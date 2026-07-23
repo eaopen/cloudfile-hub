@@ -27,43 +27,71 @@ class UnknownSubject(Exception):
     """No account/group answers to what the admin typed."""
 
 
-def resolve_user(subject):
+def _default_map_email(subject):
+    """Seahub's own login-string -> identity mapping. Returns input if unmapped."""
+    from seahub.profile.models import Profile
+    return Profile.objects.convert_login_str_to_username(subject)
+
+
+def _default_account_exists(candidate):
+    from seaserv import ccnet_api
+    return bool(ccnet_api.get_emailuser(candidate))
+
+
+def resolve_user(subject, map_email=None, account_exists=None):
     """Return the identity enforcement will see, for a typed user subject.
 
-    Accepts either the internal id or a login email, because an admin knows
-    the email and an API client may already hold the id.
+    Accepts the internal id or a login/contact email: an admin knows the email,
+    while an API client may already hold the id.
+
+    **The mapping is tried before the existence check, and that order is the
+    whole point.** The obvious shape -- "if this already names an account, keep
+    it; otherwise map it" -- looks right and is wrong, because
+    ``ccnet_api.get_emailuser`` resolves an *email* too. An email therefore
+    passes the "is this an identity?" test, gets kept verbatim, and the rule is
+    stored against a string enforcement never compares. That is precisely the
+    bug this module was written to fix, and the first version of it reproduced
+    the bug exactly; the six-entry matrix caught it, unit tests did not.
+
+    So: map first, and only fall back to the input when the mapping is a no-op.
+
+    The mapping is Seahub's ``convert_login_str_to_username`` rather than a
+    query of our own. It is what the rest of Seahub authenticates through, so
+    borrowing it means a rule matches exactly the account that logging in
+    produces; a private reimplementation would be one more thing to drift, and
+    drift here means rules that quietly apply to nobody.
+
+    The lookups are injectable so this ordering can be tested without Django,
+    seaserv or a running server -- see tests/test_subjects.py.
     """
-    from seaserv import ccnet_api
+    map_email = map_email or _default_map_email
+    account_exists = account_exists or _default_account_exists
 
     subject = (subject or '').strip()
     if not subject:
         raise UnknownSubject('empty subject')
 
-    # Already an identity?
     try:
-        if ccnet_api.get_emailuser(subject):
+        mapped = map_email(subject)
+    except Exception as e:                                  # pragma: no cover
+        logger.warning('login-string mapping for %s failed: %s', subject, e)
+        mapped = None
+
+    # A real mapping wins outright: this is the 14+ case where identity and
+    # email differ.
+    if mapped and mapped != subject:
+        return mapped
+
+    # No mapping. Either the input is already an identity, or it is a
+    # pre-14 deployment where the two are the same string -- both fine, but
+    # confirm the account exists rather than storing whatever was typed. Note
+    # convert_login_str_to_username returns its input when nothing maps, so a
+    # typo arrives here unchanged and must not slip through.
+    try:
+        if account_exists(subject):
             return subject
     except Exception as e:                                  # pragma: no cover
-        logger.warning('get_emailuser(%s) failed: %s', subject, e)
-
-    # Otherwise treat it as a login email and look the account up. Profile
-    # holds the mapping in 14; older deployments have identity == email and
-    # will have matched above.
-    try:
-        from seahub.profile.models import Profile
-        profile = Profile.objects.filter(login_id=subject).first() \
-            or Profile.objects.filter(contact_email=subject).first()
-        if profile and profile.user:
-            return profile.user
-    except Exception as e:                                  # pragma: no cover
-        logger.warning('profile lookup for %s failed: %s', subject, e)
-
-    try:
-        user = ccnet_api.get_emailuser_by_email(subject)
-        if user:
-            return user.email
-    except Exception:
-        pass
+        logger.warning('account lookup for %s failed: %s', subject, e)
 
     raise UnknownSubject(subject)
 
