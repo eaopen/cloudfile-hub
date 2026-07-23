@@ -44,7 +44,32 @@ if EVENTS_CONFIG_FILE:
     os.environ['EVENTS_CONFIG_FILE'] = EVENTS_CONFIG_FILE
 
 if HAS_FILE_SEARCH:
-    from seafes import es_search, es_search_wikis
+    try:
+        from seafes import es_search, es_search_wikis
+    except ImportError:
+        # CloudFile: HAS_FILE_SEARCH may now be true because a CloudFile search
+        # provider is configured rather than because Elasticsearch is, and a CE
+        # deployment has no seafes to import. Native deployments are unaffected
+        # -- upstream only sets the flag when seafes is present.
+        es_search = es_search_wikis = None
+
+# CloudFile: pluggable search backend.
+#
+# search_files below is where Seahub turns a query into hits; everything after
+# that call is presentation. Dispatching here rather than at the six places
+# that decide whether to offer search at all keeps this to one patched
+# function, and means a backend inherits Seahub's repo scoping instead of
+# reimplementing it (getting that wrong would leak files across libraries).
+#
+# meilisearch is one such backend, not the mechanism -- see
+# cloudfile-docker/docs/EXTENSION-POINTS.md. With no provider selected this
+# returns None and Elasticsearch answers exactly as before. The fallback keeps
+# this file working in a checkout without cloudfile_ext.
+try:
+    from cloudfile_ext.hooks import search_files as _cf_search_files
+except ImportError:
+    def _cf_search_files(*args, **kwargs):
+        return None
 
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
@@ -170,7 +195,21 @@ def search_files(repos_map, search_path, keyword, obj_desc, start, size, org_id=
     # search file
     if len(repos_map) > 1:
         search_path = None
-    files_found, total = es_search(repos_map, search_path, keyword, obj_desc, start, size, search_filename_only)
+    answered = _cf_search_files(repos_map, search_path, keyword, obj_desc,
+                                start, size, org_id, search_filename_only)
+    if answered is not None:
+        files_found, total = answered
+    else:
+        if es_search is None:
+            # Reachable only when seafevents reports search as enabled but
+            # seafes cannot be imported. Upstream crashed at import time here;
+            # deferring that (so a CloudFile provider can enable search without
+            # Elasticsearch) must not turn it into "NoneType is not callable"
+            # three frames deep.
+            raise ImportError(
+                'search is enabled but seafes is not installed, and no '
+                'CloudFile search provider is selected (CF_PROVIDER_SEARCH)')
+        files_found, total = es_search(repos_map, search_path, keyword, obj_desc, start, size, search_filename_only)
 
     result = []
     for f in files_found:
@@ -227,6 +266,16 @@ def search_files(repos_map, search_path, keyword, obj_desc, start, size, org_id=
 
 
 def search_wikis(wiki_ids, keyword, count):
+    if es_search_wikis is None:
+        # CloudFile: the provider seam covers file search, not wiki search, so
+        # a deployment that enabled search through CF_PROVIDER_SEARCH reaches
+        # this with no Elasticsearch behind it. Before the seam existed this
+        # path was unreachable on CE (HAS_FILE_SEARCH was always False), so
+        # this is a new state and it gets its own message rather than a
+        # TypeError on None.
+        raise ImportError(
+            'wiki search requires Elasticsearch; the CloudFile search '
+            'provider covers file search only')
     return es_search_wikis(wiki_ids, keyword, count)
 
 

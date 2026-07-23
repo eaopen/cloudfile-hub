@@ -11,18 +11,43 @@ request time. Registering after startup is not supported.
 
 Hook points:
 
-``urls``                 extra URL patterns, assembled by cloudfile_ext.urls
-``menu``                 navigation/menu entries surfaced to the frontend
-``permission_check``     narrow an already-computed permission (never widen)
-``file_op``              pre/post hooks around file operations
-``search_indexer``       feed documents to an external index
-``external_source``      SMB/NFS-style read-only providers
-``periodic_task``        recurring work run by the cf_worker process
+Two shapes of extension point live here, and the difference matters:
+
+*Chains* run every registered participant. Asking "does anything want to act?"
+has no single right answer, so several capabilities may each contribute::
+
+    ``urls``                 extra URL patterns, assembled by cloudfile_ext.urls
+    ``menu``                 navigation/menu entries surfaced to the frontend
+    ``permission_check``     narrow an already-computed permission (never widen)
+    ``file_op``              pre/post hooks around file operations
+    ``search_indexer``       feed documents to an index (several may co-exist:
+                             a full-text index and an audit trail both want
+                             the same stream)
+    ``external_source``      SMB/NFS-style read-only providers, keyed by type
+    ``periodic_task``        recurring work run by the cf_worker process
+
+*Providers* are interchangeable implementations of one job, and exactly one is
+active, chosen by configuration -- see cloudfile_ext.providers::
+
+    ``search``               who answers a query (meilisearch, seasearch, ...)
+    plus whatever kinds capabilities declare for themselves, e.g. where
+    directory ACL rules come from (a local table, an external service).
+
+Registration happens during ``CloudFileConfig.ready()``; lookups happen at
+request time. Registering after startup is not supported.
 """
 
 import logging
 
+from cloudfile_ext.providers import ProviderSet
+
 logger = logging.getLogger(__name__)
+
+#: Provider kind for the search backend. Declared here rather than by a
+#: capability because the upstream patch that dispatches to it lives in the
+#: baseline (seahub/search/utils.py), so the seam must exist even when no
+#: capability is installed.
+SEARCH = 'search'
 
 FILE_OP_PHASES = ('pre', 'post')
 
@@ -37,6 +62,7 @@ class Registry(object):
         self.search_indexers = []
         self.external_sources = {}
         self.periodic_tasks = []
+        self.providers = ProviderSet()
         self._sealed = False
 
     # -- registration -----------------------------------------------------
@@ -89,9 +115,51 @@ class Registry(object):
         return func
 
     def register_search_indexer(self, indexer):
+        """Add a document feed. A chain: every indexer sees every document."""
         self._check_open('search indexers')
         self.search_indexers.append(indexer)
         return indexer
+
+    def register_provider(self, kind, name, provider):
+        """Add one interchangeable implementation of `kind`, called `name`.
+
+        Registering does not activate: the operator selects one by setting
+        ``CF_PROVIDER_<KIND>``. So a build may ship several backends and a
+        deployment picks one, which is what lets meilisearch be *a* way to do
+        search rather than *the* way.
+        """
+        self._check_open('providers')
+        return self.providers.register(kind, name, provider)
+
+    def register_search_provider(self, name, provider):
+        """Add a search backend under `name`.
+
+        A provider is any object with::
+
+            search_files(repos_map, search_path, keyword, obj_desc,
+                         start, size, org_id, search_filename_only,
+                         filters=None)
+                -> (files_found, total)
+
+        `files_found` is a list of dicts carrying at least ``repo_id`` and
+        ``fullpath``; Seahub's own post-processing fills in the rest, so a
+        provider does not need to know about repo ownership or dirents. See
+        cloudfile_ext.hooks.search_files.
+
+        `filters` are structured predicates over user-defined attributes and
+        tags (cloudfile_ext.search_query). A provider that can honour them
+        declares which operators it implements::
+
+            supported_filter_ops = frozenset({search_query.EQ,
+                                              search_query.IN})
+
+        Undeclared operators are refused before the provider is called, so a
+        backend never has to decide what to do with a predicate it cannot
+        express -- and can never quietly widen a query by dropping one. A
+        provider that declares nothing is only ever called without filters,
+        which is why the parameter is optional.
+        """
+        return self.register_provider(SEARCH, name, provider)
 
     def register_external_source_provider(self, source_type, provider):
         self._check_open('external sources')
@@ -128,6 +196,10 @@ class Registry(object):
             if permission is None:
                 return None
         return permission
+
+    def active_search_provider(self):
+        """The selected search backend, or None to leave Seahub's alone."""
+        return self.providers.active(SEARCH)
 
     def run_file_op_hooks(self, phase, op, username, repo_id, path, **kwargs):
         for func in self.file_op_hooks[phase]:

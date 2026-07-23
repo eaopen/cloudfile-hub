@@ -6,8 +6,10 @@
 
 `haiwen/seahub` 的 fork，CloudFile（Seafile CE 企业扩展版）的 Web/API 层。
 
-`dev` 上是**扩展基线**：只有扩展框架和扩展点，没有任何具体能力。目录 ACL 等
-能力活在各自的长期特性分支上（`feature/dir-acl`）。
+`dev` = **扩展基线 + 已验收能力**，全部 `CF_ENABLE_*` 默认关闭。
+开发中的能力在 `feature/<耦合簇>`（例如 `feature/dir-acl`），
+**验收后合回 `dev` 并删除分支**——不长期分叉，理由见
+`cloudfile-docker/docs/BRANCHES.md` 第一节。
 
 CloudFile 由三个仓库组成，通常并排 checkout：
 
@@ -29,12 +31,14 @@ workspace/
 
 新代码一律放进 `cloudfile_ext/`（后端）和 `frontend/src/cloudfile/`（前端）。
 
-目前只改了三个上游文件，改动前请先确认你真的没有别的办法：
+目前只改了五个上游文件，改动前请先确认你真的没有别的办法：
 
 | 文件 | 改了什么 | 为什么必须改这里 |
 |---|---|---|
 | `seahub/utils/rooturl.py` | 挂载 CloudFile 路由 | `seahub/urls.py` 有一千多行且上游频繁改动；这个文件多年未变 |
 | `seahub/views/__init__.py` | `check_folder_permission` 转发到注册中心 | 它是 Hub 侧权限判定的咽喉，被 53 个模块调用 255 次，钩这一处就覆盖全部入口 |
+| `seahub/search/utils.py` | `search_files` 委派给已选中的检索 provider | 它是"查询变成结果"的唯一收敛点，之后全是展示逻辑。切在这里，provider 自动继承 Seahub 的库范围收敛——让后端自己实现那部分，写错就是跨库泄露文件 |
+| `seahub/utils/__init__.py` | `HAS_FILE_SEARCH` 或上"provider 是否已配置" | 与上一条**成对，缺一不可**：这个标志是搜索入口本身的开关，六处调用点读它。不改这里，CE 部署根本不会路由到 `search_files` |
 | `frontend/config/webpack.entry.js` | 注册前端入口 | 纯数据追加，往 `entryFiles` 字典加一个 key |
 
 **加新能力不需要再改上游。** 已有的注入点足够：
@@ -46,6 +50,16 @@ workspace/
 - 新权限约束 → `registry.register_permission_check()`
 - 文件操作前后钩子 → `registry.register_file_op_hook()`
 - 后台周期任务 → `registry.register_periodic_task()`
+- 检索后端 → `registry.register_search_provider()`
+- **同一件事的可互换实现** → `registry.register_provider(kind, name, ...)`，
+  由 `CF_PROVIDER_<KIND>` 选中。meilisearch 之于检索、外部权限服务之于
+  ACL 规则来源，都是这个形状
+- 调用客户自己的服务 → `cloudfile_ext.external_service.ExternalService`
+  （**注意：绝不放在同步权限判定路径上**，理由见
+  `cloudfile-docker/docs/EXTENSION-POINTS.md` 第五节）
+
+扩展点的完整清单、每个扩展点被哪些特性依赖、以及已知缺口，见
+`cloudfile-docker/docs/EXTENSION-POINTS.md`。
 
 如果你觉得必须再改一个上游文件，先停下来说明理由，并同步更新
 `cloudfile-docker/BRANCHING.md` 里的清单——那份清单是同步上游时的检查依据，

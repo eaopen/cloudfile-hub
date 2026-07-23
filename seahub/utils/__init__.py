@@ -1180,6 +1180,26 @@ if EVENTS_CONFIG_FILE:
     if HAS_FILE_SEARCH and HAS_FILE_SEASEARCH:
         raise Exception('ES and seasearch cannot be configured simultaneously.')
 
+# CloudFile: a registered search provider also enables search.
+#
+# This flag is the gate on the search entry points themselves -- six call sites
+# across api2 and the context processor consult it to decide whether to offer
+# search at all -- and upstream only ever sets it from the seafevents config.
+# A CE deployment therefore has no way to reach seahub.search.utils.search_files
+# no matter what backend is installed, which is why this is patched here rather
+# than only at the query itself.
+#
+# Widening only: a provider can turn search on, never off, so a deployment with
+# Elasticsearch configured is unaffected. The fallback keeps this file working
+# in a checkout without cloudfile_ext.
+try:
+    from cloudfile_ext.hooks import has_search_provider as _cf_has_search_provider
+except ImportError:
+    def _cf_has_search_provider():
+        return False
+
+HAS_FILE_SEARCH = HAS_FILE_SEARCH or _cf_has_search_provider()
+
 # repo auto delete related
 ENABLE_REPO_AUTO_DEL = False
 if EVENTS_CONFIG_FILE:

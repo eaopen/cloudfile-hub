@@ -29,6 +29,25 @@ CF_ENABLE_CHECKOUT = False
 CF_ENABLE_S3_STORAGE = False
 CF_ENABLE_EXTERNAL_SOURCES = False
 
+# -- providers -------------------------------------------------------------
+
+# Which implementation answers each pluggable job. Empty means "native CE
+# behaviour"; a name must match something a capability registered, or the
+# first use raises UnknownProvider rather than silently falling back.
+#
+# The setting name is derived from the kind (cloudfile_ext.providers), so a
+# capability that declares a new kind needs no edit here -- these two are
+# spelled out only because operators set them.
+CF_PROVIDER_SEARCH = ''            # e.g. 'meilisearch', 'seasearch'
+CF_PROVIDER_ACL_RULE_SOURCE = ''   # e.g. 'local-db', 'external-service'
+
+# -- external services -----------------------------------------------------
+
+# Per-service settings are CF_SERVICE_<NAME>_{URL,SECRET,TIMEOUT,RETRIES,
+# ON_FAILURE}; see cloudfile_ext.external_service. Nothing is configured by
+# default, and a service is never consulted on the synchronous permission
+# path -- rules are pulled into cf_* tables and enforced from there.
+
 # -- database --------------------------------------------------------------
 
 # cf_* tables live in seafile-db rather than seahub-db because seaf-server and

@@ -10,10 +10,11 @@ from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 
 from cloudfile_ext.features import enabled_features
+from cloudfile_ext.registry import registry
 
 
 class CloudFileFeaturesView(APIView):
-    """Report which CF_ENABLE_* switches are on.
+    """Report which CF_ENABLE_* switches are on, and which providers exist.
 
     The frontend uses this to hide entry points for capabilities that are not
     deployed. It is a convenience, not a security boundary -- every switch is
@@ -31,4 +32,11 @@ class CloudFileFeaturesView(APIView):
     throttle_classes = (UserRateThrottle,)
 
     def get(self, request):
-        return Response({'features': enabled_features()})
+        # `providers` is what makes a misconfiguration diagnosable without
+        # shell access: it reports the selected name next to the names that
+        # are actually registered, which is the difference between "search is
+        # broken" and "CF_PROVIDER_SEARCH names a capability that is off".
+        return Response({
+            'features': enabled_features(),
+            'providers': registry.providers.describe(),
+        })
