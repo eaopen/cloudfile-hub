@@ -122,9 +122,9 @@ def get_system_default_repo_id():
 #
 # This is one of only two upstream files CloudFile patches behaviourally (see
 # cloudfile-docker/BRANCHING.md). check_folder_permission below is the choke
-# point for Hub-side permission checks -- 353 call sites across web views,
-# REST endpoints, thumbnails and metadata -- so hooking this one function
-# covers every Hub entry point at once.
+# point for Hub-side permission checks -- called from 255 places across 53
+# modules: web views, REST endpoints, thumbnails, metadata -- so hooking this
+# one function covers every Hub entry point at once.
 #
 # It dispatches through the cloudfile_ext registry rather than naming a
 # capability, so adding one later is a registration rather than another edit
