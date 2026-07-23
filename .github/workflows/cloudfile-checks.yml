@@ -1,0 +1,55 @@
+name: CloudFile checks
+
+# 本仓库的改动也要过一遍 CloudFile 的跨仓检查。
+#
+# 检查逻辑只有一份，在 cloudfile-docker/tools/run-checks.sh；这里只负责把三个
+# 仓库摆成并排布局，并把**本仓库**换成被测的那个 ref，另外两个取 dev。
+
+on:
+  push:
+    branches: [dev]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  checks:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          path: cloudfile-hub
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: eaopen/cloudfile-server
+          ref: dev
+          path: cloudfile-server
+          fetch-depth: 0
+
+      - uses: actions/checkout@v4
+        with:
+          repository: eaopen/cloudfile-docker
+          ref: dev
+          path: cloudfile-docker
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cloudfile-server/fileserver/go.mod
+          cache-dependency-path: cloudfile-server/fileserver/go.sum
+
+      - name: 安装 C 侧测试依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq libglib2.0-dev pkg-config
+
+      - name: pytest
+        run: pip install --quiet pytest
+
+      - name: 运行检查
+        run: ./cloudfile-docker/tools/run-checks.sh
