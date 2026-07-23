@@ -52,7 +52,7 @@ const entryFiles = {
   // CloudFile extensions. Adding a key here is all a new page needs -- this
   // dict is the only entry-point registry, so webpack.config.js stays
   // untouched and out of the upstream merge path.
-  cloudfileDirACL: '/cloudfile/acl/index.js',
+  cloudfileAdmin: '/cloudfile/admin/index.js',
 };
 
 const getEntries = (isEnvDevelopment) => {

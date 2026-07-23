@@ -6,6 +6,9 @@
 
 `haiwen/seahub` 的 fork，CloudFile（Seafile CE 企业扩展版）的 Web/API 层。
 
+`dev` 上是**扩展基线**：只有扩展框架和扩展点，没有任何具体能力。目录 ACL 等
+能力活在各自的长期特性分支上（`feature/dir-acl`）。
+
 CloudFile 由三个仓库组成，通常并排 checkout：
 
 ```
@@ -17,7 +20,7 @@ workspace/
 
 跨仓规格与部署说明在 `cloudfile-docker/`：
 [BRANCHING.md](../cloudfile-docker/BRANCHING.md)、
-[docs/acl-semantics.md](../cloudfile-docker/docs/acl-semantics.md)、
+[docs/BRANCHES.md](../cloudfile-docker/docs/BRANCHES.md)、
 [deploy/compose/README.md](../cloudfile-docker/deploy/compose/README.md)。
 
 ## 最重要的一条：不要改上游文件
@@ -59,15 +62,12 @@ cloudfile_ext/
 ├── urls.py              从 registry 组装，不手写
 ├── settings_defaults.py CF_* 默认值
 ├── db_router.py         cf_* 模型路由到 seafile-db
-├── acl/                 目录级 ACL（已实现）
-│   ├── resolver.py      纯算法，无 Django/DB/Seafile 依赖 —— 见下
-│   ├── models.py        managed=False，表由 cloudfile-server 建
-│   ├── service.py       apply_dir_acl，被上游 patch 调用
-│   ├── apis.py          库主管理 API
-│   └── admin_apis.py    系统管理员 API
 └── sso/ audit/ metadata/ search/ office/ checkout/ external_sources/
                          占位，各自的 register() 是 no-op
 ```
+
+能力分支在这里加自己的包（例如 `feature/dir-acl` 的 `acl/`），并在 `apps.py`
+的能力列表里加一行——**不需要再动任何上游文件**。
 
 ## 铁律
 
@@ -80,7 +80,7 @@ cloudfile_ext/
 **2. 扩展只能收紧权限，不能放宽。**
 
 `registry.apply_permission_checks` 串起来的每个钩子，返回值必须 ⊆ 入参。
-`cloudfile_ext/acl/tests/test_resolver.py::test_never_widens` 会穷举验证这一点。
+实现权限类能力时，必须带一个穷举整个权限格的不变量测试。
 
 **3. 隐藏按钮不是安全边界。**
 
@@ -88,11 +88,12 @@ cloudfile_ext/
 `check_folder_permission`，以及它下面的 seafile-server。写前端时不要假设
 后端会因为按钮没显示就不被调用。
 
-**4. `acl/resolver.py` 不许引入 Django、数据库或 Seafile 依赖。**
+**4. 能力包的纯算法部分不许引入 Django、数据库或 Seafile 依赖。**
 
-它要能脱离整个 Seahub 直接跑，因为它和 cloudfile-server 的 C 实现共用同一份
-用例集。任何 `import django` 都会破坏这一点——注意 `acl/__init__.py` 里的
-`from cloudfile_ext.features import is_enabled` 是**故意放在 `register()` 内部**的。
+它要能脱离整个 Seahub 直接跑，才能和 cloudfile-server 的 C 实现共用同一份
+用例集。因此能力包的 `__init__.py` 里，`from cloudfile_ext.features import
+is_enabled` 要**放在 `register()` 内部**而不是模块顶层——否则 `import` 该包
+就会拉进 Django。
 
 ## 测试
 
@@ -100,12 +101,11 @@ cloudfile_ext/
 python3 -m pytest cloudfile_ext/ -q
 ```
 
-ACL 用例集来自 `cloudfile-docker/docs/acl-cases.json`，三仓并排 checkout 时
-自动找到；否则用 `CF_ACL_CASES` 指定路径。**同一份用例集也驱动 cloudfile-server
-的 C 实现**，两边必须给出相同结果。
+基线本身没有能力实现，这里只有框架级测试。能力的测试随能力分支走。
 
-改 ACL 语义的正确顺序：先改 `cloudfile-docker/docs/acl-semantics.md`，
-再改 `acl-cases.json`，最后同时改 Python 和 C 两处实现。只改一处 = 引入漂移。
+跨层语义（同一套规则同时在 Hub 和 seafile-server 实现）必须用共享用例集驱动
+两端，规格放在 `cloudfile-docker/docs/`。改语义的正确顺序：先改规格 → 再改
+用例集 → 最后同时改两处实现。只改一处 = 引入漂移。
 
 上游自带的回归：
 
@@ -124,12 +124,12 @@ python3 -m pytest tests/ -q
 
 ## 容易踩的坑
 
-- **`check_folder_permission` 现在会应用 ACL。** 管理 ACL 的接口如果用它做鉴权，
-  库主给自己写一条限制规则就会把自己锁在门外。管理类接口一律用
+- **`check_folder_permission` 会应用所有已注册的权限钩子。** 能力自己的管理接口
+  如果用它做鉴权，管理员写一条限制到自己头上就会被锁在门外。管理类接口一律用
   `seafile_api.check_permission()`（原生库级权限）。
-- **`cf_dir_acl` 在 seafile-db，不在 seahub-db。** 因为 seaf-server 和 Go fileserver
-  都要读它，而它们只连 ccnet-db 和 seafile-db。模型是 `managed=False`，
-  `manage.py migrate` 永远不该管这张表。
-- **Hub 侧有 30 秒 ACL 缓存**（`CF_ACL_CACHE_TTL`）。这只是界面延迟优化，
-  最坏情况是界面显示了一个服务端随后拒绝的条目。改完规则记得调
-  `service.invalidate_repo()`。
+- **`cf_*` 表在 seafile-db，不在 seahub-db。** 因为 seaf-server 和 Go fileserver
+  都要读它们，而它们只连 ccnet-db 和 seafile-db。模型用 `managed=False`，
+  建表由 cloudfile-server 的 `scripts/sql/*/cloudfile.sql` 负责，
+  `manage.py migrate` 永远不该管这些表。
+- **注册中心启动后会 `seal()`**，运行时注册会抛异常。所有注册都要在
+  `CloudFileConfig.ready()` 里完成。
