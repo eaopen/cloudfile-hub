@@ -6,9 +6,9 @@ source scans, audit archiving, metadata upkeep. It is not a separate service --
 the cf-worker container runs this command from the same image as the
 application.
 
-Nothing registers a task yet; the capabilities that need one are P2 and later.
-Until then this exits immediately rather than idling a container for no reason,
-which is also why the compose service sits behind the `worker` profile.
+SSO registers its directory-sync task when enabled; P2 and later capabilities
+can register their work in the same way. With no enabled task the command exits
+immediately, which is why the compose service sits behind the `worker` profile.
 """
 
 import logging
