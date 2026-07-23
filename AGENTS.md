@@ -76,7 +76,9 @@ cloudfile_ext/
 ├── urls.py              从 registry 组装，不手写
 ├── settings_defaults.py CF_* 默认值
 ├── db_router.py         cf_* 模型路由到 seafile-db
-└── sso/ audit/ metadata/ search/ office/ checkout/ external_sources/
+├── identity.py          登录串 → Seafile 身份。14 之后两者不是一回事，
+│                        **每个存或比用户名的能力都撞上这条**，所以在基线
+└── audit/ metadata/ search/ office/ checkout/ external_sources/
                          占位，各自的 register() 是 no-op
 ```
 

@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""Subject resolution ordering.
+"""Identity resolution ordering.
 
 This file exists because the first two attempts at resolve_user were wrong in
 the same way, and nothing but a full stack caught it. The lookups are injected
@@ -14,7 +14,7 @@ folder just stays open while the administrator believes it is restricted.
 
 import pytest
 
-from cloudfile_ext.acl import subjects
+from cloudfile_ext import identity
 
 
 IDENTITY = '854d0a7e9998440c8c73854a59e8db9a@auth.local'
@@ -31,7 +31,7 @@ def accounts(*known):
 
 
 def test_email_resolves_to_identity():
-    assert subjects.resolve_user(
+    assert identity.resolve_user(
         EMAIL,
         map_email=mapping({EMAIL: IDENTITY}),
         account_exists=accounts(IDENTITY, EMAIL),
@@ -48,7 +48,7 @@ def test_email_wins_even_though_it_names_an_account():
     the real server's behaviour, and the resolution must still return the
     identity.
     """
-    assert subjects.resolve_user(
+    assert identity.resolve_user(
         EMAIL,
         map_email=mapping({EMAIL: IDENTITY}),
         account_exists=accounts(IDENTITY, EMAIL),   # both exist, as in reality
@@ -56,7 +56,7 @@ def test_email_wins_even_though_it_names_an_account():
 
 
 def test_identity_passes_through():
-    assert subjects.resolve_user(
+    assert identity.resolve_user(
         IDENTITY,
         map_email=mapping({EMAIL: IDENTITY}),
         account_exists=accounts(IDENTITY),
@@ -66,7 +66,7 @@ def test_identity_passes_through():
 def test_pre_14_identity_equals_email():
     """Deployments where the two are the same string must keep working."""
     legacy = 'alice@example.com'
-    assert subjects.resolve_user(
+    assert identity.resolve_user(
         legacy,
         map_email=mapping({}),          # nothing to map
         account_exists=accounts(legacy),
@@ -76,8 +76,8 @@ def test_pre_14_identity_equals_email():
 def test_unknown_subject_is_refused():
     """A typo must not be stored. convert_login_str_to_username hands back its
     input when nothing maps, so without the existence check it would be."""
-    with pytest.raises(subjects.UnknownSubject):
-        subjects.resolve_user(
+    with pytest.raises(identity.UnknownSubject):
+        identity.resolve_user(
             'typo@example.com',
             map_email=mapping({EMAIL: IDENTITY}),
             account_exists=accounts(IDENTITY, EMAIL),
@@ -85,13 +85,13 @@ def test_unknown_subject_is_refused():
 
 
 def test_empty_subject_is_refused():
-    with pytest.raises(subjects.UnknownSubject):
-        subjects.resolve_user('   ', map_email=mapping({}),
+    with pytest.raises(identity.UnknownSubject):
+        identity.resolve_user('   ', map_email=mapping({}),
                               account_exists=accounts())
 
 
 def test_whitespace_is_stripped():
-    assert subjects.resolve_user(
+    assert identity.resolve_user(
         f'  {EMAIL} ',
         map_email=mapping({EMAIL: IDENTITY}),
         account_exists=accounts(IDENTITY),

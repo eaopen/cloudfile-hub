@@ -40,6 +40,7 @@ CF_ENABLE_EXTERNAL_SOURCES = False
 # spelled out only because operators set them.
 CF_PROVIDER_SEARCH = ''            # e.g. 'meilisearch', 'seasearch'
 CF_PROVIDER_ACL_RULE_SOURCE = ''   # e.g. 'local-db', 'external-service'
+CF_PROVIDER_SSO_DIRECTORY = ''     # e.g. 'static', 'external-service'
 
 # -- external services -----------------------------------------------------
 
@@ -69,3 +70,30 @@ CF_DATABASE_PORT = '3306'
 # authoritative enforcement is in seafile-server; this cache only spares the
 # Hub a query per permission check.
 CF_ACL_CACHE_TTL = 30
+
+# -- SSO directory mapping -------------------------------------------------
+#
+# Login itself is upstream's (ENABLE_OAUTH / ENABLE_ADFS_LOGIN / ENABLE_CAS,
+# all present in CE and none of them Pro-gated). These settings govern only the
+# part upstream does not do: mirroring an organisation's groups into Seafile.
+
+# Account that owns the groups the sync creates. No default on purpose --
+# picking one silently would attach every synced group to whoever happens to
+# sort first. Sync refuses to run until this names a real account.
+CF_SSO_GROUP_OWNER = ''
+
+# Seconds between full syncs, run by cf-worker. The webhook
+# (api/v2.1/cloudfile/sso/directory-webhook/) is what makes changes apply in
+# seconds; this interval is the floor when nothing pushes.
+CF_SSO_SYNC_INTERVAL = 600
+
+# Refuse a sync that would drop more than this share of managed memberships in
+# one tick. A truncated or half-failed directory feed looks exactly like a mass
+# departure, and only one of those readings is recoverable. Set to '' to lift
+# the ceiling -- do that deliberately, for one real reorganisation, not as a
+# standing configuration.
+CF_SSO_MAX_REMOVAL_RATIO = 0.5
+
+# Groups for CF_PROVIDER_SSO_DIRECTORY = 'static': a list of
+# {'external_id': ..., 'name': ..., 'members': [login, ...]}.
+CF_SSO_DIRECTORY_STATIC = []
