@@ -21,7 +21,7 @@ from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 
 from cloudfile_ext.features import is_enabled
-from cloudfile_ext.acl import resolver, service
+from cloudfile_ext.acl import resolver, service, subjects
 from cloudfile_ext.acl.apis import (
     VALID_PERMISSIONS, VALID_SUBJECT_TYPES, _serialize, _feature_off,
 )
@@ -94,6 +94,14 @@ class AdminDirACLView(APIView):
         if not seafile_api.get_repo(repo_id):
             return api_error(status.HTTP_404_NOT_FOUND, 'Library not found.')
 
+        # As in the owner-facing endpoint: store the identity enforcement
+        # compares, not what was typed. See cloudfile_ext/acl/subjects.py.
+        try:
+            subject = subjects.resolve(subject_type, subject)
+        except subjects.UnknownSubject as e:
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'subject not found: %s' % e)
+
         try:
             rule = DirACL.objects.set_rule(
                 repo_id, path, subject_type, subject, permission,
@@ -125,6 +133,11 @@ class AdminDirACLView(APIView):
                 if subject_type not in VALID_SUBJECT_TYPES or not subject:
                     return api_error(status.HTTP_400_BAD_REQUEST,
                                      'subject_type or subject invalid.')
+                try:
+                    subject = subjects.resolve(subject_type, subject)
+                except subjects.UnknownSubject as e:
+                    return api_error(status.HTTP_400_BAD_REQUEST,
+                                     'subject not found: %s' % e)
                 DirACL.objects.delete_rule(
                     repo_id, resolver.normalize_path(path), subject_type,
                     subject)

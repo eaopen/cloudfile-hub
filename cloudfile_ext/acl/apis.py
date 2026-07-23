@@ -23,7 +23,7 @@ from seahub.api2.utils import api_error
 from seahub.constants import PERMISSION_READ_WRITE
 
 from cloudfile_ext.features import is_enabled
-from cloudfile_ext.acl import resolver, service
+from cloudfile_ext.acl import resolver, service, subjects
 from cloudfile_ext.acl.models import DirACL
 
 logger = logging.getLogger(__name__)
@@ -121,6 +121,15 @@ class DirACLView(APIView):
         if error:
             return error
 
+        # Store the identity enforcement compares against, not what was typed.
+        # Since Seafile 14 those differ: a rule saved against an email never
+        # matches, and fails open in silence. See cloudfile_ext/acl/subjects.py.
+        try:
+            subject = subjects.resolve(subject_type, subject)
+        except subjects.UnknownSubject as e:
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'subject not found: %s' % e)
+
         try:
             rule = DirACL.objects.set_rule(
                 repo_id, path, subject_type, subject, permission,
@@ -148,6 +157,15 @@ class DirACLView(APIView):
         error = _check_can_manage(request, repo_id, path)
         if error:
             return error
+
+        # Same resolution as POST, or a rule created by email could not be
+        # deleted by email -- the delete would report success having matched
+        # nothing, which is the same silent-failure shape in reverse.
+        try:
+            subject = subjects.resolve(subject_type, subject)
+        except subjects.UnknownSubject as e:
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'subject not found: %s' % e)
 
         try:
             DirACL.objects.delete_rule(repo_id, path, subject_type, subject)
@@ -180,6 +198,19 @@ class DirACLEffectiveView(APIView):
         # Checking another user's effective permission is an admin-grade
         # disclosure, so it is gated the same way rule management is.
         target = request.GET.get('user', '') or request.user.username
+
+        # This endpoint answers "why can Bob not open that folder", and whoever
+        # is asking knows Bob's email, not his opaque id. Resolving here also
+        # keeps the answer honest: without it, an email would silently compute
+        # the permissions of a user that does not exist and report no access --
+        # which looks exactly like a correctly restrictive rule.
+        if target != request.user.username:
+            try:
+                target = subjects.resolve(resolver.SUBJECT_USER, target)
+            except subjects.UnknownSubject as e:
+                return api_error(status.HTTP_400_BAD_REQUEST,
+                                 'user not found: %s' % e)
+
         if target != request.user.username:
             error = _check_can_manage(request, repo_id, path)
             if error:
