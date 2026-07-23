@@ -19,9 +19,14 @@ def register(registry):
 
     from django.urls import re_path
 
+    from cloudfile_ext.acl import sources
     from cloudfile_ext.acl.apis import DirACLView, DirACLEffectiveView
     from cloudfile_ext.acl.admin_apis import AdminDirACLView
     from cloudfile_ext.acl.service import apply_dir_acl
+
+    # Where rules come from is pluggable; where they are enforced from is not.
+    # See cloudfile_ext/acl/sources.py.
+    sources.register(registry)
 
     repo_id = r'(?P<repo_id>[-0-9a-f]{36})'
 
@@ -43,3 +48,11 @@ def register(registry):
         'url': '/cloudfile/acl/',
         'feature': 'CF_ENABLE_DIR_ACL',
     })
+
+    # Pull from the selected rule source on a schedule. A no-op for local-db,
+    # which is why cf-worker stays out of the default compose services until
+    # something actually needs it.
+    def sync_rules():
+        return sources.active(registry).sync()
+
+    registry.register_periodic_task('acl-rule-sync', 300, sync_rules)
