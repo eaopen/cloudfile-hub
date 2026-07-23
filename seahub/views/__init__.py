@@ -118,6 +118,27 @@ def get_system_default_repo_id():
     return _default_repo_id
 
 
+# CloudFile: permission hook.
+#
+# This is one of only two upstream files CloudFile patches behaviourally (see
+# cloudfile-docker/BRANCHING.md). check_folder_permission below is the choke
+# point for Hub-side permission checks -- 353 call sites across web views,
+# REST endpoints, thumbnails and metadata -- so hooking this one function
+# covers every Hub entry point at once.
+#
+# It dispatches through the cloudfile_ext registry rather than naming a
+# capability, so adding one later is a registration rather than another edit
+# here. Hooks may only narrow a permission, never widen it, and with no hook
+# registered -- every CF_ENABLE_* switch off -- this returns its input
+# unchanged. The fallback keeps this file working in a checkout without
+# cloudfile_ext.
+try:
+    from cloudfile_ext.hooks import check_permission as _cf_check_permission
+except ImportError:
+    def _cf_check_permission(username, repo_id, path, permission):
+        return permission
+
+
 def check_folder_permission(request, repo_id, path):
     """Check repo/folder/file access permission of a user.
 
@@ -128,7 +149,8 @@ def check_folder_permission(request, repo_id, path):
     """
     repo_status = seafile_api.get_repo_status(repo_id)
     if repo_status == 1:
-        return PERMISSION_READ
+        return _cf_check_permission(request.user.username, repo_id, path,
+                                    PERMISSION_READ)
 
     username = request.user.username
     if not username:
@@ -136,7 +158,7 @@ def check_folder_permission(request, repo_id, path):
     permission = seafile_api.check_permission_by_path(repo_id, path, username)
     if permission == PERMISSION_INVISIBLE:
         return None
-    return permission
+    return _cf_check_permission(username, repo_id, path, permission)
 
 def get_seadoc_file_uuid(repo, path):
     repo_id = repo.repo_id

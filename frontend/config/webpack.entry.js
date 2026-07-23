@@ -48,6 +48,11 @@ const entryFiles = {
   sysAdmin: '/pages/sys-admin',
   sysadminRepoHistory: '/pages/sys-admin/repo-history.js',
   sysadminRepoSnapshot: '/pages/sys-admin/repo-snapshot.js',
+
+  // CloudFile extensions. Adding a key here is all a new page needs -- this
+  // dict is the only entry-point registry, so webpack.config.js stays
+  // untouched and out of the upstream merge path.
+  cloudfileDirACL: '/cloudfile/acl/index.js',
 };
 
 const getEntries = (isEnvDevelopment) => {

@@ -40,3 +40,23 @@ if hasattr(settings, "SITE_ROOT"):
     urlpatterns = [
         re_path(r'^%s' % settings.SITE_ROOT[1:], include(settings.SITE_ROOT_URLCONF)),
     ]
+
+    # CloudFile: mount the extension routes.
+    #
+    # This is one of only two upstream files CloudFile patches behaviourally
+    # (see cloudfile-docker/BRANCHING.md). It is done here rather than in
+    # seahub/urls.py because that file is a thousand lines that upstream edits
+    # constantly, while this one has been stable for years -- the smaller the
+    # patched surface, the cheaper each upstream merge is.
+    #
+    # CloudFile patterns come first so an extension can shadow a native
+    # endpoint when it has to. The try/except keeps a stock Seahub checkout
+    # working with this file present but cloudfile_ext absent.
+    try:
+        cloudfile_urls = include('cloudfile_ext.urls')
+    except ImportError:
+        pass
+    else:
+        urlpatterns = [
+            re_path(r'^%s' % settings.SITE_ROOT[1:], cloudfile_urls),
+        ] + urlpatterns
