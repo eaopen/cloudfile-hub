@@ -32,10 +32,19 @@ CF_ENABLE_EXTERNAL_SOURCES = False
 # -- database --------------------------------------------------------------
 
 # cf_* tables live in seafile-db rather than seahub-db because seaf-server and
-# the Go fileserver only ever connect to ccnet-db and seafile-db; putting the
-# ACL anywhere else would make it unreadable to the layer that has to enforce
-# it. cloudfile_ext.db_router points cf_* models at this alias.
+# the Go fileserver only ever connect to ccnet-db and seafile-db; putting them
+# anywhere else would make them unreadable to the layer that has to enforce
+# the rules. cloudfile_ext.db_router points cf_* models at this alias.
+#
+# The connection itself is assembled in CloudFileConfig.ready(), not here:
+# seahub_settings.py is imported as a plain module, so it has no DATABASES to
+# add an entry to. These scalars are what the docker bootstrap writes.
 CF_DATABASE_ALIAS = 'cloudfile'
+CF_DATABASE_NAME = ''
+CF_DATABASE_USER = ''
+CF_DATABASE_PASSWORD = ''
+CF_DATABASE_HOST = ''
+CF_DATABASE_PORT = '3306'
 
 # Seconds to cache a repo's ACL rules in-process. Kept short because the
 # authoritative enforcement is in seafile-server; this cache only spares the
