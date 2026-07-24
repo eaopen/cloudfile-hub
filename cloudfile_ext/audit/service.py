@@ -27,4 +27,9 @@ def filters(params):
             raise ValueError('obj_type invalid.')
         clauses.append('obj_type = %s')
         values.append(obj_type)
+    else:
+        # Activity also records library lifecycle rows. CloudFile's operation
+        # log is intentionally scoped to the requested file/folder audit UI.
+        clauses.append('obj_type IN (%s, %s)')
+        values.extend(('file', 'dir'))
     return clauses, values

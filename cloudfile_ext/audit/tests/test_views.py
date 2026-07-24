@@ -24,3 +24,8 @@ class AuditFilterTests(TestCase):
             filters({'op_type': 'download'})
         with self.assertRaises(ValueError):
             filters({'obj_type': 'repo'})
+
+    def test_default_list_is_scoped_to_files_and_directories(self):
+        clauses, values = filters({})
+        self.assertEqual(clauses, ['obj_type IN (%s, %s)'])
+        self.assertEqual(values, ['file', 'dir'])
