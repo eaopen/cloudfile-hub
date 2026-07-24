@@ -10,6 +10,8 @@ Reading that authoritative table avoids a second, partial Hub-only audit trail.
 import json
 
 from django.db import connection
+from django.core.exceptions import PermissionDenied
+from django.http import Http404
 from django.shortcuts import render
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
@@ -76,6 +78,8 @@ class AuditLogView(APIView):
 
 def audit_page(request):
     """System-admin operation-log list; data stays behind the token API."""
-    if not request.user.is_staff or not is_enabled('CF_ENABLE_AUDIT'):
-        return _disabled()
+    if not is_enabled('CF_ENABLE_AUDIT'):
+        raise Http404
+    if not request.user.is_staff:
+        raise PermissionDenied
     return render(request, 'cloudfile_ext/audit.html')
