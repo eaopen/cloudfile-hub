@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
-"""Operation log and audit trail. Phase P1 -- not implemented yet.
-
-Gated by CF_ENABLE_AUDIT. When built, this registers a post file-op hook to
-record operations and query routes to read them back. Post hooks are
-exception-swallowing by design (see registry.run_file_op_hooks) so that
-auditing can never break the write it is observing.
-"""
+"""Operation log backed by the server/seafevents commit-event stream."""
 
 
 def register(registry):
     from cloudfile_ext.features import is_enabled
+    from django.urls import path
+    from cloudfile_ext.audit.views import AuditLogView, audit_page
 
     if not is_enabled("CF_ENABLE_AUDIT"):
         return
+    registry.register_urls([
+        path('api/v2.1/cloudfile/audit/', AuditLogView.as_view(),
+             name='cloudfile-audit-api'),
+        path('cloudfile/audit/', audit_page, name='cloudfile-audit-page'),
+    ])

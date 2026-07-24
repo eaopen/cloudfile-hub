@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block main_content %}
+<div class="container my-4">
+  <h2>{% trans "Operation log" %}</h2>
+  <form id="audit-filters" class="form-inline mb-3">
+    <input class="form-control mr-2" name="repo_id" placeholder="{% trans 'Library ID' %}">
+    <input class="form-control mr-2" name="user" placeholder="{% trans 'User' %}">
+    <select class="form-control mr-2" name="op_type"><option value="">{% trans "All operations" %}</option><option>create</option><option>edit</option><option>delete</option><option>rename</option><option>move</option><option>recover</option></select>
+    <select class="form-control mr-2" name="obj_type"><option value="">{% trans "Files and folders" %}</option><option value="file">{% trans "File" %}</option><option value="dir">{% trans "Folder" %}</option></select>
+    <button class="btn btn-primary">{% trans "Filter" %}</button>
+  </form>
+  <table class="table"><thead><tr><th>{% trans "Time" %}</th><th>{% trans "User" %}</th><th>{% trans "Operation" %}</th><th>{% trans "Type" %}</th><th>{% trans "Library" %}</th><th>{% trans "Path" %}</th></tr></thead><tbody id="audit-events"></tbody></table>
+</div>
+<script>
+(() => { const form=document.querySelector('#audit-filters'), body=document.querySelector('#audit-events');
+  const esc=(s)=>String(s||'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+  const load=async()=>{const q=new URLSearchParams(new FormData(form)); const r=await fetch('{{ SITE_ROOT }}api/v2.1/cloudfile/audit/?'+q,{credentials:'same-origin'}); const d=await r.json(); body.innerHTML=(d.events||[]).map(e=>`<tr><td>${esc(e.time)}</td><td>${esc(e.user)}</td><td>${esc(e.operation)}</td><td>${esc(e.object_type)}</td><td>${esc(e.repo_id)}</td><td>${e.old_path?esc(e.old_path)+' → ':''}${esc(e.path)}</td></tr>`).join('');};
+  form.addEventListener('submit',e=>{e.preventDefault();load();}); load(); })();
+</script>
+{% endblock %}
