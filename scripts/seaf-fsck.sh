@@ -60,6 +60,19 @@ function validate_seafile_data_dir () {
     fi
 }
 
+function validate_repair_is_offline () {
+    local param
+    for param in "$@"; do
+        if [ "${param}" = "-r" ] || [ "${param}" = "--repair" ]; then
+            if pgrep -f '(^|/)seaf-server( |$)|/fileserver( |$)' >/dev/null 2>&1; then
+                echo "Error: stop seaf-server and fileserver before running fsck repair."
+                exit 1
+            fi
+            return
+        fi
+    done
+}
+
 function run_seaf_fsck () {
     validate_seafile_data_dir;
     set_env_config;
@@ -71,6 +84,12 @@ function run_seaf_fsck () {
         -d "${default_seafile_data_dir}" \
         -F "${default_conf_dir}" \
         ${seaf_fsck_opts}
+    rc=$?
+    if [ ${rc} -ne 0 ]; then
+        echo "seaf-fsck failed"
+        echo
+        return ${rc}
+    fi
 
     echo "seaf-fsck run done"
     echo
@@ -89,6 +108,11 @@ then
 fi
 
 seaf_fsck_opts=$@
-run_seaf_fsck;
+validate_repair_is_offline "$@"
+run_seaf_fsck
+rc=$?
+if [ ${rc} -ne 0 ]; then
+    exit ${rc}
+fi
 
 echo "Done."
