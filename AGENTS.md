@@ -31,7 +31,7 @@ workspace/
 
 新代码一律放进 `cloudfile_ext/`（后端）和 `frontend/src/cloudfile/`（前端）。
 
-目前只改了五个上游文件，改动前请先确认你真的没有别的办法：
+目前只改了七个上游文件，改动前请先确认你真的没有别的办法：
 
 | 文件 | 改了什么 | 为什么必须改这里 |
 |---|---|---|
@@ -40,6 +40,8 @@ workspace/
 | `seahub/search/utils.py` | `search_files` 委派给已选中的检索 provider | 它是"查询变成结果"的唯一收敛点，之后全是展示逻辑。切在这里，provider 自动继承 Seahub 的库范围收敛——让后端自己实现那部分，写错就是跨库泄露文件 |
 | `seahub/utils/__init__.py` | `HAS_FILE_SEARCH` 或上"provider 是否已配置" | 与上一条**成对，缺一不可**：这个标志是搜索入口本身的开关，六处调用点读它。不改这里，CE 部署根本不会路由到 `search_files` |
 | `frontend/config/webpack.entry.js` | 注册前端入口 | 纯数据追加，往 `entryFiles` 字典加一个 key |
+| `scripts/seaf-fsck.sh` | 修复模式前置校验服务已停止 + 传播退出码 | 脚本原生无论成败都以 `echo "Done."` 收尾、退出码固定为 0；离线迁移编排必须能拿到真实失败信号，只能在这唯一入口上改，新文件要么整份复制维护、要么留下能绕过校验的原脚本 |
+| `scripts/seaf-gc.sh` | 传播退出码 | 同上，`run_seaf_gc` 失败时脚本自身也一直返回 0 |
 
 **加新能力不需要再改上游。** 已有的注入点足够：
 
