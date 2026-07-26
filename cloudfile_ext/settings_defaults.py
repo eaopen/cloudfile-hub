@@ -125,6 +125,25 @@ CF_MEILISEARCH_TIMEOUT = 5
 # How often cf-worker looks for new commits to index, in seconds.
 CF_SEARCH_INDEX_INTERVAL = 60
 
+# -- external sources -------------------------------------------------------
+#
+# Container paths a source root may live under. An external source is an
+# SMB/NFS share the operator mounted on the host and bind-mounted here, so this
+# is the boundary between "a share ops chose to expose" and "any path in the
+# container".
+#
+# The default is deliberately restrictive rather than empty: an empty allow-list
+# would let the admin API register / as an external source, and a security
+# property that only holds when the operator configured it correctly is not one
+# worth shipping. Widen it only to prefixes that contain nothing but mounts --
+# never '/'.
+#
+# Containment against this list is re-checked on every access, not just at
+# registration. The share is writable by whoever uses the NAS, and a symlink
+# added after registration would otherwise widen what is reachable. See
+# cloudfile_ext/external_sources/paths.py and docs/external-sources.md.
+CF_EXTERNAL_SOURCES_ROOTS = ['/shared/external']
+
 # Files at or under this size (in bytes) whose extension is in the plain-text
 # set (cloudfile_ext.search.indexer.TEXT_EXTENSIONS) get their content indexed
 # alongside filename/path/metadata. Larger or non-text files are indexed by
