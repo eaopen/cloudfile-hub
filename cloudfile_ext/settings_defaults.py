@@ -23,7 +23,7 @@ CF_ENABLE_DIR_ACL = False
 CF_ENABLE_AUDIT = False
 CF_ENABLE_METADATA = False
 CF_ENABLE_TAGS = False
-CF_ENABLE_MEILISEARCH = False
+CF_ENABLE_SEARCH = False
 CF_ENABLE_ONLYOFFICE = False
 CF_ENABLE_CHECKOUT = False
 CF_ENABLE_S3_STORAGE = False
@@ -38,7 +38,17 @@ CF_ENABLE_EXTERNAL_SOURCES = False
 # The setting name is derived from the kind (cloudfile_ext.providers), so a
 # capability that declares a new kind needs no edit here -- these two are
 # spelled out only because operators set them.
-CF_PROVIDER_SEARCH = ''            # e.g. 'meilisearch', 'seasearch'
+#
+# CF_PROVIDER_SEARCH left empty (the default) means "native": whichever
+# backend seafevents.conf configures under [SEASEARCH] or [INDEX FILES]
+# (SeaSearch or Elasticsearch) answers queries exactly as it does on upstream
+# CE. For SeaSearch specifically that is upstream's own
+# `elif HAS_FILE_SEASEARCH` branch in seahub.api2.views.Search.get(), which
+# does not go through search_files() at all -- there is no 'seasearch'
+# provider name to select, because that path needs no CloudFile code (see
+# cloudfile_ext.search's module docstring). Set this to 'meilisearch' to route
+# queries to cloudfile_ext.search.backends.meilisearch instead.
+CF_PROVIDER_SEARCH = ''            # '' (native SeaSearch/ES) or 'meilisearch'
 CF_PROVIDER_ACL_RULE_SOURCE = ''   # e.g. 'local-db', 'external-service'
 CF_PROVIDER_SSO_DIRECTORY = ''     # e.g. 'static', 'external-service'
 
@@ -97,3 +107,29 @@ CF_SSO_MAX_REMOVAL_RATIO = 0.5
 # Groups for CF_PROVIDER_SSO_DIRECTORY = 'static': a list of
 # {'external_id': ..., 'name': ..., 'members': [login, ...]}.
 CF_SSO_DIRECTORY_STATIC = []
+
+# -- search: meilisearch backend --------------------------------------------
+#
+# Only consulted when CF_PROVIDER_SEARCH = 'meilisearch'. The default
+# (CF_PROVIDER_SEARCH = '') needs none of this -- SeaSearch/Elasticsearch are
+# configured entirely through seafevents.conf, which cloudfile-docker's
+# bootstrap writes from CF_ENABLE_SEARCH and CF_SEASEARCH_TOKEN.
+
+CF_MEILISEARCH_URL = 'http://meilisearch:7700'
+CF_MEILISEARCH_API_KEY = ''
+# HTTP timeout for a single Meilisearch call. Kept short: a slow search
+# backend must not turn into a slow page load, and Seahub's own search view
+# already wraps this in a bare except that renders an empty result page.
+CF_MEILISEARCH_TIMEOUT = 5
+
+# How often cf-worker looks for new commits to index, in seconds.
+CF_SEARCH_INDEX_INTERVAL = 60
+
+# Files at or under this size (in bytes) whose extension is in the plain-text
+# set (cloudfile_ext.search.indexer.TEXT_EXTENSIONS) get their content indexed
+# alongside filename/path/metadata. Larger or non-text files are indexed by
+# metadata only -- content extraction for office/PDF formats is what SeaSearch
+# already does through seafevents; re-doing it here would duplicate that
+# pipeline for the one backend that exists specifically for sites that are not
+# running SeaSearch. See docs/search.md.
+CF_SEARCH_INDEX_TEXT_MAX_BYTES = 1024 * 1024
