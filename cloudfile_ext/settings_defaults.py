@@ -24,8 +24,11 @@ CF_ENABLE_AUDIT = False
 CF_ENABLE_METADATA = False
 CF_ENABLE_TAGS = False
 CF_ENABLE_SEARCH = False
+CF_ENABLE_FILE_PREVIEW = False
 CF_ENABLE_ONLYOFFICE = False
+CF_ENABLE_FILE_LOCK = False
 CF_ENABLE_CHECKOUT = False
+CF_ENABLE_LOCAL_APP = False
 CF_ENABLE_S3_STORAGE = False
 CF_ENABLE_EXTERNAL_SOURCES = False
 
@@ -152,3 +155,22 @@ CF_EXTERNAL_SOURCES_ROOTS = ['/shared/external']
 # pipeline for the one backend that exists specifically for sites that are not
 # running SeaSearch. See docs/search.md.
 CF_SEARCH_INDEX_TEXT_MAX_BYTES = 1024 * 1024
+
+# -- file actions ----------------------------------------------------------
+
+# Native previews remain upstream URLs; this list only decides which files get
+# a CloudFile action entry point around that existing renderer.
+CF_FILE_ACTION_PREVIEW_EXTENSIONS = (
+    'pdf', 'txt', 'md', 'markdown', 'csv', 'json', 'xml', 'html', 'htm',
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'mp3', 'mp4', 'webm',
+    'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'odt', 'ods', 'odp',
+)
+CF_FILE_ACTION_OFFICE_EXTENSIONS = (
+    'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'odt', 'ods', 'odp',
+    'csv', 'pdf',
+)
+
+# Native Messaging agents receive short-lived, single-file capabilities. A
+# local write action remains unavailable until the seafile-server lock
+# provider is present; an advisory Hub-only checkout would be unsafe.
+CF_LOCAL_APP_SESSION_TTL = 300

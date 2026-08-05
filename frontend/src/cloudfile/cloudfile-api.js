@@ -59,6 +59,28 @@ class CloudFileAPI {
     return this.req.get(url, { params: { path: path, user: user } });
   }
 
+  // -- file actions -------------------------------------------------------
+
+  getFileActions(repoID, path) {
+    const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/file-actions/';
+    return this.req.get(url, { params: { path: path } });
+  }
+
+  createLocalSession(repoID, path, mode = 'local-view') {
+    const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/local-sessions/';
+    return this.req.post(url, { path: path, mode: mode });
+  }
+
+  checkoutFile(repoID, path, source = 'manual') {
+    const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/checkout/';
+    return this.req.post(url, { path: path, source: source });
+  }
+
+  releaseCheckout(repoID, path, generation) {
+    const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/checkout/';
+    return this.req.delete(url, { data: { path: path, generation: generation } });
+  }
+
 }
 
 let cloudFileAPI = new CloudFileAPI();

@@ -1,0 +1,80 @@
+:root {
+  --cf-ink: #18231d;
+  --cf-paper: #f4f0e7;
+  --cf-olive: #71834f;
+  --cf-red: #b44631;
+  --cf-line: rgba(24, 35, 29, .22);
+}
+
+.cf-action-shell {
+  min-height: 100vh;
+  padding: clamp(2rem, 6vw, 6rem);
+  color: var(--cf-ink);
+  background-color: var(--cf-paper);
+  background-image: radial-gradient(rgba(24, 35, 29, .09) .65px, transparent .65px);
+  background-size: 8px 8px;
+}
+
+.cf-action-hero {
+  max-width: 72rem;
+  margin-bottom: 3.5rem;
+  border-bottom: 3px solid var(--cf-ink);
+  padding-bottom: 1.5rem;
+}
+
+.cf-eyebrow, .cf-action-card small {
+  font-family: Georgia, 'Times New Roman', serif;
+  letter-spacing: .14em;
+  font-size: .7rem;
+  font-weight: 700;
+}
+
+.cf-action-hero h1, .cf-action-card h2, .cf-agent-ticket h2 {
+  margin: .3rem 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  letter-spacing: -.045em;
+  font-weight: 700;
+}
+
+.cf-action-hero h1 { font-size: clamp(2.8rem, 8vw, 6rem); }
+.cf-action-hero p { margin: 0; color: rgba(24, 35, 29, .68); word-break: break-all; }
+
+.cf-action-grid {
+  display: grid;
+  max-width: 72rem;
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+  gap: 1rem;
+}
+
+.cf-action-card, .cf-agent-ticket, .cf-checkout-status {
+  border: 1px solid var(--cf-line);
+  background: rgba(255,255,255,.62);
+  box-shadow: 5px 5px 0 rgba(24, 35, 29, .12);
+}
+
+.cf-action-card { min-height: 17rem; padding: 1.35rem; display: flex; flex-direction: column; }
+.cf-action-card h2 { font-size: 1.9rem; }
+.cf-action-card p { flex: 1; line-height: 1.55; }
+.cf-action-card .btn-primary { align-self: flex-start; background: var(--cf-ink); border-color: var(--cf-ink); border-radius: 0; }
+.cf-action-card.is-disabled { opacity: .62; background: rgba(228, 222, 209, .72); }
+.cf-action-card__topline { display: flex; gap: .55rem; align-items: center; }
+.cf-action-card__signal { width: .65rem; height: .65rem; border-radius: 50%; background: var(--cf-olive); }
+.cf-action-card__signal.is-write { background: var(--cf-red); }
+.cf-action-card__blocked { font-size: .78rem; border-left: 3px solid var(--cf-red); padding-left: .55rem; color: #754133; }
+.cf-loading, .cf-error, .cf-empty { max-width: 72rem; padding: 1rem; border-left: 4px solid var(--cf-olive); }
+.cf-error { border-color: var(--cf-red); }
+.cf-agent-ticket, .cf-checkout-status { max-width: 72rem; margin-top: 2rem; padding: 1.5rem; }
+.cf-agent-ticket__facts { display: flex; gap: 2rem; margin: 1.4rem 0 0; }
+.cf-agent-ticket__facts div { min-width: 10rem; }
+.cf-agent-ticket__facts dt { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.cf-agent-ticket__facts dd { margin: .2rem 0 0; }
+.cf-agent-ticket__actions { display: flex; flex-wrap: wrap; gap: .75rem; margin-top: 1.4rem; }
+.cf-agent-ticket .btn-primary, .cf-checkout-status .btn-primary { background: var(--cf-ink); border-color: var(--cf-ink); border-radius: 0; }
+.cf-checkout-status { display: flex; justify-content: space-between; gap: 1rem; align-items: center; border-left: 5px solid var(--cf-red); }
+.cf-checkout-status h2 { margin: .3rem 0; font-family: Georgia, 'Times New Roman', serif; }
+.cf-checkout-status p { margin: 0; }
+@media (max-width: 40rem) {
+  .cf-agent-ticket__facts, .cf-checkout-status { display: block; }
+  .cf-agent-ticket__facts div + div { margin-top: .8rem; }
+  .cf-checkout-status .btn { margin-top: 1rem; }
+}

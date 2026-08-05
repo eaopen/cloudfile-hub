@@ -54,6 +54,7 @@ const entryFiles = {
   // untouched and out of the upstream merge path.
   cloudfileAdmin: '/cloudfile/admin/index.js',
   cloudfileAcl: '/cloudfile/acl/index.js',
+  cloudfileFileActions: '/cloudfile/file-actions/index.js',
 };
 
 const getEntries = (isEnvDevelopment) => {
