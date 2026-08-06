@@ -20,6 +20,7 @@ const SyncSelector = ({ icon, className, value, title, onChange, children, onSea
 
   const handleChange = useCallback((newValue) => {
     onChange && onChange(newValue);
+    setIsShowSelector(false);
   }, [onChange]);
 
   const onToggle = useCallback(() => {
@@ -40,7 +41,7 @@ const SyncSelector = ({ icon, className, value, title, onChange, children, onSea
       </SelectorDisplay>
       {isShowSelector && (
         <SyncOptionsEditor
-          className="sea-ai-chat-selector-display-editor"
+          className="sea-ai-chat-selector-display-editor sea-ai-chat-file-selector-editor"
           target={ref}
           isMultiple={true}
           placeholder={gettext('Search')}

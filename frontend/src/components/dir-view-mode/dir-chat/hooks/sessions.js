@@ -10,8 +10,19 @@ import { ASK_PAGE_SLUG_ID, SESSION_TAB_TYPE } from '../constants';
 
 const SessionsContext = React.createContext(null);
 
-export const SessionsProvider = ({ repoID, api, children }) => {
-  const [isLoading, setLoading] = useState(true);
+export const SessionsProvider = ({
+  repoID,
+  api,
+  children,
+  enableSessions = true,
+  getSessionIdsFilter,
+  onSessionTouch,
+  onSessionDelete,
+  onSessionIdsMissing,
+  fallbackToNewWhenSessionMissing = false,
+}) => {
+  const [isLoading, setLoading] = useState(enableSessions);
+  const [isSessionsLoadSuccessful, setIsSessionsLoadSuccessful] = useState(false);
   const [sessions, setSessions] = useState([]);
   const [teamSessions, setTeamSessions] = useState([]);
   const [isTeamSessionsLoading, setIsTeamSessionsLoading] = useState(false);
@@ -27,17 +38,66 @@ export const SessionsProvider = ({ repoID, api, children }) => {
     return rawSessions.map((session) => new ChatSession(session));
   }, []);
 
+  const getFilteredSessionIds = useCallback(() => {
+    if (typeof getSessionIdsFilter !== 'function') {
+      return null;
+    }
+
+    const sessionIds = getSessionIdsFilter();
+    if (!Array.isArray(sessionIds)) {
+      return [];
+    }
+
+    return sessionIds.filter(Boolean);
+  }, [getSessionIdsFilter]);
+
+  const filterSessionsByIds = useCallback((sessionList, sessionIds) => {
+    if (!Array.isArray(sessionIds)) {
+      return sessionList;
+    }
+
+    if (sessionIds.length === 0) {
+      return [];
+    }
+
+    const sessionOrderMap = new Map(sessionIds.map((sessionId, index) => [sessionId, index]));
+    return sessionList
+      .filter((session) => sessionOrderMap.has(session._id))
+      .sort((left, right) => sessionOrderMap.get(left._id) - sessionOrderMap.get(right._id));
+  }, []);
+
   const loadSessions = useCallback(() => {
+    if (!enableSessions) {
+      setSessions([]);
+      setLoading(false);
+      setIsSessionsLoadSuccessful(false);
+      return Promise.resolve();
+    }
     setLoading(true);
+    setIsSessionsLoadSuccessful(false);
     return api.listChatSessions(repoID).then((res) => {
-      setSessions(normalizeSessions(res.data.sessions));
+      const normalizedSessions = normalizeSessions(res.data.sessions);
+      const sessionIds = getFilteredSessionIds();
+      const nextSessions = filterSessionsByIds(normalizedSessions, sessionIds);
+
+      if (Array.isArray(sessionIds) && typeof onSessionIdsMissing === 'function') {
+        const existingSessionIdSet = new Set(normalizedSessions.map((session) => session._id));
+        const missingSessionIds = sessionIds.filter((sessionId) => !existingSessionIdSet.has(sessionId));
+        if (missingSessionIds.length > 0) {
+          onSessionIdsMissing(missingSessionIds);
+        }
+      }
+
+      setSessions(nextSessions);
+      setIsSessionsLoadSuccessful(true);
     }).catch((error) => {
       toaster.danger(Utils.getErrorMsg(error));
       setSessions([]);
+      setIsSessionsLoadSuccessful(false);
     }).finally(() => {
       setLoading(false);
     });
-  }, [api, normalizeSessions, repoID]);
+  }, [api, enableSessions, filterSessionsByIds, getFilteredSessionIds, normalizeSessions, onSessionIdsMissing, repoID]);
 
   const updateSessionCollection = useCallback((setter, sessionId, updater) => {
     setter((currentSessions) => {
@@ -65,18 +125,40 @@ export const SessionsProvider = ({ repoID, api, children }) => {
     setSessions((currentSessions) => [session, ...currentSessions.filter((item) => item._id !== session._id)]);
   }, []);
 
+  const touchSession = useCallback((sessionId) => {
+    if (!sessionId || sessionId === ASK_PAGE_SLUG_ID.NEW || typeof onSessionTouch !== 'function') {
+      return;
+    }
+
+    onSessionTouch(sessionId);
+
+    setSessions((currentSessions) => {
+      const sessionIndex = currentSessions.findIndex((session) => session._id === sessionId);
+      if (sessionIndex <= 0) {
+        return currentSessions;
+      }
+
+      const nextSessions = currentSessions.slice(0);
+      const [targetSession] = nextSessions.splice(sessionIndex, 1);
+      nextSessions.unshift(targetSession);
+      return nextSessions;
+    });
+  }, [onSessionTouch]);
+
   const createSession = useCallback((name) => {
     return api.createChatSession(repoID, name).then((res) => {
       const session = new ChatSession(res.data.session);
       prependSession(session);
+      touchSession(session._id);
       return session;
     });
-  }, [api, prependSession, repoID]);
+  }, [api, prependSession, repoID, touchSession]);
 
   const startChatFromConversation = useCallback((sessionId) => {
     return api.copyChatSession(sessionId).then((res) => {
       const session = new ChatSession(res.data.session);
       prependSession(session);
+      touchSession(session._id);
       setActiveTab(SESSION_TAB_TYPE.MINE);
       togglePageSlugId(session._id);
       toaster.success(gettext('Started a new chat from this conversation'));
@@ -85,7 +167,7 @@ export const SessionsProvider = ({ repoID, api, children }) => {
       toaster.danger(Utils.getErrorMsg(error));
       throw error;
     });
-  }, [api, prependSession, togglePageSlugId]);
+  }, [api, prependSession, togglePageSlugId, touchSession]);
 
   const modifySession = useCallback((sessionId, { name }) => {
     return api.modifyChatSession(sessionId, { session_name: name }).then((res) => {
@@ -98,13 +180,21 @@ export const SessionsProvider = ({ repoID, api, children }) => {
   const deleteSession = useCallback((sessionId) => {
     return api.deleteChatSession(sessionId).then(() => {
       updateSessionState(sessionId, () => null);
+      if (typeof onSessionDelete === 'function') {
+        onSessionDelete(sessionId);
+      }
       if (pageSlugId === sessionId) {
         togglePageSlugId(ASK_PAGE_SLUG_ID.NEW);
       }
     });
-  }, [api, pageSlugId, togglePageSlugId, updateSessionState]);
+  }, [api, onSessionDelete, pageSlugId, togglePageSlugId, updateSessionState]);
 
   const loadTeamSessions = useCallback(() => {
+    if (!enableSessions) {
+      setTeamSessions([]);
+      setIsTeamSessionsLoading(false);
+      return Promise.resolve();
+    }
     setIsTeamSessionsLoading(true);
     return api.listTeamSharedSessions(repoID).then((res) => {
       setTeamSessions(normalizeSessions(res.data.sessions));
@@ -114,14 +204,14 @@ export const SessionsProvider = ({ repoID, api, children }) => {
     }).finally(() => {
       setIsTeamSessionsLoading(false);
     });
-  }, [api, normalizeSessions, repoID]);
+  }, [api, enableSessions, normalizeSessions, repoID]);
 
   const shareSession = useCallback((sessionId) => {
     return api.shareChatSession(sessionId, true).then((res) => {
       const updatedSession = new ChatSession(res.data.session);
       updateSessionState(sessionId, () => updatedSession);
       setTeamSessions((currentSessions) => [updatedSession, ...currentSessions.filter((item) => item._id !== sessionId)]);
-      toaster.success(gettext('Chat shared within library'));
+      toaster.success(gettext('Chat shared'));
       return updatedSession;
     }).catch((error) => {
       toaster.danger(Utils.getErrorMsg(error));
@@ -133,7 +223,7 @@ export const SessionsProvider = ({ repoID, api, children }) => {
       const updatedSession = new ChatSession(res.data.session);
       updateSessionCollection(setSessions, sessionId, () => updatedSession);
       updateSessionCollection(setTeamSessions, sessionId, () => null);
-      toaster.success(gettext('Chat unshared from library'));
+      toaster.success(gettext('Chat unshared'));
       return updatedSession;
     }).catch((error) => {
       toaster.danger(Utils.getErrorMsg(error));
@@ -247,8 +337,33 @@ export const SessionsProvider = ({ repoID, api, children }) => {
   }, [sessions, teamSessions]);
 
   useEffect(() => {
+    if (!enableSessions) {
+      setLoading(false);
+      setIsSessionsLoadSuccessful(false);
+      setSessions([]);
+      setTeamSessions([]);
+      setIsShowSessions(false);
+      return;
+    }
+
     loadSessions();
-  }, [loadSessions]);
+  }, [enableSessions, loadSessions]);
+
+  useEffect(() => {
+    if (!enableSessions || !fallbackToNewWhenSessionMissing || isLoading || !isSessionsLoadSuccessful || pageSlugId === ASK_PAGE_SLUG_ID.NEW) {
+      return;
+    }
+
+    const hasMatchedSession = sessions.some((session) => session._id === pageSlugId);
+    if (hasMatchedSession) {
+      return;
+    }
+
+    if (typeof onSessionDelete === 'function') {
+      onSessionDelete(pageSlugId);
+    }
+    togglePageSlugId(ASK_PAGE_SLUG_ID.NEW);
+  }, [enableSessions, fallbackToNewWhenSessionMissing, isLoading, isSessionsLoadSuccessful, onSessionDelete, pageSlugId, sessions, togglePageSlugId]);
 
   useEffect(() => {
     const unsubscribeSendChatMessage = eventBus.subscribe(EVENT_BUS_TYPE.ASK_QUESTION, solveProblem);
@@ -296,6 +411,7 @@ export const SessionsProvider = ({ repoID, api, children }) => {
     getChatMessage,
     markSessionRunningTask,
     prependSession,
+    touchSession,
     getSession,
   }), [
     activeTab,
@@ -319,6 +435,7 @@ export const SessionsProvider = ({ repoID, api, children }) => {
     solveProblem,
     startChatFromConversation,
     teamSessions,
+    touchSession,
     toggleIsShowSessions,
     unshareSession,
   ]);

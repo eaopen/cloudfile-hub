@@ -146,6 +146,16 @@ export const createTableHeaders = (
         sortBy === 'creator' && sortIcon
       )
     }] : []),
+    ...(isColumnVisible(PRIVATE_COLUMN_KEY.AI_SUMMARY) ? [{
+      key: PRIVATE_COLUMN_KEY.AI_SUMMARY,
+      width: 320,
+      className: 'dirent-property dirent-property-ai-summary',
+      children: React.createElement(
+        'span',
+        {},
+        gettext('AI summary')
+      )
+    }] : []),
     ...(isColumnVisible(PRIVATE_COLUMN_KEY.FILE_STATUS) ? [{
       key: PRIVATE_COLUMN_KEY.FILE_STATUS,
       width: 120,

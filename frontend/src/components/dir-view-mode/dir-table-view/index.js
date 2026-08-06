@@ -60,6 +60,7 @@ const DirTableView = ({
   onItemConvert,
   isDirentDetailShow,
   showDirentDetail,
+  updateDetailDirent,
   onItemsMove,
   onItemMove,
   selectedDirentList,
@@ -532,10 +533,22 @@ const DirTableView = ({
     onSelectedDirentListUpdate(list);
   }, [getDirentsByRowIds, onSelectedDirentListUpdate]);
 
+  const onClickTableBlankSpace = useCallback(() => {
+    updateDetailDirent(null);
+  }, [updateDetailDirent]);
+
   const onRecordSelected = useCallback((event, rowId) => {
     const dirent = getDirentByRowId(rowId);
     onItemSelected(dirent, event);
   }, [getDirentByRowId, onItemSelected]);
+
+  const onCellClick = useCallback((cell) => {
+    const rowId = typeof cell?.rowIdx === 'number' ? tableData.row_ids[cell.rowIdx] : null;
+    const dirent = rowId ? getDirentByRowId(rowId) : null;
+    if (!dirent) return;
+
+    updateDetailDirent(dirent);
+  }, [getDirentByRowId, tableData.row_ids, updateDetailDirent]);
 
   const renderCustomDraggedRows = useCallback((draggedRecordIds) => {
     if (!Array.isArray(draggedRecordIds) || draggedRecordIds.length === 0) return null;
@@ -675,6 +688,8 @@ const DirTableView = ({
         gridUtils={gridUtilsAdapter}
         showRecordAsTree={false}
         createContextMenuOptions={createContextMenuOptions}
+        onCellClick={onCellClick}
+        onClickTableBlankSpace={onClickTableBlankSpace}
         onRecordSelected={onRecordSelected}
         renderCustomDraggedRows={renderCustomDraggedRows}
         moveRecords={permission.canModify() ? moveDirents : undefined}
@@ -710,6 +725,7 @@ DirTableView.propTypes = {
   updateDirentMetadata: PropTypes.func,
   onItemConvert: PropTypes.func,
   showDirentDetail: PropTypes.func,
+  updateDetailDirent: PropTypes.func,
   onItemsMove: PropTypes.func,
   onItemMove: PropTypes.func,
   onColumnOrderChange: PropTypes.func,

@@ -1,12 +1,13 @@
 import React, { Fragment, useCallback, useState } from 'react';
 import PropTypes from 'prop-types';
 import { Modal, ModalBody, TabContent, TabPane, Nav, NavItem, NavLink } from 'reactstrap';
-import { gettext, enableRepoAutoDel, enableFaceRecognitionFeature, enableSeafileAI } from '../../utils/constants';
+import { gettext, enableRepoAutoDel, enableFaceRecognitionFeature, enableSeafileAI, enableAIChat } from '../../utils/constants';
 import { TAB } from '../../constants/repo-setting-tabs';
 import LibHistorySettingPanel from './lib-settings/lib-history-setting-panel';
 import LibAutoDelSettingPanel from './lib-settings/lib-old-files-auto-del-setting-panel';
 import {
   MetadataStatusManagementDialog as LibExtendedPropertiesSettingPanel,
+  MetadataAISummaryStatusDialog as LibAISummarySettingPanel,
   MetadataFaceRecognitionDialog as LibFaceRecognitionSettingPanel,
   MetadataTagsStatusDialog as LibMetadataTagsStatusSettingPanel,
   useMetadata
@@ -34,7 +35,12 @@ const LibSettingsDialog = ({ repoID, currentRepoInfo, toggleDialog, tab, showMig
   const { encrypted, is_admin } = currentRepoInfo;
   const { enableMetadataManagement } = window.app.pageOptions;
   const { updateEnableFaceRecognition } = useMetadata();
-  const { enableMetadata, updateEnableMetadata, enableTags, tagsLang, updateEnableTags, enableFaceRecognition, globalHiddenColumns, modifyGlobalHiddenColumns } = useMetadataStatus();
+  const {
+    enableMetadata, updateEnableMetadata,
+    enableTags, tagsLang, updateEnableTags,
+    enableAISummary, updateEnableAISummary,
+    enableFaceRecognition, globalHiddenColumns, modifyGlobalHiddenColumns
+  } = useMetadataStatus();
   const enableHistorySetting = is_admin; // repo owner, admin of the department which the repo belongs to, and ...
   const enableAutoDelSetting = is_admin && enableRepoAutoDel;
   const enableExtendedPropertiesSetting = !encrypted && is_admin && enableMetadataManagement;
@@ -126,6 +132,22 @@ const LibSettingsDialog = ({ repoID, currentRepoInfo, toggleDialog, tab, showMig
                         {gettext('Extended properties')}
                       </NavLink>
                     </NavItem>
+                    {enableSeafileAI && enableAIChat &&
+                      <NavItem
+                        role="tab"
+                        aria-selected={activeTab === TAB.AI_SUMMARY_SETTING}
+                        aria-controls="ai-summary-setting-panel"
+                      >
+                        <NavLink
+                          className={activeTab === TAB.AI_SUMMARY_SETTING ? 'active' : ''}
+                          onClick={toggleTab.bind(this, TAB.AI_SUMMARY_SETTING)}
+                          tabIndex="0"
+                          onKeyDown={Utils.onKeyDown}
+                        >
+                          {gettext('AI summary')}
+                        </NavLink>
+                      </NavItem>
+                    }
                     {enableFaceRecognitionFeature &&
                       <NavItem
                         role="tab"
@@ -186,6 +208,17 @@ const LibSettingsDialog = ({ repoID, currentRepoInfo, toggleDialog, tab, showMig
                     modifyHiddenColumns={modifyGlobalHiddenColumns}
                     submit={updateEnableMetadata}
                     toggleDialog={toggleDialog}
+                  />
+                </TabPane>
+              )}
+              {(enableExtendedPropertiesSetting && enableSeafileAI && enableAIChat && activeTab === TAB.AI_SUMMARY_SETTING) && (
+                <TabPane tabId={TAB.AI_SUMMARY_SETTING} role="tabpanel" id="ai-summary-setting-panel">
+                  <LibAISummarySettingPanel
+                    repoID={repoID}
+                    value={enableAISummary}
+                    submit={updateEnableAISummary}
+                    toggleDialog={toggleDialog}
+                    enableMetadata={enableMetadata}
                   />
                 </TabPane>
               )}

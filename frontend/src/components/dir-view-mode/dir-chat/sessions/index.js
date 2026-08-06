@@ -1,8 +1,10 @@
-import React, { useEffect } from 'react';
+import React, { useLayoutEffect, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
+import classNames from 'classnames';
 import { gettext } from '../../../../utils/constants';
 import CenteredLoading from '../../../centered-loading';
 import Icon from '../../../icon';
+import Tooltip from '../../../tooltip';
 import { useSessions } from '../hooks';
 import EmptyTip from '../../../empty-tip';
 import Session from './session';
@@ -10,7 +12,7 @@ import { SESSION_TAB_TYPE } from '../constants';
 
 import './index.css';
 
-const Sessions = ({ sessionId }) => {
+const Sessions = ({ sessionId, embedded = false, onSelect }) => {
   const {
     sessions,
     teamSessions,
@@ -20,53 +22,123 @@ const Sessions = ({ sessionId }) => {
     closeShowSessions,
     loadTeamSessions,
   } = useSessions();
+  const tabsRef = useRef(null);
+  const mineLabelRef = useRef(null);
+  const teamLabelRef = useRef(null);
+  const hasRequestedTeamSessionsRef = useRef(false);
+  const [indicatorStyle, setIndicatorStyle] = useState(null);
 
   const isTeamTab = activeTab === SESSION_TAB_TYPE.TEAM;
-  const displaySessions = isTeamTab ? teamSessions : sessions;
+  const displaySessions = embedded ? sessions : (isTeamTab ? teamSessions : sessions);
+  const shouldShowLoading = !embedded && (isTeamTab && !hasRequestedTeamSessionsRef.current ? true : isTeamSessionsLoading);
+  const emptyTipProps = isTeamTab
+    ? {
+      title: gettext('No shared chats'),
+      text: gettext('Shared chats can be viewed by everyone with read or write\n permission to the library'),
+    }
+    : {
+      title: gettext('No chats'),
+    };
 
-  useEffect(() => {
-    if (isTeamTab) {
+  useLayoutEffect(() => {
+    const updateIndicator = () => {
+      const tabsNode = tabsRef.current;
+      const activeLabelNode = activeTab === SESSION_TAB_TYPE.MINE ? mineLabelRef.current : teamLabelRef.current;
+
+      if (!tabsNode || !activeLabelNode) {
+        return;
+      }
+
+      const tabsRect = tabsNode.getBoundingClientRect();
+      const labelRect = activeLabelNode.getBoundingClientRect();
+
+      setIndicatorStyle({
+        width: labelRect.width,
+        transform: `translateX(${labelRect.left - tabsRect.left}px)`,
+      });
+    };
+
+    updateIndicator();
+    window.addEventListener('resize', updateIndicator);
+
+    return () => {
+      window.removeEventListener('resize', updateIndicator);
+    };
+  }, [activeTab]);
+
+  const onSelectMineTab = () => {
+    setActiveTab(SESSION_TAB_TYPE.MINE);
+  };
+
+  const onSelectTeamTab = () => {
+    if (!hasRequestedTeamSessionsRef.current) {
+      hasRequestedTeamSessionsRef.current = true;
       loadTeamSessions();
     }
-  }, [isTeamTab, loadTeamSessions]);
+
+    setActiveTab(SESSION_TAB_TYPE.TEAM);
+  };
 
   return (
-    <div className="sea-ai-ask-sessions-wrapper" style={{ width: 280, marginLeft: 16 }}>
-      <div className="sea-ai-ask-sessions-header">
-        <div>{gettext('Histories')}</div>
-        <button type="button" className="btn btn-icon p-0 border-0 bg-transparent" onClick={closeShowSessions} title={gettext('Close')}>
-          <Icon symbol="close" />
-        </button>
-      </div>
-      <div className="sea-ai-ask-sessions-tabs">
-        <button
-          type="button"
-          className={`sea-ai-ask-sessions-tab ${activeTab === SESSION_TAB_TYPE.MINE ? 'active' : ''}`}
-          onClick={() => setActiveTab(SESSION_TAB_TYPE.MINE)}
-        >
-          {gettext('Mine')}
-        </button>
-        <button
-          type="button"
-          className={`sea-ai-ask-sessions-tab ${activeTab === SESSION_TAB_TYPE.TEAM ? 'active' : ''}`}
-          onClick={() => setActiveTab(SESSION_TAB_TYPE.TEAM)}
-        >
-          {gettext('Shared')}
-        </button>
-      </div>
-      <div className="sea-ai-ask-sessions-body">
-        {isTeamSessionsLoading && (
+    <div
+      className={classNames('sea-ai-ask-sessions-wrapper', { embedded })}
+      style={embedded ? undefined : { width: 280, marginLeft: 16 }}
+    >
+      {!embedded && (
+        <div className="sea-ai-ask-sessions-header">
+          <div>{gettext('Histories')}</div>
+          <button
+            id="sea-ai-ask-sessions-close-btn"
+            type="button"
+            className="btn btn-icon p-0 border-0 sea-ai-ask-sessions-close-btn"
+            onClick={closeShowSessions}
+            aria-label={gettext('Close')}
+          >
+            <Icon symbol="close" />
+          </button>
+          <Tooltip target="sea-ai-ask-sessions-close-btn" placement="bottom">
+            {gettext('Close')}
+          </Tooltip>
+        </div>
+      )}
+      {!embedded && (
+        <div className="sea-ai-ask-sessions-tabs" ref={tabsRef}>
+          <button
+            type="button"
+            className={`sea-ai-ask-sessions-tab ${activeTab === SESSION_TAB_TYPE.MINE ? 'active' : ''}`}
+            onClick={onSelectMineTab}
+          >
+            <span className="sea-ai-ask-sessions-tab-label" ref={mineLabelRef}>{gettext('Mine')}</span>
+          </button>
+          <button
+            type="button"
+            className={`sea-ai-ask-sessions-tab ${activeTab === SESSION_TAB_TYPE.TEAM ? 'active' : ''}`}
+            onClick={onSelectTeamTab}
+          >
+            <span className="sea-ai-ask-sessions-tab-label" ref={teamLabelRef}>{gettext('Shared')}</span>
+          </button>
+          <span
+            aria-hidden="true"
+            className={`sea-ai-ask-sessions-tab-indicator ${indicatorStyle ? 'is-visible' : ''}`}
+            style={indicatorStyle || undefined}
+          />
+        </div>
+      )}
+      <div className={classNames('sea-ai-ask-sessions-body', { embedded })}>
+        {shouldShowLoading && (
           <CenteredLoading />
         )}
-        {!isTeamSessionsLoading && displaySessions.length === 0 && (
-          <EmptyTip className="sea-ai-ask-sessions-empty" text={gettext('No chats')} />
+        {!shouldShowLoading && displaySessions.length === 0 && (
+          <EmptyTip className="sea-ai-ask-sessions-empty" {...emptyTipProps} />
         )}
-        {!isTeamSessionsLoading && displaySessions.map((session) => (
+        {!shouldShowLoading && displaySessions.map((session) => (
           <Session
             key={session._id}
             session={session}
             isSelected={sessionId === session._id}
-            isTeamTab={isTeamTab}
+            isTeamTab={embedded ? false : isTeamTab}
+            embedded={embedded}
+            onSelect={onSelect}
           />
         ))}
       </div>
@@ -76,6 +148,8 @@ const Sessions = ({ sessionId }) => {
 
 Sessions.propTypes = {
   sessionId: PropTypes.string,
+  embedded: PropTypes.bool,
+  onSelect: PropTypes.func,
 };
 
 export default Sessions;

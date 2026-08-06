@@ -203,6 +203,10 @@ export const getColumnDisplayName = (key, name) => {
       return gettext('Size');
     case PRIVATE_COLUMN_KEY.FILE_DETAILS:
       return gettext('File details');
+    case PRIVATE_COLUMN_KEY.AI_SUMMARY:
+      return gettext('AI summary');
+    case PRIVATE_COLUMN_KEY.AI_SUMMARY_MTIME:
+      return gettext('AI summary time');
     case PRIVATE_COLUMN_KEY.CAPTURE_TIME:
       return gettext('Capture time');
     case PRIVATE_COLUMN_KEY.OWNER:
@@ -260,7 +264,10 @@ export const getNormalizedColumnType = (key, type) => {
     case PRIVATE_COLUMN_KEY.FILE_KEYWORDS:
     case PRIVATE_COLUMN_KEY.SUFFIX:
       return CellType.TEXT;
+    case PRIVATE_COLUMN_KEY.AI_SUMMARY_MTIME:
+      return CellType.MTIME;
     case PRIVATE_COLUMN_KEY.FILE_DESCRIPTION:
+    case PRIVATE_COLUMN_KEY.AI_SUMMARY:
       return CellType.LONG_TEXT;
     case PRIVATE_COLUMN_KEY.FILE_EXPIRED:
       return CellType.CHECKBOX;

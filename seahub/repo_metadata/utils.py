@@ -108,6 +108,15 @@ def add_init_face_recognition_task(params):
     return json.loads(resp.content)['task_id']
 
 
+def add_init_ai_summary_task(params):
+    payload = {'exp': int(time.time()) + 300, }
+    token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
+    headers = {"Authorization": "Token %s" % token}
+    url = urljoin(SEAFEVENTS_SERVER_URL, '/add-init-ai-summary-task')
+    resp = requests.get(url, params=params, headers=headers)
+    return json.loads(resp.content).get('task_id')
+
+
 def extract_file_details(params):
     payload = {'exp': int(time.time()) + 300, }
     token = jwt.encode(payload, SECRET_KEY, algorithm='HS256')
@@ -195,6 +204,33 @@ def init_metadata(metadata_server_api):
     # init sys column
     sys_columns = METADATA_TABLE_SYS_COLUMNS
     metadata_server_api.add_columns(METADATA_TABLE.id, sys_columns)
+
+
+def init_ai_summary(metadata_server_api):
+    from seafevents.repo_metadata.constants import METADATA_TABLE
+
+    columns = metadata_server_api.list_columns(METADATA_TABLE.id).get('columns', [])
+    column_keys = {column.get('key') for column in columns}
+    ai_summary_columns = []
+
+    for column in [METADATA_TABLE.columns.ai_summary, METADATA_TABLE.columns.ai_summary_mtime]:
+        if column.key not in column_keys:
+            ai_summary_columns.append(column.to_dict())
+
+    if ai_summary_columns:
+        metadata_server_api.add_columns(METADATA_TABLE.id, ai_summary_columns)
+
+
+def remove_ai_summary(metadata_server_api):
+    from seafevents.repo_metadata.constants import METADATA_TABLE
+
+    columns = metadata_server_api.list_columns(METADATA_TABLE.id).get('columns', [])
+    for column in columns:
+        if column.get('key') in [
+            METADATA_TABLE.columns.ai_summary.key,
+            METADATA_TABLE.columns.ai_summary_mtime.key,
+        ]:
+            metadata_server_api.delete_column(METADATA_TABLE.id, column['key'], True)
 
 
 def init_faces(metadata_server_api):

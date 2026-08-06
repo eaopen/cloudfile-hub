@@ -76,6 +76,21 @@ class MetadataManagerAPI {
     return this.req.put(url, data);
   }
 
+  getAISummaryStatus(repoID) {
+    const url = this.server + '/api/v2.1/repos/' + repoID + '/metadata/summary-status/';
+    return this.req.get(url);
+  }
+
+  openAISummary(repoID) {
+    const url = this.server + '/api/v2.1/repos/' + repoID + '/metadata/summary-status/';
+    return this.req.post(url);
+  }
+
+  closeAISummary(repoID) {
+    const url = this.server + '/api/v2.1/repos/' + repoID + '/metadata/summary-status/';
+    return this.req.delete(url);
+  }
+
   modifyGlobalHiddenColumns(repoID, globalHiddenColumns) {
     const url = this.server + '/api/v2.1/repos/' + repoID + '/metadata/global-hidden-columns/';
     const data = { global_hidden_columns: globalHiddenColumns };

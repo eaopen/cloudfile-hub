@@ -171,7 +171,11 @@ def check_folder_permission(request, repo_id, path):
     username = request.user.username
     if not username:
         return None
-    permission = seafile_api.check_permission_by_path(repo_id, path, username)
+    try:
+        permission = seafile_api.check_permission_by_path(repo_id, path, username)
+    except SearpcError as e:
+        logger.warning(e)
+        return None
     if permission == PERMISSION_INVISIBLE:
         return None
     return _cf_check_permission(username, repo_id, path, permission)

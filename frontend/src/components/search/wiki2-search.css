@@ -35,16 +35,30 @@
 }
 
 .wiki2-search-input .form-control {
-  padding-left: 2.5rem;
+  padding-left: 36px;
+  padding-right: 36px;
   height: 38px;
   font-size: 0.875rem;
   width: 100%;
 }
 
-.seafile-search-divider {
-  height: 1px;
-  background-color: var(--bs-border-color);
-  margin: 16px 0;
+.wiki2-search-input .wiki2-search-input-clear {
+  top: 50%;
+  right: 9px;
+  bottom: auto;
+  left: auto;
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  padding: 0;
+  color: var(--bs-icon-color);
+  background-color: transparent;
+  border-radius: 4px;
+  transform: translateY(-50%);
+}
+
+.wiki2-search-input .wiki2-search-input-clear:hover {
+  background-color: var(--bs-hover-secondary-bg);
 }
 
 .wiki2-search-modal .modal-body {
@@ -53,4 +67,12 @@
 
 .wiki2-search-modal .seafile-divider {
   margin: 16px 0;
+}
+
+@media (max-width: 767px) {
+  .wiki2-search-input .search-input {
+    height: 38px;
+    width: 100% !important;
+    box-shadow: none;
+  }
 }

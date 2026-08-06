@@ -5,13 +5,14 @@ import MediaQuery from 'react-responsive';
 import classNames from 'classnames';
 import { SEARCH_CONTAINER, SEARCH_MASK } from '@/constants/zIndexes';
 import wikiAPI from '../../utils/wiki-api';
-import { gettext, siteRoot } from '../../utils/constants';
+import { gettext, mediaUrl, siteRoot } from '../../utils/constants';
 import { debounce, Utils } from '../../utils/utils';
 import toaster from '../toast';
 import Loading from '../loading';
 import IconBtn from '../icon-btn';
 import Icon from '../icon';
 import Wiki2SearchResult from './wiki2-search-result';
+import Tooltip from '../tooltip';
 
 import './wiki2-search.css';
 
@@ -167,7 +168,7 @@ function Wiki2GlobalSearch({ placeholder, onSearchedClick }) {
       if (isEnter(e)) {
         const highlightResult = results[highlightIndex];
         if (highlightResult) {
-          onItemClick(highlightResult);
+          onItemClick(e, highlightResult);
         }
       } else if (isUp(e)) {
         onUp(e, highlightIndex);
@@ -223,17 +224,23 @@ function Wiki2GlobalSearch({ placeholder, onSearchedClick }) {
       <>
         {isLoading && <Loading />}
         {(value === '' && !isResultGotten) && (
-          <div className="search-result-none">{gettext('Type characters to start search')}</div>
+          <div className="search-result-none search-result-start-searching-tip">
+            <img className='none-image' src={`${mediaUrl}img/start-searching.png`} alt="" width="48" height="48" />
+            <span className='none-tip'>{gettext('Type characters to start search')}</span>
+          </div>
         )}
         {(value !== '' && isResultGotten && results.length === 0) && (
-          <div className="search-result-none">{gettext('No result')}</div>
+          <div className="search-result-none search-result-no-results-tip">
+            <img className='none-image' src={`${mediaUrl}img/no-results.png`} alt="" width="48" height="48" />
+            <span className='none-tip'>{gettext('No results matching')}</span>
+          </div>
         )}
-        {results.length > 0 && (
-          <div className="wiki2-search-result mb-3">
-            <h6 className="wiki2-search-result-header d-flex align-items-center my-2">
+        {value !== '' && results.length > 0 && (
+          <div className="wiki2-search-result">
+            <h6 className="wiki2-search-result-header d-flex align-items-center">
               <span>{gettext('Wiki pages')}</span>
             </h6>
-            <ul>
+            <ul className="wiki2-search-result-list">
               {results.map((result, index) => {
                 const flatIndex = getFlatIndex(result);
                 const key = result._id || result.doc_uuid || `${result.wiki_id}-${result.page_id || ''}-${flatIndex}`;
@@ -297,12 +304,18 @@ function Wiki2GlobalSearch({ placeholder, onSearchedClick }) {
                   onFocus={onFocus}
                   autoFocus={true}
                 />
-                <IconBtn
-                  symbol="close"
-                  className="search-icon-right input-icon-addon mr-2"
-                  onClick={onClearSearch}
-                  aria-label={gettext('Close')}
-                />
+                {value !== '' && (
+                  <>
+                    <IconBtn
+                      id="wiki2-global-search-clear-btn"
+                      symbol="close"
+                      className="search-icon-right wiki2-search-input-clear"
+                      onClick={onClearSearch}
+                      aria-label={gettext('Clear search')}
+                    />
+                    <Tooltip target="wiki2-global-search-clear-btn">{gettext('Clear search')}</Tooltip>
+                  </>
+                )}
               </div>
 
               <div className="seafile-divider"></div>

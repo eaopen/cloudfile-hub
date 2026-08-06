@@ -173,7 +173,7 @@ class DirentListItem extends React.Component {
       this.thumbnailCenter = videoThumbnailCenter;
       return true;
     }
-    if (Utils.imageCheck(dirent.name) || (enablePDFThumbnail && Utils.pdfCheck(dirent.name))) {
+    if (Utils.imageCheck(dirent.name) || Utils.epubCheck(dirent.name) || (enablePDFThumbnail && Utils.pdfCheck(dirent.name))) {
       this.thumbnailCenter = imageThumbnailCenter;
       return true;
     }
@@ -229,6 +229,21 @@ class DirentListItem extends React.Component {
     event.stopPropagation();
     event.preventDefault();
     this.props.onItemSelected(this.props.dirent, event);
+  };
+
+  onRowClick = (event) => {
+    if (this.state.isRenaming) {
+      return;
+    }
+
+    const interactiveSelector = 'a, button, input, textarea, select, [role="button"], .op-icon, .dropdown, .dropdown-toggle';
+    if (event.target.closest(interactiveSelector)) {
+      return;
+    }
+
+    event.stopPropagation();
+    event.preventDefault();
+    this.props.onDirentClick(this.props.dirent, event);
   };
 
   onItemStarred = (e) => {
@@ -607,6 +622,7 @@ class DirentListItem extends React.Component {
     const showModified = visibleColumnKeys.includes(DIR_COLUMN_KEYS.MTIME);
     const showCreator = visibleColumnKeys.includes(PRIVATE_COLUMN_KEY.FILE_CREATOR);
     const showLastModifier = visibleColumnKeys.includes(PRIVATE_COLUMN_KEY.FILE_MODIFIER);
+    const showAISummary = visibleColumnKeys.includes(PRIVATE_COLUMN_KEY.AI_SUMMARY);
     const showStatus = visibleColumnKeys.includes(PRIVATE_COLUMN_KEY.FILE_STATUS);
     const statusCol = columns.find(col => col.key === PRIVATE_COLUMN_KEY.FILE_STATUS);
     const showTags = visibleColumnKeys.includes(PRIVATE_COLUMN_KEY.TAGS);
@@ -712,6 +728,7 @@ class DirentListItem extends React.Component {
         onDragLeave={this.onItemDragLeave}
         onDrop={this.onItemDragDrop}
         onMouseDown={this.onItemMouseDown}
+        onClick={this.onRowClick}
         onContextMenu={this.onItemContextMenu}
       >
         {/* Checkbox */}
@@ -830,6 +847,15 @@ class DirentListItem extends React.Component {
               queryUserAPI={this.props.queryUser}
               collaboratorsCache={this.props.collaboratorsCache}
             />
+          </div>
+        )}
+
+        {showAISummary && (
+          <div
+            className="dirent-property dirent-property-ai-summary text-truncate"
+            title={showMetadata ? dirent.metadata[PRIVATE_COLUMN_KEY.AI_SUMMARY] || '' : ''}
+          >
+            {showMetadata ? dirent.metadata[PRIVATE_COLUMN_KEY.AI_SUMMARY] || '' : ''}
           </div>
         )}
 

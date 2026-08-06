@@ -4,7 +4,7 @@ from .apis import MetadataRecognizeFaces, MetadataRecords, MetadataManage, Metad
     FaceRecognitionManage, FacesRecord, MetadataExtractFileDetails, PeoplePhotos, MetadataTagsStatusManage, MetadataTags, \
     MetadataTagsLinks, MetadataFileTags, MetadataTagFiles, MetadataMergeTags, MetadataTagsFiles, MetadataDetailsSettingsView, \
     PeopleCoverPhoto, MetadataMigrateTags, MetadataExportTags, MetadataImportTags, MetadataGlobalHiddenColumnsView, \
-    MetadataBatchRecords, MetadataStatistics, MetadataCheckRecordsLimit
+    MetadataBatchRecords, MetadataStatistics, MetadataCheckRecordsLimit, MetadataAISummaryStatusManage
 
 urlpatterns = [
     re_path(r'^$', MetadataManage.as_view(), name='api-v2.1-metadata'),
@@ -12,6 +12,7 @@ urlpatterns = [
     re_path(r'^record/$', MetadataRecord.as_view(), name='api-v2.1-metadata-record-info'),
     re_path(r'^batch-records/$', MetadataBatchRecords.as_view(), name='api-v2.1-metadata-batch-records'),
     re_path(r'^columns/$', MetadataColumns.as_view(), name='api-v2.1-metadata-columns'),
+    re_path(r'^summary-status/$', MetadataAISummaryStatusManage.as_view(), name='api-v2.1-metadata-summary-status'),
 
     # view
     re_path(r'^folders/$', MetadataFolders.as_view(), name='api-v2.1-metadata-folders'),

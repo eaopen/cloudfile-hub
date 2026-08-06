@@ -5,7 +5,7 @@ import toaster from '../components/toast';
 import Loading from '../components/loading';
 import { PRIVATE_FILE_TYPE } from '../constants';
 import { EVENT_BUS_TYPE } from '../metadata/constants';
-import { enableSeafileAI, gettext } from '../utils/constants';
+import { enableSeafileAI, enableAIChat, gettext } from '../utils/constants';
 
 
 // This hook provides content related to seahub interaction, such as whether to enable extended attributes
@@ -25,6 +25,7 @@ export const MetadataStatusProvider = ({ repoID, repoInfo, currentPath, hideMeta
   const [enableTags, setEnableTags] = useState(false);
   const [tagsLang, setTagsLang] = useState('en');
 
+  const [enableAISummary, setEnableAISummary] = useState(false);
   const [enableFaceRecognition, setEnableFaceRecognition] = useState(false);
 
   const [showView, setShowView] = useState(false);
@@ -47,6 +48,7 @@ export const MetadataStatusProvider = ({ repoID, repoInfo, currentPath, hideMeta
     setLoading(true);
     setEnableMetadata(false);
     setEnableTags(false);
+    setEnableAISummary(false);
     setEnableFaceRecognition(false);
     setDetailsSettings({});
     setIsBeingBuilt(false);
@@ -60,6 +62,7 @@ export const MetadataStatusProvider = ({ repoID, repoInfo, currentPath, hideMeta
       const {
         enabled: enableMetadata,
         tags_enabled: enableTags,
+        summary_enabled: enableAISummary,
         show_view: showView,
         tags_lang: tagsLang,
         details_settings: detailsSettings,
@@ -70,6 +73,7 @@ export const MetadataStatusProvider = ({ repoID, repoInfo, currentPath, hideMeta
         cancelMetadataURL();
       }
       setEnableTags(enableTags);
+      setEnableAISummary(enableSeafileAI && enableAIChat && !!enableAISummary);
       setShowView(showView);
       setTagsLang(tagsLang || 'en');
       setDetailsSettings(JSON.parse(detailsSettings));
@@ -114,6 +118,7 @@ export const MetadataStatusProvider = ({ repoID, repoInfo, currentPath, hideMeta
     if (!newValue) {
       cancelMetadataURL(true);
       setEnableTags(false);
+      setEnableAISummary(false);
       setEnableFaceRecognition(false);
     }
     setDetailsSettings({});
@@ -132,6 +137,11 @@ export const MetadataStatusProvider = ({ repoID, repoInfo, currentPath, hideMeta
     setEnableTags(newValue);
     setTagsLang(lang);
   }, [enableTags, tagsLang, cancelMetadataURL]);
+
+  const updateEnableAISummary = useCallback((newValue) => {
+    if (newValue === enableAISummary) return;
+    setEnableAISummary(newValue);
+  }, [enableAISummary]);
 
 
   const updateEnableFaceRecognition = useCallback((newValue) => {
@@ -182,6 +192,8 @@ export const MetadataStatusProvider = ({ repoID, repoInfo, currentPath, hideMeta
         showView,
         tagsLang,
         updateEnableTags,
+        enableAISummary,
+        updateEnableAISummary,
         detailsSettings,
         modifyDetailsSettings,
         enableFaceRecognition,

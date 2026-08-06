@@ -4,7 +4,7 @@
   left: 0;
   width: 100%;
   height: 100%;
-  background-color: rgba(0, 0, 0, 0.2);
+  background-color: rgba(0, 0, 0, 0.5);
 }
 
 .search-container {
@@ -17,7 +17,8 @@
   position: absolute;
   top: 10px;
   right: 110px;
-  border-radius: 3px;
+  border: 1px solid #eee;
+  border-radius: 8px;
   box-shadow: 0 3px 8px 0 rgba(116, 129, 141, 0.1);
   background: var(--bs-body-bg);
   color: var(--bs-body-color);
@@ -34,7 +35,7 @@
 
 .search-container .input-icon {
   position: relative;
-  margin: 0 12px;
+  margin: 0 16px;
 }
 
 .search-container .input-icon svg.input-icon-addon {
@@ -57,7 +58,9 @@
 .search-icon-left {
   display: flex;
   align-items: center;
-  justify-content: center;
+  min-width: 16px !important;
+  padding-left: 12px;
+  padding-right: 8px;
 }
 
 .search-icon-left .seafile-multicolor-icon {
@@ -85,7 +88,7 @@
 
 .search-icon-right:hover {
   background-color: var(--bs-icon-btn-hover-bg-color);
-  border-radius: 3px;
+  border-radius: 4px;
 }
 
 .search-icon-right.sf3-font-set-up {
@@ -141,12 +144,55 @@
 }
 
 .search-result-container .search-result-none {
-  text-align: center;
-  line-height: 4rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+}
+
+.search-result-none.search-result-start-searching-tip .none-image,
+.search-result-none.search-result-no-results-tip .none-image {
+  display: none;
+}
+
+.search-result-none.search-result-start-searching-tip::before,
+.search-result-none.search-result-no-results-tip::before {
+  content: "";
+  width: 48px;
+  height: 48px;
+  margin-top: 64px;
+  margin-bottom: 8px;
+  flex-shrink: 0;
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: contain;
+}
+
+[data-bs-theme="light"] .search-result-none.search-result-start-searching-tip::before {
+  background-image: url(../../../media/img/start-searching.png);
+}
+
+[data-bs-theme="dark"] .search-result-none.search-result-start-searching-tip::before {
+  background-image: url(../../../media/img/start-searching-dark.png);
+}
+
+[data-bs-theme="light"] .search-result-none.search-result-no-results-tip::before {
+  background-image: url(../../../media/img/no-results.png);
+}
+
+[data-bs-theme="dark"] .search-result-none.search-result-no-results-tip::before {
+  background-image: url(../../../media/img/no-results-dark.png);
+}
+
+.search-result-container .search-result-none .none-tip {
+  line-height: 22px;
+  font-size: 14px;
+  color: var(--bs-body-secondary-color);
+  margin-bottom: 80px;
 }
 
 .search-result-container .search-result-list {
-  margin: 4px 0;
+  margin: 0;
   padding: 0;
   list-style: none;
 }
@@ -166,13 +212,17 @@
   padding: 10px 36px 10px 8px;
   font-size: 0.8125rem;
   cursor: pointer;
-  margin-right: 1rem;
+  margin-right: 12px;
   border-radius: 4px;
   position: relative;
 }
 
 .search-result-container .search-result-item.search-result-item-highlight {
-  background-color: var(--bs-bg-secondary-color);
+  background-color: var(--bs-active-secondary-bg);
+}
+
+.search-result-container .search-result-item:hover {
+  background-color: var(--bs-hover-secondary-bg);
 }
 
 .search-result-container .search-result-container-side-panel {
@@ -220,8 +270,11 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  top: auto;
+  top: 0;
   right: 0;
+  bottom: 0;
+  margin-top: auto;
+  margin-bottom: auto;
 }
 
 .search-result-item .search-icon-right:hover {
@@ -496,14 +549,16 @@
 .search-results-title,
 .visited-search-results-title {
   color: #666;
+  line-height: 22px;
   font-size: .875rem;
   font-weight: normal;
-  margin: 10px 0 4px;
+  margin: 12px 0 8px;
+  padding-right: 12px;
 }
 
 .search-types {
   padding-right: 16px;
-  padding-top: 6px;
+  padding-top: 12px;
 }
 
 .search-types>div {
@@ -515,10 +570,13 @@
   border-radius: 4px;
 }
 
-.search-types .search-types-highlight,
+.search-types .search-types-highlight {
+  background-color: var(--bs-active-secondary-bg);
+}
+
 .search-types>div:focus,
 .search-types>div:hover {
-  background-color: var(--bs-bg-color);
+  background-color: var(--bs-hover-secondary-bg);
 }
 
 .search-types .search-types-text {
@@ -529,7 +587,7 @@
 .search-types .sf3-font-enter,
 .search-types .search-types-enter-icon {
   position: absolute;
-  right: 6px;
+  right: 12px;
   top: 50%;
   transform: translateY(-50%);
   color: #999999;
@@ -537,10 +595,11 @@
 
 .library-result-container {
   margin-bottom: 16px;
+  margin-right: 16px;
 }
 
 .library-result-divider {
-  margin: 10px 0 16px;
+  margin: 12px 0 12px;
 }
 
 .library-result-header {

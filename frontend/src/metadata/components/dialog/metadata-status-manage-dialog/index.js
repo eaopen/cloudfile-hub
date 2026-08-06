@@ -60,6 +60,16 @@ const GLOBAL_CONFIGURABLE_COLUMNS = [
     key: PRIVATE_COLUMN_KEY.FILE_DESCRIPTION,
     name: '_description',
     type: CellType.LONG_TEXT,
+  },
+  {
+    key: PRIVATE_COLUMN_KEY.AI_SUMMARY,
+    name: '_ai_summary',
+    type: CellType.LONG_TEXT,
+  },
+  {
+    key: PRIVATE_COLUMN_KEY.AI_SUMMARY_MTIME,
+    name: '_ai_summary_mtime',
+    type: CellType.DATE,
   }
 ];
 

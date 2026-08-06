@@ -2,6 +2,7 @@ import React, { Component } from 'react';
 import PropTypes from 'prop-types';
 import { Input } from 'reactstrap';
 import { gettext } from '../../utils/constants';
+import SearchEmptyTip from '../../components/common/search-empty-tip';
 import { Utils } from '../../utils/utils';
 import OpIcon from '../../components/op-icon';
 import OpElement from '../../components/op-element';
@@ -43,7 +44,8 @@ class UserSelector extends Component {
 
   togglePopover = () => {
     this.setState({
-      isPopoverOpen: !this.state.isPopoverOpen
+      isPopoverOpen: !this.state.isPopoverOpen,
+      query: '',
     }, () => {
       if (!this.state.isPopoverOpen) {
         const { availableUsers } = this.props;
@@ -75,7 +77,7 @@ class UserSelector extends Component {
     const selectedUsers = availableUsers.filter(item => item.isSelected);
     const filteredAvailableUsers = query.trim() ? availableUsers.filter(item => item.contact_email.indexOf(query.trim()) != -1 || item.name.indexOf(query.trim()) != -1 || item.login_id.indexOf(query.trim()) != -1) : availableUsers;
     return (
-      <div className="mt-4 position-relative">
+      <div className="position-relative">
         <OpElement
           className="cur-activity-modifiers d-inline-flex align-items-center p-2 rounded"
           title={gettext('Toggle user selector')}
@@ -115,26 +117,30 @@ class UserSelector extends Component {
                 onChange={this.onQueryChange}
               />
             </div>
-            <ul className="activity-user-list list-unstyled p-3 o-auto">
-              {filteredAvailableUsers.map((item, index) => {
-                return (
-                  <li
-                    key={index}
-                    className="activity-user-item h-6 p-1 rounded d-flex justify-content-between align-items-center"
-                    onClick={(e) => { this.toggleSelectItem(e, item); }}
-                    tabIndex="0"
-                    onKeyDown={Utils.onKeyDown}
-                    aria-label={gettext('Select')}
-                  >
-                    <div>
-                      <img src={item.avatar_url} className="avatar w-5 h-5" alt="" />
-                      <span className="activity-user-name ml-2">{item.name}</span>
-                    </div>
-                    {item.isSelected && <Icon symbol="check-thin" className="text-gray font-weight-bold" />}
-                  </li>
-                );
-              })}
-            </ul>
+            {filteredAvailableUsers.length > 0 &&
+              <ul className="activity-user-list list-unstyled p-3 o-auto">
+                {filteredAvailableUsers.map((item, index) => {
+                  return (
+                    <li
+                      key={index}
+                      className="activity-user-item h-6 p-1 rounded d-flex justify-content-between align-items-center"
+                      onClick={(e) => { this.toggleSelectItem(e, item); }}
+                      tabIndex="0"
+                      onKeyDown={Utils.onKeyDown}
+                      aria-label={gettext('Select')}
+                    >
+                      <div>
+                        <img src={item.avatar_url} className="avatar w-5 h-5" alt="" />
+                        <span className="activity-user-name ml-2">{item.name}</span>
+                      </div>
+                      {item.isSelected && <Icon symbol="check" className="text-gray font-weight-bold" />}
+                    </li>
+                  );
+                })}
+              </ul>}
+            {filteredAvailableUsers.length === 0 && (
+              <SearchEmptyTip text={gettext('No users')} />
+            )}
           </div>
         )}
       </div>

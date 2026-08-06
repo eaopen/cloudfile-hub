@@ -1,15 +1,21 @@
 .sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item {
   display: flex;
   align-items: center;
-  padding: 0 8px;
-  border-radius: 4px;
+  padding: 0 10px;
+  border-radius: 8px;
   width: 100%;
-  height: 36px;
+  min-height: 40px;
   cursor: pointer;
 }
 
-.sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item.active,
-.sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item:hover,
+.sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item.active {
+  background-color: var(--bs-nav-active-bg);
+}
+
+.sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item:hover {
+  background-color: var(--bs-nav-hover-bg);
+}
+
 .sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item .sea-ai-ask-session-more-op-btn:hover {
   background-color: var(--bs-icon-btn-hover-bg-color);
 }
@@ -17,16 +23,29 @@
 .sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item .sea-ai-ask-session-content {
   width: calc(100% - 16px); /* 16: icon-width(16) */
   overflow: hidden;
+  min-width: 0;
 }
 
-.sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item.has-more-menu:hover .sea-ai-ask-session-content {
-  width: calc(100% - 56px); /* 56: icon-width(16) + icon-mr(8) + more-width(24) + more-ml(8) */
+.sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item .seafile-multicolor-icon {
+  flex-shrink: 0;
+  font-size: 1rem;
+}
+
+.sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item .sea-ai-ask-session-content {
+  flex: 1;
+  overflow: hidden;
+}
+
+.sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item.has-more-menu.active .sea-ai-ask-session-content {
+  width: calc(100% - 56px);
   margin-right: 8px;
 }
 
 .sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item .sea-ai-ask-session-name {
   flex: 1;
   overflow: hidden;
+  font-size: 14px;
+  line-height: 22px;
 }
 
 .sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item .sea-ai-ask-session-more-op-btn {
@@ -37,6 +56,11 @@
 }
 
 .sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item.has-more-menu:hover .sea-ai-ask-session-more-op-btn {
+  flex-shrink: 0;
+  display: flex;
+}
+
+.sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item.has-more-menu.active .sea-ai-ask-session-more-op-btn {
   display: flex;
 }
 
@@ -46,4 +70,21 @@
 
 .sea-ai-ask-session-more-op-btn .dropdown-item {
   padding: 8px;
+}
+
+.sea-ai-ask-session-dropdown-menu .dropdown-item-icon {
+  margin-right: 12px !important;
+}
+
+.sea-ai-ask-session-dropdown-menu .dropdown-item-icon .seafile-multicolor-icon {
+  width: 14px;
+  height: 14px;
+  color: #666;
+}
+
+.sea-ai-ask-sessions-wrapper .sea-ai-ask-session-item.embedded {
+  min-height: 32px;
+  margin-bottom: 4px;
+  padding-left: 8px;
+  padding-right: 8px;
 }
