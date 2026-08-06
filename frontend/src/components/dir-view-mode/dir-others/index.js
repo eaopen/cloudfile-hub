@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import PropTypes from 'prop-types';
-import { gettext, username, isPro, siteRoot, enableAIChat, enableSeafileAI } from '../../../utils/constants';
+import { gettext, username, isPro, siteRoot, enableAIChat, enableSeafileAI, cloudFileWatchEnabled } from '../../../utils/constants';
 import { Utils } from '../../../utils/utils';
 import TreeSection from '../../tree-section';
 import LibSettingsDialog from '../../dialog/lib-settings';
@@ -62,7 +62,7 @@ const DirOthers = ({ userPerm, repoID, currentRepoInfo, currentMode, updateRepoI
   const isRepoOwner = owner_email == username;
   const isDepartmentAdmin = owner_email.indexOf('@seafile_group') != -1 && is_admin;
 
-  const enableMonitorRepo = isPro && (permission == 'r' || permission == 'rw');
+  const enableMonitorRepo = (isPro || cloudFileWatchEnabled) && (permission == 'r' || permission == 'rw');
 
   return (
     <TreeSection title={gettext('Others')} className="dir-others">

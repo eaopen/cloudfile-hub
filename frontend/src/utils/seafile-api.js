@@ -1,7 +1,7 @@
 import axios from 'axios';
 import FormData from 'form-data';
 import Cookies from 'js-cookie';
-import { siteRoot } from './constants';
+import { cloudFileLockEnabled, isPro, siteRoot } from './constants';
 
 class SeafileAPI {
 
@@ -1094,6 +1094,10 @@ class SeafileAPI {
   }
 
   lockfile(repoID, filePath, expire) {
+    if (cloudFileLockEnabled && !isPro) {
+      const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/file-lock/';
+      return this.req.put(url, { path: filePath });
+    }
     const url = this.server + '/api/v2.1/repos/' + repoID + '/file/?p=' + encodeURIComponent(filePath);
     let form = new FormData();
     form.append('operation', 'lock');
@@ -1104,6 +1108,10 @@ class SeafileAPI {
   }
 
   unlockfile(repoID, filePath) {
+    if (cloudFileLockEnabled && !isPro) {
+      const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/file-lock/';
+      return this.req.delete(url, { data: { path: filePath } });
+    }
     const url = this.server + '/api/v2.1/repos/' + repoID + '/file/?p=' + encodeURIComponent(filePath);
     let form = new FormData();
     form.append('operation', 'unlock');

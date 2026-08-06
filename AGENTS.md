@@ -31,7 +31,8 @@ workspace/
 
 新代码一律放进 `cloudfile_ext/`（后端）和 `frontend/src/cloudfile/`（前端）。
 
-目前只改了七个上游文件，改动前请先确认你真的没有别的办法：
+七个核心扩展点之外，原生文件列表/详情交互另有 19 个已登记兼容补丁；完整路径以
+`cloudfile-docker/docs/upstream-patches/cloudfile-hub.txt` 为准。改动前请先确认你真的没有别的办法：
 
 | 文件 | 改了什么 | 为什么必须改这里 |
 |---|---|---|
@@ -43,7 +44,8 @@ workspace/
 | `scripts/seaf-fsck.sh` | 修复模式前置校验服务已停止 + 传播退出码 | 脚本原生无论成败都以 `echo "Done."` 收尾、退出码固定为 0；离线迁移编排必须能拿到真实失败信号，只能在这唯一入口上改，新文件要么整份复制维护、要么留下能绕过校验的原脚本 |
 | `scripts/seaf-gc.sh` | 传播退出码 | 同上，`run_seaf_gc` 失败时脚本自身也一直返回 0 |
 
-**加新能力不需要再改上游。** 已有的注入点足够：
+**后端新能力不需要再改上游。** 已有的注入点足够；原生 React 菜单、历史版本和
+页面上下文没有注册点时，只能修改已登记的前端兼容补丁，并保持开关关闭时行为不变：
 
 - Django app / middleware / 认证后端 → 写进 `conf/seahub_settings.py` 的 `EXTRA_INSTALLED_APPS` 等。
   Seahub 的 `load_local_settings()`（`seahub/settings.py`）会把 `EXTRA_<NAME>` 追加到同名设置，

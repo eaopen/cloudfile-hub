@@ -55,6 +55,8 @@ export const canSendShareLinkEmail = window.app.pageOptions.canSendShareLinkEmai
 export const canViewOrg = window.app.pageOptions.canViewOrg === 'True';
 export const fileAuditEnabled = window.app.pageOptions.fileAuditEnabled;
 export const folderPermEnabled = window.app.pageOptions.folderPermEnabled;
+export const cloudFileLockEnabled = window.app.pageOptions.cloudFileLockEnabled === true;
+export const cloudFileWatchEnabled = window.app.pageOptions.cloudFileWatchEnabled === true;
 export const enableResetEncryptedRepoPassword = window.app.pageOptions.enableResetEncryptedRepoPassword === 'True';
 export const isEmailConfigured = window.app.pageOptions.isEmailConfigured === 'True';
 export const enableUploadFolder = window.app.pageOptions.enableUploadFolder === 'True';
@@ -173,6 +175,7 @@ export const filePath = window.fileHistory ? window.fileHistory.pageOptions.file
 export const fileName = window.fileHistory ? window.fileHistory.pageOptions.fileName : '';
 export const useNewAPI = window.fileHistory ? window.fileHistory.pageOptions.use_new_api : '';
 export const canDownload = window.fileHistory ? window.fileHistory.pageOptions.can_download_file : '';
+export const canRevert = window.fileHistory ? window.fileHistory.pageOptions.can_revert_file : false;
 export const isVirtualRepo = window.fileHistory ? window.fileHistory.pageOptions.isVirtualRepo : false;
 
 // org admin

@@ -138,7 +138,7 @@ const FileDetails = React.memo(({ repoID, dirent, path, direntDetail, isShowRepo
     </>
   );
 }, (props, nextProps) => {
-  const { repoID, repoInfo, dirent, path, direntDetail, isShowRepoTags, repoTags, fileTagList } = props;
+  const { repoID, repoInfo, dirent, path, direntDetail, isShowRepoTags, repoTags, fileTagList, tagsData, readOnly, onFileTagChanged } = props;
   const isChanged = (
     isShowRepoTags !== nextProps.isShowRepoTags ||
     repoID !== nextProps.repoID ||
@@ -147,7 +147,10 @@ const FileDetails = React.memo(({ repoID, dirent, path, direntDetail, isShowRepo
     !ObjectUtils.isSameObject(dirent, nextProps.dirent) ||
     !ObjectUtils.isSameObject(direntDetail, nextProps.direntDetail) ||
     repoTags !== nextProps.repoTags ||
-    fileTagList !== nextProps.fileTagList
+    fileTagList !== nextProps.fileTagList ||
+    tagsData !== nextProps.tagsData ||
+    readOnly !== nextProps.readOnly ||
+    onFileTagChanged !== nextProps.onFileTagChanged
   );
   return !isChanged;
 });

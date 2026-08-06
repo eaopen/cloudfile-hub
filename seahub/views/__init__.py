@@ -134,9 +134,25 @@ def get_system_default_repo_id():
 # cloudfile_ext.
 try:
     from cloudfile_ext.hooks import check_permission as _cf_check_permission
+    from cloudfile_ext.features import is_enabled as _cf_feature_enabled
 except ImportError:
     def _cf_check_permission(username, repo_id, path, permission):
         return permission
+
+    def _cf_feature_enabled(name):
+        return False
+
+
+def _cloudfile_dir_acl_enabled():
+    return _cf_feature_enabled('CF_ENABLE_DIR_ACL')
+
+
+def _cloudfile_file_lock_enabled():
+    return _cf_feature_enabled('CF_ENABLE_FILE_LOCK')
+
+
+def _cloudfile_watch_enabled():
+    return _cf_feature_enabled('CF_ENABLE_WATCH')
 
 
 def check_folder_permission(request, repo_id, path):
@@ -695,6 +711,7 @@ def file_revisions(request, repo_id):
         is_locked, locked_by_me = False, False
 
     repo_perm = seafile_api.check_permission_by_path(repo_id, path, username)
+    can_download_file = parse_repo_perm(repo_perm).can_download
     if repo_perm != 'rw' or (is_locked and not locked_by_me):
         can_revert_file = False
 
@@ -734,6 +751,7 @@ def file_revisions(request, repo_id):
             'is_owner': is_owner,
             'can_compare': can_compare,
             'can_revert_file': can_revert_file,
+            'can_download_file': can_download_file,
         })
 
     return render(request, 'file_revisions_old.html', {
@@ -744,7 +762,7 @@ def file_revisions(request, repo_id):
         'is_owner': is_owner,
         'can_compare': can_compare,
         'can_revert_file': can_revert_file,
-        'can_download_file': parse_repo_perm(repo_perm).can_download,
+        'can_download_file': can_download_file,
         'use_new_api': use_new_api,
         'is_virtual_repo': repo.is_virtual,
     })
@@ -1176,7 +1194,11 @@ def react_fake_view(request, **kwargs):
         'enable_reset_encrypted_repo_password': ENABLE_RESET_ENCRYPTED_REPO_PASSWORD,
         'is_email_configured': IS_EMAIL_CONFIGURED,
         'can_add_public_repo': request.user.permissions.can_add_public_repo(),
-        'folder_perm_enabled': is_pro_version(),
+        # CloudFile's ACL page reuses the native folder-permission menu slot,
+        # while its API and seafile-server remain the enforcement boundary.
+        'folder_perm_enabled': is_pro_version() or _cloudfile_dir_acl_enabled(),
+        'cloudfile_file_lock_enabled': _cloudfile_file_lock_enabled(),
+        'cloudfile_watch_enabled': _cloudfile_watch_enabled(),
         'file_audit_enabled': FILE_AUDIT_ENABLED,
         'custom_nav_items': json.dumps(CUSTOM_NAV_ITEMS),
         'enable_show_contact_email_when_search_user': settings.ENABLE_SHOW_CONTACT_EMAIL_WHEN_SEARCH_USER,

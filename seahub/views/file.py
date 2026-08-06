@@ -704,9 +704,28 @@ def view_lib_file(request, repo_id, path):
     is_starred = is_file_starred(username, repo_id, path, org_id)
     return_dict['is_starred'] = is_starred
 
+    # CloudFile CE uses the same server-side lease provider that guards sync,
+    # WebDAV and HTTP writes; Pro continues to use its native lock provider.
+    cloudfile_lock_enabled = False
+    if not is_pro_version():
+        try:
+            from cloudfile_ext.features import is_enabled as cf_feature_enabled
+            cloudfile_lock_enabled = cf_feature_enabled('CF_ENABLE_FILE_LOCK')
+        except Exception:
+            cloudfile_lock_enabled = False
+    return_dict['cloudfile_file_lock_enabled'] = cloudfile_lock_enabled
+
     # check file lock info
     try:
-        is_locked, locked_by_me = check_file_lock(repo_id, path, username)
+        if cloudfile_lock_enabled:
+            from cloudfile_ext.file_actions.service import lock_status
+            cf_lock = lock_status(repo_id, path, username)
+            if cf_lock.get('ok') is not True:
+                raise RuntimeError('CloudFile lock provider is unavailable')
+            is_locked = bool(cf_lock.get('locked'))
+            locked_by_me = bool(cf_lock.get('locked_by_me'))
+        else:
+            is_locked, locked_by_me = check_file_lock(repo_id, path, username)
     except Exception as e:
         logger.error(e)
         is_locked = False
@@ -714,7 +733,7 @@ def view_lib_file(request, repo_id, path):
 
     locked_by_online_office = if_locked_by_online_office(repo_id, path)
 
-    if is_pro_version() and permission == 'rw':
+    if (is_pro_version() or cloudfile_lock_enabled) and permission == 'rw':
         can_lock_unlock_file = True
     else:
         can_lock_unlock_file = False

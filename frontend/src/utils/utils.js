@@ -1,4 +1,4 @@
-import { mediaUrl, gettext, serviceURL, siteRoot, isPro, fileAuditEnabled, canGenerateShareLink, canGenerateUploadLink, shareLinkPasswordMinLength, username, folderPermEnabled, onlyofficeConverterExtensions, enableSeadoc, enableRepoSnapshotLabel,
+import { mediaUrl, gettext, serviceURL, siteRoot, isPro, fileAuditEnabled, canGenerateShareLink, canGenerateUploadLink, shareLinkPasswordMinLength, username, folderPermEnabled, cloudFileLockEnabled, onlyofficeConverterExtensions, enableSeadoc, enableRepoSnapshotLabel,
   enableResetEncryptedRepoPassword, isEmailConfigured, isSystemStaff,
   enableOnlyoffice, onlyofficeEditFileExtension,
   enableOfficeWebApp, officeWebAppEditFileExtension, enableMultipleOfficeSuite, officeSuiteEditFileExtension } from './constants';
@@ -590,7 +590,10 @@ export const Utils = {
     }
 
     if (permission == 'rw') {
-      if (folderPermEnabled && ((isRepoOwner && currentRepoInfo.has_been_shared_out) || currentRepoInfo.is_admin)) {
+      const canManageFolderPermission = isPro
+        ? ((isRepoOwner && currentRepoInfo.has_been_shared_out) || currentRepoInfo.is_admin)
+        : isRepoOwner;
+      if (folderPermEnabled && canManageFolderPermission) {
         list.push('Divider', PERMISSION);
       }
     }
@@ -687,9 +690,12 @@ export const Utils = {
     }
 
     if (permission == 'rw') {
-      if (isPro) {
+      if (isPro || cloudFileLockEnabled) {
         if (dirent.is_locked) {
-          if (dirent.locked_by_me || dirent.lock_owner == 'OnlineOffice' || isRepoOwner || currentRepoInfo.is_admin) {
+          const canUnlock = dirent.locked_by_me || (isPro && (
+            dirent.lock_owner == 'OnlineOffice' || isRepoOwner || currentRepoInfo.is_admin
+          ));
+          if (canUnlock) {
             if (!dirent.name.endsWith('.sdoc')) {
               list.push(UNLOCK);
             }

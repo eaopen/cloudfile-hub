@@ -12,6 +12,7 @@ const propTypes = {
   item: PropTypes.object.isRequired,
   index: PropTypes.number.isRequired,
   canDownload: PropTypes.bool.isRequired,
+  canRevert: PropTypes.bool.isRequired,
   onItemRestore: PropTypes.func.isRequired,
 };
 
@@ -43,6 +44,7 @@ class HistoryItem extends React.Component {
 
   render() {
     let item = this.props.item;
+    const historicPath = item.path || filePath;
     return (
       <tr
         onMouseEnter={this.onMouseEnter}
@@ -68,11 +70,12 @@ class HistoryItem extends React.Component {
         <td>
           <MoreMenu
             index={this.props.index}
-            downloadUrl={URLDecorator.getUrl({ type: 'download_historic_file', filePath: filePath, objID: item.rev_file_id })}
-            viewUrl={`${siteRoot}repo/${historyRepoID}/history/files/?obj_id=${item.rev_file_id}&commit_id=${item.commit_id}&p=${Utils.encodePath(filePath)}`}
+            downloadUrl={URLDecorator.getUrl({ type: 'download_historic_file', filePath: historicPath, objID: item.rev_file_id })}
+            viewUrl={`${siteRoot}repo/${historyRepoID}/history/files/?obj_id=${item.rev_file_id}&commit_id=${item.commit_id}&p=${Utils.encodePath(historicPath)}`}
             snapshotURL={`${siteRoot}repo/${historyRepoID}/snapshot/?commit_id=${item.commit_id}`}
             onItemRestore={this.onItemRestore}
             canDownload={this.props.canDownload}
+            canRevert={this.props.canRevert}
             className={this.state.active ? '' : 'invisible'}
           />
         </td>
@@ -90,6 +93,7 @@ const MoreMenuPropTypes = {
   viewUrl: PropTypes.string.isRequired,
   onItemRestore: PropTypes.func.isRequired,
   canDownload: PropTypes.bool.isRequired,
+  canRevert: PropTypes.bool.isRequired,
   snapshotURL: PropTypes.string.isRequired,
   className: PropTypes.string.isRequired,
 };
@@ -97,9 +101,9 @@ const MoreMenuPropTypes = {
 class MoreMenu extends React.PureComponent {
 
   getMenuItems = () => {
-    const { index, downloadUrl, viewUrl, snapshotURL, onItemRestore, canDownload } = this.props;
+    const { index, downloadUrl, viewUrl, snapshotURL, onItemRestore, canDownload, canRevert } = this.props;
     const items = [];
-    if (index !== 0) {
+    if (index !== 0 && canRevert) {
       items.push({ key: 'restore', label: gettext('Restore'), onClick: onItemRestore });
     }
     if (canDownload) {

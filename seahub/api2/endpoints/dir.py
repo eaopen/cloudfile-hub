@@ -98,11 +98,28 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
 
         file_list = [dirent for dirent in dir_file_list if not stat.S_ISDIR(dirent.mode)]
 
+        cloudfile_locks = {}
+        if not is_pro_version():
+            try:
+                from cloudfile_ext.features import is_enabled as cf_feature_enabled
+                if cf_feature_enabled('CF_ENABLE_FILE_LOCK'):
+                    from cloudfile_ext.file_actions.service import lock_status_map
+                    cloudfile_locks = lock_status_map(
+                        repo_id,
+                        [posixpath.join(parent_dir, item.obj_name) for item in file_list],
+                        username)
+            except Exception as e:
+                # Listing stays available when the optional lock provider is
+                # down; write paths still fail closed in seafile-server.
+                logger.error(e)
+
         # Use dict to reduce memcache fetch cost in large for-loop.
         nickname_dict = {}
         contact_email_dict = {}
         modifier_set = {x.modifier for x in file_list}
         lock_owner_set = {x.lock_owner for x in file_list}
+        lock_owner_set.update(
+            item['owner'] for item in cloudfile_locks.values() if item.get('owner'))
         for e in modifier_set | lock_owner_set:
             if e not in nickname_dict:
                 nickname_dict[e] = email2nickname(e)
@@ -150,6 +167,15 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
                     file_info["locked_by_me"] = True
                 else:
                     file_info["locked_by_me"] = False
+            elif file_path in cloudfile_locks:
+                lock_info = cloudfile_locks[file_path]
+                lock_owner_email = lock_info['owner']
+                file_info['is_locked'] = True
+                file_info['is_freezed'] = False
+                file_info['lock_owner'] = lock_owner_email
+                file_info['lock_owner_name'] = nickname_dict.get(lock_owner_email, '')
+                file_info['lock_owner_contact_email'] = contact_email_dict.get(lock_owner_email, '')
+                file_info['locked_by_me'] = lock_info['locked_by_me']
 
             # get star info
             file_info['starred'] = False

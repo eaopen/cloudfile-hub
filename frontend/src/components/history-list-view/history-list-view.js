@@ -10,6 +10,8 @@ const propTypes = {
   reloadMore: PropTypes.func.isRequired,
   onItemClick: PropTypes.func.isRequired,
   onItemRestore: PropTypes.func.isRequired,
+  canDownload: PropTypes.bool.isRequired,
+  canRevert: PropTypes.bool.isRequired,
 };
 
 class HistoryListView extends React.Component {
@@ -72,6 +74,8 @@ class HistoryListView extends React.Component {
               isItemFreezed={this.state.isItemFreezed}
               onItemClick={this.onItemClick}
               onItemRestore={this.props.onItemRestore}
+              canDownload={this.props.canDownload}
+              canRevert={this.props.canRevert}
               onFreezedItemToggle={this.onFreezedItemToggle}
             />
           );

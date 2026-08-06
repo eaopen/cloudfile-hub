@@ -13,6 +13,7 @@ def register(registry):
 
     enabled = any(is_enabled(name) for name in (
         'CF_ENABLE_FILE_PREVIEW', 'CF_ENABLE_CHECKOUT', 'CF_ENABLE_LOCAL_APP',
+        'CF_ENABLE_FILE_LOCK',
     ))
     if not enabled:
         return
@@ -21,7 +22,7 @@ def register(registry):
 
     from cloudfile_ext.file_actions.apis import (
         AgentContentView, CheckoutView, FileActionsPageView, FileActionsView,
-        LocalSessionView,
+        FileLockView, LocalSessionView,
     )
 
     repo_id = r'(?P<repo_id>[-0-9a-f]{36})'
@@ -34,6 +35,8 @@ def register(registry):
                 AgentContentView.as_view(), name='cloudfile-agent-content'),
         re_path(r'^api/v2.1/cloudfile/repos/%s/checkout/$' % repo_id,
                 CheckoutView.as_view(), name='cloudfile-checkout'),
+        re_path(r'^api/v2.1/cloudfile/repos/%s/file-lock/$' % repo_id,
+                FileLockView.as_view(), name='cloudfile-file-lock'),
         path('cloudfile/file-actions/', FileActionsPageView.as_view(),
              name='cloudfile-file-actions-page'),
     ])

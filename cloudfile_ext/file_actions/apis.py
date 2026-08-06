@@ -207,6 +207,53 @@ class CheckoutView(_FileActionAPIView):
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
+class FileLockView(_FileActionAPIView):
+    """CloudFile CE adapter for the native lock/unlock controls."""
+
+    def get(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_FILE_LOCK'):
+            return _feature_off()
+        path, error = _get_file(request, repo_id, request.GET.get('path', ''))
+        if error:
+            return error
+        result = service.lock_status(repo_id, path, request.user.username)
+        if result.get('ok') is not True:
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
+                             'File-lock service is unavailable.')
+        return Response(result)
+
+    def put(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_FILE_LOCK'):
+            return _feature_off()
+        path, error = _get_file(
+            request, repo_id, request.data.get('path', ''), require_edit=True)
+        if error:
+            return error
+        result = service.lock_file(repo_id, path, request.user.username)
+        if not result.get('ok'):
+            if result.get('reason') == 'locked':
+                return Response(result, status=status.HTTP_423_LOCKED)
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
+                             'File-lock service is unavailable.')
+        return Response(result, status=status.HTTP_200_OK)
+
+    def delete(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_FILE_LOCK'):
+            return _feature_off()
+        path, error = _get_file(
+            request, repo_id, request.data.get('path', ''), require_edit=True)
+        if error:
+            return error
+        result = service.release_checkout(repo_id, path, request.user.username)
+        if not result.get('ok'):
+            if result.get('reason') == 'not_owner_or_stale':
+                return api_error(status.HTTP_409_CONFLICT,
+                                 'The file is not locked by the current user.')
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
+                             'File-lock service is unavailable.')
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+
 @method_decorator(login_required, name='dispatch')
 @method_decorator(never_cache, name='dispatch')
 class FileActionsPageView(APIView):

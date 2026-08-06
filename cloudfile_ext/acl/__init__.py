@@ -17,12 +17,13 @@ def register(registry):
     if not is_enabled('CF_ENABLE_DIR_ACL'):
         return
 
-    from django.urls import re_path
+    from django.urls import path, re_path
 
     from cloudfile_ext.acl import sources
     from cloudfile_ext.acl.apis import DirACLView, DirACLEffectiveView
     from cloudfile_ext.acl.admin_apis import AdminDirACLView
     from cloudfile_ext.acl.service import apply_dir_acl
+    from cloudfile_ext.acl.views import acl_page
 
     # Where rules come from is pluggable; where they are enforced from is not.
     # See cloudfile_ext/acl/sources.py.
@@ -38,6 +39,7 @@ def register(registry):
                 name='cloudfile-dir-acl-effective'),
         re_path(r'^api/v2.1/admin/cloudfile/repos/%s/dir-acl/$' % repo_id,
                 AdminDirACLView.as_view(), name='cloudfile-admin-dir-acl'),
+        path('cloudfile/acl/', acl_page, name='cloudfile-dir-acl-page'),
     ])
 
     registry.register_permission_check(apply_dir_acl)

@@ -81,6 +81,8 @@
             fileAuditEnabled: {% if file_audit_enabled %} true {% else %} false {% endif %},
             enableFileComment: {% if enableFileComment %} true {% else %} false {% endif %},
             folderPermEnabled: {% if folder_perm_enabled %} true {% else %} false {% endif %},
+            cloudFileLockEnabled: {% if cloudfile_file_lock_enabled %} true {% else %} false {% endif %},
+            cloudFileWatchEnabled: {% if cloudfile_watch_enabled %} true {% else %} false {% endif %},
             enableResetEncryptedRepoPassword: '{{ enable_reset_encrypted_repo_password }}',
             isEmailConfigured: '{{ is_email_configured }}',
             enableUploadFolder: '{{ enable_upload_folder }}',

@@ -1,6 +1,6 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { gettext, PER_PAGE, filePath } from '../../utils/constants';
+import { canDownload, canRevert, gettext, PER_PAGE, filePath } from '../../utils/constants';
 import editUtilities from '../../utils/editor-utilities';
 import Loading from '../../components/loading';
 import HistoryListView from '../../components/history-list-view/history-list-view';
@@ -113,6 +113,8 @@ class SidePanel extends React.Component {
                 reloadMore={this.reloadMore}
                 onItemClick={this.onItemClick}
                 onItemRestore={this.onItemRestore}
+                canDownload={Boolean(canDownload)}
+                canRevert={Boolean(canRevert)}
               />
             }
           </div>

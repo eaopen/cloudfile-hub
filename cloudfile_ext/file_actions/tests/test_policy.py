@@ -13,6 +13,13 @@ def test_extension_normalization():
     assert policy.extension('/readme') == ''
 
 
+def test_native_lock_uses_the_server_supported_contract():
+    request = policy.native_lock_request('repo', '/plan.docx', 'user@example.com')
+    assert request['kind'] == 'pro-compatible'
+    assert request['owner'] == 'user@example.com'
+    assert request['lease_seconds'] < request['hard_expire_seconds']
+
+
 def test_all_features_off_is_quiet():
     assert policy.actions_for('/plan.docx', {}, PREVIEW) == []
 

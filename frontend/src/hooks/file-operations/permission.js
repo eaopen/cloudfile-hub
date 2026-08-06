@@ -2,6 +2,7 @@ import React, { useContext, useEffect, useCallback, useState, useRef, forwardRef
 import ModalPortal from '../../components/modal-portal';
 import LibSubFolderPermissionDialog from '../../components/dialog/lib-sub-folder-permission-dialog';
 import { EVENT_BUS_TYPE } from '../../components/common/event-bus-type';
+import { folderPermEnabled, isPro, siteRoot } from '../../utils/constants';
 
 // This hook provides content about lib sub-folder permission
 const LibSubFolderPermissionContext = React.createContext(null);
@@ -13,10 +14,15 @@ export const LibSubFolderPermissionProvider = forwardRef(({ repoID, eventBus, is
   const nameRef = useRef('');
 
   const handleLibSubFolderPermission = useCallback((path, name) => {
+    if (folderPermEnabled && !isPro) {
+      const query = new URLSearchParams({ repo_id: repoID, path });
+      window.location.assign(`${siteRoot}cloudfile/acl/?${query.toString()}`);
+      return;
+    }
     pathRef.current = path;
     nameRef.current = name;
     setDialogShow(true);
-  }, []);
+  }, [repoID]);
 
   const cancelLibSubFolderPermission = useCallback(() => {
     setDialogShow(false);
@@ -61,4 +67,3 @@ export const useLibSubFolderPermissionContext = () => {
   }
   return context;
 };
-

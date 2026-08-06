@@ -4,13 +4,15 @@
 import os
 import json
 import uuid
+import time
 from urllib.parse import quote
 
 from django.conf import settings
 from django.core.cache import cache
+from django.db import connections
 
 from cloudfile_ext.features import enabled_features
-from cloudfile_ext.file_actions.policy import actions_for
+from cloudfile_ext.file_actions.policy import actions_for, native_lock_request
 
 
 def _site_root():
@@ -46,6 +48,57 @@ def lock_provider_ready(repo_id, path):
     """
     response = _lock_rpc('cf_lock_status', {'repo_id': repo_id, 'path': path})
     return response.get('ok') is True
+
+
+def lock_status(repo_id, path, username=''):
+    """Return normalized lease state for the native Hub lock controls."""
+    result = _lock_rpc('cf_lock_status', {'repo_id': repo_id, 'path': path})
+    if result.get('ok') is not True:
+        return result
+    owner = result.get('owner', '')
+    result['locked_by_me'] = bool(result.get('locked') and username and owner == username)
+    return result
+
+
+def lock_status_map(repo_id, paths, username=''):
+    """Read live list-view lock state in one query from the authority table."""
+    paths = tuple(dict.fromkeys(paths))
+    if not paths:
+        return {}
+    alias = getattr(settings, 'CF_DATABASE_ALIAS', 'cloudfile')
+    placeholders = ', '.join(['%s'] * len(paths))
+    now = int(time.time())
+    query = (
+        'SELECT normalized_path, owner, kind, lease_until '
+        'FROM cf_lock_lease WHERE repo_id = %s AND status = %s '
+        'AND lease_until > %s AND hard_expire_at > %s '
+        'AND normalized_path IN (' + placeholders + ')'
+    )
+    with connections[alias].cursor() as cursor:
+        cursor.execute(query, [repo_id, 'active', now, now] + list(paths))
+        rows = cursor.fetchall()
+    return {
+        row[0]: {
+            'is_locked': True,
+            'owner': row[1],
+            'kind': row[2],
+            'lease_until': row[3],
+            'locked_by_me': bool(username and row[1] == username),
+        }
+        for row in rows
+    }
+
+
+def lock_file(repo_id, path, username, lease_seconds=12 * 60 * 60):
+    """Acquire the same authoritative lease enforced by all write paths."""
+    current = lock_status(repo_id, path, username)
+    if current.get('ok') and current.get('locked_by_me'):
+        # Retrying after a lost HTTP response must not turn an already-owned
+        # lock into a 423 conflict.
+        return current
+    request = native_lock_request(repo_id, path, username)
+    request['lease_seconds'] = lease_seconds
+    return _lock_rpc('cf_lock_acquire', request)
 
 
 def get_actions(repo_id, path, can_edit=False):

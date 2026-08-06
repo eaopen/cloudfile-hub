@@ -97,7 +97,8 @@ const Detail = React.memo(({
     !ObjectUtils.isSameObject(props.selectedDirents, nextProps.selectedDirents) ||
     !ObjectUtils.isSameObject(props.currentRepoInfo, nextProps.currentRepoInfo) ||
     JSON.stringify(props.repoTags || []) !== JSON.stringify(nextProps.repoTags || []) ||
-    JSON.stringify(props.fileTags || []) !== JSON.stringify(nextProps.fileTags || []);
+    JSON.stringify(props.fileTags || []) !== JSON.stringify(nextProps.fileTags || []) ||
+    props.onFileTagChanged !== nextProps.onFileTagChanged;
   return !isChanged;
 });
 
