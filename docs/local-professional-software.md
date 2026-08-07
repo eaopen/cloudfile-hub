@@ -3,7 +3,7 @@
 OnlyOffice 保持 Seafile CE 原生集成：由 Seafile 的文档配置、回调和部署参数负责，
 CloudFile 不增加代理路由、会话接口或独立验收条件。
 
-CloudFile 的本地查看和本地编辑统一使用 `cloudfile-local/v1` 会话文件。浏览器只在
+CloudFile 的本地查看和本地编辑统一使用 `cloudfile-local/v2` 会话文件。浏览器只在
 用户请求后下载短时 `*.cloudfile` 文件；绿色版 CloudFile Local 和已安装版 CloudFile
 Local 使用相同的文件关联或命令行打开该文件，再按本机策略调用 PDF、CAD、图像等专业
 应用。浏览器不直接连接本机端口，也不显示可复制的访问令牌。
@@ -12,25 +12,43 @@ Local 使用相同的文件关联或命令行打开该文件，再按本机策�
 
 ```json
 {
-  "protocol": "cloudfile-local/v1",
-  "mode": "local-edit",
-  "expires_in": 300,
-  "file": {
-    "name": "drawing.dwg",
-    "content_url": "/thirdparty-editor/file-content/?access_token=..."
-  },
-  "writeback": {
-    "content_url": "/api/v2.1/cloudfile/agent-sessions/.../content/",
-    "generation": "..."
-  }
+  "protocol": "cloudfile-local/v2",
+  "server": "https://cloudfile.example",
+  "ticket": "single-claim-opaque-ticket",
+  "expires_at": 1760000000
 }
 ```
 
-- `local-view` 只有 `file`，Agent 下载为只读副本。
-- `local-edit` 同时包含 `writeback`。Agent 必须在有效期内以 `multipart/form-data`
-  的 `file` 字段 PUT 回写；服务端再次校验租约 owner、generation 和源文件版本。
-- Agent 不得把会话文件、URL 或文件内容上传到第三方服务；过期、回写成功或租约失效后
-  必须删除本地临时文件与会话文件。
+- 下载文件只携带一次性 ticket；Agent 以 `POST /api/v2.1/cloudfile/agent-sessions/claim/`
+  领取后才收到短时下载 URL，编辑会话另收到 write-back capability 与心跳 URL。
+- ticket 60 秒内只能领取一次；浏览器、扩展和会话文件都不接触内容 URL、写回 capability
+  或 Seafile 登录凭据。
+- `local-view` 下载为只读副本；`local-edit` 必须以 `multipart/form-data` 的 `file` 字段
+  PUT 回写，并由服务端再次校验租约 owner、generation 和源文件版本。
+- Agent 不得把会话文件、票据、URL 或文件内容上传到第三方服务；过期、回写成功或租约
+  失效后必须删除本地临时文件与会话文件。
+
+## 本地软件最小配置
+
+首次安装只需要把 CloudFile 站点加入 Agent 的受信任 origin。Agent 对每一个领取成功的
+会话按以下固定顺序选择本地软件：
+
+1. 当前用户配置的 `open_rules`；
+2. 本机自动检测的软件；
+3. 操作系统当前的文件关联。
+
+自动检测覆盖 Microsoft Word/Excel/PowerPoint/Visio、LibreOffice 和主流 CAD/三维工具：
+AutoCAD、BricsCAD、DraftSight、Revit、SOLIDWORKS、Creo、NX、CATIA、SketchUp、Rhino
+及 FreeCAD。Windows 优先使用用户或机器注册的 `App Paths`，再检查常见安装目录；只把
+已存在的本地可执行文件作为候选，绝不从会话文件、Hub 或 Chrome 扩展接收程序路径或命令。
+
+`open_rules` 仅用于覆盖自动选择，例如指定某个 DWG 查看器。规则按顺序匹配，程序必须是
+本机绝对路径，命令只允许一个 `{file}` 占位符，并使用参数数组启动、不经 shell。远端会话
+始终只携带站点、一次性 ticket 和过期时间。
+
+Chrome 扩展默认把下载完成的 `.cloudfile`（含浏览器生成的 `blob:` 下载）交给 Native
+Messaging Agent；用户可在扩展弹窗关闭自动打开。扩展仅显示 Agent 已检测到的软件名称，
+不读取或保存程序路径、浏览器 Cookie 或 Seafile token。
 
 ## 手工与第三方签出
 
