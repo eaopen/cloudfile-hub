@@ -38,7 +38,12 @@ function ActionCard({ action, onOpen, busy }) {
 }
 
 function downloadSessionManifest(session) {
-  const payload = JSON.stringify(session, null, 2);
+  const payload = JSON.stringify({
+    protocol: session.protocol,
+    server: window.location.origin,
+    ticket: session.ticket,
+    expires_at: session.expires_at,
+  }, null, 2);
   const blob = new Blob([payload], { type: 'application/vnd.cloudfile.local-session+json' });
   const url = window.URL.createObjectURL(blob);
   const anchor = document.createElement('a');

@@ -10,7 +10,7 @@ from django.views.decorators.cache import never_cache
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.parsers import FormParser, MultiPartParser
-from rest_framework.permissions import IsAuthenticated
+from rest_framework.permissions import IsAdminUser, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
@@ -45,6 +45,18 @@ def _get_file(request, repo_id, path, require_edit=False):
         return None, api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
     if require_edit and parse_repo_perm(permission).can_edit_on_web is False:
         return None, api_error(status.HTTP_403_FORBIDDEN, 'Edit permission required.')
+    return path, None
+
+
+def _get_file_for_admin(repo_id, path):
+    """Locate a file without applying its owner's library permission rules."""
+    if not path:
+        return None, api_error(status.HTTP_400_BAD_REQUEST, 'path invalid.')
+    path = normalize_file_path(path)
+    if not seafile_api.get_repo(repo_id):
+        return None, api_error(status.HTTP_404_NOT_FOUND, 'Library not found.')
+    if not seafile_api.get_file_id_by_path(repo_id, path):
+        return None, api_error(status.HTTP_404_NOT_FOUND, 'File not found.')
     return path, None
 
 
@@ -109,6 +121,26 @@ class LocalSessionView(_FileActionAPIView):
         return Response(result, status=status.HTTP_201_CREATED)
 
 
+class AgentSessionClaimView(APIView):
+    """Exchange one browser-visible ticket for agent-only file capabilities."""
+
+    authentication_classes = ()
+    permission_classes = ()
+    throttle_classes = (UserRateThrottle,)
+
+    def post(self, request):
+        if not is_enabled('CF_ENABLE_LOCAL_APP'):
+            return _feature_off()
+        ticket = request.data.get('ticket', '')
+        if not isinstance(ticket, str) or not ticket:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'ticket invalid.')
+        origin = request.build_absolute_uri('/').rstrip('/')
+        claimed = service.claim_agent_session(ticket, origin)
+        if not claimed:
+            return api_error(status.HTTP_410_GONE, 'Local session is unavailable or expired.')
+        return Response(claimed)
+
+
 class AgentContentView(APIView):
     """Commit one local-editor result using a one-file, fenced capability."""
 
@@ -116,8 +148,9 @@ class AgentContentView(APIView):
     permission_classes = ()
     parser_classes = (MultiPartParser, FormParser)
 
-    def put(self, request, token):
-        session = service.local_edit_session(token)
+    def put(self, request, session_id):
+        capability = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+        session = service.local_edit_session(session_id, capability)
         upload = request.FILES.get('file')
         if not session or not upload:
             return api_error(status.HTTP_410_GONE, 'Local editing session expired.')
@@ -152,8 +185,23 @@ class AgentContentView(APIView):
 
         service.release_checkout(session['repo_id'], session['path'],
                                  session['username'], session['generation'])
-        service.consume_local_edit_session(token)
+        service.consume_local_edit_session(session_id)
         return Response(status=status.HTTP_204_NO_CONTENT)
+
+
+class AgentSessionHeartbeatView(APIView):
+    """Renew only the claimed agent session's fenced local-edit lease."""
+
+    authentication_classes = ()
+    permission_classes = ()
+    throttle_classes = (UserRateThrottle,)
+
+    def patch(self, request, session_id):
+        capability = request.headers.get('Authorization', '').removeprefix('Bearer ').strip()
+        result = service.refresh_local_edit_session(session_id, capability)
+        if not result:
+            return api_error(status.HTTP_410_GONE, 'Local editing lease is no longer valid.')
+        return Response(result)
 
 
 class CheckoutView(_FileActionAPIView):
@@ -244,11 +292,67 @@ class FileLockView(_FileActionAPIView):
             request, repo_id, request.data.get('path', ''), require_edit=True)
         if error:
             return error
-        result = service.release_checkout(repo_id, path, request.user.username)
+        generation = request.data.get('generation', '')
+        if not generation:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'generation required.')
+        result = service.release_checkout(
+            repo_id, path, request.user.username, generation)
         if not result.get('ok'):
             if result.get('reason') == 'not_owner_or_stale':
                 return api_error(status.HTTP_409_CONFLICT,
                                  'The file is not locked by the current user.')
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
+                             'File-lock service is unavailable.')
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    def patch(self, request, repo_id):
+        """Renew only the caller's current generation of a lease."""
+        if not is_enabled('CF_ENABLE_FILE_LOCK'):
+            return _feature_off()
+        path, error = _get_file(
+            request, repo_id, request.data.get('path', ''), require_edit=True)
+        if error:
+            return error
+        generation = request.data.get('generation', '')
+        if not generation:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'generation required.')
+        result = service.refresh_lock(
+            repo_id, path, request.user.username, generation)
+        if not result.get('ok'):
+            if result.get('reason') == 'not_owner_or_stale':
+                return api_error(status.HTTP_409_CONFLICT,
+                                 'The file lock is no longer active.')
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
+                             'File-lock service is unavailable.')
+        return Response(result)
+
+
+class AdminFileLockForceReleaseView(APIView):
+    """Let system administrators release a reviewed, fenced lease."""
+
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+    throttle_classes = (UserRateThrottle,)
+
+    def post(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_FILE_LOCK'):
+            return _feature_off()
+        path, error = _get_file_for_admin(
+            repo_id, request.data.get('path', ''))
+        if error:
+            return error
+        generation = request.data.get('generation', '')
+        if not generation:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'generation required.')
+        reason = request.data.get('reason', '')
+        if not isinstance(reason, str):
+            return api_error(status.HTTP_400_BAD_REQUEST, 'reason invalid.')
+        result = service.force_release_lock(
+            repo_id, path, request.user.username, generation, reason)
+        if not result.get('ok'):
+            if result.get('reason') == 'not_found_or_stale':
+                return api_error(status.HTTP_409_CONFLICT,
+                                 'The file lock is no longer active.')
             return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
                              'File-lock service is unavailable.')
         return Response(status=status.HTTP_204_NO_CONTENT)

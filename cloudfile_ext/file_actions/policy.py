@@ -10,13 +10,9 @@ client from overwriting the file, so it is not treated as a lock.
 
 import os
 
-
-NATIVE_PREVIEW = 'native-preview'
-LOCAL_VIEW = 'local-view'
-LOCAL_EDIT = 'local-edit'
-CHECKOUT = 'checkout'
-
-WRITE_ACTIONS = frozenset((LOCAL_EDIT, CHECKOUT))
+from cloudfile_ext.file_actions.contracts import (
+    CHECKOUT, LOCAL_EDIT, LOCAL_VIEW, NATIVE_PREVIEW, WRITE_ACTIONS,
+)
 
 
 def native_lock_request(repo_id, path, username):
