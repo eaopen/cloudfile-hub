@@ -88,12 +88,16 @@ def switched(monkeypatch):
     install pytest and nothing else, so a test that needed real Django would be
     skipped in CI -- and a skipped check reads as coverage while providing none.
     """
-    def _switched(on):
+    def _switched(on, search_provider=''):
         conf = types.ModuleType('django.conf')
-        conf.settings = types.SimpleNamespace(CF_ENABLE_EXTERNAL_SOURCES=on)
+        conf.settings = types.SimpleNamespace(
+            CF_ENABLE_EXTERNAL_SOURCES=on,
+            CF_PROVIDER_SEARCH=search_provider,
+        )
         django = types.ModuleType('django')
         django.conf = conf
         urls = types.ModuleType('django.urls')
+        urls.path = lambda pattern, view, name=None: (pattern, view, name)
         urls.re_path = lambda pattern, view, name=None: (pattern, view, name)
         django.urls = urls
         monkeypatch.setitem(sys.modules, 'django', django)
@@ -193,7 +197,7 @@ def test_switch_on_is_not_quiet(switched):
         return
 
     assert 'local-path' in registry.external_sources, registry.external_sources
-    assert len(registry.urls) == 6, registry.urls
+    assert len(registry.urls) == 15, registry.urls
 
 
 def test_switch_on_registers_the_backend_and_nothing_shared(switched,
@@ -219,10 +223,70 @@ def test_switch_on_registers_the_backend_and_nothing_shared(switched,
             setattr(module, attr, types.SimpleNamespace(as_view=lambda: None))
         monkeypatch.setitem(sys.modules, name, module)
 
+    overlay = types.ModuleType('cloudfile_ext.external_sources.overlay_apis')
+    overlay.ExternalOverlayView = types.SimpleNamespace(as_view=lambda: None)
+    monkeypatch.setitem(sys.modules, overlay.__name__, overlay)
+
+    search = types.ModuleType('cloudfile_ext.external_sources.search_apis')
+    search.ExternalSourceSearchView = types.SimpleNamespace(as_view=lambda: None)
+    monkeypatch.setitem(sys.modules, search.__name__, search)
+
+    shadows = types.ModuleType('cloudfile_ext.external_sources.shadows')
+    for attr in ('ExternalApi2FileView', 'ExternalDirView',
+                 'ExternalFileDetailView', 'ExternalFileView',
+                 'ExternalRepoView', 'ExternalReposView'):
+        setattr(shadows, attr, types.SimpleNamespace(as_view=lambda: None))
+    monkeypatch.setitem(sys.modules, shadows.__name__, shadows)
+
+    views = types.ModuleType('cloudfile_ext.external_sources.views')
+    views.external_sources_page = object()
+    monkeypatch.setitem(sys.modules, views.__name__, views)
+
     registry = switched(True)
 
     assert 'local-path' in registry.external_sources
-    assert len(registry.urls) == 6, registry.urls
+    assert len(registry.urls) == 15, registry.urls
     assert registry.permission_checks == []
     assert registry.periodic_tasks == []
-    assert registry.menu == []
+    assert registry.menu == [{
+        'key': 'external-sources',
+        'label': 'External sources',
+        'url': '/cloudfile/external-sources/',
+        'feature': 'CF_ENABLE_EXTERNAL_SOURCES',
+    }]
+
+
+def test_meilisearch_registers_the_bounded_scanner(switched, monkeypatch):
+    """The periodic scanner is opt-in and never starts under SeaSearch."""
+    for name in ('cloudfile_ext.external_sources.admin_apis',
+                 'cloudfile_ext.external_sources.apis'):
+        module = types.ModuleType(name)
+        for attr in ('AdminExternalSourcesView', 'AdminExternalSourceView',
+                     'AdminExternalSourceGrantsView', 'ExternalSourcesView',
+                     'ExternalSourceDirView', 'ExternalSourceFileView'):
+            setattr(module, attr, types.SimpleNamespace(as_view=lambda: None))
+        monkeypatch.setitem(sys.modules, name, module)
+
+    for module_name, attrs in {
+            'cloudfile_ext.external_sources.overlay_apis': ('ExternalOverlayView',),
+            'cloudfile_ext.external_sources.search_apis': ('ExternalSourceSearchView',),
+            'cloudfile_ext.external_sources.shadows': (
+                'ExternalApi2FileView', 'ExternalDirView',
+                'ExternalFileDetailView', 'ExternalFileView',
+                'ExternalRepoView', 'ExternalReposView'),
+    }.items():
+        module = types.ModuleType(module_name)
+        for attr in attrs:
+            setattr(module, attr, types.SimpleNamespace(as_view=lambda: None))
+        monkeypatch.setitem(sys.modules, module_name, module)
+
+    views = types.ModuleType('cloudfile_ext.external_sources.views')
+    views.external_sources_page = object()
+    monkeypatch.setitem(sys.modules, views.__name__, views)
+    scanner = types.ModuleType('cloudfile_ext.external_sources.scanner')
+    scanner.TASK_NAME = 'external_source_scan'
+    scanner.scan_tick = object()
+    monkeypatch.setitem(sys.modules, scanner.__name__, scanner)
+
+    registry = switched(True, 'meilisearch')
+    assert registry.periodic_tasks == ['external_source_scan']

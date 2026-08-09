@@ -81,6 +81,59 @@ class CloudFileAPI {
     return this.req.delete(url, { data: { path: path, generation: generation } });
   }
 
+  // -- external sources ---------------------------------------------------
+
+  listExternalSources() {
+    return this.req.get(this.server + '/api/v2.1/cloudfile/external-sources/');
+  }
+
+  listExternalSourceDir(sourceID, path = '/') {
+    return this.req.get(this.server + '/api/v2.1/cloudfile/external-sources/' + sourceID + '/dir/', {
+      params: { p: path }
+    });
+  }
+
+  externalSourceDownloadUrl(sourceID, path) {
+    return this.server + '/api/v2.1/cloudfile/external-sources/' + sourceID + '/file/?' +
+      new URLSearchParams({ p: path, op: 'download' }).toString();
+  }
+
+  searchExternalSources(query) {
+    return this.req.get(this.server + '/api/v2.1/cloudfile/external-sources/search/', {
+      params: { q: query }
+    });
+  }
+
+  listAdminExternalSources() {
+    return this.req.get(this.server + '/api/v2.1/admin/cloudfile/external-sources/');
+  }
+
+  createExternalSource(payload) {
+    return this.req.post(this.server + '/api/v2.1/admin/cloudfile/external-sources/', payload);
+  }
+
+  updateExternalSource(sourceID, payload) {
+    return this.req.put(this.server + '/api/v2.1/admin/cloudfile/external-sources/' + sourceID + '/', payload);
+  }
+
+  deleteExternalSource(sourceID) {
+    return this.req.delete(this.server + '/api/v2.1/admin/cloudfile/external-sources/' + sourceID + '/');
+  }
+
+  listExternalSourceGrants(sourceID) {
+    return this.req.get(this.server + '/api/v2.1/admin/cloudfile/external-sources/' + sourceID + '/grants/');
+  }
+
+  grantExternalSource(sourceID, payload) {
+    return this.req.post(this.server + '/api/v2.1/admin/cloudfile/external-sources/' + sourceID + '/grants/', payload);
+  }
+
+  revokeExternalSourceGrant(sourceID, subjectType, subject) {
+    return this.req.delete(this.server + '/api/v2.1/admin/cloudfile/external-sources/' + sourceID + '/grants/', {
+      params: { subject_type: subjectType, subject: subject }
+    });
+  }
+
 }
 
 let cloudFileAPI = new CloudFileAPI();

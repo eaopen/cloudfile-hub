@@ -24,8 +24,9 @@ from cloudfile_ext import identity
 from cloudfile_ext.features import is_enabled
 from cloudfile_ext.external_sources import paths, service
 from cloudfile_ext.external_sources.models import (
-    ExternalSource, ExternalSourceGrant, PERMISSION_R, SUBJECT_GROUP,
-    SUBJECT_USER, VALID_PERMISSIONS, VALID_SUBJECT_TYPES,
+    ExternalOverlay, ExternalScanState, ExternalSource, ExternalSourceGrant,
+    PERMISSION_R, SUBJECT_GROUP, SUBJECT_USER, VALID_PERMISSIONS,
+    VALID_SUBJECT_TYPES,
 )
 
 logger = logging.getLogger(__name__)
@@ -174,11 +175,27 @@ class AdminExternalSourceView(APIView):
             # would silently re-authorise whoever had access if the same id is
             # ever reused by AUTO_INCREMENT after a restore.
             ExternalSourceGrant.objects.filter(source_id=source.id).delete()
+            ExternalOverlay.objects.filter(source_id=source.id).delete()
+            ExternalScanState.objects.filter(source_id=source.id).delete()
+            repo_id = source.repo_id
             source.delete()
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
                              'Internal Server Error')
+
+        # Meilisearch is deliberately outside the database transaction. A
+        # search outage must not make a source impossible to decommission;
+        # authorization still filters any stale document, and the next index
+        # maintenance run can remove it. Normal removal is immediate.
+        try:
+            from django.conf import settings
+            if getattr(settings, 'CF_PROVIDER_SEARCH', '') == 'meilisearch':
+                from cloudfile_ext.search.backends.meilisearch import client_from_settings
+                client_from_settings().delete_by_repo(repo_id)
+        except Exception:
+            logger.warning('could not remove external search documents for %s',
+                           repo_id, exc_info=True)
 
         return Response({'success': True})
 

@@ -9,6 +9,8 @@ second home in seahub-db would mean a Django migration history to carry across
 every upstream merge in exchange for nothing.
 """
 
+import hashlib
+import json
 import time
 import uuid
 
@@ -121,3 +123,84 @@ class ExternalSourceGrant(models.Model):
 
     def __str__(self):
         return '%s:%s=%s' % (self.subject_type, self.subject, self.permission)
+
+
+class ExternalScanStateManager(models.Manager):
+
+    def get_state(self, source_id):
+        return self.filter(source_id=source_id).first()
+
+    def save_state(self, source_id, cursor_path, status, detail=''):
+        now = int(time.time())
+        obj, _created = self.update_or_create(
+            source_id=source_id,
+            defaults={
+                'cursor_path': cursor_path,
+                'last_run': now,
+                'status': status,
+                'detail': detail[:2000],
+            },
+        )
+        return obj
+
+
+class ExternalScanState(models.Model):
+    source_id = models.BigIntegerField(unique=True)
+    cursor_path = models.CharField(max_length=1000, null=True)
+    last_run = models.BigIntegerField(null=True)
+    status = models.CharField(max_length=16)
+    detail = models.TextField(null=True)
+
+    objects = ExternalScanStateManager()
+
+    class Meta:
+        managed = False
+        db_table = 'cf_external_scan_state'
+        app_label = 'cloudfile_ext'
+
+
+class ExternalOverlayManager(models.Manager):
+
+    @staticmethod
+    def path_hash(path):
+        return hashlib.sha1(path.encode('utf-8')).hexdigest()
+
+    def get_overlay(self, source_id, path):
+        return self.filter(source_id=source_id,
+                           path_hash=self.path_hash(path)).first()
+
+    def update_overlay(self, source_id, path, metadata=None, tags=None):
+        now = int(time.time())
+        values = {'path': path, 'mtime': now}
+        if metadata is not None:
+            values['metadata'] = json.dumps(metadata, ensure_ascii=False,
+                                            sort_keys=True)
+        if tags is not None:
+            values['tags'] = json.dumps(tags, ensure_ascii=False)
+        obj, created = self.get_or_create(
+            source_id=source_id, path_hash=self.path_hash(path),
+            defaults=dict(values, ctime=now),
+        )
+        if not created:
+            for key, value in values.items():
+                setattr(obj, key, value)
+            obj.save(update_fields=list(values))
+        return obj
+
+
+class ExternalOverlay(models.Model):
+    source_id = models.BigIntegerField(db_index=True)
+    path = models.CharField(max_length=1000)
+    path_hash = models.CharField(max_length=40)
+    metadata = models.TextField(null=True)
+    tags = models.TextField(null=True)
+    ctime = models.BigIntegerField(null=True)
+    mtime = models.BigIntegerField(null=True)
+
+    objects = ExternalOverlayManager()
+
+    class Meta:
+        managed = False
+        db_table = 'cf_external_overlay'
+        app_label = 'cloudfile_ext'
+        unique_together = ('source_id', 'path_hash')
