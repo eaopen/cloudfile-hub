@@ -51,7 +51,7 @@ export const getTagFileOperationList = (fileName, repo, canModify) => {
       }
     }
     menuList.push('Divider', HISTORY);
-    if (isPro && fileAuditEnabled) {
+    if (fileAuditEnabled) {
       menuList.push(ACCESS_LOG);
     }
     menuList.push('Divider', OPEN_VIA_CLIENT);

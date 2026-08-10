@@ -71,6 +71,10 @@ const TextTranslation = {
     key: 'Permission',
     value: gettext('Permission')
   },
+  DIR_ACL: {
+    key: 'DIR_ACL',
+    value: gettext('Directory permissions')
+  },
   DETAILS: {
     key: 'Details',
     value: gettext('Details')

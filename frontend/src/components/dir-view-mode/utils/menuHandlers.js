@@ -5,6 +5,7 @@ import { EVENT_BUS_TYPE } from '@/components/common/event-bus-type';
 import { Dirent } from '@/models';
 import { Utils } from '@/utils/utils';
 import { seafileAPI } from '@/utils/seafile-api';
+import { siteRoot } from '@/utils/constants';
 import { AttachmentObject } from '../dir-chat/models';
 import { setPendingAttachments } from '../dir-chat/hooks/ai-chat-tools';
 
@@ -165,6 +166,11 @@ export const menuHandlers = {
     const direntPath = Utils.joinPath(path, dirent.name);
     const name = Utils.getFileName(direntPath);
     eventBus.dispatch(EVENT_BUS_TYPE.PERMISSION, direntPath, name);
+  },
+
+  [TextTranslation.DIR_ACL.key]: ({ repoID, path, dirent }) => {
+    const dirPath = path === '/' ? '/' : Utils.joinPath(path, dirent.name);
+    window.open(siteRoot + 'cloudfile/acl/?repo_id=' + encodeURIComponent(repoID) + '&path=' + encodeURIComponent(dirPath));
   },
 
   [TextTranslation.STAR.key]: ({ dirent, repoID, path, updateDirent }) => {

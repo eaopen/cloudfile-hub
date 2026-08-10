@@ -39,4 +39,5 @@ class CloudFileFeaturesView(APIView):
         return Response({
             'features': enabled_features(),
             'providers': registry.providers.describe(),
+            'menu': registry.menu,
         })

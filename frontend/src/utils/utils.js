@@ -8,6 +8,7 @@ import toaster from '../components/toast';
 import PermissionDeniedTip from '../components/permission-denied-tip';
 import { compareTwoString } from './compare-two-string';
 import { PRIVATE_FILE_TYPE } from '../constants';
+import { isEnabled as cloudfileIsEnabled } from '../cloudfile/features';
 
 export const Utils = {
 
@@ -600,6 +601,14 @@ export const Utils = {
       if (folderPermEnabled && canManageFolderPermission) {
         list.push('Divider', PERMISSION);
       }
+      // CloudFile: directory-level ACL
+      const { DIR_ACL } = TextTranslation;
+      if (cloudfileIsEnabled('CF_ENABLE_DIR_ACL')) {
+        if (list[list.length - 1] !== 'Divider') {
+          list.push('Divider');
+        }
+        list.push(DIR_ACL);
+      }
     }
 
     if (permission == 'r' && !currentRepoInfo.encrypted) {
@@ -756,7 +765,7 @@ export const Utils = {
     if (permission == 'rw') {
       let subOpList = [];
       subOpList.push(PROPERTIES, HISTORY);
-      if (isPro && fileAuditEnabled) {
+      if (fileAuditEnabled) {
         subOpList.push(ACCESS_LOG);
       }
 

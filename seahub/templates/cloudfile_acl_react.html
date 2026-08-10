@@ -1,0 +1,19 @@
+{% extends 'base_for_react.html' %}
+{% load seahub_tags i18n %}
+{% load render_bundle from webpack_loader %}
+
+{% block sub_title %}{% trans "Directory permissions" %} - {% endblock %}
+
+{% block extra_style %}
+{% render_bundle 'cloudfileAcl' 'css' %}
+{% endblock %}
+
+{% block extra_script %}
+<script type="text/javascript">
+window.app.pageOptions = {
+  repoID: '{{repo_id}}',
+  path: '{{path|escapejs}}',
+};
+</script>
+{% render_bundle 'cloudfileAcl' 'js' %}
+{% endblock %}

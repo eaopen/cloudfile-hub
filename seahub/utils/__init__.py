@@ -1155,6 +1155,14 @@ if EVENTS_CONFIG_FILE:
 
     FILE_AUDIT_ENABLED = check_file_audit_enabled()
 
+# Override FILE_AUDIT_ENABLED from seahub_settings.py if set
+# (CloudFile: CF_ENABLE_AUDIT -> ENABLE_FILE_AUDIT -> seahub_settings.py)
+try:
+    from seahub_settings import ENABLE_FILE_AUDIT
+    FILE_AUDIT_ENABLED = ENABLE_FILE_AUDIT
+except ImportError:
+    pass
+
 # search realted
 HAS_FILE_SEARCH = False
 HAS_FILE_SEASEARCH = False
