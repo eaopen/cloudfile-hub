@@ -29,7 +29,7 @@ def register(registry):
     if not is_enabled('CF_ENABLE_EXTERNAL_SOURCES'):
         return
 
-    from django.urls import re_path
+    from django.urls import path, re_path
 
     from cloudfile_ext.external_sources import local_path
     from cloudfile_ext.external_sources.admin_apis import (
@@ -39,6 +39,13 @@ def register(registry):
     from cloudfile_ext.external_sources.apis import (
         ExternalSourceDirView, ExternalSourceFileView, ExternalSourcesView,
     )
+    from cloudfile_ext.external_sources.overlay_apis import ExternalOverlayView
+    from cloudfile_ext.external_sources.search_apis import ExternalSourceSearchView
+    from cloudfile_ext.external_sources.shadows import (
+        ExternalApi2FileView, ExternalDirView, ExternalFileDetailView,
+        ExternalFileView, ExternalRepoView, ExternalReposView,
+    )
+    from cloudfile_ext.external_sources.views import external_sources_page
 
     # One backend in this release, covering both SMB and NFS because the mount
     # is the operator's job. Registered by type rather than selected by a
@@ -69,7 +76,56 @@ def register(registry):
                 % source_id,
                 AdminExternalSourceGrantsView.as_view(),
                 name='cloudfile-admin-external-source-grants'),
+        re_path(r'^api/v2.1/cloudfile/external-sources/%s/overlay/$'
+                % source_id, ExternalOverlayView.as_view(),
+                name='cloudfile-external-source-overlay'),
+        re_path(r'^api/v2.1/cloudfile/external-sources/search/$',
+                ExternalSourceSearchView.as_view(),
+                name='cloudfile-external-source-search'),
+        path('cloudfile/external-sources/', external_sources_page,
+             name='cloudfile-external-sources-page'),
+
+        # Shadow the native read paths before Seahub sees a synthetic repo id.
+        # Every class delegates unchanged ids straight back to upstream.
+        path('api/v2.1/repos/', ExternalReposView.as_view(),
+             name='cloudfile-external-shadow-repos'),
+        re_path(r'^api/v2.1/repos/%s/$' % r'(?P<repo_id>[-0-9a-f]{36})',
+                ExternalRepoView.as_view(), name='cloudfile-external-shadow-repo'),
+        re_path(r'^api/v2.1/repos/%s/dir/$' % r'(?P<repo_id>[-0-9a-f]{36})',
+                ExternalDirView.as_view(), name='cloudfile-external-shadow-dir'),
+        re_path(r'^api/v2.1/repos/%s/file/$' % r'(?P<repo_id>[-0-9a-f]{36})',
+                ExternalFileView.as_view(), name='cloudfile-external-shadow-file'),
+        re_path(r'^api2/repos/%s/file/$' % r'(?P<repo_id>[-0-9a-f]{36})',
+                ExternalApi2FileView.as_view(), name='cloudfile-external-shadow-api2-file'),
+        re_path(r'^api2/repos/%s/file/detail/$' % r'(?P<repo_id>[-0-9a-f]{36})',
+                ExternalFileDetailView.as_view(), name='cloudfile-external-shadow-file-detail'),
     ])
 
-    # No register_menu() yet: a menu entry pointing at a page that does not
-    # exist is worse than no entry. It lands with the phase 2 frontend.
+    registry.register_menu({
+        'key': 'external-sources',
+        'label': 'External sources',
+        'url': '/cloudfile/external-sources/',
+        'feature': 'CF_ENABLE_EXTERNAL_SOURCES',
+    })
+
+    # SeaSearch owns its own index and offers no document-write protocol.
+    # Run the mounted-tree scanner only when CloudFile owns the Meilisearch
+    # index, so a harmless external source never starts a worker task in a
+    # native search deployment.
+    from django.conf import settings
+    if getattr(settings, 'CF_PROVIDER_SEARCH', '') == 'meilisearch':
+        from cloudfile_ext.external_sources.scanner import TASK_NAME, scan_tick
+        registry.register_periodic_task(TASK_NAME, _scan_interval(), scan_tick)
+
+
+def _scan_interval():
+    import logging
+
+    from django.conf import settings
+
+    logger = logging.getLogger(__name__)
+    try:
+        return max(15, int(getattr(settings, 'CF_EXTERNAL_SCAN_INTERVAL', 60)))
+    except (TypeError, ValueError):
+        logger.warning('CF_EXTERNAL_SCAN_INTERVAL is not a number; using 60s')
+        return 60

@@ -5,6 +5,8 @@ import os
 import json
 import uuid
 import time
+import hashlib
+import secrets
 from urllib.parse import quote
 
 from django.conf import settings
@@ -134,26 +136,45 @@ def _local_software_session(mode, ttl, file_name, content_url, commit_url='', ge
     return session
 
 
-def issue_local_view_session(repo_id, path, username):
-    """Create a one-file read capability consumed by a local Agent.
+def _agent_session_ttl():
+    # A ticket is only for claim. It is deliberately shorter than the
+    # post-claim content/write-back capabilities minted by the Hub.
+    return min(60, max(30, int(getattr(settings, 'CF_LOCAL_APP_SESSION_TTL', 60))))
 
-    `thirdparty_editor_access_token_*` is already the hardened upstream
-    gateway for an untrusted editor process: it checks expiry, library and
-    file existence before returning bytes.  CloudFile narrows its lifetime to
-    five minutes and grants `can_edit=False` unconditionally.
-    """
-    token = uuid.uuid4().hex
-    ttl = max(30, int(getattr(settings, 'CF_LOCAL_APP_SESSION_TTL', 300)))
-    cache.set('thirdparty_editor_access_token_' + token, {
-        'request_user': username,
-        'repo_id': repo_id,
-        'file_path': path,
-        'permission': {'can_edit': False},
-    }, ttl)
-    query = '?access_token=' + quote(token, safe='')
-    return _local_software_session(
-        'local-view', ttl, os.path.basename(path),
-        _join_site('thirdparty-editor/file-content/' + query))
+
+def _session_alias():
+    return getattr(settings, 'CF_DATABASE_ALIAS', 'cloudfile')
+
+
+def _ticket_digest(ticket):
+    return hashlib.sha256(ticket.encode('utf-8')).hexdigest()
+
+
+def _issue_agent_session(mode, repo_id, path, username, file_id='', generation=''):
+    now = int(time.time())
+    ttl = _agent_session_ttl()
+    session_id = str(uuid.uuid4())
+    ticket = secrets.token_urlsafe(32)
+    alias = _session_alias()
+    with connections[alias].cursor() as cursor:
+        cursor.execute(
+            'INSERT INTO cf_edit_session '
+            '(session_id, ticket_digest, ticket_expire_at, mode, username, repo_id, '
+            'normalized_path, base_file_id, generation, state, created_at, updated_at) '
+            'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
+            [session_id, _ticket_digest(ticket), now + ttl, mode, username, repo_id,
+             path, file_id or None, generation or None, 'created', now, now])
+    return {
+        'protocol': 'cloudfile-local/v2',
+        'ticket': ticket,
+        'expires_in': ttl,
+        'expires_at': now + ttl,
+    }
+
+
+def issue_local_view_session(repo_id, path, username):
+    """Create an opaque one-time local-view ticket, never a URL capability."""
+    return _issue_agent_session('local-view', repo_id, path, username)
 
 
 def issue_local_edit_session(repo_id, path, username, file_id):
@@ -169,38 +190,127 @@ def issue_local_edit_session(repo_id, path, username, file_id):
     if not lock.get('ok'):
         return lock
 
-    token = uuid.uuid4().hex
-    ttl = max(30, int(getattr(settings, 'CF_LOCAL_APP_SESSION_TTL', 300)))
-    cache.set('thirdparty_editor_access_token_' + token, {
-        'request_user': username,
-        'repo_id': repo_id,
-        'file_path': path,
-        'permission': {'can_edit': False},
-    }, ttl)
-    cache.set('cloudfile_local_edit_session_' + token, {
-        'repo_id': repo_id,
-        'path': path,
-        'username': username,
-        'base_file_id': file_id,
-        'generation': lock['generation'],
-    }, ttl)
-    query = '?access_token=' + quote(token, safe='')
-    session = _local_software_session(
-        'local-edit', ttl, os.path.basename(path),
-        _join_site('thirdparty-editor/file-content/' + query),
-        _join_site('api/v2.1/cloudfile/agent-sessions/%s/content/' % token),
-        lock['generation'])
+    try:
+        session = _issue_agent_session(
+            'local-edit', repo_id, path, username, file_id, lock['generation'])
+    except Exception:
+        # A lease without a claimable session is a denial-of-service lock.
+        release_checkout(repo_id, path, username, lock['generation'])
+        return {'ok': False, 'reason': 'session_store_unavailable'}
     session['ok'] = True
     return session
 
 
-def local_edit_session(token):
-    return cache.get('cloudfile_local_edit_session_' + token)
+def _read_session(session_id):
+    alias = _session_alias()
+    with connections[alias].cursor() as cursor:
+        cursor.execute(
+            'SELECT session_id, mode, username, repo_id, normalized_path, '
+            'base_file_id, generation, state, ticket_expire_at '
+            'FROM cf_edit_session WHERE session_id = %s', [session_id])
+        row = cursor.fetchone()
+    if not row:
+        return None
+    return dict(zip((
+        'session_id', 'mode', 'username', 'repo_id', 'path', 'base_file_id',
+        'generation', 'state', 'ticket_expire_at'), row))
 
 
-def consume_local_edit_session(token):
-    cache.delete('cloudfile_local_edit_session_' + token)
-    cache.delete('thirdparty_editor_access_token_' + token)
+def claim_agent_session(ticket, server_origin):
+    """Atomically exchange a browser-visible ticket for agent-only URLs."""
+    from django.db import transaction
+
+    now = int(time.time())
+    alias = _session_alias()
+    digest = _ticket_digest(ticket)
+    with transaction.atomic(using=alias):
+        with connections[alias].cursor() as cursor:
+            cursor.execute(
+                'SELECT session_id, mode, username, repo_id, normalized_path, '
+                'base_file_id, generation, ticket_expire_at '
+                'FROM cf_edit_session WHERE ticket_digest = %s AND state = %s '
+                'FOR UPDATE', [digest, 'created'])
+            row = cursor.fetchone()
+            if not row or row[7] <= now:
+                return None
+            cursor.execute(
+                'UPDATE cf_edit_session SET state = %s, claimed_at = %s, '
+                'updated_at = %s WHERE session_id = %s AND state = %s',
+                ['claimed', now, now, row[0], 'created'])
+    session_id, mode, username, repo_id, path, base_file_id, generation, expires_at = row
+    if mode == 'local-edit':
+        lock = _lock_rpc('cf_lock_status', {'repo_id': repo_id, 'path': path})
+        if not lock.get('locked') or lock.get('owner') != username \
+                or lock.get('kind') != 'local-edit' or lock.get('generation') != generation:
+            with connections[alias].cursor() as cursor:
+                cursor.execute(
+                    'UPDATE cf_edit_session SET state = %s, closed_at = %s, updated_at = %s '
+                    'WHERE session_id = %s AND state = %s',
+                    ['aborted', now, now, session_id, 'claimed'])
+            release_checkout(repo_id, path, username, generation)
+            return None
+    # Ticket expiry is intentionally one minute; claimed local-edit sessions
+    # use the C lease duration and must not inherit that short claim window.
+    capability_ttl = 30 * 60 if mode == 'local-edit' else 5 * 60
+    content_token = uuid.uuid4().hex
+    cache.set('thirdparty_editor_access_token_' + content_token, {
+        'request_user': username,
+        'repo_id': repo_id,
+        'file_path': path,
+        'permission': {'can_edit': False},
+    }, capability_ttl)
+    content_url = server_origin.rstrip('/') + _join_site(
+        'thirdparty-editor/file-content/?access_token=' + quote(content_token, safe=''))
+    response = {
+        'session_id': session_id,
+        'mode': mode,
+        'expires_at': now + capability_ttl,
+        'file': {'name': os.path.basename(path), 'content_url': content_url},
+    }
+    if mode == 'local-edit':
+        capability = secrets.token_urlsafe(32)
+        cache.set('cloudfile_local_writeback_' + capability, session_id, capability_ttl)
+        response['writeback'] = {
+            'content_url': server_origin.rstrip('/') + _join_site(
+                'api/v2.1/cloudfile/agent-sessions/%s/content/' % session_id),
+            'heartbeat_url': server_origin.rstrip('/') + _join_site(
+                'api/v2.1/cloudfile/agent-sessions/%s/heartbeat/' % session_id),
+            'capability': capability,
+        }
+    return response
+
+
+def local_edit_session(session_id, capability):
+    if not capability or cache.get('cloudfile_local_writeback_' + capability) != session_id:
+        return None
+    session = _read_session(session_id)
+    if not session or session['mode'] != 'local-edit' or session['state'] != 'claimed':
+        return None
+    return session
+
+
+def refresh_local_edit_session(session_id, capability):
+    session = local_edit_session(session_id, capability)
+    if not session:
+        return None
+    result = refresh_lock(
+        session['repo_id'], session['path'], session['username'],
+        session['generation'], lease_seconds=30 * 60)
+    if not result.get('ok'):
+        return None
+    # Keep the agent capability no longer than the renewed lock lease.
+    cache.set('cloudfile_local_writeback_' + capability, session_id, 30 * 60)
+    return result
+
+
+def consume_local_edit_session(session_id):
+    now = int(time.time())
+    alias = _session_alias()
+    with connections[alias].cursor() as cursor:
+        cursor.execute(
+            'UPDATE cf_edit_session SET state = %s, closed_at = %s, updated_at = %s '
+            'WHERE session_id = %s AND state = %s',
+            ['closed', now, now, session_id, 'claimed'])
 
 
 def checkout(repo_id, path, username, source):
@@ -216,8 +326,33 @@ def checkout(repo_id, path, username, source):
     })
 
 
+def refresh_lock(repo_id, path, username, generation,
+                 lease_seconds=12 * 60 * 60):
+    """Renew an owned lease without extending its hard-expiry fence."""
+    return _lock_rpc('cf_lock_refresh', {
+        'repo_id': repo_id,
+        'path': path,
+        'owner': username,
+        'generation': generation,
+        'lease_seconds': lease_seconds,
+    })
+
+
 def release_checkout(repo_id, path, username, generation=''):
     payload = {'repo_id': repo_id, 'path': path, 'owner': username}
     if generation:
         payload['generation'] = generation
     return _lock_rpc('cf_lock_release', payload)
+
+
+def force_release_lock(repo_id, path, actor, generation, reason=''):
+    """Release exactly the generation an administrator reviewed."""
+    payload = {
+        'repo_id': repo_id,
+        'path': path,
+        'actor': actor,
+        'generation': generation,
+    }
+    if reason:
+        payload['reason'] = reason
+    return _lock_rpc('cf_lock_force_release', payload)
