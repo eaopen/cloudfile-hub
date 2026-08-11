@@ -82,7 +82,10 @@ class DirACLManager(models.Manager):
             raise RuntimeError('unsupported CloudFile ACL database backend')
 
         with connection.cursor() as cursor:
-            cursor.execute(query, [repo_id, 1, now])
+            # The absence of a row is logical bootstrap revision 1.  The
+            # write being committed here is therefore revision 2, matching
+            # the C authority's bootstrap value and the shared contract.
+            cursor.execute(query, [repo_id, 2, now])
             cursor.execute(
                 'SELECT revision FROM cf_dir_acl_repo_revision '
                 'WHERE repo_id = %s', [repo_id])
