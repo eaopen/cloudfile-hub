@@ -64,6 +64,7 @@ class AdminDirACLView(APIView):
 
         return Response({
             'repo_id': repo_id,
+            'revision': DirACL.objects.current_revision(repo_id),
             'total': total,
             'page': page,
             'per_page': per_page,

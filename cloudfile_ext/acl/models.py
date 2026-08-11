@@ -54,6 +54,22 @@ class DirACLRevision(models.Model):
 
 class DirACLManager(models.Manager):
 
+    def current_revision(self, repo_id):
+        """Return the live repository ACL revision.
+
+        A repository without mutations is at logical bootstrap revision 1;
+        the first rule write creates revision 2.  Keeping that convention in
+        one manager avoids API diagnostics inventing a different baseline
+        from the C authority.
+        """
+        connection = connections[self.db]
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT revision FROM cf_dir_acl_repo_revision '
+                'WHERE repo_id = %s', [repo_id])
+            row = cursor.fetchone()
+        return int(row[0]) if row else 1
+
     def _bump_revision(self, repo_id, now):
         """Atomically advance and return the repository ACL revision.
 
