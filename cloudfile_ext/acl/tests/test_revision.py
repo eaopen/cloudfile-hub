@@ -1,9 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Red tests for the three-state ACL authority contract.
+"""Tests for the three-state ACL authority contract.
 
-These pin SEC-02 BEFORE any implementation exists (Wave 3 plans 01-03 / 01-04
-deliver the Hub revision tracker and the Server authority-state RPC). The
-fixture that drives them is the shared ``authority_states`` block in
+The fixture that drives them is the shared ``authority_states`` block in
 cloudfile-docker/docs/acl-cases.json, the same file the C and Go suites read.
 
 What is being locked here is the distinction the security boundary depends on:
@@ -49,7 +47,7 @@ def _authority_states():
 
 
 def _import_revision_module():
-    """Import the Wave 3 authority module, or fail naming what is missing.
+    """Import the authority module, or fail naming what is missing.
 
     A bare ImportError would read as an environment problem; the explicit
     pytest.fail keeps the failure reason attached to the contract.
@@ -59,9 +57,8 @@ def _import_revision_module():
         return revision
     except ImportError as exc:
         pytest.fail(
-            'cloudfile_ext.acl.revision is not implemented yet (Wave 3 plan '
-            '01-03 delivers it). Authority-state contract cannot be '
-            'verified until then. Underlying ImportError: %s' % exc)
+            'cloudfile_ext.acl.revision is not available. Authority-state '
+            'contract cannot be verified. Underlying ImportError: %s' % exc)
 
 
 # -- the three-state contract ------------------------------------------------

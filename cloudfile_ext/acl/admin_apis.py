@@ -128,7 +128,7 @@ class AdminDirACLView(APIView):
             if path is None:
                 # Clearing a whole library's ACL is the "owner has left and
                 # nobody can get in" escape hatch.
-                DirACL.objects.filter(repo_id=repo_id).delete()
+                DirACL.objects.clear_repo(repo_id)
             else:
                 if subject_type not in VALID_SUBJECT_TYPES or not subject:
                     return api_error(status.HTTP_400_BAD_REQUEST,
