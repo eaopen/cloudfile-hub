@@ -1,4 +1,14 @@
+<!-- generated-by: gsd-doc-writer -->
+<!-- generated-by: gsd-doc-writer -->
 # AGENTS.md — cloudfile-hub
+
+> 用途：约束 Hub/Web/API 扩展、测试和上游同步工作。
+> 适用版本：CloudFile `dev`，面向 Seafile CE 14 参考基线。
+> 当前状态：有效；能力状态以 [`docs/CAPABILITIES.md`](docs/CAPABILITIES.md) 为准。
+
+> 用途：约束在 CloudFile Hub 仓库内工作的开发者和自动化 agent。
+> 适用版本：Seafile CE 14.x。
+> 状态：已完成（与当前 `dev` 能力和测试核对，2026-08-11）。
 
 给在本仓库工作的 AI coding agent。人类同样适用。
 
@@ -31,7 +41,7 @@ workspace/
 
 新代码一律放进 `cloudfile_ext/`（后端）和 `frontend/src/cloudfile/`（前端）。
 
-七个核心扩展点之外，原生文件列表/详情交互另有 19 个已登记兼容补丁；完整路径以
+七个核心扩展点之外，原生文件列表/详情交互另有已登记兼容补丁；完整路径以
 `cloudfile-docker/docs/upstream-patches/cloudfile-hub.txt` 为准。改动前请先确认你真的没有别的办法：
 
 | 文件 | 改了什么 | 为什么必须改这里 |
@@ -82,8 +92,13 @@ cloudfile_ext/
 ├── db_router.py         cf_* 模型路由到 seafile-db
 ├── identity.py          登录串 → Seafile 身份。14 之后两者不是一回事，
 │                        **每个存或比用户名的能力都撞上这条**，所以在基线
-└── audit/ metadata/ search/ office/ checkout/ external_sources/
-                         占位，各自的 register() 是 no-op
+├── acl/ sso/ audit/ search/
+│                        已接入运行时的能力模块
+├── external_sources/    外部源、授权、shadow API 和扫描
+├── file_actions/        预览动作、锁、签出和本地 Agent 会话
+├── metadata/            元数据/标签占位，当前不登记有效行为
+├── checkout/            早期占位；实际签出入口已在 file_actions/
+└── office/              回调保护代码存在，但当前未加入 apps.py 注册列表
 ```
 
 能力分支在这里加自己的包（例如 `feature/dir-acl` 的 `acl/`），并在 `apps.py`
@@ -121,7 +136,8 @@ is_enabled` 要**放在 `register()` 内部**而不是模块顶层——否则 `
 python3 -m pytest cloudfile_ext/ -q
 ```
 
-基线本身没有能力实现，这里只有框架级测试。能力的测试随能力分支走。
+`dev` 已包含框架以及 ACL、SSO 组织映射、审计、搜索、外部源和文件动作测试。
+当前状态与未完成项见 `docs/CAPABILITIES.md`，不要把“存在开关或包”当成已交付。
 
 跨层语义（同一套规则同时在 Hub 和 seafile-server 实现）必须用共享用例集驱动
 两端，规格放在 `cloudfile-docker/docs/`。改语义的正确顺序：先改规格 → 再改

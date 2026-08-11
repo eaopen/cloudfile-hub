@@ -1,4 +1,9 @@
+<!-- generated-by: gsd-doc-writer -->
 # 本地专业软件使用方案
+
+> 用途：定义 Hub 与 CloudFile Local Agent 之间的本地查看、编辑和签出契约。
+> 适用版本：Seafile CE 14.x。
+> 状态：部分完成（后端会话与围栏逻辑已实现；浏览器下载链仍有阻断项，2026-08-11）。
 
 OnlyOffice 保持 Seafile CE 原生集成：由 Seafile 的文档配置、回调和部署参数负责，
 CloudFile 不增加代理路由、会话接口或独立验收条件。
@@ -7,6 +12,10 @@ CloudFile 的本地查看和本地编辑统一使用 `cloudfile-local/v2` 会话
 用户请求后下载短时 `*.cloudfile` 文件；绿色版 CloudFile Local 和已安装版 CloudFile
 Local 使用相同的文件关联或命令行打开该文件，再按本机策略调用 PDF、CAD、图像等专业
 应用。浏览器不直接连接本机端口，也不显示可复制的访问令牌。
+
+当前 Hub API 已实现 v2 ticket、claim、心跳和带 generation 的回写；但 React 下载函数
+读取 `session.file.name`，创建会话的响应当前没有 `file` 字段。修正并完成浏览器 + Agent
+端到端验收前，本能力不能标为“已完成”。
 
 ## 会话文件契约
 
@@ -21,7 +30,7 @@ Local 使用相同的文件关联或命令行打开该文件，再按本机策�
 
 - 下载文件只携带一次性 ticket；Agent 以 `POST /api/v2.1/cloudfile/agent-sessions/claim/`
   领取后才收到短时下载 URL，编辑会话另收到 write-back capability 与心跳 URL。
-- ticket 60 秒内只能领取一次；浏览器、扩展和会话文件都不接触内容 URL、写回 capability
+- ticket 在 30–60 秒领取窗口内只能领取一次（当前默认 60 秒）；浏览器、扩展和会话文件都不接触内容 URL、写回 capability
   或 Seafile 登录凭据。
 - `local-view` 下载为只读副本；`local-edit` 必须以 `multipart/form-data` 的 `file` 字段
   PUT 回写，并由服务端再次校验租约 owner、generation 和源文件版本。
