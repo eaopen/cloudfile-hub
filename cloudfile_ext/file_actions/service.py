@@ -150,6 +150,18 @@ def _ticket_digest(ticket):
     return hashlib.sha256(ticket.encode('utf-8')).hexdigest()
 
 
+def _agent_session_descriptor(mode, path, ticket, ttl, now):
+    """Return only browser-safe claim data; never expose content capability URLs."""
+    return {
+        'protocol': 'cloudfile-local/v2',
+        'mode': mode,
+        'file': {'name': os.path.basename(path)},
+        'ticket': ticket,
+        'expires_in': ttl,
+        'expires_at': now + ttl,
+    }
+
+
 def _issue_agent_session(mode, repo_id, path, username, file_id='', generation=''):
     now = int(time.time())
     ttl = _agent_session_ttl()
@@ -164,12 +176,7 @@ def _issue_agent_session(mode, repo_id, path, username, file_id='', generation='
             'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
             [session_id, _ticket_digest(ticket), now + ttl, mode, username, repo_id,
              path, file_id or None, generation or None, 'created', now, now])
-    return {
-        'protocol': 'cloudfile-local/v2',
-        'ticket': ticket,
-        'expires_in': ttl,
-        'expires_at': now + ttl,
-    }
+    return _agent_session_descriptor(mode, path, ticket, ttl, now)
 
 
 def issue_local_view_session(repo_id, path, username):
