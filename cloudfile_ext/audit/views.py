@@ -53,11 +53,19 @@ def _list(params):
     events = []
     for row in rows:
         detail = json.loads(row[8] or '{}')
+        # seafevents writes a single-op detail as a dict and a batch-op detail
+        # as a list (see seafevents/events/db.py UserActivityDetail). Surface
+        # the first item's old_path for batch ops instead of crashing on .get.
+        if isinstance(detail, list):
+            first = detail[0] if detail else {}
+            old_path = first.get('old_path', '') if isinstance(first, dict) else ''
+        else:
+            old_path = detail.get('old_path', '')
         events.append({
             'id': row[0], 'operation': row[1], 'object_type': row[2],
             'user': row[3], 'time': row[4], 'repo_id': row[5],
             'commit_id': row[6], 'path': row[7],
-            'old_path': detail.get('old_path', ''), 'detail': detail,
+            'old_path': old_path, 'detail': detail,
         })
     return {'events': events, 'total': total, 'page': page, 'per_page': per_page}
 
