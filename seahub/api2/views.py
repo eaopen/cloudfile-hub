@@ -1691,6 +1691,31 @@ class Repo(APIView):
                           repo_name=repo.name)
         return Response('success', status=status.HTTP_200_OK)
 
+def _commit_touches_folder(repo_id, commit, folder, current_folder_only=False):
+    """Whether a commit changed the folder itself or, by default, one of its
+    direct children.
+
+    CloudFile review history-006/007: folder history must not recurse into
+    deeper levels, and the current-folder-only filter must exclude even direct
+    children. Each commit is diffed against its parent; the scope decision is
+    delegated to the pure matcher in cloudfile_ext.history.scope so Hub and
+    its unit tests share the same semantics.
+    """
+    parent_id = getattr(commit, 'parent_id', None) or ''
+    try:
+        diffs = seafserv_threaded_rpc.get_diff(repo_id, parent_id, commit.id)
+    except Exception:
+        return False
+    if not diffs:
+        return False
+
+    from cloudfile_ext.history.scope import touches_folder_paths
+    return touches_folder_paths(
+        ((getattr(d, 'name', '') or '', getattr(d, 'new_name', '') or '')
+         for d in diffs),
+        folder, current_folder_only=current_folder_only)
+
+
 class RepoHistory(APIView):
     authentication_classes = (TokenAuthentication, )
     permission_classes = (IsAuthenticated,)
@@ -1704,9 +1729,25 @@ class RepoHistory(APIView):
             current_page = 1
             per_page = 25
 
+        # CloudFile review history-006/007: optional folder scope. With no
+        # `path` param this endpoint behaves exactly like CE.
+        folder = request.GET.get('path', '').strip() or None
+        current_folder_only = False
+        raw = request.GET.get('current_folder_only', '')
+        if raw:
+            try:
+                current_folder_only = to_python_boolean(raw)
+            except ValueError:
+                current_folder_only = False
+
         commits_all = get_commits(repo_id, per_page * (current_page - 1),
                                   per_page + 1)
         commits = commits_all[:per_page]
+
+        if folder:
+            commits = [c for c in commits
+                       if _commit_touches_folder(repo_id, c, folder,
+                                                 current_folder_only)]
 
         if len(commits_all) == per_page + 1:
             page_next = True
@@ -3686,7 +3727,37 @@ class FileHistory(APIView):
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
-        for commit in commits:
+        # CloudFile review history-002/003/004: additive search, filter and
+        # pagination seams. Without these query params the response is
+        # byte-identical to CE.
+        operator = request.GET.get('operator', '').strip() or \
+            request.GET.get('source', '').strip()
+        keyword = request.GET.get('q', '').strip().lower()
+
+        if operator:
+            commits = [c for c in commits
+                       if (getattr(c, 'creator_name', '') or '') == operator]
+        if keyword:
+            commits = [c for c in commits
+                       if keyword in (getattr(c, 'desc', '') or '').lower()
+                       or keyword in (getattr(c, 'creator_name', '') or '').lower()]
+
+        try:
+            current_page = int(request.GET.get('page', '1'))
+            per_page = int(request.GET.get('per_page', '25'))
+        except ValueError:
+            current_page = 1
+            per_page = 25
+        if current_page < 1:
+            current_page = 1
+        if per_page < 1:
+            per_page = 25
+
+        offset = (current_page - 1) * per_page
+        page_commits = commits[offset:offset + per_page]
+        page_next = len(commits) > offset + per_page
+
+        for commit in page_commits:
             creator_name = getattr(commit, 'creator_name', '')
 
             user_info = {}
@@ -3696,7 +3767,8 @@ class FileHistory(APIView):
 
             commit._dict['user_info'] = user_info
 
-        return HttpResponse(json.dumps({"commits": commits},
+        return HttpResponse(json.dumps({"commits": page_commits,
+                                        "page_next": page_next},
             cls=SearpcObjEncoder), status=200, content_type=json_content_type)
 
 class FileSharedLinkView(APIView):
