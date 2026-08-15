@@ -57,6 +57,14 @@ CF_PROVIDER_SEARCH = ''            # '' (native SeaSearch/ES) or 'meilisearch'
 CF_PROVIDER_ACL_RULE_SOURCE = ''   # e.g. 'local-db', 'external-service'
 CF_PROVIDER_SSO_DIRECTORY = ''     # e.g. 'static', 'external-service'
 
+# -- tags -------------------------------------------------------------------
+#
+# Upper bound on the number of repo-tags a single bulk-add request may carry.
+# Only enforced when CF_ENABLE_TAGS is on (see seahub/api2/endpoints/repo_tags.py);
+# with the switch off the endpoint keeps native CE behaviour. The default matches
+# the review checklist's 100-object batch benchmark (docs/review-cases.md).
+CF_TAG_BATCH_LIMIT = 100
+
 # -- external services -----------------------------------------------------
 
 # Per-service settings are CF_SERVICE_<NAME>_{URL,SECRET,TIMEOUT,RETRIES,

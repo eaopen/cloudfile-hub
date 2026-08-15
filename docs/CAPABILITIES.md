@@ -25,7 +25,7 @@
 | `CF_ENABLE_DIR_ACL` | Pro 平替 | CE 库/目录权限基线 | 目录规则 API、继承求解、Hub 权限钩子、管理页面 | **已完成**；57 个 ACL 测试通过，跨仓容器矩阵 37/37（六入口 + 即时撤权 + 管理员清空） |
 | `CF_ENABLE_AUDIT` | Pro 平替 | seafevents `Activity` 事件表 | 管理端只读查询与页面 | **验证中**；过滤契约测试通过，跨仓容器矩阵已覆盖目录创建/重命名、文件上传、移动、删除与恢复查询；不覆盖读取/下载访问日志、合规审计与长期留存 |
 | CE 元数据 / `CF_ENABLE_METADATA` | CE 补强 | `repo_metadata` 前端、API 和 `_is_dir` 记录模型 | 当前 `metadata.register()` 不登记自有行为 | **验证中**；Hub 通路存在，依赖外部 Metadata Server；自定义属性列已改为按列名键写入，待复验 |
-| CE 目录/文件标签 / `CF_ENABLE_TAGS` | CE 补强 | `repo_metadata`、`repo_tags`/`file_tags` 以及目录表格标签编辑 | 与 metadata 共用占位扩展入口，不建立平行标签存储 | **验证中**；跨仓 E2E 已验证标签创建、绑定、反查、重命名/移动跟随与恢复；自定义属性跟随仍待修复 |
+| CE 目录/文件标签 / `CF_ENABLE_TAGS` | CE 补强 | `repo_metadata`、`repo_tags`/`file_tags` 以及目录表格标签编辑 | 与 metadata 共用占位扩展入口，不建立平行标签存储 | **验证中**；跨仓 E2E 已验证标签创建、绑定、反查、重命名/移动跟随与恢复；自定义属性跟随仍待修复。P2-07 已在 `repo_tags` 落地系统/用户标签（`is_system`）：系统标签仅 `admin` 可写、用户标签 `rw` 及以上可编辑、列表先用户后系统、批量加标签受 `CF_TAG_BATCH_LIMIT`（默认 100）上限，权限用例由 `review_tags_matrix.py` 断言 |
 | `CF_ENABLE_SEARCH` | Pro 平替 / CE 补强 | SeaSearch/Elasticsearch 查询与 Seahub 结果后处理 | 解开 CloudFile 搜索入口、Meilisearch provider、增量索引、结果集目录 ACL 裁剪、标签/创建人高级筛选与匹配标签 | **部分完成**；Meilisearch/过滤测试通过；目录 ACL `invisible`/`none` 统一查询后裁剪（复用 acl resolver，fail closed）；`tags`/`creator_emails` 结构化过滤接入同一 `/api2/search/` 入口，`matched_tags` 区分标签命中与名称命中，容器 E2E 待复验 |
 | `CF_ENABLE_FILE_PREVIEW` | CE 补强 | CE 原生预览 URL 和渲染器 | 权限感知的统一文件动作列表 | **验证中**；策略测试通过，React 入口缺浏览器自动化测试；CloudFile 不实现渲染器 |
 | `CF_ENABLE_ONLYOFFICE` | CE 复用 | CE 文档配置、编辑器和回调链 | 仓内有回调鉴权/幂等代码 | **部分完成**；`cloudfile_ext.office` 未在 `apps.py` 注册，当前有效行为仍是 CE 原生集成；缺容器级验收 |
