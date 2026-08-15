@@ -81,8 +81,13 @@ class RepoWithStorageView(APIView):
                 return api_error(status.HTTP_400_BAD_REQUEST,
                                  'storage_id invalid.')
 
-        repo_id = seafile_api.create_repo(
-            repo_name, '', username, None, storage_id=storage_id)
+        request_json = json.dumps({
+            'name': repo_name,
+            'owner': username,
+            'desc': '',
+            'storage_id': storage_id or '',
+        })
+        repo_id = seafile_api.create_repo_with_storage(request_json)
         if not repo_id:
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
                              'Failed to create library.')
