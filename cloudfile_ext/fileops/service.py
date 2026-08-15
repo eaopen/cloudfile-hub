@@ -20,6 +20,7 @@ duplicate submission returns the first task instead of copying twice.
 import json
 import logging
 import posixpath
+import stat
 import uuid
 
 from seahub.utils.repo import (
@@ -132,7 +133,9 @@ def _measure_dir_depth(repo_id, path, guard=256):
     entries = seafile_api.list_dir_by_path(repo_id, path) or []
     deepest = 0
     for entry in entries:
-        if entry.is_dir:
+        # `stat.S_ISDIR(entry.mode)` is the reliable directory test here;
+        # Dirent.is_dir is not set on this seafile version's Dirent objects.
+        if stat.S_ISDIR(entry.mode):
             child_depth = 1 + _measure_dir_depth(
                 repo_id, posixpath.join(path, entry.obj_name), guard - 1)
             deepest = max(deepest, child_depth)
@@ -258,6 +261,13 @@ def evaluate(request, operation, payload):
 
         if file_id:
             size = _measure_file(src_repo, file_id)
+            # Destination capacity beats the per-file size policy: a copy that
+            # would exceed the destination quota is a quota error (443),
+            # review copy-006. Same-owner moves write nothing, so skip them.
+            if (operation == OPERATION_COPY or cross_owner) and \
+                    seafile_api.check_quota(dst_repo_id, size) < 0:
+                raise PrecheckError(443, 'Out of quota.',
+                                    reason=policy.REASON_OVER_QUOTA)
             if policy.check_single_file_size(size, limits['max_file_size']):
                 failures.append({'name': name,
                                  'reason': policy.REASON_OVER_SIZE})
