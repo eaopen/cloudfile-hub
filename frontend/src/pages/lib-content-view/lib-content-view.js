@@ -1,4 +1,5 @@
 import React from 'react';
+import { loadFeatures } from '../../cloudfile/features';
 import PropTypes from 'prop-types';
 import Cookies from 'js-cookie';
 import dayjs from 'dayjs';
@@ -217,6 +218,13 @@ class LibContentView extends React.Component {
   componentDidMount() {
     this.unsubscribeEvent = this.props.eventBus.subscribe(EVENT_BUS_TYPE.SEARCH_LIBRARY_CONTENT, this.onSearchedClick);
     this.unsubscribeSelectSearchedTag = this.props.eventBus.subscribe(EVENT_BUS_TYPE.SELECT_TAG, this.onTreeNodeClick);
+
+    // CloudFile: populate CF_ENABLE_* once so feature-gated entry points
+    // (e.g. share hidden under CF_ENABLE_SHARE_RESTRICT) take effect after
+    // the async fetch re-renders.
+    loadFeatures().then(() => {
+      this.setState({ featuresLoaded: true });
+    });
 
     this.unsubscribeOpenTreePanel = eventBus.subscribe(EVENT_BUS_TYPE.OPEN_TREE_PANEL, this.openTreePanel);
     this.unsubscribeSwitchToHistoryView = eventBus.subscribe(EVENT_BUS_TYPE.SWITCH_TO_HISTORY_VIEW, this.switchToHistoryView);

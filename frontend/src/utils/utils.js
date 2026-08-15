@@ -1796,6 +1796,13 @@ export const Utils = {
    */
   isHasPermissionToShare: function (repoInfo, userDirPermission, dirent) {
 
+    // CloudFile review share-001: when external sharing is restricted, the
+    // share entry is hidden across every menu. This is only a UI hide — the
+    // API re-checks CF_ENABLE_SHARE_RESTRICT server side.
+    if (cloudfileIsEnabled('CF_ENABLE_SHARE_RESTRICT')) {
+      return false;
+    }
+
     const { isCustomPermission, customPermission } = Utils.getUserPermission(userDirPermission);
     if (isCustomPermission) {
       const { download_external_link } = customPermission.permission;
