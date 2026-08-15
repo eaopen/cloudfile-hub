@@ -20,12 +20,12 @@ class CloudFileConfig(AppConfig):
 
         from cloudfile_ext import (
             base, acl, sso, audit, metadata, search, checkout,
-            external_sources, file_actions, fileops, office,
+            external_sources, file_actions, fileops, office, storage,
         )
 
         for module in (base, acl, sso, audit, metadata, search,
                        checkout, external_sources, file_actions, fileops,
-                       office):
+                       office, storage):
             module.register(registry)
 
         registry.seal()
