@@ -90,6 +90,23 @@ def _fetch_content(repo, file_id, path, max_bytes):
         return ''
 
 
+def _fetch_tags(repo_id, path):
+    """Best-effort tag names for a file, or [] when unavailable.
+
+    Tags live in Seahub's FileTags table keyed by a UUID map; a freshly
+    committed file may not have a mapping yet, and a tag lookup failing must
+    not fail indexing.
+    """
+    try:
+        from seahub.file_tags.models import FileTags
+        return [t['tag_name'] for t in
+                FileTags.objects.get_file_tag_by_path(repo_id, path)]
+    except Exception:
+        logger.warning('meilisearch indexer: could not read tags for %s/%s',
+                       repo_id, path, exc_info=True)
+        return []
+
+
 def _build_document(repo_id, path, op_user, timestamp, max_bytes):
     from seaserv import seafile_api
 
@@ -104,6 +121,12 @@ def _build_document(repo_id, path, op_user, timestamp, max_bytes):
     size = seafile_api.get_file_size(repo.store_id, repo.version, file_id) or 0
     name = path.rsplit('/', 1)[-1]
     extension = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+    try:
+        creator = seafile_api.get_repo_owner(repo_id) or ''
+    except Exception:
+        logger.warning('meilisearch indexer: could not read owner for %s',
+                       repo_id, exc_info=True)
+        creator = ''
     return {
         'id': _doc_id(repo_id, path),
         'repo_id': repo_id,
@@ -114,6 +137,8 @@ def _build_document(repo_id, path, op_user, timestamp, max_bytes):
         'size': size,
         'mtime': timestamp,
         'last_modifier': op_user,
+        'creator': creator,
+        'tags': _fetch_tags(repo_id, path),
         'content': _fetch_content(repo, file_id, path, max_bytes),
     }
 

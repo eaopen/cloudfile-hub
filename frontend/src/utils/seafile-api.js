@@ -820,6 +820,8 @@ class SeafileAPI {
     if (searchParams.time_to) { url = url + '&time_to=' + searchParams.time_to; }
     if (searchParams.size_from) { url = url + '&size_from=' + searchParams.size_from; }
     if (searchParams.size_to) { url = url + '&size_to=' + searchParams.size_to; }
+    if (searchParams.creator_emails) { url = url + '&creator_emails=' + searchParams.creator_emails; }
+    if (searchParams.tags) { url = url + '&tags=' + searchParams.tags; }
     if (searchParams.shared_from) { url = url + '&shared_from=' + searchParams.shared_from; }
     if (searchParams.not_shared_from) { url = url + '&not_shared_from=' + searchParams.not_shared_from; }
     if (searchParams.search_filename_only) { url = url + '&search_filename_only=' + searchParams.search_filename_only; }

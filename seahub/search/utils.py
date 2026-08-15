@@ -195,12 +195,13 @@ def get_search_repos_map(search_repo, username, org_id, shared_from, not_shared_
 
     return repo_id_map, repo_type_map
 
-def search_files(repos_map, search_path, keyword, obj_desc, start, size, org_id=None, search_filename_only=False):
+def search_files(repos_map, search_path, keyword, obj_desc, start, size, org_id=None, search_filename_only=False, filters=None):
     # search file
     if len(repos_map) > 1:
         search_path = None
     answered = _cf_search_files(repos_map, search_path, keyword, obj_desc,
-                                start, size, org_id, search_filename_only)
+                                start, size, org_id, search_filename_only,
+                                filters)
     if answered is not None:
         files_found, total = answered
     else:

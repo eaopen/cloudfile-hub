@@ -611,6 +611,21 @@ class Search(APIView):
                 repo_id_map, repo_type_map = get_search_repos_map(search_repo,
                         username, org_id, shared_from, not_shared_from)
 
+            # CloudFile: tag / creator filters ride the structured filter
+            # vocabulary consumed by the selected search provider. Native
+            # ES/SeaSearch cannot express them, so they only take effect with
+            # a CloudFile provider selected (which is the path that builds the
+            # tag/creator index anyway).
+            filters = []
+            tags = request.GET.get('tags', '').strip()
+            if tags:
+                filters.append({'field': 'tags', 'op': 'in',
+                                'value': [t for t in tags.split(',') if t]})
+            creator_emails = request.GET.get('creator_emails', '').strip()
+            if creator_emails:
+                filters.append({'field': 'creator', 'op': 'in',
+                                'value': [c for c in creator_emails.split(',') if c]})
+
             obj_desc = {
                 'obj_type': obj_type,
                 'suffixes': suffixes,
@@ -620,7 +635,7 @@ class Search(APIView):
             # search file
             try:
                 results, total = search_files(repo_id_map, search_path, keyword, obj_desc, start, size, org_id,
-                                              search_filename_only)
+                                              search_filename_only, filters)
             except Exception as e:
                 logger.error(e)
                 results, total = [], 0

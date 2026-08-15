@@ -692,6 +692,8 @@ class Search extends Component {
       items[i]['thumbnail_url'] = data[i].thumbnail_url;
       items[i]['mtime'] = data[i].mtime || '';
       items[i]['repo_owner_email'] = data[i].repo_owner_email || '';
+      items[i]['tags'] = data[i].tags || [];
+      items[i]['matched_tags'] = data[i].matched_tags || [];
     }
     return items;
   }

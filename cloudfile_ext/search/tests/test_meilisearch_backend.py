@@ -161,7 +161,57 @@ def test_hits_are_translated_to_the_search_files_contract():
         {'repo-a': FakeRepo('repo-a')}, None, 'q', None, 0, 10)
     assert total == 7
     assert hits == [{'repo_id': 'repo-a', 'fullpath': '/a.txt',
-                     'name': 'a.txt', 'size': 42}]
+                     'name': 'a.txt', 'size': 42, 'tags': [],
+                     'matched_tags': []}]
+
+
+def test_matched_tags_are_derived_from_highlighted_tag_values():
+    """A tag hit must be distinguishable from a name hit: Meilisearch wraps
+    the matched term inside a tag value with <em>, and the provider turns that
+    back into clean tag names so the UI can label them 'matched tag'."""
+    client = FakeClient(response={
+        'hits': [{
+            'repo_id': 'repo-a', 'path': '/a.txt', 'name': 'a.txt',
+            'size': 42, 'tags': ['合同', '财务'],
+            '_formatted': {'tags': ['<em>合同</em>', '财务']},
+        }],
+    })
+    hits, total = meilisearch.MeilisearchProvider(client=client).search_files(
+        {'repo-a': FakeRepo('repo-a')}, None, '合同', None, 0, 10)
+    assert hits[0]['tags'] == ['合同', '财务']
+    assert hits[0]['matched_tags'] == ['合同']
+
+
+def test_no_highlight_means_no_matched_tags():
+    """When the query matched the name (or content), not a tag, the tags come
+    back unhighlighted and matched_tags stays empty -- never a false 'matched
+    tag' label."""
+    client = FakeClient(response={
+        'hits': [{
+            'repo_id': 'repo-a', 'path': '/合同.txt', 'name': '合同.txt',
+            'size': 42, 'tags': ['财务'],
+            '_formatted': {'tags': ['财务']},
+        }],
+    })
+    hits, total = meilisearch.MeilisearchProvider(client=client).search_files(
+        {'repo-a': FakeRepo('repo-a')}, None, '合同', None, 0, 10)
+    assert hits[0]['matched_tags'] == []
+
+
+def test_tag_and_creator_filters_translate_to_meilisearch_filters():
+    """The advanced panel's tag/creator predicates ride the same structured
+    filter vocabulary as any user-defined attribute; nothing backend-specific
+    is needed beyond declaring the attributes filterable."""
+    client = FakeClient()
+    filters = [
+        search_query.FieldFilter('tags', search_query.IN, ['合同', '财务']),
+        search_query.FieldFilter('creator', search_query.EQ, 'a@e.com'),
+    ]
+    meilisearch.MeilisearchProvider(client=client).search_files(
+        {'repo-a': FakeRepo('repo-a')}, None, 'q', None, 0, 10, filters=filters)
+    filter_expr = client.calls[0]['filter_expr']
+    assert 'tags IN ["合同", "财务"]' in filter_expr
+    assert 'creator = "a@e.com"' in filter_expr
 
 
 def test_backend_failure_returns_empty_results_instead_of_raising():
