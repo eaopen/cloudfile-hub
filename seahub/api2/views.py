@@ -86,7 +86,8 @@ from seahub.utils.repo import get_repo_owner, get_library_storages, \
         is_valid_repo_id_format, can_set_folder_perm_by_user, \
         add_encrypted_repo_secret_key_to_database, get_available_repo_perms, \
         parse_repo_perm
-from seahub.utils.star import star_file, unstar_file, get_dir_starred_files
+from seahub.utils.star import star_file, unstar_file, get_dir_starred_files, \
+        get_dir_starred_obj_ids, is_favorites_id_enabled
 from seahub.utils.file_tags import get_files_tags_in_dir
 from seahub.utils.file_types import MARKDOWN
 from seahub.utils.file_size import get_file_size_unit
@@ -2464,6 +2465,8 @@ def get_dir_entrys_by_id(request, repo, path, dir_id, request_type=None):
 
     starred_files = get_dir_starred_files(username, repo.id, path)
     files_tags_in_dir = get_files_tags_in_dir(repo.id, path)
+    starred_obj_ids = get_dir_starred_obj_ids(username, repo.id) \
+        if is_favorites_id_enabled() else None
 
     for e in file_list:
         e['modifier_contact_email'] = contact_email_dict.get(e['modifier_email'], '')
@@ -2476,7 +2479,9 @@ def get_dir_entrys_by_id(request, repo, path, dir_id, request_type=None):
                 e['file_tags'].append(file_tag)
         file_path = posixpath.join(path, e['name'])
         e['starred'] = False
-        if normalize_file_path(file_path) in starred_files:
+        if starred_obj_ids is not None:
+            e['starred'] = e['id'] in starred_obj_ids
+        elif normalize_file_path(file_path) in starred_files:
             e['starred'] = True
 
     dir_list.sort(key=lambda x: x['name'].lower())
@@ -3542,9 +3547,13 @@ class FileDetailView(APIView):
             file_size = 0
         entry["size"] = file_size
 
-        starred_files = UserStarredFiles.objects.filter(repo_id=repo_id,
-                path=path)
-        entry["starred"] = True if len(starred_files) > 0 else False
+        if is_favorites_id_enabled():
+            entry["starred"] = UserStarredFiles.objects.filter(
+                email=request.user.username, obj_id=obj_id).exists()
+        else:
+            starred_files = UserStarredFiles.objects.filter(repo_id=repo_id,
+                    path=path)
+            entry["starred"] = True if len(starred_files) > 0 else False
         file_comments = FileComment.objects.get_by_file_path(repo_id, path)
         comment_total = file_comments.count()
         entry["comment_total"] = comment_total

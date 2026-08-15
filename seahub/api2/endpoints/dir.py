@@ -27,6 +27,7 @@ from seahub.utils.file_types import IMAGE, VIDEO, PDF, SVG, SEADOC, EPUB
 from seahub.base.models import UserStarredFiles
 from seahub.base.templatetags.seahub_tags import email2nickname, \
         email2contact_email
+from seahub.utils.star import is_favorites_id_enabled
 from seahub.utils.repo import parse_repo_perm
 from seahub.constants import PERMISSION_INVISIBLE, PERMISSION_READ
 from seahub.repo_metadata.models import RepoMetadata
@@ -60,9 +61,11 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
         starred_items = UserStarredFiles.objects.filter(email=username,
                 repo_id=repo_id, path__startswith=parent_dir, org_id=-1)
         starred_item_path_list = [f.path.rstrip('/') for f in starred_items]
+        starred_item_obj_id_set = {f.obj_id for f in starred_items if f.obj_id}
     except Exception as e:
         logger.error(e)
         starred_item_path_list = []
+        starred_item_obj_id_set = set()
 
     thumbnail_support_file_types = [IMAGE, PDF, SVG, EPUB]
     if ENABLE_THUMBNAIL_SERVER:
@@ -90,7 +93,9 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
             # get star info
             dir_info['starred'] = False
             dir_path = posixpath.join(parent_dir, dirent.obj_name)
-            if dir_path.rstrip('/') in starred_item_path_list:
+            if is_favorites_id_enabled():
+                dir_info['starred'] = dirent.obj_id in starred_item_obj_id_set
+            elif dir_path.rstrip('/') in starred_item_path_list:
                 dir_info['starred'] = True
 
     # only get file info list
@@ -179,7 +184,9 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
 
             # get star info
             file_info['starred'] = False
-            if file_path.rstrip('/') in starred_item_path_list:
+            if is_favorites_id_enabled():
+                file_info['starred'] = file_obj_id in starred_item_obj_id_set
+            elif file_path.rstrip('/') in starred_item_path_list:
                 file_info['starred'] = True
 
             # get tag info

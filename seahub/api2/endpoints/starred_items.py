@@ -23,6 +23,8 @@ from seahub.thumbnail.utils import get_thumbnail_src
 from seahub.base.models import UserStarredFiles
 from seahub.base.templatetags.seahub_tags import email2nickname, \
         email2contact_email
+from seahub.utils.star import resolve_obj_id, backfill_row_obj_id, \
+        is_favorites_id_enabled, star_file
 from seahub.settings import ENABLE_VIDEO_THUMBNAIL, \
     THUMBNAIL_ROOT, THUMBNAIL_DEFAULT_SIZE
 from seahub.utils.file_types import IMAGE, VIDEO
@@ -45,6 +47,7 @@ class StarredItems(APIView):
         item_info['repo_name'] = repo.repo_name if repo else ''
         item_info['repo_encrypted'] = repo.encrypted if repo else False
         item_info['is_dir'] = starred_item.is_dir
+        item_info['obj_id'] = starred_item.obj_id or ''
 
         path = starred_item.path
 
@@ -82,6 +85,13 @@ class StarredItems(APIView):
 
         email = request.user.username
         all_starred_items = UserStarredFiles.objects.filter(email=email)
+
+        # Lazily backfill rows that predate object-id favorites so the list
+        # below can rely on obj_id. Lossless: unresolved rows stay untouched.
+        if is_favorites_id_enabled():
+            for starred_item in all_starred_items:
+                backfill_row_obj_id(starred_item)
+            all_starred_items = UserStarredFiles.objects.filter(email=email)
 
         repo_dict = {}
         for starred_item in all_starred_items:
@@ -164,19 +174,31 @@ class StarredItems(APIView):
 
         # star a item
         email = request.user.username
-        starred_item = UserStarredFiles.objects.get_starred_item(email, repo_id, path)
-        if not starred_item:
-            org_id = None
-            if is_org_context(request):
-                org_id = request.user.org.org_id
+        org_id = None
+        if is_org_context(request):
+            org_id = request.user.org.org_id
 
-            try:
-                starred_item = UserStarredFiles.objects.add_starred_item(email,
-                        repo_id, path, is_dir, org_id or -1)
-            except Exception as e:
-                logger.error(e)
-                error_msg = 'Internal Server Error'
-                return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
+        try:
+            star_file(email, repo_id, path, is_dir, org_id or -1)
+
+            if is_favorites_id_enabled():
+                obj_id = resolve_obj_id(repo_id, path)
+                starred_item = UserStarredFiles.objects.get_starred_item(
+                    email, repo_id, path, obj_id=obj_id)
+            else:
+                starred_item = None
+
+            if not starred_item:
+                starred_item = UserStarredFiles.objects.get_starred_item(
+                    email, repo_id, path)
+        except Exception as e:
+            logger.error(e)
+            error_msg = 'Internal Server Error'
+            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
+
+        if not starred_item:
+            error_msg = 'Internal Server Error'
+            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
         # get info of new starred item
         item_info = self.get_starred_item_info(repo, starred_item)
@@ -216,14 +238,18 @@ class StarredItems(APIView):
 
         email = request.user.username
 
+        obj_id = None
+        if is_favorites_id_enabled():
+            obj_id = resolve_obj_id(repo_id, path)
+
         # database record check
-        if not UserStarredFiles.objects.get_starred_item(email, repo_id, path):
+        if not UserStarredFiles.objects.get_starred_item(email, repo_id, path, obj_id=obj_id):
             error_msg = 'Item %s not found.' % path
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # unstar a item
         try:
-            UserStarredFiles.objects.delete_starred_item(email, repo_id, path)
+            UserStarredFiles.objects.delete_starred_item(email, repo_id, path, obj_id=obj_id)
         except Exception as e:
             logger.error(e)
             error_msg = 'Internal Server Error'

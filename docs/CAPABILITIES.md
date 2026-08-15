@@ -30,6 +30,7 @@
 | `CF_ENABLE_FILE_PREVIEW` | CE 补强 | CE 原生预览 URL 和渲染器 | 权限感知的统一文件动作列表 | **验证中**；策略测试通过，React 入口缺浏览器自动化测试；CloudFile 不实现渲染器 |
 | `CF_ENABLE_ONLYOFFICE` | CE 复用 | CE 文档配置、编辑器和回调链 | 仓内有回调鉴权/幂等代码 | **部分完成**；`cloudfile_ext.office` 未在 `apps.py` 注册，当前有效行为仍是 CE 原生集成；缺容器级验收 |
 | `CF_ENABLE_FILE_LOCK` | Pro 平替 | Seahub 权限与文件定位 | 锁状态/获取/续租/释放/管理员强制释放 API | **部分完成**；Hub 契约测试通过，锁/签入签出/续租/管理员恢复跨协议矩阵 18/21；剩余 WebDAV/REST 拒绝状态码未统一为 423 |
+| `CF_ENABLE_FAVORITES_ID` | CE 补强 | CE 收藏 API/前端与 `UserStarredFiles` | `obj_id` 身份、移动/重命名跟随、旧记录无损回填 | **验证中**；`favorites/identity.py` 纯规则单测通过，`star.py`/`starred_items.py` 按 `obj_id` 判存与打星标，`backfill_starred_obj_ids` 幂等回填；移动/重命名与迁移的容器 E2E 待补 |
 | `CF_ENABLE_WATCH` | Pro 平替 | CE `UserMonitoredRepos` 与 monitored-repos API | 直接放开非 Pro gate（`monitored_repos.py` 上游补丁） | **部分完成**；运行时已接线，没有 CloudFile 专项测试；通知消费链与各格式写回无独立 E2E |
 | `CF_ENABLE_CONVERT_EXPORT` | 新应用扩展 | CE 下载/导出与 SeaDoc | 未发现注册模块 | **部分完成（Hub 边界）**；Hub 无自研渲染/转换，跨仓复用 CE/SeaDoc + Compose 配置与前端接线，各格式写回无独立 E2E |
 | `CF_ENABLE_CHECKOUT` | Pro 平替 | CE 文件权限和版本写入 | `file_actions` 中的带 generation 租约签出/释放 | **部分完成**；API 已接线，依赖 server 锁 provider；签出/释放跨协议矩阵同文件锁 18/21（`checkout/` 包内旧占位说明不是实际入口） |

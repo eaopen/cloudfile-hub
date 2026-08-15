@@ -72,7 +72,14 @@ def prepare_starred_files(files):
             try:
                 file_id = seafile_api.get_file_id_by_path(f.repo.id, f.path)
                 sfile['oid'] = file_id
+                sfile['obj_id'] = file_id
                 sfile['size'] = get_file_size(f.repo.store_id, f.repo.version, file_id)
+            except SearpcError as e:
+                logger.error(e)
+                pass
+        else:
+            try:
+                sfile['obj_id'] = seafile_api.get_dir_id_by_path(f.repo.id, f.path) or ''
             except SearpcError as e:
                 logger.error(e)
                 pass
