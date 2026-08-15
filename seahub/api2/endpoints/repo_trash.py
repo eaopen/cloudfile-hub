@@ -29,6 +29,15 @@ logger = logging.getLogger(__name__)
 SHOW_REPO_TRASH_DAYS = 90
 
 
+def _is_recycle_admin(request, repo_id):
+    """CloudFile review recycle-002/003: the recycle bin is an admin-only
+    surface. Repo admins (CE perm 'admin', incl. owner, department admin and
+    admin-shared users) and system staff may use it; plain r/rw users get 403.
+    """
+    return request.user.is_staff or is_repo_admin(request.user.username,
+                                                  repo_id)
+
+
 class RepoTrash(APIView):
 
     authentication_classes = (TokenAuthentication, SessionAuthentication)
@@ -60,7 +69,7 @@ class RepoTrash(APIView):
         """ Return deleted files/dirs of a repo/folder
 
         Permission checking:
-        1. all authenticated user can perform this action.
+        1. repo admin or system staff can perform this action (review recycle-002).
         """
 
         # argument check
@@ -84,7 +93,7 @@ class RepoTrash(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if check_folder_permission(request, repo_id, path) is None:
+        if not _is_recycle_admin(request, repo_id):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -134,7 +143,7 @@ class RepoTrash(APIView):
         """ Return deleted files/dirs of a repo/folder
 
         Permission checking:
-        1. all authenticated user can perform this action.
+        1. repo admin or system staff can perform this action (review recycle-002).
         """
 
         # argument check
@@ -158,7 +167,7 @@ class RepoTrash(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if check_folder_permission(request, repo_id, path) is None:
+        if not _is_recycle_admin(request, repo_id):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -286,7 +295,7 @@ class RepoTrashRevertDirents(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if check_folder_permission(request, repo_id, '/') != 'rw':
+        if not _is_recycle_admin(request, repo_id):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -377,7 +386,7 @@ class RepoTrash2(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if check_folder_permission(request, repo_id, path) is None:
+        if not _is_recycle_admin(request, repo_id):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -502,7 +511,7 @@ class SearchRepoTrash2(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if check_folder_permission(request, repo_id, path) is None:
+        if not _is_recycle_admin(request, repo_id):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -565,7 +574,7 @@ class RevertRepoTrash2(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if check_folder_permission(request, repo_id, '/') != 'rw':
+        if not _is_recycle_admin(request, repo_id):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 

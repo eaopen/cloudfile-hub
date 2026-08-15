@@ -13,7 +13,7 @@ import Item from './item';
 
 import './index.css';
 
-const DirOthers = ({ userPerm, repoID, currentRepoInfo, currentMode, updateRepoInfo }) => {
+const DirOthers = ({ repoID, currentRepoInfo, currentMode, updateRepoInfo }) => {
   const { owner_email, is_admin, repo_name: repoName, permission } = currentRepoInfo;
 
   const showSettings = is_admin; // repo owner, department admin, shared with 'Admin' permission
@@ -74,7 +74,9 @@ const DirOthers = ({ userPerm, repoID, currentRepoInfo, currentMode, updateRepoI
           op={toggleSettingsDialog}
         />
       )}
-      {userPerm == 'rw' && (
+      {/* CloudFile review recycle-001: the recycle bin is admin-only, so the
+          entry is hidden for plain r/rw users. */}
+      {is_admin && (
         <Item
           text={gettext('Trash')}
           iconSymbol="trash"

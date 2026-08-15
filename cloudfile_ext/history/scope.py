@@ -16,10 +16,12 @@ def touches_folder_paths(changed_paths, folder, current_folder_only=False):
     """Whether any (old_path, new_path) pair hits the folder scope.
 
     ``changed_paths`` is an iterable of ``(name, new_name)`` pairs where either
-    element may be ``None``/``''``. The function is pure so it can be shared
-    verbatim by the Hub view and its unit tests.
+    element may be ``None``/``''``. Paths may carry a leading '/' (as in the
+    review contract) or be relative (as the seafile diff RPC returns them);
+    both are normalized before matching. The function is pure so it can be
+    shared verbatim by the Hub view and its unit tests.
     """
-    folder = folder.rstrip('/')
+    folder = folder.strip('/')
     if not folder:
         return False
 
@@ -27,7 +29,7 @@ def touches_folder_paths(changed_paths, folder, current_folder_only=False):
         for raw in (name, new_name):
             if not raw:
                 continue
-            path = raw.rstrip('/')
+            path = raw.strip('/')
             if path == folder:
                 # The folder itself changed (created/deleted/renamed).
                 return True

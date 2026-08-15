@@ -1257,6 +1257,12 @@ def view_trash_file(request, repo_id):
     if not request.user_perm:
         return render_permission_error(request, _('Unable to view file'))
 
+    # CloudFile review recycle-002: the recycle bin is an admin-only surface;
+    # this old route must not let a plain r/rw user view a trashed file.
+    if not (request.user.is_staff or
+            is_repo_admin(request.user.username, repo_id)):
+        return render_permission_error(request, _('Unable to view file'))
+
     if ret_dict['err']:
         return render(request, 'history_file_view_react.html', ret_dict)
 
