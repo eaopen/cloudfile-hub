@@ -43,6 +43,13 @@ TASK_NAME = 'search_meilisearch_index'
 _STATE_NAME = 'meilisearch'
 
 
+def _normalize_op(op_type):
+    """seafevents merges consecutive commits into batch_<op> Activity rows."""
+    if op_type.startswith('batch_'):
+        return op_type[len('batch_'):]
+    return op_type
+
+
 def _text_extensions():
     from seahub.search.utils import SEARCH_FILEEXT
     from seahub.utils.file_types import TEXT
@@ -190,31 +197,45 @@ def index_tick(client=None, max_bytes=None):
     upserts = {}
     deletes = set()
     for event in events:
-        op_type = event['op_type']
+        op_type = _normalize_op(event['op_type'])
         if op_type not in _FILE_OPS or event['obj_type'] != 'file':
             continue
-        repo_id, path = event['repo_id'], event['path']
+        repo_id = event['repo_id']
 
-        if op_type == 'delete':
-            doc_id = _doc_id(repo_id, path)
-            deletes.add(doc_id)
-            upserts.pop(doc_id, None)
-            continue
+        # seafevents merges consecutive commits of one op into a single
+        # Activity row whose detail is a list of the individual items (each
+        # with its own path / old_path). Expand it; single-op rows carry the
+        # path on the row itself.
+        detail = event['detail']
+        if isinstance(detail, list):
+            entries = [(it.get('path'), it.get('old_path'))
+                       for it in detail if isinstance(it, dict)]
+        elif isinstance(detail, dict):
+            entries = [(event['path'], detail.get('old_path'))]
+        else:
+            entries = [(event['path'], None)]
 
-        if op_type in ('rename', 'move'):
-            old_path = event['detail'].get('old_path')
-            if old_path:
+        for path, old_path in entries:
+            if not path:
+                continue
+            if op_type == 'delete':
+                doc_id = _doc_id(repo_id, path)
+                deletes.add(doc_id)
+                upserts.pop(doc_id, None)
+                continue
+
+            if op_type in ('rename', 'move') and old_path:
                 old_id = _doc_id(repo_id, old_path)
                 deletes.add(old_id)
                 upserts.pop(old_id, None)
 
-        doc = _build_document(repo_id, path, event['op_user'],
-                              event['timestamp'], max_bytes)
-        if doc is None:
-            deletes.add(_doc_id(repo_id, path))
-        else:
-            upserts[doc['id']] = doc
-            deletes.discard(doc['id'])
+            doc = _build_document(repo_id, path, event['op_user'],
+                                  event['timestamp'], max_bytes)
+            if doc is None:
+                deletes.add(_doc_id(repo_id, path))
+            else:
+                upserts[doc['id']] = doc
+                deletes.discard(doc['id'])
 
     try:
         if upserts:
