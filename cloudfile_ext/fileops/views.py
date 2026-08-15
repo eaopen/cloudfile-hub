@@ -42,6 +42,18 @@ def _handle(request, operation, repo_id):
     except service.PrecheckError as exc:
         return api_error(exc.http_status, str(exc))
 
+    # Preview mode (move permission-impact confirm): return the precheck
+    # outcome — affected members and per-item failures — without performing
+    # the move. The frontend uses this to warn before a move that would
+    # strip access from existing members.
+    if payload.get('preview'):
+        return Response({
+            'done': not evaluation['to_run'],
+            'failures': evaluation['failures'],
+            'affected_members': evaluation['affected_members'],
+            'item_count': len(evaluation['to_run']),
+        })
+
     if not evaluation['to_run']:
         # Every item failed precheck: report the failure list, no task.
         return Response(service.failures_only(evaluation))
