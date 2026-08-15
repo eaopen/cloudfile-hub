@@ -23,7 +23,7 @@
 | 扩展框架 | CE 补强 | Seahub AppConfig、URL 与 settings 加载 | Registry、provider、feature 诊断、`cf_worker` | **已完成**；provider/封存测试通过 |
 | `CF_ENABLE_SSO` | CE 补强 | OAuth/OIDC、SAML、CAS、LDAP、REMOTE_USER 登录 | 目录 source、组映射、周期/登录后同步、管理 API | **已完成**；26 个目录/对账测试通过，static 目录语义跨仓容器 E2E 通过；`external-service` 有代码和单测；LDAP/AD/Authentik 目录源未做专属 provider 验证，只同步已存在用户的组关系 |
 | `CF_ENABLE_DIR_ACL` | Pro 平替 | CE 库/目录权限基线 | 目录规则 API、继承求解、Hub 权限钩子、管理页面 | **已完成**；57 个 ACL 测试通过，跨仓容器矩阵 37/37（六入口 + 即时撤权 + 管理员清空） |
-| `CF_ENABLE_AUDIT` | Pro 平替 | seafevents `Activity` 事件表 | 管理端只读查询与页面 | **验证中**；过滤契约测试通过，跨仓容器矩阵已覆盖目录创建/重命名、文件上传、移动、删除与恢复查询；不覆盖读取/下载访问日志、合规审计与长期留存 |
+| `CF_ENABLE_AUDIT` | Pro 平替 | seafevents `Activity` 事件表 | 管理端只读查询、筛选、CSV 导出与页面；标签变更审计侧车 `cf_audit_event` | **验证中**；过滤契约测试通过，跨仓容器矩阵已覆盖目录创建/重命名、文件上传、移动、删除与恢复查询。P2-08 已补齐：查询/导出支持按时间/操作人/类型/对象/来源/结果/路径筛选，`source`/`result`/`before`/`after` 作为一等字段返回，标签增删/改名/系统标签变化经 `cf_audit_event` 记录前后值并可导出 CSV；不覆盖读取/下载访问日志、合规审计与长期留存 |
 | CE 元数据 / `CF_ENABLE_METADATA` | CE 补强 | `repo_metadata` 前端、API 和 `_is_dir` 记录模型 | 当前 `metadata.register()` 不登记自有行为 | **验证中**；Hub 通路存在，依赖外部 Metadata Server；自定义属性列已改为按列名键写入，待复验 |
 | CE 目录/文件标签 / `CF_ENABLE_TAGS` | CE 补强 | `repo_metadata`、`repo_tags`/`file_tags` 以及目录表格标签编辑 | 与 metadata 共用占位扩展入口，不建立平行标签存储 | **验证中**；跨仓 E2E 已验证标签创建、绑定、反查、重命名/移动跟随与恢复；自定义属性跟随仍待修复。P2-07 已在 `repo_tags` 落地系统/用户标签（`is_system`）：系统标签仅 `admin` 可写、用户标签 `rw` 及以上可编辑、列表先用户后系统、批量加标签受 `CF_TAG_BATCH_LIMIT`（默认 100）上限，权限用例由 `review_tags_matrix.py` 断言 |
 | `CF_ENABLE_SEARCH` | Pro 平替 / CE 补强 | SeaSearch/Elasticsearch 查询与 Seahub 结果后处理 | 解开 CloudFile 搜索入口、Meilisearch provider、增量索引、结果集目录 ACL 裁剪、标签/创建人高级筛选与匹配标签 | **部分完成**；Meilisearch/过滤测试通过；目录 ACL `invisible`/`none` 统一查询后裁剪（复用 acl resolver，fail closed）；`tags`/`creator_emails` 结构化过滤接入同一 `/api2/search/` 入口，`matched_tags` 区分标签命中与名称命中，容器 E2E 待复验 |
@@ -44,7 +44,7 @@
 | ACL | `cf_dir_acl` 表和 server/fileserver 强制执行 | Hub 只收紧；缺少底层实现不能视为安全交付 |
 | 文件锁/签出/本地编辑 | `cf_lock_*` RPC、`cf_lock_lease`、`cf_edit_session` | provider 不可用时写动作不可用，不退化为 Hub 提示锁 |
 | SSO 组织映射 | 选中的 static/external directory、组 owner、`cf_worker` | 未选 source 时不做映射；同步异常记录状态，不阻断登录 |
-| 审计 | seafevents 写入 `Activity` | Hub 只读，不制造第二条不完整审计流 |
+| 审计 | seafevents 写入 `Activity`；Hub 写标签变更 `cf_audit_event` | 文件操作只读 `Activity`（不制造第二条不完整审计流）；标签变更由 Hub 追加（标签无其他生产者，属完整覆盖） |
 | 元数据/标签 | Metadata Server、Redis、JWT 与持久化数据库 | 外部服务不可用时显式失败，不影响核心文件读写 |
 | Meilisearch | URL、API key、`cf_worker` | provider 配错时显式报错/日志，不静默换后端 |
 | 外部源 | 运维挂载、允许根目录、`cf_*` 表 | 越界、穿越、symlink 逃逸均拒绝；仅提供只读内容路径 |
