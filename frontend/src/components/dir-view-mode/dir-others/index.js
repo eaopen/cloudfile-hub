@@ -74,9 +74,10 @@ const DirOthers = ({ repoID, currentRepoInfo, currentMode, updateRepoInfo }) => 
           op={toggleSettingsDialog}
         />
       )}
-      {/* CloudFile review recycle-001: the recycle bin is admin-only, so the
-          entry is hidden for plain r/rw users. */}
-      {is_admin && (
+      {/* CloudFile review recycle-001: the recycle bin is admin-only. `is_admin`
+          covers shared/department admin; the repo owner (is_admin is unset for
+          them) is admitted via isRepoOwner. */}
+      {(is_admin || isRepoOwner) && (
         <Item
           text={gettext('Trash')}
           iconSymbol="trash"
