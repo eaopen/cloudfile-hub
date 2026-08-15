@@ -661,6 +661,10 @@ class DirView(APIView):
                                  json.dumps([dir_name]), username)
         except SearpcError as e:
             logger.error(e)
+            from cloudfile_ext.file_actions.service import searpc_lock_status
+            locked_status = searpc_lock_status(e)
+            if locked_status is not None:
+                return api_error(locked_status, str(e))
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 

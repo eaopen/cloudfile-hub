@@ -17,6 +17,23 @@ from cloudfile_ext.features import enabled_features
 from cloudfile_ext.file_actions.policy import actions_for, native_lock_request
 
 
+#: CloudFile's own write-lifecycle error code, mirroring common/cf-fileop.h.
+CF_ERR_FILE_LOCKED = 600
+
+
+def searpc_lock_status(error):
+    """Map a SearpcError carrying CF_ERR_FILE_LOCKED to HTTP 423, else None.
+
+    The C write lifecycle refuses with ``CF_ERR_FILE_LOCKED`` (600) and the
+    fork's ``seafile.rpcclient`` preserves that code on ``SearpcError``. REST
+    and WebDAV entry points call this so a locked file reads as 423 Locked
+    rather than a generic 500 -- the upstream behaviour of dropping err_code.
+    """
+    if getattr(error, 'code', None) == CF_ERR_FILE_LOCKED:
+        return 423
+    return None
+
+
 def _site_root():
     return getattr(settings, 'SITE_ROOT', '/') or '/'
 
