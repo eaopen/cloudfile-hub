@@ -359,7 +359,7 @@ def repo_folder_trash(request, repo_id):
     username = request.user.username
 
     if not seafile_api.get_dir_id_by_path(repo_id, path) or \
-            not (request.user.is_staff or is_repo_admin(username, repo_id)):
+            check_folder_permission(request, repo_id, path) != 'rw':
         return render_permission_error(request, _('Unable to view recycle page'))
 
     repo = get_repo(repo_id)
