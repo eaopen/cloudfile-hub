@@ -34,6 +34,7 @@ CF_ENABLE_CHECKOUT = False
 CF_ENABLE_LOCAL_APP = False
 CF_ENABLE_S3_STORAGE = False
 CF_ENABLE_EXTERNAL_SOURCES = False
+CF_ENABLE_FILEOPS = False
 
 # -- providers -------------------------------------------------------------
 
@@ -185,3 +186,23 @@ CF_FILE_ACTION_OFFICE_EXTENSIONS = (
 # local write action remains unavailable until the seafile-server lock
 # provider is present; an advisory Hub-only checkout would be unsafe.
 CF_LOCAL_APP_SESSION_TTL = 300
+
+# -- copy/move unified precheck (CF_ENABLE_FILEOPS) -------------------------
+#
+# Per the review checklist, the limits are controlled from configuration, all
+# expressed in "0 = unlimited" so that enabling the switch without tuning any
+# limit still matches native CE copy/move behaviour:
+#
+#   CF_FILEOP_MAX_FILE_SIZE    single-file size ceiling (bytes)
+#   CF_FILEOP_MAX_FOLDER_DEPTH ceiling on how deep a copied/moved folder may be
+#   CF_FILEOP_MAX_ITEM_COUNT   max selected objects per batch
+#   CF_FILEOP_MAX_BATCH_SIZE   max total bytes per batch
+#
+# The single-file and depth limits are *per item*: an over-limit item is put in
+# the failure list while the rest of the batch proceeds. The item-count and
+# batch-size limits reject the whole request, because a partial "which items
+# fit" decision for those is the operator's job, not a per-item property.
+CF_FILEOP_MAX_FILE_SIZE = 0
+CF_FILEOP_MAX_FOLDER_DEPTH = 0
+CF_FILEOP_MAX_ITEM_COUNT = 0
+CF_FILEOP_MAX_BATCH_SIZE = 0

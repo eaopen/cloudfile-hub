@@ -37,6 +37,7 @@
 | `CF_ENABLE_LOCAL_APP` | 新应用扩展 | CE 认证下载与版本写入 | v2 ticket、Agent claim、心跳、带围栏回写 | **验证中**；下载—领取—编辑—写回容器矩阵 14/14 通过（写回已改 `put_file`）；仍缺签名发布包与跨平台升级 |
 | `CF_ENABLE_S3_STORAGE` | CE 补强 | CE/S3 存储与 fsck/gc | 本仓仅有离线维护脚本适配，不存在 Hub 注册模块 | **已完成（Hub 边界）**；Hub 无 S3 模块，跨仓多存储 + MinIO S3 已完成（管理员按库指定存储方案，自助选择 UI 未完成） |
 | `CF_ENABLE_EXTERNAL_SOURCES` | 新应用扩展 | Seahub 列表/文件 API 外形 | local-path provider、授权、只读浏览/下载、overlay、shadow API、Meilisearch 扫描 | **部分完成**；72 个相关测试通过；当前 `local-path` 为只读内容入口，真实 SMB/NFS 挂载、数据库与浏览器流程待验收 |
+| `CF_ENABLE_FILEOPS` | Pro 平替 | CE `copy_file`/`move_file` 写入 | 影子端点统一预检查（权限/大小/层级/配额/同名冲突）、移动 `affected_members`、`cf_fileop_task` 幂等、失败清单 | **验证中**；纯策略单测通过（`fileops/tests/test_policy.py`），影子 `/api2/repos/{repo}/fileops/{copy,move}/` 运行时接线；容器 E2E（`review_copy_matrix.py`/`review_move_matrix.py`）待跑；移动确认框 UI 与 v2.1 批量入口未接 |
 
 ## 外部依赖边界
 
