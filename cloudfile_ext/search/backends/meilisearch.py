@@ -34,8 +34,12 @@ INDEX_NAME = 'cloudfile_files'
 #: `creator` (library owner) and `tags` let the advanced filter panel narrow a
 #: query server-side; `tags` is also searchable so a tag name can match a file
 #: whose name and content do not -- and the hit reports which tags matched so
-#: the UI never presents a tag hit as a name hit.
-FILTERABLE_ATTRIBUTES = ['repo_id', 'path', 'object_type', 'extension', 'mtime', 'size', 'creator', 'tags']
+#: the UI never presents a tag hit as a name hit. `dirs` lists a document's
+#: ancestor directory paths (e.g. /a/b/c.txt -> ['/a', '/a/b']); Meilisearch
+#: 1.10 has no STARTS WITH filter, so the "search within this folder"
+#: narrowing uses `dirs IN [<search_path>]`, which matches exactly the
+#: documents under that directory.
+FILTERABLE_ATTRIBUTES = ['repo_id', 'path', 'object_type', 'extension', 'mtime', 'size', 'creator', 'tags', 'dirs']
 SORTABLE_ATTRIBUTES = ['mtime', 'size', 'name']
 SEARCHABLE_ATTRIBUTES = ['name', 'path', 'content', 'tags']
 
