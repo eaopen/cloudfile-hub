@@ -9,7 +9,7 @@ upload (which arrives as `batch_create`) is silently skipped.
 
 import json
 
-from cloudfile_ext.search.indexer import _normalize_op, _doc_id
+from cloudfile_ext.search.ops import normalize_op as _normalize_op, doc_id as _doc_id
 
 
 def test_batch_op_normalization():

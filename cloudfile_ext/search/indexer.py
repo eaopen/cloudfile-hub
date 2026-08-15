@@ -16,7 +16,6 @@ duplicating that pipeline for the one backend that exists specifically for
 sites not running SeaSearch would be the tail wagging the dog.
 """
 
-import hashlib
 import json
 import logging
 import urllib.error
@@ -43,21 +42,15 @@ TASK_NAME = 'search_meilisearch_index'
 _STATE_NAME = 'meilisearch'
 
 
-def _normalize_op(op_type):
-    """seafevents merges consecutive commits into batch_<op> Activity rows."""
-    if op_type.startswith('batch_'):
-        return op_type[len('batch_'):]
-    return op_type
+
+
+from cloudfile_ext.search.ops import doc_id as _doc_id, normalize_op as _normalize_op
 
 
 def _text_extensions():
     from seahub.search.utils import SEARCH_FILEEXT
     from seahub.utils.file_types import TEXT
     return frozenset(SEARCH_FILEEXT[TEXT])
-
-
-def _doc_id(repo_id, path):
-    return '%s:%s' % (repo_id, hashlib.sha1(path.encode('utf-8')).hexdigest())
 
 
 def _fetch_content(repo, file_id, path, max_bytes):
