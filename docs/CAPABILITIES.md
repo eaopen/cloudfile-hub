@@ -28,12 +28,12 @@
 | CE 目录/文件标签 / `CF_ENABLE_TAGS` | CE 补强 | `repo_metadata`、`repo_tags`/`file_tags` 以及目录表格标签编辑 | 与 metadata 共用占位扩展入口，不建立平行标签存储 | **验证中**；跨仓 E2E 已验证标签创建、绑定、反查、重命名/移动跟随与恢复；自定义属性跟随仍待修复。P2-07 已在 `repo_tags` 落地系统/用户标签（`is_system`）：系统标签仅 `admin` 可写、用户标签 `rw` 及以上可编辑、列表先用户后系统、批量加标签受 `CF_TAG_BATCH_LIMIT`（默认 100）上限，权限用例由 `review_tags_matrix.py` 断言 |
 | `CF_ENABLE_SEARCH` | Pro 平替 / CE 补强 | SeaSearch/Elasticsearch 查询与 Seahub 结果后处理 | 解开 CloudFile 搜索入口、Meilisearch provider、增量索引、结果集目录 ACL 裁剪、标签/创建人高级筛选与匹配标签 | **部分完成**；Meilisearch/过滤测试通过；目录 ACL `invisible`/`none` 统一查询后裁剪（复用 acl resolver，fail closed）；`tags`/`creator_emails` 结构化过滤接入同一 `/api2/search/` 入口，`matched_tags` 区分标签命中与名称命中，容器 E2E 待复验 |
 | `CF_ENABLE_FILE_PREVIEW` | CE 补强 | CE 原生预览 URL 和渲染器 | 权限感知的统一文件动作列表 | **验证中**；策略测试通过，React 入口缺浏览器自动化测试；CloudFile 不实现渲染器 |
-| `CF_ENABLE_ONLYOFFICE` | CE 复用 | CE 文档配置、编辑器和回调链 | 仓内有回调鉴权/幂等代码 | **部分完成**；`cloudfile_ext.office` 未在 `apps.py` 注册，当前有效行为仍是 CE 原生集成；缺容器级验收 |
-| `CF_ENABLE_FILE_LOCK` | Pro 平替 | Seahub 权限与文件定位 | 锁状态/获取/续租/释放/管理员强制释放 API | **部分完成**；Hub 契约测试通过，锁/签入签出/续租/管理员恢复跨协议矩阵 18/21；剩余 WebDAV/REST 拒绝状态码未统一为 423 |
+| `CF_ENABLE_ONLYOFFICE` | CE 复用 | CE 文档配置、编辑器和回调链 | 回调鉴权/幂等守卫影子接管回调 URL | **部分完成**；`cloudfile_ext.office` 已注册进 `apps.py`（开关关闭时不注册任何路由）；容器门禁 `office-e2e.yml` 起真实 Document Server 验证路由挂载、convert 往返、无签名回调拒绝与重投递不 500；浏览器内编辑会话与真实保存去重的端到端仍待补 |
+| `CF_ENABLE_FILE_LOCK` | Pro 平替 | Seahub 权限与文件定位 | 锁状态/获取/续租/释放/管理员强制释放 API | **部分完成**；Hub 契约测试通过，锁/签入签出/续租/管理员恢复跨协议矩阵 21/21；WebDAV/REST 拒绝统一映射 423（searpc 透传 `CF_ERR_FILE_LOCKED`）；客户端兼容与锁语义未证明与 Pro 等价 |
 | `CF_ENABLE_FAVORITES_ID` | CE 补强 | CE 收藏 API/前端与 `UserStarredFiles` | `obj_id` 身份、移动/重命名跟随、旧记录无损回填 | **验证中**；`favorites/identity.py` 纯规则单测通过，`star.py`/`starred_items.py` 按 `obj_id` 判存与打星标，`backfill_starred_obj_ids` 幂等回填；移动/重命名与迁移的容器 E2E 待补 |
 | `CF_ENABLE_WATCH` | Pro 平替 | CE `UserMonitoredRepos` 与 monitored-repos API | 直接放开非 Pro gate（`monitored_repos.py` 上游补丁） | **部分完成**；运行时已接线，没有 CloudFile 专项测试；通知消费链与各格式写回无独立 E2E |
 | `CF_ENABLE_CONVERT_EXPORT` | 新应用扩展 | CE 下载/导出与 SeaDoc | 未发现注册模块 | **部分完成（Hub 边界）**；Hub 无自研渲染/转换，跨仓复用 CE/SeaDoc + Compose 配置与前端接线，各格式写回无独立 E2E |
-| `CF_ENABLE_CHECKOUT` | Pro 平替 | CE 文件权限和版本写入 | `file_actions` 中的带 generation 租约签出/释放 | **部分完成**；API 已接线，依赖 server 锁 provider；签出/释放跨协议矩阵同文件锁 18/21（`checkout/` 包内旧占位说明不是实际入口） |
+| `CF_ENABLE_CHECKOUT` | Pro 平替 | CE 文件权限和版本写入 | `file_actions` 中的带 generation 租约签出/释放 | **部分完成**；API 已接线，依赖 server 锁 provider；签出/释放跨协议矩阵同文件锁 21/21（`checkout/` 包内旧占位说明不是实际入口） |
 | `CF_ENABLE_LOCAL_APP` | 新应用扩展 | CE 认证下载与版本写入 | v2 ticket、Agent claim、心跳、带围栏回写 | **验证中**；下载—领取—编辑—写回容器矩阵 14/14 通过（写回已改 `put_file`）；仍缺签名发布包与跨平台升级 |
 | `CF_ENABLE_S3_STORAGE` | CE 补强 | CE/S3 存储与 fsck/gc | 本仓仅有离线维护脚本适配，不存在 Hub 注册模块 | **已完成（Hub 边界）**；Hub 无 S3 模块，跨仓多存储 + MinIO S3 已完成（管理员按库指定存储方案，自助选择 UI 未完成） |
 | `CF_ENABLE_EXTERNAL_SOURCES` | 新应用扩展 | Seahub 列表/文件 API 外形 | local-path provider、授权、只读浏览/下载、overlay、shadow API、Meilisearch 扫描 | **部分完成**；72 个相关测试通过；当前 `local-path` 为只读内容入口，真实 SMB/NFS 挂载、数据库与浏览器流程待验收 |
