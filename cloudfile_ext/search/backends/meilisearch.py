@@ -237,8 +237,10 @@ class MeilisearchProvider(object):
             # Only ever passed together with a single-repo repos_map (see
             # seahub.search.utils.search_files) -- a "search within this
             # folder" narrowing, not a permission boundary, so best-effort is
-            # fine here.
-            clauses.append('path STARTS WITH %s' % _quote(search_path.rstrip('/') + '/'))
+            # fine here. `dirs IN` is the version-safe prefix filter (no
+            # STARTS WITH before Meilisearch 1.12).
+            clauses.append('dirs IN %s' % json.dumps(
+                [search_path.rstrip('/')], ensure_ascii=False))
         clauses.extend(_obj_desc_clauses(obj_desc))
         for f in (filters or []):
             clauses.append(_filter_expr(f))

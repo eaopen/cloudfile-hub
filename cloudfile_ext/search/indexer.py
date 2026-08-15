@@ -107,6 +107,22 @@ def _fetch_tags(repo_id, path):
         return []
 
 
+def _ancestor_dirs(path):
+    """Ancestor directory paths of a file, shallow-to-deep order.
+
+    /folder-alpha/nested.txt -> ['/folder-alpha']; /a/b/c.txt -> ['/a', '/a/b'].
+    Used by the query side as a version-safe 'search within this folder'
+    prefix filter (dirs IN), because Meilisearch 1.10 has no STARTS WITH.
+    """
+    parts = [p for p in path.split('/') if p]
+    out = []
+    acc = ''
+    for part in parts[:-1]:
+        acc += '/' + part
+        out.append(acc)
+    return out
+
+
 def _build_document(repo_id, path, op_user, timestamp, max_bytes):
     from seaserv import seafile_api
 
@@ -135,10 +151,12 @@ def _build_document(repo_id, path, op_user, timestamp, max_bytes):
         'extension': extension,
         'object_type': 'file',
         'size': size,
-        'mtime': timestamp,
+        'mtime': int(timestamp.timestamp())
+                 if hasattr(timestamp, 'timestamp') else timestamp,
         'last_modifier': op_user,
         'creator': creator,
         'tags': _fetch_tags(repo_id, path),
+        'dirs': _ancestor_dirs(path),
         'content': _fetch_content(repo, file_id, path, max_bytes),
     }
 

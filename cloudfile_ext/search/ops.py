@@ -17,5 +17,9 @@ def normalize_op(op_type):
 
 
 def doc_id(repo_id, path):
-    """Stable Meilisearch document id for (repo_id, path)."""
-    return '%s:%s' % (repo_id, hashlib.sha1(path.encode('utf-8')).hexdigest())
+    """Stable Meilisearch document id for (repo_id, path).
+
+    Meilisearch document ids may only contain alphanumerics and '-', so the
+    repo uuid and the path digest are joined with a dash rather than a colon.
+    """
+    return '%s-%s' % (repo_id, hashlib.sha1(path.encode('utf-8')).hexdigest())
