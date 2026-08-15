@@ -998,6 +998,24 @@ class SeafileAPI {
     return this.req.get(url);
   }
 
+  moveFileopsPreview(srcRepoID, srcParentDir, srcName, dstRepoID, dstParentDir, direntType) {
+    // CloudFile fileops shadow preview (CF_ENABLE_FILEOPS): returns the
+    // permission-impact (affected_members) without moving anything, backing the
+    // move-confirm dialog.
+    const url = this.server + `/api2/repos/${srcRepoID}/fileops/move/`;
+    const operation = {
+      'src_repo_id': srcRepoID,
+      'src_parent_dir': srcParentDir,
+      'src_dirent_name': srcName,
+      'dst_repo_id': dstRepoID,
+      'dst_parent_dir': dstParentDir,
+      'operation': 'move',
+      'dirent_type': direntType || 'file',
+      'preview': true,
+    };
+    return this.req.post(url, operation, { headers: { 'Content-Type': 'application/json' } });
+  }
+
   cancelCopyMoveOperation(task_id) {
     const url = this.server + '/api/v2.1/copy-move-task/';
     let params = {
