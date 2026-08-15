@@ -3781,6 +3781,13 @@ class FileSharedLinkView(APIView):
 
     def put(self, request, repo_id, format=None):
 
+        # CloudFile review share-002: when external sharing is restricted,
+        # only system admins may create new share links.
+        from cloudfile_ext.features import is_enabled
+        if is_enabled('CF_ENABLE_SHARE_RESTRICT') and not request.user.is_staff:
+            error_msg = 'External sharing is disabled.'
+            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+
         repo = seaserv.get_repo(repo_id)
         if not repo:
             return api_error(status.HTTP_404_NOT_FOUND, "Library does not exist")
