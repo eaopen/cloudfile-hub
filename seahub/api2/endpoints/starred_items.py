@@ -24,7 +24,7 @@ from seahub.base.models import UserStarredFiles
 from seahub.base.templatetags.seahub_tags import email2nickname, \
         email2contact_email
 from seahub.utils.star import resolve_obj_id, backfill_row_obj_id, \
-        is_favorites_id_enabled, star_file
+        is_favorites_id_enabled, star_file, locate_obj_id
 from seahub.settings import ENABLE_VIDEO_THUMBNAIL, \
     THUMBNAIL_ROOT, THUMBNAIL_DEFAULT_SIZE
 from seahub.utils.file_types import IMAGE, VIDEO
@@ -60,6 +60,17 @@ class StarredItems(APIView):
         else:
             item_info['obj_name'] = os.path.basename(path.rstrip('/'))
             dirent = seafile_api.get_dirent_by_path(repo_id, path) if repo else ''
+            # CloudFile review: a favorite keyed by object id follows its
+            # object. When the stored path no longer resolves (moved/renamed),
+            # re-locate the object id instead of marking the item deleted.
+            if not dirent and starred_item.obj_id and \
+                    is_favorites_id_enabled():
+                found = locate_obj_id(repo_id, starred_item.obj_id)
+                if found:
+                    path = found
+                    item_info['path'] = path
+                    item_info['obj_name'] = os.path.basename(path.rstrip('/'))
+                    dirent = seafile_api.get_dirent_by_path(repo_id, path)
             item_info['mtime'] = timestamp_to_isoformat_timestr(dirent.mtime) if \
                     dirent else ''
             item_info['deleted'] = False if dirent else True

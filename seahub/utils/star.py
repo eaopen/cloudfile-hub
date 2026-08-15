@@ -1,6 +1,8 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 # -*- coding: utf-8 -*-
 import logging
+import posixpath
+import stat
 
 from django.db import IntegrityError
 from django.db.models import Q
@@ -12,6 +14,34 @@ from seahub.utils import normalize_file_path, normalize_dir_path
 from cloudfile_ext.favorites.identity import pick_obj_id, should_backfill
 
 logger = logging.getLogger(__name__)
+
+
+def locate_obj_id(repo_id, obj_id, root='/', guard=512):
+    """Find the current path of an object id by walking the repo tree.
+
+    Used when a starred item's stored path no longer resolves (the object was
+    moved or renamed): favorites keyed by object id must keep pointing at the
+    same object, so the listing re-locates it instead of marking it deleted.
+    ``guard`` bounds the walk so a pathological tree cannot loop forever.
+    """
+    if guard <= 0:
+        return None
+    try:
+        entries = seafile_api.list_dir_by_path(repo_id, root) or []
+    except Exception as e:
+        logger.warning('locate obj_id %s in %s failed at %s: %s',
+                       obj_id, repo_id, root, e)
+        return None
+    for entry in entries:
+        if entry.obj_id == obj_id:
+            return posixpath.join(root, entry.obj_name)
+        if stat.S_ISDIR(entry.mode):
+            found = locate_obj_id(repo_id, obj_id,
+                                  posixpath.join(root, entry.obj_name),
+                                  guard - 1)
+            if found:
+                return found
+    return None
 
 
 def is_favorites_id_enabled():
