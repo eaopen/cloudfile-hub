@@ -123,11 +123,13 @@ def test_query_is_scoped_to_the_repos_the_caller_already_resolved():
     assert 'repo_id IN ["repo-a", "repo-b"]' in filter_expr
 
 
-def test_search_path_narrows_to_a_subtree_with_starts_with():
+def test_search_path_narrows_to_a_subtree_with_dirs():
     client = FakeClient()
     meilisearch.MeilisearchProvider(client=client).search_files(
         {'repo-a': FakeRepo('repo-a')}, '/项目/设计', 'q', None, 0, 10)
-    assert 'path STARTS WITH "/项目/设计/"' in client.calls[0]['filter_expr']
+    # Meilisearch 1.10 has no STARTS WITH; the folder narrowing rides the
+    # document's dirs array (ancestor paths) via an IN filter.
+    assert 'dirs IN ["/项目/设计"]' in client.calls[0]['filter_expr']
 
 
 def test_custom_filters_and_obj_desc_are_both_applied():
