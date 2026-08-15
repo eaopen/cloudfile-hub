@@ -52,6 +52,21 @@ def _batch_limit():
     return getattr(settings, 'CF_TAG_BATCH_LIMIT', DEFAULT_TAG_BATCH_LIMIT)
 
 
+def _audit_tag_change(request, repo_id, operation, before=None, after=None):
+    """P2-08: append a tag-change audit event with before/after values.
+
+    The audit switch gates the write inside cloudfile_ext.audit.events; the
+    event is a best-effort sidecar, so any failure here is logged and must
+    never turn the tag operation itself into an error.
+    """
+    try:
+        from cloudfile_ext.audit.events import record_tag_event
+        record_tag_event(request.user.username, repo_id, operation,
+                         before=before, after=after)
+    except Exception as e:
+        logger.warning('failed to record tag audit event: %s', e)
+
+
 def _can_write_tag(request, repo_id, is_system):
     """Authorize a tag write.
 
@@ -166,6 +181,8 @@ class RepoTagsView(APIView):
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
+        _audit_tag_change(request, repo_id, 'create', before=None,
+                          after=repo_tag.to_dict())
         return Response({"repo_tag": repo_tag.to_dict()}, status=status.HTTP_201_CREATED)
 
     def put(self, request, repo_id):
@@ -221,6 +238,7 @@ class RepoTagsView(APIView):
         for repo_tag in repo_tag_list:
             res = repo_tag.to_dict()
             repo_tags.append(res)
+            _audit_tag_change(request, repo_id, 'create', before=None, after=res)
 
         return Response({"repo_tags": repo_tags}, status=status.HTTP_200_OK)
 
@@ -256,6 +274,7 @@ class RepoTagView(APIView):
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         try:
+            before = repo_tag.to_dict()
             repo_tag.name = tag_name
             repo_tag.color = tag_color
             repo_tag.save()
@@ -264,6 +283,8 @@ class RepoTagView(APIView):
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
+        _audit_tag_change(request, repo_id, 'update', before=before,
+                          after=repo_tag.to_dict())
         return Response({"repo_tag": repo_tag.to_dict()}, status=status.HTTP_200_OK)
 
     def delete(self, request, repo_id, repo_tag_id):
@@ -281,10 +302,12 @@ class RepoTagView(APIView):
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         try:
+            before = repo_tag.to_dict()
             RepoTags.objects.delete_repo_tag(repo_tag_id)
         except Exception as e:
             logger.error(e)
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
+        _audit_tag_change(request, repo_id, 'delete', before=before, after=None)
         return Response({"success": "true"}, status=status.HTTP_200_OK)
