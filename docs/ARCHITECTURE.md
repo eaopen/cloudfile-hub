@@ -102,5 +102,4 @@ docs/                          本仓当前文档
 
 - CloudFile `metadata` 包仍是占位注册，`checkout` 实际入口已迁入 `file_actions`。这不代表 CE 自带的 `repo_metadata`、`repo_tags`/`file_tags` 前端和 API 不存在；其可用性取决于跨仓配置和外部 Metadata Server。
 - OnlyOffice 回调保护模块未接入 `CloudFileConfig.ready()`；当前有效边界仍是 CE 原生 OnlyOffice 集成。
-- 原生 SeaSearch 分支不会执行 Elasticsearch/Meilisearch 分支的 invisible-path 过滤；ACL 与搜索共用时需完成跨仓验收。
 - 本地软件前端当前读取 `session.file.name`，而会话创建响应未返回 `file`；端到端下载流程仍属部分完成。

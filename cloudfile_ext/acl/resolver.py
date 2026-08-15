@@ -166,3 +166,16 @@ def resolve(rules, subjects, path, native):
     if decision is None:
         return native
     return tighten(native, decision)
+
+
+def denies(rules, subjects, path):
+    """Whether `rules` deny `path` for `subjects` outright.
+
+    This is the visibility question search and metadata need: should a hit at
+    `path` be hidden? It is deliberately native-agnostic -- an ``invisible``
+    or ``none`` rule vetoes whatever the native share permission is, and any
+    other decision keeps the path visible. Passing ``PERMISSION_RW`` as the
+    native placeholder only affects the *non-denying* answer, which callers
+    discard, so its value cannot change the True/False result.
+    """
+    return resolve(rules, subjects, path, PERMISSION_RW) is None

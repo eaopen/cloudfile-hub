@@ -28,13 +28,14 @@ all:
   and it starts the cf-worker indexer below, since Meilisearch's index is
   built by CloudFile, unlike SeaSearch's which seafevents builds itself.
 
-Known gap, upstream's, not introduced here: the elif HAS_FILE_SEASEARCH branch
-does not run Search.get()'s is_invisible_path filtering, so a directory ACL's
-`invisible` paths (docs/acl-semantics.md) are not excluded from native SeaSearch
-results the way they are from the ES/meilisearch branch (which does run that
-filtering, being the same branch as ES). Deployments running CF_ENABLE_DIR_ACL
-together with search should prefer CF_PROVIDER_SEARCH=meilisearch, or wait for
-an upstream fix, until this is resolved -- see docs/search.md.
+Directory ACL in search results: upstream's `is_invisible_path` only covers the
+native invisible-*share* concept, not CloudFile's directory ACL
+(docs/acl-semantics.md). seahub.search.utils.is_invisible_path is therefore
+extended to also consult the ACL resolver per hit -- a directory ACL rule of
+`invisible` or `none` hides the path from search and metadata results on both
+the SeaSearch branch and the ES/meilisearch branch, without depending on an
+upstream fix. The check fails closed: if the rules cannot be loaded, the path
+is treated as hidden rather than leaked. See docs/search.md.
 
 See docs/search.md for the full design and docs/FEATURES.md item 40.
 """

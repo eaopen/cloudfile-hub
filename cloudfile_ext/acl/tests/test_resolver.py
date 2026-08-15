@@ -71,6 +71,49 @@ def test_ancestors():
     assert resolver.ancestors('/a/b') == ['/', '/a', '/a/b']
 
 
+def test_denies_is_true_only_for_outright_denying_rules():
+    """Search/metadata trimming: invisible and none hide a hit, while
+    grants and no-rule keep it visible -- regardless of what native would
+    have been, since the caller has no native permission to pass."""
+    subjects = resolver.subject_set('u@e.com')
+
+    def rules_for(permission, inherit=1):
+        return [{'path': '/hr', 'subject_type': 'user',
+                 'subject': 'u@e.com', 'permission': permission,
+                 'inherit': inherit}]
+
+    for permission in (resolver.PERMISSION_INVISIBLE, resolver.PERMISSION_NONE):
+        assert resolver.denies(rules_for(permission), subjects, '/hr/a.txt')
+        assert resolver.denies(rules_for(permission), subjects, '/hr')
+
+    for permission in (resolver.PERMISSION_R, resolver.PERMISSION_RW):
+        assert not resolver.denies(rules_for(permission), subjects, '/hr/a.txt')
+
+    assert not resolver.denies([], subjects, '/hr/a.txt')
+
+
+def test_denies_honours_non_inheriting_rule_and_deeper_override():
+    """A non-inheriting invisible rule hides only its own path, and a deeper
+    grant overrides an inherited deny -- both are cases a naive prefix set
+    cannot express."""
+    subjects = resolver.subject_set('u@e.com')
+
+    non_inherit = [{'path': '/hr', 'subject_type': 'user',
+                    'subject': 'u@e.com', 'permission': 'invisible',
+                    'inherit': 0}]
+    assert resolver.denies(non_inherit, subjects, '/hr')
+    assert not resolver.denies(non_inherit, subjects, '/hr/a.txt')
+
+    override = [
+        {'path': '/hr', 'subject_type': 'user', 'subject': 'u@e.com',
+         'permission': 'invisible', 'inherit': 1},
+        {'path': '/hr/allowed', 'subject_type': 'user', 'subject': 'u@e.com',
+         'permission': 'rw', 'inherit': 1},
+    ]
+    assert resolver.denies(override, subjects, '/hr/other.txt')
+    assert not resolver.denies(override, subjects, '/hr/allowed/a.txt')
+
+
 def test_never_widens():
     """The security invariant, checked exhaustively over the lattice."""
     order = resolver.PERMISSION_ORDER

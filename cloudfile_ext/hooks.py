@@ -105,3 +105,15 @@ def search_files(repos_map, search_path, keyword, obj_desc, start, size,
     return provider.search_files(repos_map, search_path, keyword, obj_desc,
                                  start, size, org_id, search_filename_only,
                                  filters)
+
+
+def is_search_path_denied(username, repo_id, path):
+    """Whether a directory ACL hides `path` for `username` in search/metadata.
+
+    Called from seahub.search.utils.is_invisible_path so result sets honour
+    directory-ACL ``invisible``/``none`` rules the same way directory listing
+    does. The import is lazy so this module stays importable when the ACL
+    capability is not installed; returns False when it is off.
+    """
+    from cloudfile_ext.acl import service
+    return service.is_path_denied(username, repo_id, path)

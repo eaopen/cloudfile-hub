@@ -26,7 +26,7 @@
 | `CF_ENABLE_AUDIT` | Pro 平替 | seafevents `Activity` 事件表 | 管理端只读查询与页面 | **验证中**；过滤契约测试通过，跨仓容器矩阵已覆盖目录创建/重命名、文件上传、移动、删除与恢复查询；不覆盖读取/下载访问日志、合规审计与长期留存 |
 | CE 元数据 / `CF_ENABLE_METADATA` | CE 补强 | `repo_metadata` 前端、API 和 `_is_dir` 记录模型 | 当前 `metadata.register()` 不登记自有行为 | **验证中**；Hub 通路存在，依赖外部 Metadata Server；自定义属性列已改为按列名键写入，待复验 |
 | CE 目录/文件标签 / `CF_ENABLE_TAGS` | CE 补强 | `repo_metadata`、`repo_tags`/`file_tags` 以及目录表格标签编辑 | 与 metadata 共用占位扩展入口，不建立平行标签存储 | **验证中**；跨仓 E2E 已验证标签创建、绑定、反查、重命名/移动跟随与恢复；自定义属性跟随仍待修复 |
-| `CF_ENABLE_SEARCH` | Pro 平替 / CE 补强 | SeaSearch/Elasticsearch 查询与 Seahub 结果后处理 | 解开 CloudFile 搜索入口、Meilisearch provider、增量索引 | **部分完成**；Meilisearch/过滤测试通过；SeaSearch 的 ACL `invisible` 过滤缺口为上游限制（跨用户契约红测，Meilisearch 走同一过滤分支） |
+| `CF_ENABLE_SEARCH` | Pro 平替 / CE 补强 | SeaSearch/Elasticsearch 查询与 Seahub 结果后处理 | 解开 CloudFile 搜索入口、Meilisearch provider、增量索引、结果集目录 ACL 裁剪 | **部分完成**；Meilisearch/过滤测试通过；目录 ACL `invisible`/`none` 已在 SeaSearch 与 Meilisearch 两条路径统一做查询后裁剪（复用 acl resolver，fail closed），`search_matrix.py` 已扩展跨用户/无权目录用例，容器 E2E 待复验 |
 | `CF_ENABLE_FILE_PREVIEW` | CE 补强 | CE 原生预览 URL 和渲染器 | 权限感知的统一文件动作列表 | **验证中**；策略测试通过，React 入口缺浏览器自动化测试；CloudFile 不实现渲染器 |
 | `CF_ENABLE_ONLYOFFICE` | CE 复用 | CE 文档配置、编辑器和回调链 | 仓内有回调鉴权/幂等代码 | **部分完成**；`cloudfile_ext.office` 未在 `apps.py` 注册，当前有效行为仍是 CE 原生集成；缺容器级验收 |
 | `CF_ENABLE_FILE_LOCK` | Pro 平替 | Seahub 权限与文件定位 | 锁状态/获取/续租/释放/管理员强制释放 API | **部分完成**；Hub 契约测试通过，锁/签入签出/续租/管理员恢复跨协议矩阵 18/21；剩余 WebDAV/REST 拒绝状态码未统一为 423 |

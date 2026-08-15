@@ -67,9 +67,13 @@ if HAS_FILE_SEARCH:
 # this file working in a checkout without cloudfile_ext.
 try:
     from cloudfile_ext.hooks import search_files as _cf_search_files
+    from cloudfile_ext.hooks import is_search_path_denied as _cf_is_search_path_denied
 except ImportError:
     def _cf_search_files(*args, **kwargs):
         return None
+
+    def _cf_is_search_path_denied(username, repo_id, path):
+        return False
 
 # Get an instance of a logger
 logger = logging.getLogger(__name__)
@@ -361,31 +365,47 @@ def get_user_group_ids(username, org_id):
     return [group.id for group in user_groups]
 
 
+class _InvisiblePaths(dict):
+    """Invisible-path map plus the user it was resolved for.
+
+    ``is_invisible_path`` needs the username to additionally consult
+    CloudFile's directory ACL -- a second, independent visibility boundary
+    that upstream's invisible-share map knows nothing about. The upstream call
+    sites pass only the map, so the username travels on it to keep those call
+    sites untouched.
+    """
+
+    def __init__(self, username, *args, **kwargs):
+        super(_InvisiblePaths, self).__init__(*args, **kwargs)
+        self.username = username
+
+
 def get_invisible_repos_info_by_username(username, org_id):
     """
     return: a dict of invisible repo paths, like {repo_id: {invisible_path1, invisible_path2, ...}, ...}
     """
     invisible_path_cache_key = normalize_cache_key(username, USER_REPO_INVISIBLE_PATH_PREFIX)
     repo_id_to_invisible_path_set = cache.get(invisible_path_cache_key)
-    if repo_id_to_invisible_path_set is not None:
-        return repo_id_to_invisible_path_set
-    
-    seafile_db_api = SeafileDB()
-    repo_id_to_invisible_path_set = {}
+    if repo_id_to_invisible_path_set is None:
+        seafile_db_api = SeafileDB()
+        repo_id_to_invisible_path_set = {}
 
-    user_repo_to_invisible_path_set = seafile_db_api.get_share_to_user_invisible_repos_info(username)
-    group_ids = get_user_group_ids(username, org_id)
-    group_repo_to_invisible_path_set = seafile_db_api.get_share_to_group_invisible_repos_info_by_group_ids(group_ids)
-    for repo_id, path_set in user_repo_to_invisible_path_set.items():
-        group_invisible_path_set = group_repo_to_invisible_path_set.get(repo_id)
-        if group_invisible_path_set:
-            path_set.update(group_invisible_path_set)
-            group_repo_to_invisible_path_set.pop(repo_id)
-        repo_id_to_invisible_path_set[repo_id] = path_set
+        user_repo_to_invisible_path_set = seafile_db_api.get_share_to_user_invisible_repos_info(username)
+        group_ids = get_user_group_ids(username, org_id)
+        group_repo_to_invisible_path_set = seafile_db_api.get_share_to_group_invisible_repos_info_by_group_ids(group_ids)
+        for repo_id, path_set in user_repo_to_invisible_path_set.items():
+            group_invisible_path_set = group_repo_to_invisible_path_set.get(repo_id)
+            if group_invisible_path_set:
+                path_set.update(group_invisible_path_set)
+                group_repo_to_invisible_path_set.pop(repo_id)
+            repo_id_to_invisible_path_set[repo_id] = path_set
 
-    repo_id_to_invisible_path_set.update(group_repo_to_invisible_path_set)
-    cache.set(invisible_path_cache_key, repo_id_to_invisible_path_set, USER_REPO_INVISIBLE_PATH_CACHE_TIMEOUT)
-    return repo_id_to_invisible_path_set
+        repo_id_to_invisible_path_set.update(group_repo_to_invisible_path_set)
+        cache.set(invisible_path_cache_key, repo_id_to_invisible_path_set, USER_REPO_INVISIBLE_PATH_CACHE_TIMEOUT)
+
+    # The cache stores the plain map; the username is attached on the way out
+    # so it never round-trips through the cache (and never leaks across users).
+    return _InvisiblePaths(username, repo_id_to_invisible_path_set)
 
 
 def is_invisible_path(repo_id_to_invisible_paths, repo_id, path):
@@ -394,6 +414,17 @@ def is_invisible_path(repo_id_to_invisible_paths, repo_id, path):
         ip = invisible_path.rstrip('/')
         if path == ip or path.startswith(ip + '/'):
             return True
+
+    # CloudFile directory ACL is a second visibility boundary: ``invisible``
+    # and ``none`` rules must hide a path from search and metadata results,
+    # which upstream's invisible-share mechanism above knows nothing about.
+    # The username rides on the map returned by
+    # get_invisible_repos_info_by_username, so the upstream call sites stay
+    # untouched. A plain dict (e.g. existing callers/tests) carries no
+    # username and keeps the original behaviour.
+    username = getattr(repo_id_to_invisible_paths, 'username', None)
+    if username and _cf_is_search_path_denied(username, repo_id, path):
+        return True
     return False
 
 def is_path_in_virtual_root(fullpath, origin_path):
