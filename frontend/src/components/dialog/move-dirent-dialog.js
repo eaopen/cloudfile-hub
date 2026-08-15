@@ -94,7 +94,7 @@ class MoveDirentDialog extends React.Component {
     }
   };
 
-  maybeConfirmMove = (doMove, srcName, direntType) => {
+  maybeConfirmMove = (doMove, srcNames, direntType) => {
     // CloudFile move permission-impact confirm: when CF_ENABLE_FILEOPS is on,
     // preview the affected-members count and confirm before losing anyone
     // access. Native CE behaviour (no switch) moves straight through.
@@ -104,12 +104,12 @@ class MoveDirentDialog extends React.Component {
     }
     const { repoID, path } = this.props;
     const { selectedRepo, selectedPath } = this.state;
-    if (!srcName || !selectedRepo || !selectedRepo.repo_id) {
+    if (!srcNames || !srcNames.length || !selectedRepo || !selectedRepo.repo_id) {
       doMove();
       return;
     }
     seafileAPI.moveFileopsPreview(
-      repoID, path, srcName, selectedRepo.repo_id, selectedPath, direntType
+      repoID, path, srcNames, selectedRepo.repo_id, selectedPath, direntType
     ).then((res) => {
       const affected = (res && res.data && res.data.affected_members) || 0;
       if (affected > 0) {
@@ -181,11 +181,14 @@ class MoveDirentDialog extends React.Component {
       return;
     }
 
+    // Batch entry: preview the whole selection through the fileops shadow's
+    // src_dirents contract, so the affected-members warning covers every item.
     const first = this.props.selectedDirentList && this.props.selectedDirentList[0];
+    const names = (this.props.selectedDirentList || []).map(dirent => dirent.name);
     this.maybeConfirmMove(() => {
       this.props.onItemsMove(selectedRepo, selectedPath, true);
       this.toggle();
-    }, first ? first.name : null, first ? (first.type === 'dir' ? 'dir' : 'file') : null);
+    }, names, first ? (first.type === 'dir' ? 'dir' : 'file') : null);
   };
 
   moveItem = () => {
@@ -223,7 +226,7 @@ class MoveDirentDialog extends React.Component {
     this.maybeConfirmMove(() => {
       this.props.onItemMove(selectedRepo, this.props.dirent, selectedPath, this.props.path, true);
       this.toggle();
-    }, this.props.dirent.name, this.props.dirent.type === 'dir' ? 'dir' : 'file');
+    }, [this.props.dirent.name], this.props.dirent.type === 'dir' ? 'dir' : 'file');
   };
 
   toggle = () => {

@@ -998,15 +998,16 @@ class SeafileAPI {
     return this.req.get(url);
   }
 
-  moveFileopsPreview(srcRepoID, srcParentDir, srcName, dstRepoID, dstParentDir, direntType) {
+  moveFileopsPreview(srcRepoID, srcParentDir, srcNames, dstRepoID, dstParentDir, direntType) {
     // CloudFile fileops shadow preview (CF_ENABLE_FILEOPS): returns the
     // permission-impact (affected_members) without moving anything, backing the
-    // move-confirm dialog.
+    // move-confirm dialog. srcNames is the full batch so the precheck evaluates
+    // every selected item (the v2.1 batch entry), not just the first one.
     const url = this.server + `/api2/repos/${srcRepoID}/fileops/move/`;
     const operation = {
       'src_repo_id': srcRepoID,
       'src_parent_dir': srcParentDir,
-      'src_dirent_name': srcName,
+      'src_dirents': srcNames,
       'dst_repo_id': dstRepoID,
       'dst_parent_dir': dstParentDir,
       'operation': 'move',
