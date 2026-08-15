@@ -74,14 +74,17 @@ npm run build
 
 ## 最新验证结果
 
-2026-08-11 在仓库 `.venv`（Python 3.9.6、pytest 8.4.2）执行：
+2026-08-15 执行（Python 3.12.7、pytest 7.4.4）：
 
 ```text
-collected 217 items
-217 passed, 1 warning in 0.18s
+collected 218 items
+218 passed, 1 warning in 0.13s
 ```
 
-警告为 `DJANGO_SETTINGS_MODULE` 未被当前 pytest 插件识别。首次使用系统 `/usr/bin/python3` 运行失败，原因是该解释器未安装 pytest；这属于环境问题，不是用例失败。
+警告为 `DJANGO_SETTINGS_MODULE` 未被当前 pytest 插件识别：`pytest.ini` 声明了该选项，但
+`cloudfile_ext/` 是纯逻辑测试、不依赖 Django settings，不加载 pytest-django 不影响结果。
+计数从 217 升到 218，是本地编辑 descriptor v2 修复（0503bf7a6）在 `test_lock_service.py`
+新增的回归用例。
 
 同日执行 `NODE_ENV=development ./node_modules/.bin/eslint ./src/cloudfile/` 通过。未设置 `NODE_ENV` 时 Babel preset 会拒绝解析，因此手工运行必须保留该环境变量；`npm run lint` 已内置。
 

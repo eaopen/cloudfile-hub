@@ -33,7 +33,7 @@
 | `CF_ENABLE_WATCH` | Pro 平替 | CE `UserMonitoredRepos` 与 monitored-repos API | 直接放开非 Pro gate，并把开关送入页面上下文 | **验证中**；运行时已接线，但没有 CloudFile 专项测试，通知消费链需部署验收 |
 | `CF_ENABLE_CONVERT_EXPORT` | 新应用扩展 | CE 下载/导出基础能力 | 未发现注册模块 | **规划** |
 | `CF_ENABLE_CHECKOUT` | Pro 平替 | CE 文件权限和版本写入 | `file_actions` 中的带 generation 租约签出/释放 | **验证中**；API 已接线，依赖 server 锁 provider；`checkout/` 包内旧占位说明不是实际入口 |
-| `CF_ENABLE_LOCAL_APP` | 新应用扩展 | CE 认证下载与版本写入 | v2 ticket、Agent claim、心跳、带围栏回写 | **部分完成**；后端契约已实现，但 React 下载函数读取 `session.file.name`，创建响应未返回 `file`，端到端流程当前阻断 |
+| `CF_ENABLE_LOCAL_APP` | 新应用扩展 | CE 认证下载与版本写入 | v2 ticket、Agent claim、心跳、带围栏回写 | **验证中**；下载—领取—编辑—写回容器矩阵 14/14 通过（写回已改 `put_file`）；仍缺签名发布包与跨平台升级 |
 | `CF_ENABLE_S3_STORAGE` | CE 补强 | CE/S3 存储与 fsck/gc | 本仓仅有离线维护脚本适配，不存在 Hub 注册模块 | **部分完成（Hub 边界）**；部署与存储总状态以 `cloudfile-docker` 为准 |
 | `CF_ENABLE_EXTERNAL_SOURCES` | 新应用扩展 | Seahub 列表/文件 API 外形 | local-path provider、授权、只读浏览/下载、overlay、shadow API、Meilisearch 扫描 | **验证中**；72 个相关测试通过，真实 SMB/NFS 挂载、数据库与浏览器流程待验收 |
 

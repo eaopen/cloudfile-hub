@@ -3,7 +3,7 @@
 
 > 用途：定义 Hub 与 CloudFile Local Agent 之间的本地查看、编辑和签出契约。
 > 适用版本：Seafile CE 14.x。
-> 状态：部分完成（后端会话与围栏逻辑已实现；浏览器下载链仍有阻断项，2026-08-11）。
+> 状态：验证中（后端会话、围栏、浏览器下载链与写回均已实现并过 14/14 容器矩阵；仍缺签名发布包与跨平台升级，2026-08-15）。
 
 OnlyOffice 保持 Seafile CE 原生集成：由 Seafile 的文档配置、回调和部署参数负责，
 CloudFile 不增加代理路由、会话接口或独立验收条件。
@@ -13,9 +13,10 @@ CloudFile 的本地查看和本地编辑统一使用 `cloudfile-local/v2` 会话
 Local 使用相同的文件关联或命令行打开该文件，再按本机策略调用 PDF、CAD、图像等专业
 应用。浏览器不直接连接本机端口，也不显示可复制的访问令牌。
 
-当前 Hub API 已实现 v2 ticket、claim、心跳和带 generation 的回写；但 React 下载函数
-读取 `session.file.name`，创建会话的响应当前没有 `file` 字段。修正并完成浏览器 + Agent
-端到端验收前，本能力不能标为“已完成”。
+Hub API 已实现 v2 ticket、claim、心跳和带 generation 的回写；React 下载函数读取
+`session.file.name`，创建会话响应已补齐 `file` 字段（descriptor v2），写回改用 `put_file`
+替换文件以避免生成重名副本。下载—领取—编辑—写回容器矩阵 14/14 通过；在产出签名发布包
+与跨平台升级方案前，本能力不标为“已完成”。
 
 ## 会话文件契约
 
