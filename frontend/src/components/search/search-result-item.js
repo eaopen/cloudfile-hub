@@ -72,6 +72,20 @@ class SearchResultItem extends React.Component {
           <div className="item-name ellipsis" title={item.name}>{item.name}</div>
           <div className="item-link ellipsis" title={showName}>{showName}</div>
           <div className="item-text ellipsis" dangerouslySetInnerHTML={{ __html: item.content }}></div>
+          {item.is_dir && (
+            <div className="item-folder-action ellipsis" style={{ fontSize: '12px', color: '#999', marginTop: '2px' }}>
+              {gettext('Open folder')} · {gettext('Locate in directory tree')}
+            </div>
+          )}
+          {item.matched_tags && item.matched_tags.length > 0 && (
+            <div className="item-matched-tags" style={{ display: 'flex', flexWrap: 'wrap', gap: '4px', marginTop: '4px' }}>
+              {item.matched_tags.map((tag, index) => (
+                <span key={index} className="matched-tag-badge" style={{ backgroundColor: '#f0f0f0', borderRadius: '10px', padding: '0 8px', fontSize: '12px', color: '#666' }}>
+                  {gettext('Matched tag')}: {tag}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
         {isHighlight && onDeleteItem && (
           <IconBtn

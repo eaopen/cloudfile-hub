@@ -8,9 +8,9 @@
 
 /* edit color popover */
 .sf-metadata-edit-option-color-popover .popover {
-  max-width: 425px;
-  padding-top: 5px;
-  padding-left: 5px;
+  max-width: none;
+  width: fit-content;
+  padding: 16px;
 }
 
 .sf-metadata-edit-option-color-popover .sf-metadata-edit-option-color-item-input {
@@ -19,13 +19,16 @@
   opacity: 0;
 }
 
-.sf-metadata-edit-option-color-popover .col-auto {
-  padding-left: 3px;
+.sf-metadata-edit-option-color-popover .sf-metadata-edit-option-color-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  width: 376px;
 }
 
 .sf-metadata-edit-option-color-popover .sf-metadata-edit-option-color-item-container {
-  width: 1.75rem;
-  height: 1.75rem;
+  width: 24px;
+  height: 24px;
   display: flex;
   align-items: center;
   justify-content: center;

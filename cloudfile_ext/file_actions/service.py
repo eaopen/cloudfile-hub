@@ -17,6 +17,23 @@ from cloudfile_ext.features import enabled_features
 from cloudfile_ext.file_actions.policy import actions_for, native_lock_request
 
 
+#: CloudFile's own write-lifecycle error code, mirroring common/cf-fileop.h.
+CF_ERR_FILE_LOCKED = 600
+
+
+def searpc_lock_status(error):
+    """Map a SearpcError carrying CF_ERR_FILE_LOCKED to HTTP 423, else None.
+
+    The C write lifecycle refuses with ``CF_ERR_FILE_LOCKED`` (600) and the
+    fork's ``seafile.rpcclient`` preserves that code on ``SearpcError``. REST
+    and WebDAV entry points call this so a locked file reads as 423 Locked
+    rather than a generic 500 -- the upstream behaviour of dropping err_code.
+    """
+    if getattr(error, 'code', None) == CF_ERR_FILE_LOCKED:
+        return 423
+    return None
+
+
 def _site_root():
     return getattr(settings, 'SITE_ROOT', '/') or '/'
 
@@ -150,6 +167,18 @@ def _ticket_digest(ticket):
     return hashlib.sha256(ticket.encode('utf-8')).hexdigest()
 
 
+def _agent_session_descriptor(mode, path, ticket, ttl, now):
+    """Return only browser-safe claim data; never expose content capability URLs."""
+    return {
+        'protocol': 'cloudfile-local/v2',
+        'mode': mode,
+        'file': {'name': os.path.basename(path)},
+        'ticket': ticket,
+        'expires_in': ttl,
+        'expires_at': now + ttl,
+    }
+
+
 def _issue_agent_session(mode, repo_id, path, username, file_id='', generation=''):
     now = int(time.time())
     ttl = _agent_session_ttl()
@@ -164,12 +193,7 @@ def _issue_agent_session(mode, repo_id, path, username, file_id='', generation='
             'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
             [session_id, _ticket_digest(ticket), now + ttl, mode, username, repo_id,
              path, file_id or None, generation or None, 'created', now, now])
-    return {
-        'protocol': 'cloudfile-local/v2',
-        'ticket': ticket,
-        'expires_in': ttl,
-        'expires_at': now + ttl,
-    }
+    return _agent_session_descriptor(mode, path, ticket, ttl, now)
 
 
 def issue_local_view_session(repo_id, path, username):

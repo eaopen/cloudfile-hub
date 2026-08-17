@@ -3,7 +3,7 @@
 
 > 用途：按代码和测试证据标记 Hub/Web/API 的真实能力状态。
 > 适用版本：Seafile CE 14.x。
-> 状态：已完成（状态快照：`dev`，2026-08-11）。
+> 状态：已完成（状态快照：`dev`，2026-08-15；状态已与 `cloudfile-docker/docs/feature-matrix.md` 对齐）。
 
 ## 状态口径
 
@@ -21,21 +21,24 @@
 | 能力/开关 | 产品定位 | CE 复用 | Hub 新增 | 状态与证据 |
 |---|---|---|---|---|
 | 扩展框架 | CE 补强 | Seahub AppConfig、URL 与 settings 加载 | Registry、provider、feature 诊断、`cf_worker` | **已完成**；provider/封存测试通过 |
-| `CF_ENABLE_SSO` | CE 补强 | OAuth/OIDC、SAML、CAS、LDAP、REMOTE_USER 登录 | 目录 source、组映射、周期/登录后同步、管理 API | **验证中**；26 个目录/对账测试通过，真实 IdP/目录与组写入需集成验收 |
-| `CF_ENABLE_DIR_ACL` | Pro 平替 | CE 库/目录权限基线 | 目录规则 API、继承求解、Hub 权限钩子、管理页面 | **验证中**；57 个 ACL 测试通过；不可绕过性依赖 `cloudfile-server` 同语义实现和 `cf_dir_acl` DDL |
-| `CF_ENABLE_AUDIT` | Pro 平替 | seafevents `Activity` 事件表 | 管理端只读查询与页面 | **部分完成**；过滤契约测试通过；跨仓 E2E 已查询文件上传、目录创建/重命名事件，其余操作与协议完整性待验证 |
-| CE 元数据 / `CF_ENABLE_METADATA` | CE 补强 | `repo_metadata` 前端、API 和 `_is_dir` 记录模型 | 当前 `metadata.register()` 不登记自有行为 | **验证中**；Hub 通路存在，有效运行依赖外部 Metadata Server 与跨仓部署 |
-| CE 目录/文件标签 / `CF_ENABLE_TAGS` | CE 补强 | `repo_metadata`、`repo_tags`/`file_tags` 以及目录表格标签编辑 | 与 metadata 共用占位扩展入口，不建立平行标签存储 | **验证中**；文件标签和通用记录链接代码存在，目录绑定、移动跟随与权限尚无本仓 E2E |
-| `CF_ENABLE_SEARCH` | Pro 平替 / CE 补强 | SeaSearch/Elasticsearch 查询与 Seahub 结果后处理 | 解开 CloudFile 搜索入口、Meilisearch provider、增量索引 | **验证中**；Meilisearch/过滤测试通过；SeaSearch 与 invisible ACL 组合有已知缺口 |
-| `CF_ENABLE_FILE_PREVIEW` | CE 补强 | CE 原生预览 URL 和渲染器 | 权限感知的统一文件动作列表 | **部分完成**；策略测试通过，React 入口缺浏览器自动化测试 |
-| `CF_ENABLE_ONLYOFFICE` | CE 复用 | CE 文档配置、编辑器和回调链 | 仓内有回调鉴权/幂等代码 | **部分完成**；`cloudfile_ext.office` 未在 `apps.py` 注册，当前有效行为仍是 CE 原生集成 |
-| `CF_ENABLE_FILE_LOCK` | Pro 平替 | Seahub 权限与文件定位 | 锁状态/获取/续租/释放/管理员强制释放 API | **验证中**；Hub 契约测试通过，必须连接 server 侧 `cf_lock_*` RPC 与表 |
-| `CF_ENABLE_WATCH` | Pro 平替 | CE `UserMonitoredRepos` 与 monitored-repos API | 直接放开非 Pro gate，并把开关送入页面上下文 | **验证中**；运行时已接线，但没有 CloudFile 专项测试，通知消费链需部署验收 |
-| `CF_ENABLE_CONVERT_EXPORT` | 新应用扩展 | CE 下载/导出基础能力 | 未发现注册模块 | **规划** |
-| `CF_ENABLE_CHECKOUT` | Pro 平替 | CE 文件权限和版本写入 | `file_actions` 中的带 generation 租约签出/释放 | **验证中**；API 已接线，依赖 server 锁 provider；`checkout/` 包内旧占位说明不是实际入口 |
-| `CF_ENABLE_LOCAL_APP` | 新应用扩展 | CE 认证下载与版本写入 | v2 ticket、Agent claim、心跳、带围栏回写 | **部分完成**；后端契约已实现，但 React 下载函数读取 `session.file.name`，创建响应未返回 `file`，端到端流程当前阻断 |
-| `CF_ENABLE_S3_STORAGE` | CE 补强 | CE/S3 存储与 fsck/gc | 本仓仅有离线维护脚本适配，不存在 Hub 注册模块 | **部分完成（Hub 边界）**；部署与存储总状态以 `cloudfile-docker` 为准 |
-| `CF_ENABLE_EXTERNAL_SOURCES` | 新应用扩展 | Seahub 列表/文件 API 外形 | local-path provider、授权、只读浏览/下载、overlay、shadow API、Meilisearch 扫描 | **验证中**；72 个相关测试通过，真实 SMB/NFS 挂载、数据库与浏览器流程待验收 |
+| `CF_ENABLE_SSO` | CE 补强 | OAuth/OIDC、SAML、CAS、LDAP、REMOTE_USER 登录 | 目录 source、组映射、周期/登录后同步、管理 API | **已完成**；26 个目录/对账测试通过，static 目录语义跨仓容器 E2E 通过；`external-service` 有代码和单测；LDAP/AD/Authentik 目录源未做专属 provider 验证，只同步已存在用户的组关系 |
+| `CF_ENABLE_DIR_ACL` | Pro 平替 | CE 库/目录权限基线 | 目录规则 API、继承求解、Hub 权限钩子、管理页面 | **已完成**；57 个 ACL 测试通过，跨仓容器矩阵 37/37（六入口 + 即时撤权 + 管理员清空） |
+| `CF_ENABLE_AUDIT` | Pro 平替 | seafevents `Activity` 事件表 | 管理端只读查询、筛选、CSV 导出与页面；标签变更审计侧车 `cf_audit_event` | **验证中**；过滤契约测试通过，跨仓容器矩阵已覆盖目录创建/重命名、文件上传、移动、删除与恢复查询。P2-08 已补齐：查询/导出支持按时间/操作人/类型/对象/来源/结果/路径筛选，`source`/`result`/`before`/`after` 作为一等字段返回，标签增删/改名/系统标签变化经 `cf_audit_event` 记录前后值并可导出 CSV；不覆盖读取/下载访问日志、合规审计与长期留存 |
+| CE 元数据 / `CF_ENABLE_METADATA` | CE 补强 | `repo_metadata` 前端、API 和 `_is_dir` 记录模型 | 当前 `metadata.register()` 不登记自有行为 | **验证中**；Hub 通路存在，依赖外部 Metadata Server；自定义属性列已改为按列名键写入，待复验 |
+| CE 目录/文件标签 / `CF_ENABLE_TAGS` | CE 补强 | `repo_metadata`、`repo_tags`/`file_tags` 以及目录表格标签编辑 | 与 metadata 共用占位扩展入口，不建立平行标签存储 | **验证中**；跨仓 E2E 已验证标签创建、绑定、反查、重命名/移动跟随与恢复；自定义属性跟随仍待修复。P2-07 已在 `repo_tags` 落地系统/用户标签（`is_system`）：系统标签仅 `admin` 可写、用户标签 `rw` 及以上可编辑、列表先用户后系统、批量加标签受 `CF_TAG_BATCH_LIMIT`（默认 100）上限，权限用例由 `review_tags_matrix.py` 断言 |
+| `CF_ENABLE_SEARCH` | Pro 平替 / CE 补强 | SeaSearch/Elasticsearch 查询与 Seahub 结果后处理 | 解开 CloudFile 搜索入口、Meilisearch provider、增量索引、结果集目录 ACL 裁剪、标签/创建人高级筛选与匹配标签 | **部分完成**；Meilisearch/过滤测试通过；目录 ACL `invisible`/`none` 统一查询后裁剪（复用 acl resolver，fail closed）；`tags`/`creator_emails` 结构化过滤接入同一 `/api2/search/` 入口，`matched_tags` 区分标签命中与名称命中，容器 E2E 待复验 |
+| `CF_ENABLE_FILE_PREVIEW` | CE 补强 | CE 原生预览 URL 和渲染器 | 权限感知的统一文件动作列表 | **验证中**；策略测试通过，React 入口缺浏览器自动化测试；CloudFile 不实现渲染器 |
+| `CF_ENABLE_ONLYOFFICE` | CE 复用 | CE 文档配置、编辑器和回调链 | 回调鉴权/幂等守卫影子接管回调 URL | **部分完成**；`cloudfile_ext.office` 已注册进 `apps.py`（开关关闭时不注册任何路由）；容器门禁 `office-e2e.yml` 起真实 Document Server 验证路由挂载、convert 往返、无签名回调拒绝与重投递不 500；浏览器内编辑会话与真实保存去重的端到端仍待补 |
+| `CF_ENABLE_FILE_LOCK` | Pro 平替 | Seahub 权限与文件定位 | 锁状态/获取/续租/释放/管理员强制释放 API | **部分完成**；Hub 契约测试通过，锁/签入签出/续租/管理员恢复跨协议矩阵 21/21；WebDAV/REST 拒绝统一映射 423（searpc 透传 `CF_ERR_FILE_LOCKED`）；客户端兼容与锁语义未证明与 Pro 等价 |
+| `CF_ENABLE_FAVORITES_ID` | CE 补强 | CE 收藏 API/前端与 `UserStarredFiles` | `obj_id` 身份、移动/重命名跟随、旧记录无损回填 | **验证中**；`favorites/identity.py` 纯规则单测通过，`star.py`/`starred_items.py` 按 `obj_id` 判存与打星标，`backfill_starred_obj_ids` 幂等回填；容器 E2E（`favorites_matrix.py`）通过：星标后移动文件，列表按 `obj_id` 重定位到新路径（`locate_obj_id` 树遍历兜底）而非标记删除 |
+| `CF_ENABLE_WATCH` | Pro 平替 | CE `UserMonitoredRepos` 与 monitored-repos API | 直接放开非 Pro gate（`monitored_repos.py` 上游补丁） | **部分完成**；运行时已接线，没有 CloudFile 专项测试；通知消费链与各格式写回无独立 E2E |
+| `CF_ENABLE_CONVERT_EXPORT` | 新应用扩展 | CE 下载/导出与 SeaDoc | 未发现注册模块 | **部分完成（Hub 边界）**；Hub 无自研渲染/转换，跨仓复用 CE/SeaDoc + Compose 配置与前端接线，各格式写回无独立 E2E |
+| `CF_ENABLE_CHECKOUT` | Pro 平替 | CE 文件权限和版本写入 | `file_actions` 中的带 generation 租约签出/释放 | **部分完成**；API 已接线，依赖 server 锁 provider；签出/释放跨协议矩阵同文件锁 21/21（`checkout/` 包内旧占位说明不是实际入口） |
+| `CF_ENABLE_LOCAL_APP` | 新应用扩展 | CE 认证下载与版本写入 | v2 ticket、Agent claim、心跳、带围栏回写 | **验证中**；下载—领取—编辑—写回容器矩阵 14/14 通过（写回已改 `put_file`）；仍缺签名发布包与跨平台升级 |
+| `CF_ENABLE_S3_STORAGE` | CE 补强 | CE/S3 存储与 fsck/gc | 本仓仅有离线维护脚本适配，不存在 Hub 注册模块 | **已完成（Hub 边界）**；Hub 无 S3 模块，跨仓多存储 + MinIO S3 已完成（管理员按库指定存储方案，自助选择 UI 未完成） |
+| `CF_ENABLE_EXTERNAL_SOURCES` | 新应用扩展 | Seahub 列表/文件 API 外形 | local-path provider、授权、只读浏览/下载、overlay、shadow API、Meilisearch 扫描 | **部分完成**；72 个相关测试通过；当前 `local-path` 为只读内容入口，真实 SMB/NFS 挂载、数据库与浏览器流程待验收 |
+| `CF_ENABLE_FILEOPS` | Pro 平替 | CE `copy_file`/`move_file` 写入 | 影子端点统一预检查（权限/大小/层级/配额/同名冲突）、移动 `affected_members`、`cf_fileop_task` 幂等、失败清单 | **验证中**；纯策略单测通过（`fileops/tests/test_policy.py`），影子 `/api2/repos/{repo}/fileops/{copy,move}/` 运行时接线；容器 E2E 14/14 通过（`review_copy_matrix.py`/`review_move_matrix.py`）；深度测量改用 `stat.S_ISDIR(entry.mode)`、配额错误先于大小策略。移动确认框 UI 与 v2.1 批量入口未接 |
+| `CF_ENABLE_SHARE_RESTRICT` | CE 补强 | CE 外链创建/访问/列表端点 | 开关默认 false；开启后非管理员创建外链 403、匿名访问旧外链按不存在处理（404）、列表/查询端点保留、管理员仍可创建与管理 | **验证中**；`share_links.py`/`views.py`/`views/file.py`/`views/repo.py` 门禁接线，容器 E2E（`review_share_matrix.py`）3/3 通过；前端入口隐藏属浏览器套件阶段 |
 
 ## 外部依赖边界
 
@@ -44,7 +47,7 @@
 | ACL | `cf_dir_acl` 表和 server/fileserver 强制执行 | Hub 只收紧；缺少底层实现不能视为安全交付 |
 | 文件锁/签出/本地编辑 | `cf_lock_*` RPC、`cf_lock_lease`、`cf_edit_session` | provider 不可用时写动作不可用，不退化为 Hub 提示锁 |
 | SSO 组织映射 | 选中的 static/external directory、组 owner、`cf_worker` | 未选 source 时不做映射；同步异常记录状态，不阻断登录 |
-| 审计 | seafevents 写入 `Activity` | Hub 只读，不制造第二条不完整审计流 |
+| 审计 | seafevents 写入 `Activity`；Hub 写标签变更 `cf_audit_event` | 文件操作只读 `Activity`（不制造第二条不完整审计流）；标签变更由 Hub 追加（标签无其他生产者，属完整覆盖） |
 | 元数据/标签 | Metadata Server、Redis、JWT 与持久化数据库 | 外部服务不可用时显式失败，不影响核心文件读写 |
 | Meilisearch | URL、API key、`cf_worker` | provider 配错时显式报错/日志，不静默换后端 |
 | 外部源 | 运维挂载、允许根目录、`cf_*` 表 | 越界、穿越、symlink 逃逸均拒绝；仅提供只读内容路径 |

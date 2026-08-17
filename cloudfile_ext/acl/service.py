@@ -121,3 +121,41 @@ def apply_dir_acl(username, repo_id, path, permission):
         return None
 
     return resolver.resolve(rules, subjects, path, permission)
+
+
+def is_path_denied(username, repo_id, path):
+    """Whether a directory ACL denies `username` access at `path`.
+
+    Search and metadata reuse this: a hit under an ``invisible`` or ``none``
+    directory must be dropped from results just as it would be from a
+    directory listing. Unlike ``apply_dir_acl`` there is no native permission
+    to tighten, so this asks the narrower visibility question and fails closed
+    -- when rules cannot be loaded the path is reported denied rather than
+    leaked.
+    """
+    if not is_enabled('CF_ENABLE_DIR_ACL'):
+        return False
+
+    if not username:
+        return False
+
+    try:
+        rules = _load_rules(repo_id)
+    except Exception:
+        logger.exception(
+            'cloudfile: failed to load directory ACL for repo %s, treating '
+            'search paths as denied', repo_id)
+        return True
+
+    if not rules:
+        return False
+
+    try:
+        subjects = _load_subjects(username)
+    except Exception:
+        logger.exception(
+            'cloudfile: failed to resolve subjects for %s, treating search '
+            'paths as denied', username)
+        return True
+
+    return resolver.denies(rules, subjects, path)

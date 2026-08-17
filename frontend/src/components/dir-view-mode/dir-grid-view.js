@@ -3,6 +3,7 @@ import PropTypes from 'prop-types';
 import RepoInfoBar from '../../components/repo-info-bar';
 import DirentGridView from '../../components/dirent-grid-view/dirent-grid-view';
 import DirentNoneView from '../../components/dirent-list-view/dirent-none-view';
+import { gettext } from '../../utils/constants';
 
 const propTypes = {
   path: PropTypes.string.isRequired,
@@ -37,6 +38,12 @@ const propTypes = {
 
 class DirGridView extends React.Component {
 
+  onToggleSelectAll = () => {
+    const { direntList, selectedDirentList, onSelectedDirentListUpdate } = this.props;
+    const isAllSelected = selectedDirentList.length === direntList.length;
+    onSelectedDirentListUpdate(isAllSelected ? [] : direntList);
+  };
+
   render() {
     if (this.props.path === '/' && this.props.direntList.length === 0) {
       return (
@@ -60,6 +67,17 @@ class DirGridView extends React.Component {
             updateUsedRepoTags={this.props.updateUsedRepoTags}
             onFileTagChanged={this.props.onFileTagChanged}
           />
+        )}
+        {this.props.direntList.length > 0 && (
+          <div className="grid-view-select-all" style={{ padding: '0 8px', fontSize: '14px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <input
+              type="checkbox"
+              id="grid-view-select-all-checkbox"
+              checked={this.props.selectedDirentList.length === this.props.direntList.length}
+              onChange={this.onToggleSelectAll}
+            />
+            <label htmlFor="grid-view-select-all-checkbox">{gettext('Select all')}</label>
+          </div>
         )}
         <DirentGridView
           path={this.props.path}

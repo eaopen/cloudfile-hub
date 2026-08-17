@@ -16,7 +16,6 @@ duplicating that pipeline for the one backend that exists specifically for
 sites not running SeaSearch would be the tail wagging the dog.
 """
 
-import hashlib
 import json
 import logging
 import urllib.error
@@ -43,14 +42,15 @@ TASK_NAME = 'search_meilisearch_index'
 _STATE_NAME = 'meilisearch'
 
 
+
+
+from cloudfile_ext.search.ops import doc_id as _doc_id, normalize_op as _normalize_op
+
+
 def _text_extensions():
     from seahub.search.utils import SEARCH_FILEEXT
     from seahub.utils.file_types import TEXT
     return frozenset(SEARCH_FILEEXT[TEXT])
-
-
-def _doc_id(repo_id, path):
-    return '%s:%s' % (repo_id, hashlib.sha1(path.encode('utf-8')).hexdigest())
 
 
 def _fetch_content(repo, file_id, path, max_bytes):
@@ -90,6 +90,39 @@ def _fetch_content(repo, file_id, path, max_bytes):
         return ''
 
 
+def _fetch_tags(repo_id, path):
+    """Best-effort tag names for a file, or [] when unavailable.
+
+    Tags live in Seahub's FileTags table keyed by a UUID map; a freshly
+    committed file may not have a mapping yet, and a tag lookup failing must
+    not fail indexing.
+    """
+    try:
+        from seahub.file_tags.models import FileTags
+        return [t['tag_name'] for t in
+                FileTags.objects.get_file_tag_by_path(repo_id, path)]
+    except Exception:
+        logger.warning('meilisearch indexer: could not read tags for %s/%s',
+                       repo_id, path, exc_info=True)
+        return []
+
+
+def _ancestor_dirs(path):
+    """Ancestor directory paths of a file, shallow-to-deep order.
+
+    /folder-alpha/nested.txt -> ['/folder-alpha']; /a/b/c.txt -> ['/a', '/a/b'].
+    Used by the query side as a version-safe 'search within this folder'
+    prefix filter (dirs IN), because Meilisearch 1.10 has no STARTS WITH.
+    """
+    parts = [p for p in path.split('/') if p]
+    out = []
+    acc = ''
+    for part in parts[:-1]:
+        acc += '/' + part
+        out.append(acc)
+    return out
+
+
 def _build_document(repo_id, path, op_user, timestamp, max_bytes):
     from seaserv import seafile_api
 
@@ -104,6 +137,12 @@ def _build_document(repo_id, path, op_user, timestamp, max_bytes):
     size = seafile_api.get_file_size(repo.store_id, repo.version, file_id) or 0
     name = path.rsplit('/', 1)[-1]
     extension = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+    try:
+        creator = seafile_api.get_repo_owner(repo_id) or ''
+    except Exception:
+        logger.warning('meilisearch indexer: could not read owner for %s',
+                       repo_id, exc_info=True)
+        creator = ''
     return {
         'id': _doc_id(repo_id, path),
         'repo_id': repo_id,
@@ -112,8 +151,12 @@ def _build_document(repo_id, path, op_user, timestamp, max_bytes):
         'extension': extension,
         'object_type': 'file',
         'size': size,
-        'mtime': timestamp,
+        'mtime': int(timestamp.timestamp())
+                 if hasattr(timestamp, 'timestamp') else timestamp,
         'last_modifier': op_user,
+        'creator': creator,
+        'tags': _fetch_tags(repo_id, path),
+        'dirs': _ancestor_dirs(path),
         'content': _fetch_content(repo, file_id, path, max_bytes),
     }
 
@@ -165,31 +208,45 @@ def index_tick(client=None, max_bytes=None):
     upserts = {}
     deletes = set()
     for event in events:
-        op_type = event['op_type']
+        op_type = _normalize_op(event['op_type'])
         if op_type not in _FILE_OPS or event['obj_type'] != 'file':
             continue
-        repo_id, path = event['repo_id'], event['path']
+        repo_id = event['repo_id']
 
-        if op_type == 'delete':
-            doc_id = _doc_id(repo_id, path)
-            deletes.add(doc_id)
-            upserts.pop(doc_id, None)
-            continue
+        # seafevents merges consecutive commits of one op into a single
+        # Activity row whose detail is a list of the individual items (each
+        # with its own path / old_path). Expand it; single-op rows carry the
+        # path on the row itself.
+        detail = event['detail']
+        if isinstance(detail, list):
+            entries = [(it.get('path'), it.get('old_path'))
+                       for it in detail if isinstance(it, dict)]
+        elif isinstance(detail, dict):
+            entries = [(event['path'], detail.get('old_path'))]
+        else:
+            entries = [(event['path'], None)]
 
-        if op_type in ('rename', 'move'):
-            old_path = event['detail'].get('old_path')
-            if old_path:
+        for path, old_path in entries:
+            if not path:
+                continue
+            if op_type == 'delete':
+                doc_id = _doc_id(repo_id, path)
+                deletes.add(doc_id)
+                upserts.pop(doc_id, None)
+                continue
+
+            if op_type in ('rename', 'move') and old_path:
                 old_id = _doc_id(repo_id, old_path)
                 deletes.add(old_id)
                 upserts.pop(old_id, None)
 
-        doc = _build_document(repo_id, path, event['op_user'],
-                              event['timestamp'], max_bytes)
-        if doc is None:
-            deletes.add(_doc_id(repo_id, path))
-        else:
-            upserts[doc['id']] = doc
-            deletes.discard(doc['id'])
+            doc = _build_document(repo_id, path, event['op_user'],
+                                  event['timestamp'], max_bytes)
+            if doc is None:
+                deletes.add(_doc_id(repo_id, path))
+            else:
+                upserts[doc['id']] = doc
+                deletes.discard(doc['id'])
 
     try:
         if upserts:

@@ -86,7 +86,8 @@ from seahub.utils.repo import get_repo_owner, get_library_storages, \
         is_valid_repo_id_format, can_set_folder_perm_by_user, \
         add_encrypted_repo_secret_key_to_database, get_available_repo_perms, \
         parse_repo_perm
-from seahub.utils.star import star_file, unstar_file, get_dir_starred_files
+from seahub.utils.star import star_file, unstar_file, get_dir_starred_files, \
+        get_dir_starred_obj_ids, is_favorites_id_enabled
 from seahub.utils.file_tags import get_files_tags_in_dir
 from seahub.utils.file_types import MARKDOWN
 from seahub.utils.file_size import get_file_size_unit
@@ -117,7 +118,7 @@ from seahub.views.file import get_office_feature_by_repo
 from seahub.repo_metadata.models import RepoMetadata, RepoMetadataViews
 from seahub.repo_metadata.utils import init_metadata, init_tags, add_init_metadata_task
 from seahub.repo_metadata.metadata_server_api import MetadataServerAPI
-from seahub.ai.utils import get_ai_credit_by_user, get_ai_cost_by_user
+from seahub.ai.utils import get_ai_credit_by_user, get_ai_credit_used_by_user
 
 try:
     from seahub.settings import CLOUD_MODE
@@ -329,10 +330,11 @@ class AccountInfo(APIView):
 
         if ENABLE_SEAFILE_AI and SEAFILE_AI_SERVER_URL:
             info['ai_credit'] = get_ai_credit_by_user(request.user, org_id)
-            info['ai_cost'] = round(get_ai_cost_by_user(request.user, org_id), 2)
-            info['ai_usage_rate'] = str(float(info['ai_cost']) / info['ai_credit'] * 100) + '%'
-            if info['ai_credit'] == -1:
+            info['ai_credit_used'] = round(get_ai_credit_used_by_user(request.user, org_id), 2)
+            if info['ai_credit'] <= 0:
                 info['ai_usage_rate'] = '0%'
+            else:
+                info['ai_usage_rate'] = str(float(info['ai_credit_used']) / info['ai_credit'] * 100) + '%'
 
         if quota_total > 0:
             info['space_usage'] = str(float(quota_usage) / quota_total * 100) + '%'
@@ -611,6 +613,21 @@ class Search(APIView):
                 repo_id_map, repo_type_map = get_search_repos_map(search_repo,
                         username, org_id, shared_from, not_shared_from)
 
+            # CloudFile: tag / creator filters ride the structured filter
+            # vocabulary consumed by the selected search provider. Native
+            # ES/SeaSearch cannot express them, so they only take effect with
+            # a CloudFile provider selected (which is the path that builds the
+            # tag/creator index anyway).
+            filters = []
+            tags = request.GET.get('tags', '').strip()
+            if tags:
+                filters.append({'field': 'tags', 'op': 'in',
+                                'value': [t for t in tags.split(',') if t]})
+            creator_emails = request.GET.get('creator_emails', '').strip()
+            if creator_emails:
+                filters.append({'field': 'creator', 'op': 'in',
+                                'value': [c for c in creator_emails.split(',') if c]})
+
             obj_desc = {
                 'obj_type': obj_type,
                 'suffixes': suffixes,
@@ -620,7 +637,7 @@ class Search(APIView):
             # search file
             try:
                 results, total = search_files(repo_id_map, search_path, keyword, obj_desc, start, size, org_id,
-                                              search_filename_only)
+                                              search_filename_only, filters)
             except Exception as e:
                 logger.error(e)
                 results, total = [], 0
@@ -1675,6 +1692,31 @@ class Repo(APIView):
                           repo_name=repo.name)
         return Response('success', status=status.HTTP_200_OK)
 
+def _commit_touches_folder(repo_id, commit, folder, current_folder_only=False):
+    """Whether a commit changed the folder itself or, by default, one of its
+    direct children.
+
+    CloudFile review history-006/007: folder history must not recurse into
+    deeper levels, and the current-folder-only filter must exclude even direct
+    children. Each commit is diffed against its parent; the scope decision is
+    delegated to the pure matcher in cloudfile_ext.history.scope so Hub and
+    its unit tests share the same semantics.
+    """
+    parent_id = getattr(commit, 'parent_id', None) or ''
+    try:
+        diffs = seafserv_threaded_rpc.get_diff(repo_id, parent_id, commit.id)
+    except Exception:
+        return False
+    if not diffs:
+        return False
+
+    from cloudfile_ext.history.scope import touches_folder_paths
+    return touches_folder_paths(
+        ((getattr(d, 'name', '') or '', getattr(d, 'new_name', '') or '')
+         for d in diffs),
+        folder, current_folder_only=current_folder_only)
+
+
 class RepoHistory(APIView):
     authentication_classes = (TokenAuthentication, )
     permission_classes = (IsAuthenticated,)
@@ -1688,9 +1730,25 @@ class RepoHistory(APIView):
             current_page = 1
             per_page = 25
 
+        # CloudFile review history-006/007: optional folder scope. With no
+        # `path` param this endpoint behaves exactly like CE.
+        folder = request.GET.get('path', '').strip() or None
+        current_folder_only = False
+        raw = request.GET.get('current_folder_only', '')
+        if raw:
+            try:
+                current_folder_only = to_python_boolean(raw)
+            except ValueError:
+                current_folder_only = False
+
         commits_all = get_commits(repo_id, per_page * (current_page - 1),
                                   per_page + 1)
         commits = commits_all[:per_page]
+
+        if folder:
+            commits = [c for c in commits
+                       if _commit_touches_folder(repo_id, c, folder,
+                                                 current_folder_only)]
 
         if len(commits_all) == per_page + 1:
             page_next = True
@@ -2449,6 +2507,8 @@ def get_dir_entrys_by_id(request, repo, path, dir_id, request_type=None):
 
     starred_files = get_dir_starred_files(username, repo.id, path)
     files_tags_in_dir = get_files_tags_in_dir(repo.id, path)
+    starred_obj_ids = get_dir_starred_obj_ids(username, repo.id) \
+        if is_favorites_id_enabled() else None
 
     for e in file_list:
         e['modifier_contact_email'] = contact_email_dict.get(e['modifier_email'], '')
@@ -2461,7 +2521,9 @@ def get_dir_entrys_by_id(request, repo, path, dir_id, request_type=None):
                 e['file_tags'].append(file_tag)
         file_path = posixpath.join(path, e['name'])
         e['starred'] = False
-        if normalize_file_path(file_path) in starred_files:
+        if starred_obj_ids is not None:
+            e['starred'] = e['id'] in starred_obj_ids
+        elif normalize_file_path(file_path) in starred_files:
             e['starred'] = True
 
     dir_list.sort(key=lambda x: x['name'].lower())
@@ -3527,9 +3589,13 @@ class FileDetailView(APIView):
             file_size = 0
         entry["size"] = file_size
 
-        starred_files = UserStarredFiles.objects.filter(repo_id=repo_id,
-                path=path)
-        entry["starred"] = True if len(starred_files) > 0 else False
+        if is_favorites_id_enabled():
+            entry["starred"] = UserStarredFiles.objects.filter(
+                email=request.user.username, obj_id=obj_id).exists()
+        else:
+            starred_files = UserStarredFiles.objects.filter(repo_id=repo_id,
+                    path=path)
+            entry["starred"] = True if len(starred_files) > 0 else False
         file_comments = FileComment.objects.get_by_file_path(repo_id, path)
         comment_total = file_comments.count()
         entry["comment_total"] = comment_total
@@ -3662,7 +3728,37 @@ class FileHistory(APIView):
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
-        for commit in commits:
+        # CloudFile review history-002/003/004: additive search, filter and
+        # pagination seams. Without these query params the response is
+        # byte-identical to CE.
+        operator = request.GET.get('operator', '').strip() or \
+            request.GET.get('source', '').strip()
+        keyword = request.GET.get('q', '').strip().lower()
+
+        if operator:
+            commits = [c for c in commits
+                       if (getattr(c, 'creator_name', '') or '') == operator]
+        if keyword:
+            commits = [c for c in commits
+                       if keyword in (getattr(c, 'desc', '') or '').lower()
+                       or keyword in (getattr(c, 'creator_name', '') or '').lower()]
+
+        try:
+            current_page = int(request.GET.get('page', '1'))
+            per_page = int(request.GET.get('per_page', '25'))
+        except ValueError:
+            current_page = 1
+            per_page = 25
+        if current_page < 1:
+            current_page = 1
+        if per_page < 1:
+            per_page = 25
+
+        offset = (current_page - 1) * per_page
+        page_commits = commits[offset:offset + per_page]
+        page_next = len(commits) > offset + per_page
+
+        for commit in page_commits:
             creator_name = getattr(commit, 'creator_name', '')
 
             user_info = {}
@@ -3672,7 +3768,8 @@ class FileHistory(APIView):
 
             commit._dict['user_info'] = user_info
 
-        return HttpResponse(json.dumps({"commits": commits},
+        return HttpResponse(json.dumps({"commits": page_commits,
+                                        "page_next": page_next},
             cls=SearpcObjEncoder), status=200, content_type=json_content_type)
 
 class FileSharedLinkView(APIView):
@@ -3684,6 +3781,13 @@ class FileSharedLinkView(APIView):
     throttle_classes = (UserRateThrottle, )
 
     def put(self, request, repo_id, format=None):
+
+        # CloudFile review share-002: when external sharing is restricted,
+        # only system admins may create new share links.
+        from cloudfile_ext.features import is_enabled
+        if is_enabled('CF_ENABLE_SHARE_RESTRICT') and not request.user.is_staff:
+            error_msg = 'External sharing is disabled.'
+            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         repo = seaserv.get_repo(repo_id)
         if not repo:

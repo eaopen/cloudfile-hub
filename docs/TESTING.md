@@ -69,19 +69,24 @@ npm run build
 | `cloudfile_ext/external_sources/tests/` | 授权决策、开关关闭无贡献、路径/符号链接边界、provider、扫描游标 |
 | `cloudfile_ext/file_actions/tests/` | 动作读写分类、锁 provider 门禁、generation 续租/强制释放 |
 | `cloudfile_ext/audit/tests/` | 操作/对象过滤契约 |
+| `cloudfile_ext/favorites/tests/` | 收藏 `obj_id` 身份、移动/重命名跟随纯规则 |
+| `cloudfile_ext/fileops/tests/` | 复制/移动统一预检查、权限变化提示与幂等策略 |
 | `cloudfile_ext/tests/` | CE 14 身份转换、provider 注册/封存 |
-| `cloudfile_ext/office/tests/` | OnlyOffice 幂等 key；不证明模块已接入运行时 |
+| `cloudfile_ext/office/tests/` | OnlyOffice 回调鉴权/幂等 key；模块已随开关注册进运行时 |
 
 ## 最新验证结果
 
-2026-08-11 在仓库 `.venv`（Python 3.9.6、pytest 8.4.2）执行：
+2026-08-15 执行（Python 3.12.7、pytest 7.4.4）：
 
 ```text
-collected 217 items
-217 passed, 1 warning in 0.18s
+collected 265 items
+265 passed, 1 warning in 0.14s
 ```
 
-警告为 `DJANGO_SETTINGS_MODULE` 未被当前 pytest 插件识别。首次使用系统 `/usr/bin/python3` 运行失败，原因是该解释器未安装 pytest；这属于环境问题，不是用例失败。
+警告为 `DJANGO_SETTINGS_MODULE` 未被当前 pytest 插件识别：`pytest.ini` 声明了该选项，但
+`cloudfile_ext/` 是纯逻辑测试、不依赖 Django settings，不加载 pytest-django 不影响结果。
+计数较 218 增至 265，是 P2 新增的纯逻辑用例（收藏 obj_id、复制/移动预检查、ACL 服务层，
+以及标签/搜索/审计策略）；不含三仓与浏览器端到端。
 
 同日执行 `NODE_ENV=development ./node_modules/.bin/eslint ./src/cloudfile/` 通过。未设置 `NODE_ENV` 时 Babel preset 会拒绝解析，因此手工运行必须保留该环境变量；`npm run lint` 已内置。
 
@@ -95,7 +100,7 @@ collected 217 items
 - IdP/外部目录、SMB/NFS 挂载、CloudFile Local Agent。
 - CloudFile React 菜单、页面、原生路由 shadow 和本地会话浏览器流程。
 
-因此“217 passed”只能作为 Hub 纯逻辑和适配器级证据，不能升级为整套产品“已验收”。
+因此“265 passed”只能作为 Hub 纯逻辑和适配器级证据，不能升级为整套产品“已验收”。
 
 ## CI
 

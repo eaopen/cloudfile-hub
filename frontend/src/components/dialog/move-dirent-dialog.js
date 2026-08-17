@@ -2,10 +2,12 @@ import React from 'react';
 import { Modal } from 'reactstrap';
 import PropTypes from 'prop-types';
 import SelectDirentBody from './select-dirent-body';
+import MovePermissionConfirmDialog from './move-permission-confirm-dialog';
 import { gettext } from '../../utils/constants';
 import { Utils } from '../../utils/utils';
 import { RepoInfo } from '../../models';
 import { seafileAPI } from '../../utils/seafile-api';
+import { isEnabled } from '../../cloudfile/features';
 import toaster from '../toast';
 import { MODE_TYPE_MAP } from '../../constants';
 import SeahubModalHeader from '@/components/common/seahub-modal-header';
@@ -40,6 +42,7 @@ class MoveDirentDialog extends React.Component {
       searchResults: [],
       errMessage: '',
       initToShowChildren: false,
+      pendingMove: null,
     };
   }
 
@@ -91,6 +94,46 @@ class MoveDirentDialog extends React.Component {
     }
   };
 
+  maybeConfirmMove = (doMove, srcNames, direntType) => {
+    // CloudFile move permission-impact confirm: when CF_ENABLE_FILEOPS is on,
+    // preview the affected-members count and confirm before losing anyone
+    // access. Native CE behaviour (no switch) moves straight through.
+    if (!isEnabled('CF_ENABLE_FILEOPS')) {
+      doMove();
+      return;
+    }
+    const { repoID, path } = this.props;
+    const { selectedRepo, selectedPath } = this.state;
+    if (!srcNames || !srcNames.length || !selectedRepo || !selectedRepo.repo_id) {
+      doMove();
+      return;
+    }
+    seafileAPI.moveFileopsPreview(
+      repoID, path, srcNames, selectedRepo.repo_id, selectedPath, direntType
+    ).then((res) => {
+      const affected = (res && res.data && res.data.affected_members) || 0;
+      if (affected > 0) {
+        this.setState({ pendingMove: { affectedMembers: affected, doMove } });
+      } else {
+        doMove();
+      }
+    }).catch(() => {
+      // Preview unavailable (e.g. switch off mid-flight): fall back to the
+      // native move rather than blocking the user.
+      doMove();
+    });
+  };
+
+  confirmPendingMove = () => {
+    const { doMove } = this.state.pendingMove || {};
+    this.setState({ pendingMove: null });
+    if (doMove) doMove();
+  };
+
+  cancelPendingMove = () => {
+    this.setState({ pendingMove: null });
+  };
+
   moveItems = () => {
     let { repoID } = this.props;
     let { selectedRepo, selectedPath } = this.state;
@@ -138,8 +181,14 @@ class MoveDirentDialog extends React.Component {
       return;
     }
 
-    this.props.onItemsMove(selectedRepo, selectedPath, true);
-    this.toggle();
+    // Batch entry: preview the whole selection through the fileops shadow's
+    // src_dirents contract, so the affected-members warning covers every item.
+    const first = this.props.selectedDirentList && this.props.selectedDirentList[0];
+    const names = (this.props.selectedDirentList || []).map(dirent => dirent.name);
+    this.maybeConfirmMove(() => {
+      this.props.onItemsMove(selectedRepo, selectedPath, true);
+      this.toggle();
+    }, names, first ? (first.type === 'dir' ? 'dir' : 'file') : null);
   };
 
   moveItem = () => {
@@ -174,8 +223,10 @@ class MoveDirentDialog extends React.Component {
       return;
     }
 
-    this.props.onItemMove(selectedRepo, this.props.dirent, selectedPath, this.props.path, true);
-    this.toggle();
+    this.maybeConfirmMove(() => {
+      this.props.onItemMove(selectedRepo, this.props.dirent, selectedPath, this.props.path, true);
+      this.toggle();
+    }, [this.props.dirent.name], this.props.dirent.type === 'dir' ? 'dir' : 'file');
   };
 
   toggle = () => {
@@ -384,6 +435,13 @@ class MoveDirentDialog extends React.Component {
           onAddFolder={this.props.onAddFolder}
           initToShowChildren={this.state.initToShowChildren}
         />
+        {this.state.pendingMove && (
+          <MovePermissionConfirmDialog
+            affectedMembers={this.state.pendingMove.affectedMembers}
+            onConfirm={this.confirmPendingMove}
+            onCancel={this.cancelPendingMove}
+          />
+        )}
       </Modal>
     );
   }

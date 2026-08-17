@@ -171,8 +171,12 @@ class AgentContentView(APIView):
                 tmp_name = tmp.name
                 for chunk in upload.chunks():
                     tmp.write(chunk)
-            seafile_api.post_file(session['repo_id'], tmp_name, parent or '/', name,
-                                  session['username'])
+            # put_file replaces the existing dirent; post_file would add a
+            # sibling with a unique name (e.g. "professional (1).dwg") and
+            # leave the original untouched, so a re-claim would read stale
+            # content after a successful 204 write-back.
+            seafile_api.put_file(session['repo_id'], tmp_name, parent or '/', name,
+                                 session['username'], None)
         except Exception:
             return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
                              'Unable to save local editing result.')

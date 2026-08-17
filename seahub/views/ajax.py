@@ -44,7 +44,8 @@ from seahub.utils import check_filename_with_rename, EMPTY_SHA1, \
     new_merge_with_no_conflict, get_commit_before_new_merge, \
     gen_file_upload_url, is_org_context, is_pro_version, normalize_dir_path, \
     FILEEXT_TYPE_MAP
-from seahub.utils.star import get_dir_starred_files
+from seahub.utils.star import get_dir_starred_files, get_dir_starred_obj_ids, \
+        is_favorites_id_enabled
 from seahub.utils.file_types import IMAGE, VIDEO
 from seahub.utils.file_op import check_file_lock, ONLINE_OFFICE_LOCK_OWNER
 from seahub.utils.repo import get_locked_files_by_dir, get_repo_owner, \
@@ -175,6 +176,8 @@ def list_lib_dir(request, repo_id):
     dirs = seafserv_threaded_rpc.list_dir_with_perm(repo_id, path, dir_id,
             username, -1, -1)
     starred_files = get_dir_starred_files(username, repo_id, path)
+    starred_obj_ids = get_dir_starred_obj_ids(username, repo_id) \
+        if is_favorites_id_enabled() else None
 
     for dirent in dirs:
         dirent.last_modified = dirent.mtime
@@ -192,7 +195,9 @@ def list_lib_dir(request, repo_id):
 
             dirent.starred = False
             fpath = posixpath.join(path, dirent.obj_name)
-            if fpath in starred_files:
+            if starred_obj_ids is not None:
+                dirent.starred = dirent.obj_id in starred_obj_ids
+            elif fpath in starred_files:
                 dirent.starred = True
 
             file_list.append(dirent)

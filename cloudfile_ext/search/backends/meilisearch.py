@@ -30,9 +30,18 @@ INDEX_NAME = 'cloudfile_files'
 
 #: Attributes pushed to Meilisearch by ensure_index(). The indexer and this
 #: query-side module share one definition so they can never drift apart.
-FILTERABLE_ATTRIBUTES = ['repo_id', 'path', 'object_type', 'extension', 'mtime', 'size']
+#:
+#: `creator` (library owner) and `tags` let the advanced filter panel narrow a
+#: query server-side; `tags` is also searchable so a tag name can match a file
+#: whose name and content do not -- and the hit reports which tags matched so
+#: the UI never presents a tag hit as a name hit. `dirs` lists a document's
+#: ancestor directory paths (e.g. /a/b/c.txt -> ['/a', '/a/b']); Meilisearch
+#: 1.10 has no STARTS WITH filter, so the "search within this folder"
+#: narrowing uses `dirs IN [<search_path>]`, which matches exactly the
+#: documents under that directory.
+FILTERABLE_ATTRIBUTES = ['repo_id', 'path', 'object_type', 'extension', 'mtime', 'size', 'creator', 'tags', 'dirs']
 SORTABLE_ATTRIBUTES = ['mtime', 'size', 'name']
-SEARCHABLE_ATTRIBUTES = ['name', 'path', 'content']
+SEARCHABLE_ATTRIBUTES = ['name', 'path', 'content', 'tags']
 
 #: Translation from cloudfile_ext.search_query operators to Meilisearch filter
 #: syntax. Only entries here may appear in supported_filter_ops below --
@@ -73,6 +82,24 @@ def _filter_expr(f):
         return template.format(field=f.field,
                               value=json.dumps(list(f.value), ensure_ascii=False))
     return template.format(field=f.field, value=_quote(f.value))
+
+
+def _clean_highlight(text):
+    """Strip Meilisearch's default ``<em>`` highlight markers."""
+    return text.replace('<em>', '').replace('</em>', '')
+
+
+def _matched_tags(formatted_tags):
+    """Tag names whose stored form carries a highlight marker.
+
+    ``attributesToHighlight=['tags']`` makes Meilisearch wrap the matched term
+    inside a tag value with ``<em>``. A highlighted tag therefore means "this
+    hit matched via the tag, not the name", which is exactly the signal the UI
+    needs to show a 'matched tag' indicator instead of implying a name match.
+    """
+    if not formatted_tags:
+        return []
+    return [_clean_highlight(t) for t in formatted_tags if '<em>' in t]
 
 
 class MeilisearchClient(object):
@@ -138,7 +165,8 @@ class MeilisearchClient(object):
                    {'filter': 'repo_id = %s' % _quote(repo_id)})
 
     def search(self, query, filter_expr, offset, limit, filename_only=False):
-        payload = {'q': query or '', 'offset': offset, 'limit': limit}
+        payload = {'q': query or '', 'offset': offset, 'limit': limit,
+                   'attributesToHighlight': ['tags']}
         if filter_expr:
             payload['filter'] = filter_expr
         if filename_only:
@@ -213,8 +241,10 @@ class MeilisearchProvider(object):
             # Only ever passed together with a single-repo repos_map (see
             # seahub.search.utils.search_files) -- a "search within this
             # folder" narrowing, not a permission boundary, so best-effort is
-            # fine here.
-            clauses.append('path STARTS WITH %s' % _quote(search_path.rstrip('/') + '/'))
+            # fine here. `dirs IN` is the version-safe prefix filter (no
+            # STARTS WITH before Meilisearch 1.12).
+            clauses.append('dirs IN %s' % json.dumps(
+                [search_path.rstrip('/')], ensure_ascii=False))
         clauses.extend(_obj_desc_clauses(obj_desc))
         for f in (filters or []):
             clauses.append(_filter_expr(f))
@@ -229,11 +259,14 @@ class MeilisearchProvider(object):
 
         hits = []
         for doc in resp.get('hits', []):
+            formatted = doc.get('_formatted') or {}
             hits.append({
                 'repo_id': doc.get('repo_id'),
                 'fullpath': doc.get('path'),
                 'name': doc.get('name'),
                 'size': doc.get('size'),
+                'tags': doc.get('tags') or [],
+                'matched_tags': _matched_tags(formatted.get('tags')),
             })
         total = resp.get('estimatedTotalHits', len(hits))
         return hits, total

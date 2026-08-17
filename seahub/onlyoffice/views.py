@@ -29,14 +29,15 @@ from seaserv import seafile_api
 
 from seahub.onlyoffice.settings import VERIFY_ONLYOFFICE_CERTIFICATE, \
         ONLYOFFICE_JWT_SECRET, ONLYOFFICE_FILE_EXTENSION
-from seahub.onlyoffice.utils import get_onlyoffice_dict, get_doc_key_by_repo_id_file_path
+from seahub.onlyoffice.utils import get_onlyoffice_dict, get_doc_key_by_repo_id_file_path, \
+    gen_onlyoffice_file_get_url
 from seahub.onlyoffice.utils import delete_doc_key, get_file_info_by_doc_key
 from seahub.onlyoffice.converter_utils import get_file_name_without_ext, \
         get_file_ext, get_file_type, get_internal_extension
 from seahub.onlyoffice.converter import get_converter_uri
 from seahub.utils import gen_inner_file_upload_url, is_pro_version, \
     normalize_file_path, check_filename_with_rename, get_site_scheme_and_netloc, \
-    gen_inner_file_get_url, get_file_type_and_ext, gen_file_get_url
+    gen_inner_file_get_url, get_file_type_and_ext
 from seahub.utils.file_op import if_locked_by_online_office
 from seahub.views import check_folder_permission
 
@@ -488,7 +489,7 @@ class OnlyofficeGetReferenceData(APIView):
                                                            username,
                                                            use_onetime=False)
 
-        doc_url = gen_file_get_url(dl_token, file_name)
+        doc_url = gen_onlyoffice_file_get_url(dl_token, file_name)
         link = "%s%s" % (instance_id, reverse('view_lib_file', args=[
             source_repo_id, source_file_path]))
 

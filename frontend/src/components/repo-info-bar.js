@@ -3,6 +3,8 @@ import PropTypes from 'prop-types';
 import ModalPortal from './modal-portal';
 import ListTaggedFilesDialog from './dialog/list-taggedfiles-dialog';
 import RepoInfoBarMigrate from './repo-info-bar-migrate';
+import Icon from './icon';
+import { gettext } from '../utils/constants';
 
 import '../css/repo-info-bar.css';
 
@@ -51,6 +53,11 @@ class RepoInfoBar extends React.Component {
                 <li key={usedRepoTag.id} className="used-tag-item">
                   <span className="used-tag" style={{ backgroundColor: usedRepoTag.color }}></span>
                   <span className="used-tag-name" title={usedRepoTag.name}>{usedRepoTag.name}</span>
+                  {usedRepoTag.isSystem && (
+                    <span className="used-tag-system-lock" title={gettext('System tag')} aria-label={gettext('System tag')}>
+                      <Icon symbol="lock" />
+                    </span>
+                  )}
                   <button type="button" className="used-tag-files border-0 bg-transparent" onClick={this.onListTaggedFiles.bind(this, usedRepoTag)}>
                     {usedRepoTag.fileCount > 1 ? usedRepoTag.fileCount + ' files' : usedRepoTag.fileCount + ' file'}
                   </button>

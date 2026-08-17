@@ -48,7 +48,8 @@ from seahub.utils import render_permission_error, render_error, \
     is_pro_version, FILE_AUDIT_ENABLED, is_valid_dirent_name, \
     is_windows_operating_system, get_file_history_suffix, IS_EMAIL_CONFIGURED, \
     normalize_file_path, normalize_dir_path
-from seahub.utils.star import get_dir_starred_files
+from seahub.utils.star import get_dir_starred_files, get_dir_starred_obj_ids, \
+        is_favorites_id_enabled
 from seahub.utils.repo import get_library_storages, parse_repo_perm, is_repo_admin
 from seahub.utils.file_op import check_file_lock
 from seahub.utils.timeutils import utc_to_local
@@ -263,6 +264,8 @@ def get_repo_dirents(request, repo, commit, path, offset=-1, limit=-1):
 
         username = request.user.username
         starred_files = get_dir_starred_files(username, repo.id, path)
+        starred_obj_ids = get_dir_starred_obj_ids(username, repo.id) \
+            if is_favorites_id_enabled() else None
         fileshares = FileShare.objects.filter(repo_id=repo.id).filter(username=username)
         uploadlinks = UploadLinkShare.objects.filter(repo_id=repo.id).filter(username=username)
 
@@ -304,7 +307,9 @@ def get_repo_dirents(request, repo, commit, path, offset=-1, limit=-1):
                 dirent.dl_link = get_file_download_link(repo.id, dirent.obj_id,
                                                         p_fpath)
                 dirent.history_link = file_history_base + '?p=' + quote(p_fpath)
-                if fpath in starred_files:
+                if starred_obj_ids is not None:
+                    dirent.starred = dirent.obj_id in starred_obj_ids
+                elif fpath in starred_files:
                     dirent.starred = True
                 for share in fileshares:
                     if fpath == share.path:

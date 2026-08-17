@@ -1353,6 +1353,12 @@ def view_shared_file(request, fileshare):
     Download share file if `dl` in request param.
     View raw share file if `raw` in request param.
     """
+    # CloudFile review share-004: with external sharing restricted, an old
+    # share link must not bypass the switch — treat it as nonexistent.
+    from cloudfile_ext.features import is_enabled
+    if is_enabled('CF_ENABLE_SHARE_RESTRICT'):
+        raise Http404
+
     from seahub.utils import redirect_to_login
     token = fileshare.token
     if not check_share_link_user_access(fileshare, request.user.username):

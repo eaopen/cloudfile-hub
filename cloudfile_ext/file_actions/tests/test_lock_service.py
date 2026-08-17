@@ -71,3 +71,18 @@ def test_force_release_is_fenced_to_the_generation_an_admin_reviewed(service, mo
             'generation': 'generation', 'reason': 'recovery',
         },
     }
+
+
+def test_browser_descriptor_has_agent_protocol_mode_and_safe_filename(service):
+    descriptor = service._agent_session_descriptor(
+        'local-edit', '/plans/roadmap.docx', 'one-time-ticket', 60, 1000)
+
+    assert descriptor == {
+        'protocol': 'cloudfile-local/v2',
+        'mode': 'local-edit',
+        'file': {'name': 'roadmap.docx'},
+        'ticket': 'one-time-ticket',
+        'expires_in': 60,
+        'expires_at': 1060,
+    }
+    assert 'content_url' not in repr(descriptor)

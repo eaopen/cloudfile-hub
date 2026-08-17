@@ -98,7 +98,9 @@ cloudfile_ext/
 ├── file_actions/        预览动作、锁、签出和本地 Agent 会话
 ├── metadata/            元数据/标签占位，当前不登记有效行为
 ├── checkout/            早期占位；实际签出入口已在 file_actions/
-└── office/              回调保护代码存在，但当前未加入 apps.py 注册列表
+├── fileops/             复制/移动统一预检查与幂等
+├── favorites/           收藏 obj_id 身份；经上游 star 端点接线
+└── office/              回调守卫，已随 CF_ENABLE_ONLYOFFICE 注册进 apps.py
 ```
 
 能力分支在这里加自己的包（例如 `feature/dir-acl` 的 `acl/`），并在 `apps.py`
