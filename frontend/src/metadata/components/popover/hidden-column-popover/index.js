@@ -45,8 +45,7 @@ const HideColumnPopover = ({ hidePopover, onChange, readOnly, target, placement,
       document.removeEventListener('click', hide, true);
       document.removeEventListener('keydown', onHotKey);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [hide, onHotKey]);
 
   const onPopoverInsideClick = useCallback((event) => {
     event.stopPropagation();
@@ -102,7 +101,7 @@ const HideColumnPopover = ({ hidePopover, onChange, readOnly, target, placement,
       className="sf-metadata-hide-columns-popover"
       boundariesElement={document.body}
     >
-      <div ref={popoverRef} onClick={onPopoverInsideClick} className="sf-popover-container sf-metadata-hide-columns-container" style={{ maxHeight: window.innerHeight - 100 }}>
+      <div ref={popoverRef} onClick={onPopoverInsideClick} className="sf-metadata-hide-columns-container" style={{ maxHeight: window.innerHeight - 100 }}>
         <div className="sf-metadata-hide-columns-search-container">
           <SearchInput
             placeholder={gettext('Search property')}

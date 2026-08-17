@@ -65,8 +65,10 @@ class SelectOptionGroup extends Component {
   onHotKey = (event) => {
     const keyCode = event.keyCode;
     if (keyCode === KeyCodes.UpArrow) {
+      event.preventDefault();
       this.onPressUp();
     } else if (keyCode === KeyCodes.DownArrow) {
+      event.preventDefault();
       this.onPressDown();
     } else if (keyCode === KeyCodes.Enter) {
       let option = this.filterOptions && this.filterOptions[this.state.activeIndex];
@@ -193,6 +195,7 @@ class SelectOptionGroup extends Component {
             onChange={this.onChangeSearch}
             ref={this.searchInputRef}
             isClearable={true}
+            clearValue={() => this.onChangeSearch('')}
           />
         </div>
         <div className="option-group-content" ref={(ref) => this.optionGroupContentRef = ref}>
