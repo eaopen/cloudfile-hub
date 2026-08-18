@@ -21,6 +21,7 @@ from cloudfile_ext.acl import resolver
 logger = logging.getLogger(__name__)
 
 RULES_CACHE_KEY = 'cf_acl_rules_%s'
+ADMIN_RULES_CACHE_KEY = 'cf_acl_admin_rules_%s'
 SUBJECTS_CACHE_KEY = 'cf_acl_subjects_%s'
 
 
@@ -38,9 +39,20 @@ def _load_rules(repo_id):
     return rules
 
 
+def _load_admin_rules(repo_id):
+    key = ADMIN_RULES_CACHE_KEY % repo_id
+    rules = cache.get(key)
+    if rules is None:
+        from cloudfile_ext.acl.models import DirAdmin
+        rules = DirAdmin.objects.rules_for_repo(repo_id)
+        cache.set(key, rules, _cache_ttl())
+    return rules
+
+
 def invalidate_repo(repo_id):
     """Drop the cached rules for a repo. Call after any rule write."""
     cache.delete(RULES_CACHE_KEY % repo_id)
+    cache.delete(ADMIN_RULES_CACHE_KEY % repo_id)
 
 
 def _load_subjects(username):
@@ -159,3 +171,49 @@ def is_path_denied(username, repo_id, path):
         return True
 
     return resolver.denies(rules, subjects, path)
+
+
+def _is_library_admin(username, repo_id):
+    """Library-level adminship: owner or designated admin (V1 of the manage
+    dimension). Kept behind a function so tests can stub it without importing
+    seahub's share utils."""
+    from seahub.share.utils import is_repo_admin
+    return is_repo_admin(username, repo_id)
+
+
+def can_manage(username, repo_id, path):
+    """The single management-decision entry point (acl-semantics.md 7.2).
+
+    A library admin always manages; otherwise a directory-level admin grant
+    covering `path` does. Management authorization never consults the content
+    ACL, so a restrictive content rule can never lock an admin out of the very
+    endpoint needed to remove it.
+    """
+    if _is_library_admin(username, repo_id):
+        return True
+
+    if not is_enabled('CF_ENABLE_DIR_ACL'):
+        return False
+
+    try:
+        rules = _load_admin_rules(repo_id)
+    except Exception:
+        # Fail closed: not being able to read the grants must not widen who
+        # can manage.
+        logger.exception(
+            'cloudfile: failed to load directory admin grants for repo %s, '
+            'denying manage', repo_id)
+        return False
+
+    if not rules:
+        return False
+
+    try:
+        subjects = _load_subjects(username)
+    except Exception:
+        logger.exception(
+            'cloudfile: failed to resolve subjects for %s, denying manage',
+            username)
+        return False
+
+    return resolver.can_manage(rules, subjects, path)

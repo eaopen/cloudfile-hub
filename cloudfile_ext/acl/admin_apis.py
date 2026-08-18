@@ -23,7 +23,8 @@ from seahub.api2.utils import api_error
 from cloudfile_ext.features import is_enabled
 from cloudfile_ext.acl import resolver, service, subjects
 from cloudfile_ext.acl.apis import (
-    VALID_PERMISSIONS, VALID_SUBJECT_TYPES, _serialize, _feature_off,
+    VALID_PERMISSIONS, VALID_SUBJECT_TYPES, _serialize, _serialize_admin,
+    _feature_off,
 )
 
 logger = logging.getLogger(__name__)
@@ -139,6 +140,84 @@ class AdminDirACLView(APIView):
                     return api_error(status.HTTP_400_BAD_REQUEST,
                                      'subject not found: %s' % e)
                 DirACL.objects.delete_rule(
+                    repo_id, resolver.normalize_path(path), subject_type,
+                    subject)
+        except Exception as e:
+            logger.error(e)
+            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                             'Internal Server Error')
+
+        service.invalidate_repo(repo_id)
+        return Response({'success': True})
+
+
+class AdminDirAdminView(APIView):
+    """List or clear a library's directory-admin grants, as an administrator.
+
+    The recovery counterpart to AdminDirACLView: a library whose owner left
+    still needs somebody able to inspect and revoke delegated admin grants
+    (acl-semantics.md 7.2).
+    """
+
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+    throttle_classes = (UserRateThrottle,)
+
+    def get(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_DIR_ACL'):
+            return _feature_off()
+
+        from cloudfile_ext.acl.models import DirAdmin
+
+        try:
+            page = int(request.GET.get('page', '1'))
+            per_page = min(int(request.GET.get('per_page', '100')),
+                           MAX_RULES_PER_PAGE)
+        except ValueError:
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'page or per_page invalid.')
+        if page < 1 or per_page < 1:
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'page or per_page invalid.')
+
+        qs = DirAdmin.objects.filter(repo_id=repo_id).order_by('path', 'id')
+        total = qs.count()
+        start = (page - 1) * per_page
+        grants = qs[start:start + per_page]
+
+        return Response({
+            'repo_id': repo_id,
+            'total': total,
+            'page': page,
+            'per_page': per_page,
+            'grants': [_serialize_admin(g) for g in grants],
+        })
+
+    def delete(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_DIR_ACL'):
+            return _feature_off()
+
+        from cloudfile_ext.acl.models import DirAdmin
+
+        path = request.GET.get('path')
+        subject_type = request.GET.get('subject_type', '')
+        subject = request.GET.get('subject', '')
+
+        try:
+            if path is None:
+                # Clearing a whole library's delegated grants is the "owner
+                # has left" escape hatch for the manage dimension.
+                DirAdmin.objects.filter(repo_id=repo_id).delete()
+            else:
+                if subject_type not in VALID_SUBJECT_TYPES or not subject:
+                    return api_error(status.HTTP_400_BAD_REQUEST,
+                                     'subject_type or subject invalid.')
+                try:
+                    subject = subjects.resolve(subject_type, subject)
+                except subjects.UnknownSubject as e:
+                    return api_error(status.HTTP_400_BAD_REQUEST,
+                                     'subject not found: %s' % e)
+                DirAdmin.objects.delete_rule(
                     repo_id, resolver.normalize_path(path), subject_type,
                     subject)
         except Exception as e:

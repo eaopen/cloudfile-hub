@@ -88,3 +88,42 @@ def test_subject_failure_fails_closed(service, monkeypatch):
 
     monkeypatch.setattr(service, '_load_subjects', boom)
     assert service.is_path_denied('u@e.com', 'repo', '/hr/a.txt') is True
+
+
+def test_can_manage_library_admin_always(service, monkeypatch):
+    monkeypatch.setattr(service, '_is_library_admin', lambda u, r: True)
+    monkeypatch.setattr(service, 'is_enabled', lambda name: False)
+    assert service.can_manage('u@e.com', 'repo', '/x') is True
+
+
+def test_can_manage_switch_off_denies_non_admin(service, monkeypatch):
+    monkeypatch.setattr(service, '_is_library_admin', lambda u, r: False)
+    monkeypatch.setattr(service, 'is_enabled', lambda name: False)
+    monkeypatch.setattr(service, '_load_admin_rules', lambda repo_id: [
+        {'path': '/a', 'subject_type': 'user', 'subject': 'u@e.com',
+         'inherit': 1}])
+    assert service.can_manage('u@e.com', 'repo', '/a') is False
+
+
+def test_can_manage_dir_grant_covers_path(service, monkeypatch):
+    monkeypatch.setattr(service, '_is_library_admin', lambda u, r: False)
+    monkeypatch.setattr(service, 'is_enabled', lambda name: True)
+    monkeypatch.setattr(service, '_load_admin_rules', lambda repo_id: [
+        {'path': '/a', 'subject_type': 'user', 'subject': 'u@e.com',
+         'inherit': 1}])
+    monkeypatch.setattr(service, '_load_subjects',
+                        lambda username: resolver.subject_set(username))
+
+    assert service.can_manage('u@e.com', 'repo', '/a/b') is True
+    assert service.can_manage('u@e.com', 'repo', '/other') is False
+
+
+def test_can_manage_loader_failure_fails_closed(service, monkeypatch):
+    monkeypatch.setattr(service, '_is_library_admin', lambda u, r: False)
+    monkeypatch.setattr(service, 'is_enabled', lambda name: True)
+
+    def boom(repo_id):
+        raise RuntimeError('db down')
+
+    monkeypatch.setattr(service, '_load_admin_rules', boom)
+    assert service.can_manage('u@e.com', 'repo', '/x') is False
