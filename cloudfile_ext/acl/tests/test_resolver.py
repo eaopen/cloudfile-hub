@@ -127,3 +127,46 @@ def test_never_widens():
             if got is None:
                 continue
             assert order[got] <= order[native], (native, decision, got)
+
+
+def test_can_manage_grant_covers_descendants():
+    subjects = resolver.subject_set('u@e.com')
+    rules = [{'path': '/a', 'subject_type': 'user', 'subject': 'u@e.com',
+              'inherit': 1}]
+    assert resolver.can_manage(rules, subjects, '/a')
+    assert resolver.can_manage(rules, subjects, '/a/b/c')
+    assert not resolver.can_manage(rules, subjects, '/b')
+
+
+def test_can_manage_non_inheriting_grant_covers_only_exact_path():
+    subjects = resolver.subject_set('u@e.com')
+    rules = [{'path': '/a', 'subject_type': 'user', 'subject': 'u@e.com',
+              'inherit': 0}]
+    assert resolver.can_manage(rules, subjects, '/a')
+    assert not resolver.can_manage(rules, subjects, '/a/b')
+
+
+def test_can_manage_root_grant_covers_everything():
+    subjects = resolver.subject_set('u@e.com')
+    rules = [{'path': '/', 'subject_type': 'user', 'subject': 'u@e.com',
+              'inherit': 1}]
+    assert resolver.can_manage(rules, subjects, '/deep/path/file.txt')
+
+
+def test_can_manage_ignores_other_subjects_and_empty_rules():
+    subjects = resolver.subject_set('u@e.com')
+    other = [{'path': '/a', 'subject_type': 'user', 'subject': 'x@e.com',
+              'inherit': 1}]
+    assert not resolver.can_manage(other, subjects, '/a')
+    assert not resolver.can_manage([], subjects, '/a')
+
+
+def test_can_manage_group_grant():
+    rules = [{'path': '/a', 'subject_type': 'group', 'subject': '1',
+              'inherit': 1}]
+    assert resolver.can_manage(rules, resolver.subject_set('u@e.com',
+                                                           group_ids=['1']),
+                               '/a/x')
+    assert not resolver.can_manage(rules, resolver.subject_set('v@e.com',
+                                                               group_ids=['2']),
+                                   '/a/x')

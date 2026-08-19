@@ -113,3 +113,77 @@ class DirACL(models.Model):
         self.path = normalize_path(self.path)
         self.path_hash = path_hash(self.path)
         return super(DirACL, self).save(*args, **kwargs)
+
+
+class DirAdminManager(models.Manager):
+    """Manager for directory-level admin grants (delegated manage).
+
+    Same shape as DirACL minus the permission column: a grant *is* the admin
+    role, and the manage dimension has no denies (acl-semantics.md 7).
+    """
+
+    def rules_for_repo(self, repo_id):
+        rows = self.filter(repo_id=repo_id).values(
+            'path', 'subject_type', 'subject', 'inherit')
+        return [dict(row) for row in rows]
+
+    def set_rule(self, repo_id, path, subject_type, subject, inherit=True):
+        path = normalize_path(path)
+        now = int(time.time())
+        obj, _created = self.update_or_create(
+            repo_id=repo_id,
+            path_hash=path_hash(path),
+            subject_type=subject_type,
+            subject=subject,
+            defaults={
+                'path': path,
+                'inherit': 1 if inherit else 0,
+                'mtime': now,
+            },
+            # Only set on insert, so editing a rule keeps its original date.
+            create_defaults={
+                'path': path,
+                'inherit': 1 if inherit else 0,
+                'ctime': now,
+                'mtime': now,
+            },
+        )
+        return obj
+
+    def delete_rule(self, repo_id, path, subject_type, subject):
+        return self.filter(
+            repo_id=repo_id,
+            path_hash=path_hash(path),
+            subject_type=subject_type,
+            subject=subject,
+        ).delete()
+
+
+class DirAdmin(models.Model):
+    repo_id = models.CharField(max_length=36, db_index=True)
+    path = models.CharField(max_length=1000)
+    #: sha1(path); indexed instead of `path` for the same MySQL reason as
+    #: cf_dir_acl.
+    path_hash = models.CharField(max_length=40)
+    subject_type = models.CharField(max_length=16, choices=SUBJECT_TYPE_CHOICES)
+    subject = models.CharField(max_length=255)
+    inherit = models.SmallIntegerField(default=1)
+    ctime = models.BigIntegerField(null=True)
+    mtime = models.BigIntegerField(null=True)
+
+    objects = DirAdminManager()
+
+    class Meta:
+        managed = False
+        db_table = 'cf_dir_admin'
+        app_label = 'cloudfile_ext'
+        unique_together = ('repo_id', 'path_hash', 'subject_type', 'subject')
+
+    def __str__(self):
+        return '%s:%s %s:%s' % (self.repo_id, self.path, self.subject_type,
+                                self.subject)
+
+    def save(self, *args, **kwargs):
+        self.path = normalize_path(self.path)
+        self.path_hash = path_hash(self.path)
+        return super(DirAdmin, self).save(*args, **kwargs)

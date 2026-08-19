@@ -1,10 +1,10 @@
 # -*- coding: utf-8 -*-
 """Directory ACL management endpoints.
 
-Managing ACL on a folder is itself a privileged operation: only someone with
-read-write access to the folder *and* ownership of the library may change it.
-Requiring plain `rw` would let anyone a folder was shared with re-share it
-more widely.
+Managing ACL on a directory or file is itself a privileged operation: only a
+library admin or a covering directory-level admin (`PermissionService.
+can_manage`) may change it. Requiring plain `rw` would let anyone a folder was
+shared with re-share it more widely.
 """
 
 import logging
@@ -25,6 +25,7 @@ from seahub.constants import PERMISSION_READ_WRITE
 from cloudfile_ext.features import is_enabled
 from cloudfile_ext.acl import resolver, service, subjects
 from cloudfile_ext.acl.models import DirACL
+from cloudfile_ext.permissions import PermissionService
 
 logger = logging.getLogger(__name__)
 
@@ -40,28 +41,33 @@ def _feature_off():
 def _check_can_manage(request, repo_id, path):
     """Return an error Response, or None when the caller may manage ACL here.
 
-    Ownership is required so that a user a folder was merely shared with
-    cannot re-share it more widely.
+    Library adminship or a covering directory-level admin grant is required
+    (``PermissionService.can_manage``), so a user a folder was merely shared
+    with cannot re-share it more widely, while a delegated directory admin can
+    manage within their scope.
 
     The permission check deliberately uses the *native* repo permission rather
     than check_folder_permission: the latter now applies the directory ACL, so
-    an owner who wrote a restrictive rule covering themselves would be locked
+    an admin who wrote a restrictive rule covering themselves would be locked
     out of the very endpoint needed to remove it.
     """
     repo = seafile_api.get_repo(repo_id)
     if not repo:
         return api_error(status.HTTP_404_NOT_FOUND, 'Library not found.')
 
-    if not seafile_api.get_dir_id_by_path(repo_id, path):
-        return api_error(status.HTTP_404_NOT_FOUND, 'Folder not found.')
+    # Rules may target a directory or a file (acl-semantics.md 4.3); the path
+    # must simply exist.
+    if (not seafile_api.get_dir_id_by_path(repo_id, path)
+            and not seafile_api.get_file_id_by_path(repo_id, path)):
+        return api_error(status.HTTP_404_NOT_FOUND, 'Path not found.')
 
     username = request.user.username
     if seafile_api.check_permission(repo_id, username) != PERMISSION_READ_WRITE:
         return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
-    if seafile_api.get_repo_owner(repo_id) != username:
+    if not PermissionService.can_manage(username, repo_id, path):
         return api_error(status.HTTP_403_FORBIDDEN,
-                         'Only the library owner can manage directory ACL.')
+                         'Only a library admin can manage directory ACL.')
     return None
 
 
@@ -217,12 +223,124 @@ class DirACLEffectiveView(APIView):
                 return error
 
         native = seafile_api.check_permission(repo_id, target)
-        effective = service.apply_dir_acl(target, repo_id, path, native)
+        effective = PermissionService.effective_perm(target, repo_id, path,
+                                                     native)
 
         return Response({
             'path': path,
             'user': target,
             'native_permission': native,
             'effective_permission': effective,
+            'can_manage': PermissionService.can_manage(target, repo_id, path),
             'levels': resolver.ancestors(path),
         })
+
+
+def _serialize_admin(rule):
+    return {
+        'repo_id': rule.repo_id,
+        'path': rule.path,
+        'subject_type': rule.subject_type,
+        'subject': rule.subject,
+        'inherit': bool(rule.inherit),
+        'mtime': rule.mtime,
+    }
+
+
+class DirAdminView(APIView):
+    """List, grant and revoke directory-level admin (delegated manage).
+
+    A grant covers the directory it is set on and, with inherit, everything
+    below it (acl-semantics.md 7). Who may manage here is decided by the same
+    ``PermissionService.can_manage`` the content endpoints use, so a directory
+    admin can delegate further down but never outside their own scope.
+    """
+
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAuthenticated,)
+    throttle_classes = (UserRateThrottle,)
+
+    def get(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_DIR_ACL'):
+            return _feature_off()
+
+        path = resolver.normalize_path(request.GET.get('path', '/'))
+        error = _check_can_manage(request, repo_id, path)
+        if error:
+            return error
+
+        from cloudfile_ext.acl.models import DirAdmin
+        grants = DirAdmin.objects.filter(
+            repo_id=repo_id, path_hash=resolver.path_hash(path))
+        return Response({'path': path,
+                         'grants': [_serialize_admin(g) for g in grants]})
+
+    def post(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_DIR_ACL'):
+            return _feature_off()
+
+        path = resolver.normalize_path(request.data.get('path', '/'))
+        subject_type = request.data.get('subject_type', '')
+        subject = request.data.get('subject', '')
+        inherit = request.data.get('inherit', True)
+
+        if subject_type not in VALID_SUBJECT_TYPES:
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'subject_type invalid.')
+        if not subject:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'subject invalid.')
+
+        error = _check_can_manage(request, repo_id, path)
+        if error:
+            return error
+
+        try:
+            subject = subjects.resolve(subject_type, subject)
+        except subjects.UnknownSubject as e:
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'subject not found: %s' % e)
+
+        try:
+            from cloudfile_ext.acl.models import DirAdmin
+            grant = DirAdmin.objects.set_rule(
+                repo_id, path, subject_type, subject, inherit=bool(inherit))
+        except Exception as e:
+            logger.error(e)
+            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                             'Internal Server Error')
+
+        service.invalidate_repo(repo_id)
+        return Response(_serialize_admin(grant))
+
+    def delete(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_DIR_ACL'):
+            return _feature_off()
+
+        path = resolver.normalize_path(request.GET.get('path', '/'))
+        subject_type = request.GET.get('subject_type', '')
+        subject = request.GET.get('subject', '')
+
+        if subject_type not in VALID_SUBJECT_TYPES or not subject:
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'subject_type or subject invalid.')
+
+        error = _check_can_manage(request, repo_id, path)
+        if error:
+            return error
+
+        try:
+            subject = subjects.resolve(subject_type, subject)
+        except subjects.UnknownSubject as e:
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'subject not found: %s' % e)
+
+        try:
+            from cloudfile_ext.acl.models import DirAdmin
+            DirAdmin.objects.delete_rule(repo_id, path, subject_type, subject)
+        except Exception as e:
+            logger.error(e)
+            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                             'Internal Server Error')
+
+        service.invalidate_repo(repo_id)
+        return Response({'success': True})

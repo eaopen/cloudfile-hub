@@ -95,20 +95,27 @@ def pick(rules):
     """Choose the winning permission among rules matching at one level.
 
     Two steps, per acl-semantics.md section 4.1: take the most specific
-    subject type present, then take the strictest permission within it.
+    subject type present, then -- within that type -- let a deny veto
+    outright and otherwise keep the highest grant.
 
     Splitting by subject type first is what keeps an explicit user grant
     meaningful. Without it, one `r` rule on an "everyone" group would cap every
     individual `rw` grant in the repo, and an explicit grant could never take
-    effect.
+    effect. Within the same type a deny (`none`/`invisible`) vetoes any grant,
+    matching CE `none` semantics, while competing grants merge to the highest
+    (`rw` over `r`), matching CE's group permission merge in repo-perm.c.
     """
     if not rules:
         return None
     best_type = max(SUBJECT_PRECEDENCE[r['subject_type']] for r in rules)
     candidates = [r for r in rules
                   if SUBJECT_PRECEDENCE[r['subject_type']] == best_type]
-    return min((r['permission'] for r in candidates),
-               key=lambda p: PERMISSION_ORDER[p])
+    perms = [r['permission'] for r in candidates]
+    if PERMISSION_INVISIBLE in perms:
+        return PERMISSION_INVISIBLE
+    if PERMISSION_NONE in perms:
+        return PERMISSION_NONE
+    return max(perms, key=lambda p: PERMISSION_ORDER[p])
 
 
 def tighten(native, decision):
@@ -179,3 +186,24 @@ def denies(rules, subjects, path):
     discard, so its value cannot change the True/False result.
     """
     return resolve(rules, subjects, path, PERMISSION_RW) is None
+
+
+def can_manage(rules, subjects, path):
+    """Whether an admin grant covers `path` for `subjects`.
+
+    The manage dimension (acl-semantics.md section 7): a grant at a directory
+    covers that directory and, with inherit, everything below it. Any covering
+    ancestor grant is enough -- the manage dimension has no denies, so
+    existence is the answer. Library adminship is the caller's concern, not
+    this function's.
+    """
+    path = normalize_path(path)
+    for level in ancestors(path):
+        for rule in rules:
+            if (rule['subject_type'], rule['subject']) not in subjects:
+                continue
+            if normalize_path(rule['path']) != level:
+                continue
+            if int(rule.get('inherit', 1)) == 1 or level == path:
+                return True
+    return False

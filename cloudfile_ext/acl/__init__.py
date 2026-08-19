@@ -20,9 +20,11 @@ def register(registry):
     from django.urls import path, re_path
 
     from cloudfile_ext.acl import sources
-    from cloudfile_ext.acl.apis import DirACLView, DirACLEffectiveView
-    from cloudfile_ext.acl.admin_apis import AdminDirACLView
-    from cloudfile_ext.acl.service import apply_dir_acl
+    from cloudfile_ext.acl.apis import (
+        DirACLView, DirACLEffectiveView, DirAdminView)
+    from cloudfile_ext.acl.admin_apis import (
+        AdminDirACLView, AdminDirAdminView)
+    from cloudfile_ext.permissions import PermissionService
     from cloudfile_ext.acl.views import acl_page
 
     # Where rules come from is pluggable; where they are enforced from is not.
@@ -37,12 +39,16 @@ def register(registry):
         re_path(r'^api/v2.1/cloudfile/repos/%s/dir-acl/effective/$' % repo_id,
                 DirACLEffectiveView.as_view(),
                 name='cloudfile-dir-acl-effective'),
+        re_path(r'^api/v2.1/cloudfile/repos/%s/dir-admin/$' % repo_id,
+                DirAdminView.as_view(), name='cloudfile-dir-admin'),
         re_path(r'^api/v2.1/admin/cloudfile/repos/%s/dir-acl/$' % repo_id,
                 AdminDirACLView.as_view(), name='cloudfile-admin-dir-acl'),
+        re_path(r'^api/v2.1/admin/cloudfile/repos/%s/dir-admin/$' % repo_id,
+                AdminDirAdminView.as_view(), name='cloudfile-admin-dir-admin'),
         path('cloudfile/acl/', acl_page, name='cloudfile-dir-acl-page'),
     ])
 
-    registry.register_permission_check(apply_dir_acl)
+    registry.register_permission_check(PermissionService.effective_perm)
 
     registry.register_menu({
         'key': 'dir-acl',
