@@ -16,10 +16,16 @@ EXTRA_INSTALLED_APPS = [
     'cloudfile_ext',
 ]
 
-# -- feature switches (all off by default) --------------------------------
+# -- feature switches -----------------------------------------------------
+#
+# CF_ENABLE_DIR_ACL defaults to True (product decision 2026-08-21): 目录级权限
+# 是网盘产品线核心需求，其 deny-veto + 部门祖先继承语义已对照被替换的
+# eap 本地表实现（sys_cloud_item_permission，9.1 决策下线）验证等强。
+# 运维仍可通过 compose .env 显式 CF_ENABLE_DIR_ACL=false 关闭还原纯 CE 行为；
+# 其余开关保持默认关闭（opt-in）不变。
+CF_ENABLE_DIR_ACL = True
 
 CF_ENABLE_SSO = False
-CF_ENABLE_DIR_ACL = False
 CF_ENABLE_AUDIT = False
 CF_ENABLE_METADATA = False
 CF_ENABLE_TAGS = False
