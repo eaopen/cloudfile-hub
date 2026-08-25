@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
 """CloudFile feature switches.
 
-Every switch defaults to False. Turning them all off must restore native CE
-behaviour, so nothing in cloudfile_ext may take effect without an explicit
-opt-in here.
+Every switch defaults to False except CF_ENABLE_DIR_ACL (True since the
+2026-08-21 product decision; directory ACL is core to the 网盘 line).
+Turning them all off must still restore native CE behaviour -- operators do
+that by setting the switch to false, which the compose .env passes through.
 
 Switches are read from Django settings, which pick them up from
 conf/seahub_settings.py, which the docker bootstrap writes from the compose
