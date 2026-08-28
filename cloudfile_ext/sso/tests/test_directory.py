@@ -127,7 +127,9 @@ def test_external_source_returns_what_the_service_says(cf):
         {'external_id': 'eng', 'name': 'Engineering', 'members': ['a']}]}})
     source = cf.directory.ExternalServiceDirectory(service=service)
 
-    assert source.groups()[0]['external_id'] == 'eng'
+    # The whole payload is returned, not just the list: a hierarchical feed
+    # wraps it with 'revision', which build_plan reads.
+    assert source.groups()['groups'][0]['external_id'] == 'eng'
     assert service.calls == [('GET', '/groups')]
 
 

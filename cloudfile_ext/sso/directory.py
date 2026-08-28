@@ -58,10 +58,28 @@ class DirectoryError(Exception):
 class Directory(object):
     """A source of group membership.
 
-    ``groups()`` returns the whole picture::
+    ``groups()`` returns the whole picture. Two shapes are accepted, so a
+    provider can adopt the hierarchical contract (decision 2026-08-27 §3)
+    without a coordinated upgrade::
 
+        # flat, the original contract -- still fully valid
         [{'external_id': 'eng', 'name': 'Engineering',
           'members': ['alice@example.com', ...]}, ...]
+
+        # hierarchical
+        {'revision': 'org-20260827-0001',
+         'groups': [{'external_id': 'dept-rd', 'name': '研发部',
+                     'subject_type': 'dept', 'parent_external_id': 'dept-root',
+                     'members': [...]},
+                    {'external_id': 'role-reviewer', 'name': '评审员',
+                     'subject_type': 'group', 'members': [...]}]}
+
+    ``subject_type`` defaults to 'group'; ``parent_external_id`` defaults to
+    None. A dept without a parent is created as a top-level department, a dept
+    with one as its sub-department (parents must precede children or be
+    already mapped -- the sync orders creates topologically either way).
+    ``revision`` is optional; when present and unchanged the sync skips
+    idempotently.
 
     Members are login strings as the directory knows them; resolving those to
     the identity Seafile enforces against is the service layer's job
@@ -171,7 +189,10 @@ class ExternalServiceDirectory(Directory):
         if not isinstance(groups, list):
             raise DirectoryError(
                 "directory service returned no 'groups' list: %r" % (payload,))
-        return groups
+        # Return the whole payload, not just the list: a hierarchical feed
+        # wraps the list with 'revision', which build_plan reads. A flat feed
+        # has nothing else in the payload, so this is a no-op for it.
+        return payload
 
     def groups_for_user(self, login):
         from cloudfile_ext.external_service import ExternalServiceError

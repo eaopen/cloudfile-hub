@@ -82,7 +82,8 @@ class Plan(object):
     """
 
     def __init__(self):
-        self.create = []   # [{'external_id', 'name', 'members'}]
+        self.create = []   # [{'external_id', 'name', 'members',
+        #                   'subject_type', 'parent_external_id'}]
         self.rename = []   # [{'group_id', 'name'}]
         self.add = []      # [{'group_id', 'identity'}]
         self.remove = []   # [{'group_id', 'identity'}]
@@ -112,12 +113,17 @@ def build(snapshot, mapped, members, protected=None,
     """Return the Plan that makes `members` match `snapshot`.
 
     ``snapshot``   what the directory says: a list of
-                   ``{'external_id', 'name', 'members': [identity, ...]}``.
+                   ``{'external_id', 'name', 'members': [identity, ...],
+                     'subject_type': 'dept'|'group',
+                     'parent_external_id': str|None}``.
                    Members are already resolved to the identity enforcement
                    compares (cloudfile_ext.acl.subjects); anything that could
                    not be resolved has been dropped by the caller and reported
                    separately, so an unknown account is a line in the sync
                    report rather than a member silently removed.
+                   The hierarchy fields come normalized and validated from
+                   cloudfile_ext.sso.snapshot; entries without them are plain
+                   groups, which is exactly what the previous contract meant.
     ``mapped``     ``{external_id: {'group_id': int, 'name': str}}`` -- the
                    groups CloudFile has created before, i.e. the only ones it
                    may touch.
@@ -126,6 +132,10 @@ def build(snapshot, mapped, members, protected=None,
                    practice the group's creator: Seafile groups need an owner,
                    and a directory that does not list the service account
                    would otherwise ask us to remove it on the first tick.
+
+    Creates are emitted parents-before-children (snapshot.dept_order) so the
+    apply layer can resolve a sub-department's parent group_id from the rows
+    it has just written.
 
     Raises SyncRefused if a guard rejects the result -- see the module
     docstring for why that is a refusal rather than a partial apply.
@@ -139,10 +149,13 @@ def build(snapshot, mapped, members, protected=None,
             'from here, and only one of the two readings is recoverable.'
             % len(mapped))
 
+    from cloudfile_ext.sso.snapshot import dept_order
+    ordered_snapshot = dept_order(snapshot)
+
     plan = Plan()
     seen = set()
 
-    for group in snapshot:
+    for group in ordered_snapshot:
         external_id = (group.get('external_id') or '').strip()
         if not external_id:
             # Without a stable id there is nothing to map against: matching on
@@ -160,6 +173,8 @@ def build(snapshot, mapped, members, protected=None,
                 'external_id': external_id,
                 'name': name,
                 'members': wanted,
+                'subject_type': group.get('subject_type') or 'group',
+                'parent_external_id': group.get('parent_external_id'),
             })
             continue
 

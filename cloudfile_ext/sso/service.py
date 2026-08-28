@@ -13,7 +13,7 @@ an answer -- see docs/sso-mapping.md.
 import logging
 
 from cloudfile_ext.identity import UnknownSubject, resolve_user
-from cloudfile_ext.sso import directory, reconcile
+from cloudfile_ext.sso import directory, reconcile, snapshot
 from cloudfile_ext.sso.models import SSOGroupMap, SSOSyncState
 
 logger = logging.getLogger(__name__)
@@ -129,11 +129,44 @@ def _apply(plan, owner):
     done = {'create': 0, 'rename': 0, 'add': 0, 'remove': 0, 'unmap': 0}
     errors = []
 
+    # external_id -> group_id for rows written by this pass, so a sub-dept's
+    # parent resolves from what the same plan created a moment ago. Existing
+    # rows are seeded from the plan's rename/unmap knowledge via the mapper
+    # below; creates are ordered parents-before-children by the reconciler.
+    created_ids = {}
+
     for entry in plan.create:
         try:
-            group_id = ccnet_api.create_group(entry['name'], owner)
-            SSOGroupMap.objects.add(PROVIDER, entry['external_id'], group_id,
-                                    entry['name'])
+            parent_id = 0
+            if entry.get('subject_type') == 'dept':
+                parent_external = entry.get('parent_external_id')
+                if parent_external:
+                    parent_gid = created_ids.get(parent_external)
+                    if parent_gid is None:
+                        # The parent exists from an earlier sync; look it up in
+                        # the map rather than refusing -- re-parenting onto a
+                        # mapped dept is the ordinary steady state.
+                        row = SSOGroupMap.objects.filter(
+                            provider=PROVIDER,
+                            external_id=parent_external).first()
+                        parent_gid = row.group_id if row else None
+                    if parent_gid is None:
+                        raise ValueError(
+                            'parent dept %r is not mapped; the snapshot was '
+                            'validated, so this means the parent create '
+                            'failed earlier in this pass' % parent_external)
+                    parent_id = parent_gid
+                else:
+                    # Top-level department: -1 in ccnet's convention, read back
+                    # by cloudfile_ext.acl.service._load_subjects as dept.
+                    parent_id = -1
+            group_id = ccnet_api.create_group(
+                entry['name'], owner, None, parent_id)
+            SSOGroupMap.objects.add(
+                PROVIDER, entry['external_id'], group_id, entry['name'],
+                subject_type=entry.get('subject_type') or 'group',
+                parent_external_id=entry.get('parent_external_id'))
+            created_ids[entry['external_id']] = group_id
             done['create'] += 1
         except Exception as exc:
             errors.append('create %s: %s' % (entry['external_id'], exc))
@@ -194,8 +227,14 @@ def _apply(plan, owner):
 
 def build_plan(source):
     """Compute the plan without applying it. Used by the dry-run endpoint."""
-    snapshot = source.groups()
-    resolved, unresolved = _resolve_members(snapshot)
+    raw = source.groups()
+    if isinstance(raw, dict):
+        # The hierarchical contract wraps the list in {'revision', 'groups'};
+        # a bare list is the previous shape and still valid.
+        revision = snapshot.revision_of(raw)
+        raw = raw.get('groups')
+    snapshot_validated = snapshot.validate(raw)
+    resolved, unresolved = _resolve_members(snapshot_validated)
 
     mapped = SSOGroupMap.objects.as_dict(PROVIDER)
     members, protected, stale = _current_state(mapped)
@@ -204,7 +243,8 @@ def build_plan(source):
 
     plan = reconcile.build(resolved, mapped, members, protected=protected,
                            max_removal_ratio=max_removal_ratio())
-    return plan, {'unresolved': unresolved, 'stale_mappings': stale}
+    return plan, {'unresolved': unresolved, 'stale_mappings': stale,
+                  'revision': revision}
 
 
 def sync(registry=None):
@@ -226,7 +266,8 @@ def sync(registry=None):
     try:
         owner = group_owner()
         plan, notes = build_plan(source)
-    except (SyncNotConfigured, directory.DirectoryError) as exc:
+    except (SyncNotConfigured, directory.DirectoryError,
+            snapshot.SnapshotRejected) as exc:
         return _record(STATUS_ERROR, str(exc))
     except reconcile.SyncRefused as exc:
         # Not an error in the plumbing -- a guard doing its job. Distinguished
@@ -237,6 +278,15 @@ def sync(registry=None):
         logger.exception('SSO directory sync failed')
         return _record(STATUS_ERROR, repr(exc))
 
+    revision = notes.get('revision')
+    if revision and plan.empty:
+        state = SSOSyncState.objects.get_state(SYNC_TASK)
+        if state is not None and state.status == STATUS_OK \
+                and _last_revision(state.detail) == revision:
+            # Same revision, same clean state: nothing to do. The skip is
+            # recorded so operators can see the sync is alive, not stuck.
+            return _record(STATUS_SKIPPED, 'revision %s already applied' % revision)
+
     done, errors = _apply(plan, owner)
     detail = {'applied': done, 'planned': plan.counts()}
     detail.update(notes)
@@ -244,8 +294,6 @@ def sync(registry=None):
         detail['errors'] = errors[:20]
     status = STATUS_ERROR if errors else STATUS_OK
     return _record(status, _describe(detail))
-
-
 def sync_user(username, registry=None):
     """Refresh one user's memberships, on login.
 
@@ -319,6 +367,16 @@ def _record(status, detail):
         logger.exception('could not record SSO sync state')
     logger.info('SSO directory sync: %s %s', status, detail)
     return {'status': status, 'detail': detail}
+
+
+def _last_revision(detail):
+    """Pull the applied revision back out of a recorded detail JSON blob."""
+    import json
+    try:
+        payload = json.loads(detail) if detail else {}
+        return payload.get('revision') if isinstance(payload, dict) else None
+    except ValueError:
+        return None
 
 
 def _describe(detail):

@@ -30,7 +30,9 @@ def test_unmapped_directory_group_is_created_with_its_members():
     plan = reconcile.build([group('eng', 'Engineering', ['a', 'b'])], {}, {})
 
     assert plan.create == [{'external_id': 'eng', 'name': 'Engineering',
-                            'members': ['a', 'b']}]
+                            'members': ['a', 'b'],
+                            'subject_type': 'group',
+                            'parent_external_id': None}]
     assert not plan.add          # membership rides along with the creation
     assert not plan.remove
 
