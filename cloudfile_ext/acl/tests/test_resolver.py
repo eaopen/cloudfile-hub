@@ -115,18 +115,48 @@ def test_denies_honours_non_inheriting_rule_and_deeper_override():
 
 
 def test_never_widens():
-    """The security invariant, checked exhaustively over the lattice."""
+    """The v3 eligibility invariant: a rule may set any value inside an
+    existing grant (r -> rw promotion included), but a native of None stays
+    None whatever the rules say -- a directory rule never manufactures
+    access."""
     order = resolver.PERMISSION_ORDER
-    for native in ('r', 'rw'):
-        for decision in order:
-            rules = [{'path': '/x', 'subject_type': 'user',
-                      'subject': 'u@e.com', 'permission': decision,
-                      'inherit': 1}]
-            subjects = resolver.subject_set('u@e.com')
-            got = resolver.resolve(rules, subjects, '/x', native)
-            if got is None:
-                continue
-            assert order[got] <= order[native], (native, decision, got)
+    subjects = resolver.subject_set('u@e.com')
+    for decision in order:
+        rules = [{'path': '/x', 'subject_type': 'user',
+                  'subject': 'u@e.com', 'permission': decision,
+                  'inherit': 1}]
+        assert resolver.resolve(rules, subjects, '/x', None) is None
+        # non-comparable natives are only ever vetoed, never reordered
+        if decision not in (resolver.PERMISSION_INVISIBLE,
+                            resolver.PERMISSION_NONE):
+            got = resolver.resolve(rules, subjects, '/x', 'preview')
+            assert got == 'preview', (decision, got)
+
+
+def test_personal_track_beats_group_track_across_levels():
+    """Direct unit form of the Pro cross-layer precedence: a personal rule
+    inherited from the parent outranks a group rule on the deeper dir."""
+    rules = [
+        {'path': '/p', 'subject_type': 'user', 'subject': 'u@e.com',
+         'permission': 'r', 'inherit': 1},
+        {'path': '/p/sub', 'subject_type': 'group', 'subject': '1',
+         'permission': 'rw', 'inherit': 1},
+    ]
+    subjects = resolver.subject_set('u@e.com', group_ids=['1'])
+    assert resolver.resolve(rules, subjects, '/p/sub', 'rw') == 'r'
+    assert resolver.resolve(rules, subjects, '/p/sub/x', 'rw') == 'r'
+
+
+def test_personal_deny_beats_group_grant_but_group_track_alone_still_resolves():
+    rules = [
+        {'path': '/', 'subject_type': 'group', 'subject': '1',
+         'permission': 'rw', 'inherit': 1},
+        {'path': '/hr', 'subject_type': 'user', 'subject': 'u@e.com',
+         'permission': 'none', 'inherit': 1},
+    ]
+    subjects = resolver.subject_set('u@e.com', group_ids=['1'])
+    assert resolver.resolve(rules, subjects, '/hr/x', 'rw') is None
+    assert resolver.resolve(rules, subjects, '/ok', 'rw') == 'rw'
 
 
 def test_can_manage_grant_covers_descendants():

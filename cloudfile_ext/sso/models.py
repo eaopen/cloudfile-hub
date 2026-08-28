@@ -46,10 +46,14 @@ class SSOGroupMapManager(models.Manager):
                                      'name': row['name']}
                 for row in rows}
 
-    def add(self, provider, external_id, group_id, name):
+    def add(self, provider, external_id, group_id, name,
+            subject_type='group', parent_external_id=None):
         now = int(time.time())
         return self.create(provider=provider, external_id=external_id,
-                           group_id=group_id, name=name, ctime=now, mtime=now)
+                           group_id=group_id, name=name,
+                           subject_type=subject_type,
+                           parent_external_id=parent_external_id,
+                           ctime=now, mtime=now)
 
     def rename(self, provider, external_id, name):
         return self.filter(provider=provider, external_id=external_id).update(
@@ -74,6 +78,15 @@ class SSOGroupMap(models.Model):
     #: group -- without it every rename in the directory would orphan the old
     #: group and create a second one.
     name = models.CharField(max_length=255)
+    #: Hierarchy contract (decision 2026-08-27 §3): 'dept' entries are created
+    #: as Seafile departments (parent_group_id -1 or >0), 'group' stays flat.
+    #: Nullable: rows written before the upgrade have neither value, and NULL
+    #: reads as a plain group, which is what those rows were.
+    subject_type = models.CharField(max_length=16, null=True)
+    #: external_id of the parent dept, resolved to a Seafile group_id at apply
+    #: time via the rows this same sync has just written. Never a numeric
+    #: Seafile id -- external ids survive Seafile rebuilds, numeric ids do not.
+    parent_external_id = models.CharField(max_length=255, null=True)
     ctime = models.BigIntegerField(null=True)
     mtime = models.BigIntegerField(null=True)
 

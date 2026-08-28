@@ -211,3 +211,166 @@ def _verify(request, secret):
     if not exp or int(exp) < int(time.time()):
         return False
     return True
+
+class AdminLibrarySharesDesiredView(APIView):
+    """PUT the complete desired share state for one library.
+
+    Decision source: eap-cloudfile docs/review/cloudfile_decision_20260827.md
+    §4.3. The body is the external system's whole wanted state::
+
+        {"shares": [{"external_group_id": "dept-rd", "permission": "rw"}, ...]}
+
+    The call applies immediately rather than queueing: the caller is an
+    administrative integration, and "I said so, what happened?" should have
+    one answer at one place. The response is the report -- what was applied,
+    what errored -- not just an HTTP code.
+
+    Ids are resolved through cf_sso_group_map only. A desired entry whose id
+    is not mapped becomes a per-entry error; it is never matched by name and
+    never creates a group.
+    """
+
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+    throttle_classes = (UserRateThrottle,)
+
+    def put(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_SSO'):
+            return _feature_off()
+
+        shares, policy_revision = self._parse(request)
+        if shares is None:
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'body must be {"policy_revision": N?, '
+                             '"shares": [{"external_group_id", '
+                             '"permission"}...]}')
+
+        from cloudfile_ext.sso import library_share_service as svc
+        try:
+            report = svc.apply(repo_id, shares,
+                               policy_revision=policy_revision)
+        except svc.StaleRevision as exc:
+            # 409 with the accepted revision: the caller recomputes from the
+            # newer policy instead of partially applying a stale generation.
+            return api_error(status.HTTP_409_CONFLICT,
+                             'stale policy_revision %s; applied revision '
+                             'is %s' % (exc.rejected, exc.accepted))
+        return Response(report)
+
+    def _parse(self, request):
+        try:
+            body = request.data or {}
+        except Exception:
+            return None, None
+        raw = body.get('shares')
+        if not isinstance(raw, list):
+            return None, None
+        revision = body.get('policy_revision')
+        if revision is not None:
+            try:
+                revision = int(revision)
+            except (TypeError, ValueError):
+                return None, None
+        from cloudfile_ext.sso.library_share_policy import DesiredShare
+        shares = []
+        for item in raw:
+            external_id = str(item.get('external_group_id') or '').strip()
+            permission = str(item.get('permission') or '').strip()
+            if not external_id:
+                return None, None
+            shares.append(DesiredShare(external_id, permission))
+        return shares, revision
+
+
+class AdminLibrarySharesStatusView(APIView):
+    """GET the applied state for one library.
+
+    Reads the ledger -- what this integration applied, with which permission,
+    in which state -- not Seafile's share list. The difference is the point:
+    a share a person made by hand is invisible here and will not be revoked
+    by a reconcile, which is the property the ledger exists to guarantee.
+    """
+
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+    throttle_classes = (UserRateThrottle,)
+
+    def get(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_SSO'):
+            return _feature_off()
+
+        from cloudfile_ext.sso.library_shares import ManagedLibraryShare
+        rows = ManagedLibraryShare.objects.filter(repo_id=repo_id).order_by(
+            'external_group_id')
+        return Response({
+            'repo_id': repo_id,
+            'shares': [
+                {
+                    'external_group_id': row.external_group_id,
+                    'seafile_group_id': row.seafile_group_id,
+                    'permission': row.permission,
+                    'state': row.state,
+                    'last_error': row.last_error,
+                    'mtime': row.mtime,
+                }
+                for row in rows
+            ],
+        })
+
+
+class AdminLibrarySharesReconcileView(APIView):
+    """POST to re-apply the last recorded desired state, or dry-run it.
+
+    There is no stored desired state on this side by design -- etech owns it
+    (sys_cloud_library_share). What this endpoint reconciles is the gap
+    between the ledger and Seafile: rows the ledger calls ACTIVE whose share
+    no longer exists in Seafile (removed by an admin cleaning up, say) get
+    re-applied; REVOKED rows stay gone. Pass {"desired": [...]} to reconcile
+    against a fresh wanted state instead, {"dry_run": true} to only report.
+    """
+
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+    throttle_classes = (UserRateThrottle,)
+
+    def post(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_SSO'):
+            return _feature_off()
+
+        body = {}
+        try:
+            body = request.data or {}
+        except Exception:
+            pass
+
+        dry_run = bool(body.get('dry_run'))
+
+        from cloudfile_ext.sso.library_shares import ManagedLibraryShare
+        if 'desired' in body:
+            raw = body.get('desired') or []
+            desired = []
+            from cloudfile_ext.sso.library_share_policy import DesiredShare
+            for item in raw:
+                desired.append(DesiredShare(
+                    str(item.get('external_group_id') or '').strip(),
+                    str(item.get('permission') or '').strip()))
+        else:
+            # Default: desired = whatever the ledger holds as ACTIVE. A
+            # re-apply then heals revoked-in-Seafile shares without ever
+            # inventing new ones.
+            desired = [
+                DesiredShare(row.external_group_id, row.permission)
+                for row in ManagedLibraryShare.objects.filter(
+                    repo_id=repo_id, state='ACTIVE')
+            ]
+
+        from cloudfile_ext.sso import library_share_service as svc
+        if dry_run:
+            plan = svc.plan_for(repo_id, desired)
+            return Response({
+                'planned': {'add': len(plan.add), 'update': len(plan.update),
+                            'revoke': len(plan.revoke)},
+                'add': plan.add, 'update': plan.update,
+                'revoke': plan.revoke, 'errors': plan.errors,
+            })
+        return Response(svc.apply(repo_id, desired))

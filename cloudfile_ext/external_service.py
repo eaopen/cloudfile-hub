@@ -102,8 +102,16 @@ class ExternalService(object):
             logger.error('PyJWT missing; calling %s unauthenticated',
                          self.name)
             return headers
-        token = jwt.encode({'exp': int(time.time()) + 300},
-                           self.secret, algorithm='HS256')
+        # iss/aud bind the token to one purpose: a caller that holds the
+        # secret cannot reuse it against an unrelated endpoint on the far
+        # side (decision 2026-08-28 §8.1). The receiver verifies the same
+        # fixed pair -- one line each, both ends in the compose .env.
+        now = int(time.time())
+        token = jwt.encode(
+            {'exp': now + 300,
+             'iss': 'cloudfile-sso',
+             'aud': 'eap-directory'},
+            self.secret, algorithm='HS256')
         headers['Authorization'] = 'Token %s' % token
         return headers
 
