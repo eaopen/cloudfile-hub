@@ -94,14 +94,17 @@ def subject_set(username, group_ids=(), dept_ids=()):
 def pick(rules):
     """Choose the winning permission among rules matching at one level.
 
-    Two steps, per acl-semantics.md section 4.1: take the most specific
-    subject type present, then -- within that type -- let a deny veto
-    outright and otherwise keep the highest grant.
+    Two steps, per acl-semantics.md section 4.1 (v3): within a track, take the
+    most specific subject type present, then -- within that type -- let a deny
+    veto outright and otherwise keep the highest grant.
 
-    Splitting by subject type first is what keeps an explicit user grant
-    meaningful. Without it, one `r` rule on an "everyone" group would cap every
-    individual `rw` grant in the repo, and an explicit grant could never take
-    effect. Within the same type a deny (`none`/`invisible`) vetoes any grant,
+    The user/dept/group split inside `pick` only settles dept-vs-group
+    conflicts: user rules never reach here together with group rules, because
+    resolve() splits the walk into a personal track and a group track. The
+    SUBJECT_PRECEDENCE entry for 'user' remains so subject_set-based callers
+    (denies/can_manage paths, older admin tooling) still collapse correctly.
+
+    Within the same type a deny (`none`/`invisible`) vetoes any grant,
     matching CE `none` semantics, while competing grants merge to the highest
     (`rw` over `r`), matching CE's group permission merge in repo-perm.c.
     """
@@ -119,15 +122,25 @@ def pick(rules):
 
 
 def tighten(native, decision):
-    """Combine a resolved rule with the native share permission.
+    """Combine a resolved rule with the native share permission (v3, Pro
+    compatible).
 
-    Security invariant: the result is never more privileged than `native`.
+    Base eligibility still comes from `native`: None means no share reaches
+    this user, and a directory rule never manufactures access. Within an
+    existing grant the directory rule now *defines* the permission -- a
+    library-level `r` may be promoted to `rw` on a specific subtree and `rw`
+    demoted to `r` elsewhere, matching Seafile Pro's sub-folder permissions.
+    Denies still veto outright, and non-comparable native permissions
+    (preview / cloud-edit / custom-*) are only ever vetoed, never reordered.
     """
+    if native is None:
+        return None
+
     if decision in DENYING:
         return None
 
     if native in COMPARABLE_NATIVE:
-        return min(native, decision, key=lambda p: PERMISSION_ORDER[p])
+        return decision
 
     if native == 'admin':
         # admin outranks everything on the chain, so the rule always wins.
@@ -141,16 +154,23 @@ def tighten(native, decision):
 
 
 def resolve(rules, subjects, path, native):
-    """Resolve the effective permission for `path`.
+    """Resolve the effective permission for `path` (v3, Pro compatible).
 
     `rules` is an iterable of dicts with keys: path, subject_type, subject,
     permission, inherit. Paths are normalized here, so callers may pass raw
     values.
 
+    Two independent tracks, per acl-semantics.md section 4: the personal
+    track walks the whole ancestor chain for this user's own rules and, when
+    it produces any decision, it wins outright over the dept/group track --
+    across levels, so a personal rule inherited from a parent directory beats
+    a group rule on a deeper one (Seafile Pro precedence). Each track
+    internally keeps the v2 rule "deepest level with matching rules wins".
+
     Returns a permission string, or None for no access.
     """
     if native is None:
-        # Nothing to tighten, and CloudFile must never widen.
+        # No base eligibility; a rule must never manufacture access.
         return None
 
     path = normalize_path(path)
@@ -161,15 +181,21 @@ def resolve(rules, subjects, path, native):
             continue
         by_level.setdefault(normalize_path(rule['path']), []).append(rule)
 
-    decision = None
-    for level in ancestors(path):
-        applicable = [r for r in by_level.get(level, ())
-                      if int(r.get('inherit', 1)) == 1 or level == path]
-        if not applicable:
-            # No rule at this level: keep inheriting the nearest ancestor's.
-            continue
-        decision = pick(applicable)
+    def track(subject_types):
+        decision = None
+        for level in ancestors(path):
+            applicable = [r for r in by_level.get(level, ())
+                          if r['subject_type'] in subject_types
+                          and (int(r.get('inherit', 1)) == 1
+                               or level == path)]
+            if applicable:
+                decision = pick(applicable)
+        return decision
 
+    personal = track((SUBJECT_USER,))
+    group = track((SUBJECT_DEPT, SUBJECT_GROUP))
+
+    decision = personal if personal is not None else group
     if decision is None:
         return native
     return tighten(native, decision)

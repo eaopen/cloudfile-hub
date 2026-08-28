@@ -173,3 +173,20 @@ def test_snapshot_position_of_flat_groups_is_preserved():
 
     assert [c['external_id'] for c in plan.create] == [
         'z-group', 'root', 'a-group']
+
+
+def test_member_user_ids_contract_v2_wins():
+    """Contract v2 (decision 2026-08-28 §2.3): enterprise userIds replace
+    login strings; when both keys appear the v2 key wins."""
+    raw = {'external_id': 'dept-a', 'name': 'A',
+           'members': ['alice@example.com'],
+           'member_user_ids': ['1001', '1002']}
+    entry = snapshot.normalize_entry(raw)
+    assert entry['members'] == ['1001', '1002']
+    snapshot.validate([entry])
+
+
+def test_members_still_valid_for_unupgraded_providers():
+    raw = {'external_id': 'g', 'name': 'G', 'members': ['a@e.com']}
+    entry = snapshot.normalize_entry(raw)
+    assert entry['members'] == ['a@e.com']

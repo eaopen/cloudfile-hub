@@ -35,6 +35,12 @@ GROUP = 'group'
 SUBJECT_TYPE = 'subject_type'
 PARENT_EXTERNAL_ID = 'parent_external_id'
 REVISION = 'revision'
+#: Contract v2 (decision 2026-08-28 §2.3): members are the enterprise userIds
+#: the directory is authoritative for, not login strings. `members` (logins)
+#: stays valid so providers upgrade independently; when both appear the v2
+#: key wins.
+MEMBER_USER_IDS = 'member_user_ids'
+MEMBERS = 'members'
 
 
 class SnapshotRejected(Exception):
@@ -51,14 +57,22 @@ def normalize_entry(entry):
     Absent optional fields become their defaults (flat group, no parent), so
     providers that have not upgraded continue to work unchanged -- the
     compatibility stage in decision §3.2 is "old shape is valid shape".
+    Membership: `member_user_ids` (contract v2, enterprise userIds) when
+    present, else the original `members` (login strings). Downstream treats
+    either as opaque member strings to resolve; the difference is which
+    resolver key answers them, which is the identity layer's business.
     """
     subject_type = (entry.get(SUBJECT_TYPE) or GROUP).strip().lower()
     parent = entry.get(PARENT_EXTERNAL_ID)
     parent = (parent or '').strip() or None
+    if entry.get(MEMBER_USER_IDS) is not None:
+        members = list(entry.get(MEMBER_USER_IDS) or [])
+    else:
+        members = list(entry.get(MEMBERS) or [])
     return {
         'external_id': (entry.get('external_id') or '').strip(),
         'name': (entry.get('name') or '').strip(),
-        'members': list(entry.get('members') or []),
+        'members': members,
         SUBJECT_TYPE: subject_type,
         PARENT_EXTERNAL_ID: parent,
     }

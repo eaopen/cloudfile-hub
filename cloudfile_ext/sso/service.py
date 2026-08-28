@@ -83,20 +83,33 @@ def _resolve_members(snapshot):
     passed through: a login that does not exist yet is normal during a
     rollout, but a login that never resolves means the directory and Seafile
     disagree about who people are, and that has to be visible.
+
+    Groups with unresolvable members are marked `quarantined`: the reconciler
+    still receives their full membership (so joins apply), but the caller must
+    not run removals for them -- otherwise a feed that misspells one login
+    would read as "this person left", and the sync would faithfully revoke a
+    real person's membership. The periodic sync passes the quarantine list to
+    reconcile.build, which then emits no `remove` for those groups; the next
+    clean snapshot lifts the quarantine.
     """
     resolved = []
     unresolved = []
+    quarantined = set()
     for group in snapshot:
         members = []
+        broken = False
         for login in group.get('members') or []:
             try:
                 members.append(resolve_user(login))
             except UnknownSubject:
                 unresolved.append(login)
+                broken = True
         entry = dict(group)
         entry['members'] = members
+        if broken:
+            quarantined.add(entry['external_id'])
         resolved.append(entry)
-    return resolved, unresolved
+    return resolved, unresolved, quarantined
 
 
 def _current_state(mapped):
@@ -228,13 +241,14 @@ def _apply(plan, owner):
 def build_plan(source):
     """Compute the plan without applying it. Used by the dry-run endpoint."""
     raw = source.groups()
+    revision = None
     if isinstance(raw, dict):
         # The hierarchical contract wraps the list in {'revision', 'groups'};
         # a bare list is the previous shape and still valid.
         revision = snapshot.revision_of(raw)
         raw = raw.get('groups')
     snapshot_validated = snapshot.validate(raw)
-    resolved, unresolved = _resolve_members(snapshot_validated)
+    resolved, unresolved, quarantined = _resolve_members(snapshot_validated)
 
     mapped = SSOGroupMap.objects.as_dict(PROVIDER)
     members, protected, stale = _current_state(mapped)
@@ -242,8 +256,10 @@ def build_plan(source):
         mapped.pop(external_id, None)
 
     plan = reconcile.build(resolved, mapped, members, protected=protected,
-                           max_removal_ratio=max_removal_ratio())
+                           max_removal_ratio=max_removal_ratio(),
+                           quarantined=quarantined)
     return plan, {'unresolved': unresolved, 'stale_mappings': stale,
+                  'quarantined_groups': sorted(quarantined),
                   'revision': revision}
 
 

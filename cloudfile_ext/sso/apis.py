@@ -238,33 +238,48 @@ class AdminLibrarySharesDesiredView(APIView):
         if not is_enabled('CF_ENABLE_SSO'):
             return _feature_off()
 
-        shares = self._parse(request)
+        shares, policy_revision = self._parse(request)
         if shares is None:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'body must be {"shares": [{"external_group_id", '
+                             'body must be {"policy_revision": N?, '
+                             '"shares": [{"external_group_id", '
                              '"permission"}...]}')
 
         from cloudfile_ext.sso import library_share_service as svc
-        report = svc.apply(repo_id, shares)
+        try:
+            report = svc.apply(repo_id, shares,
+                               policy_revision=policy_revision)
+        except svc.StaleRevision as exc:
+            # 409 with the accepted revision: the caller recomputes from the
+            # newer policy instead of partially applying a stale generation.
+            return api_error(status.HTTP_409_CONFLICT,
+                             'stale policy_revision %s; applied revision '
+                             'is %s' % (exc.rejected, exc.accepted))
         return Response(report)
 
     def _parse(self, request):
         try:
             body = request.data or {}
         except Exception:
-            return None
+            return None, None
         raw = body.get('shares')
         if not isinstance(raw, list):
-            return None
+            return None, None
+        revision = body.get('policy_revision')
+        if revision is not None:
+            try:
+                revision = int(revision)
+            except (TypeError, ValueError):
+                return None, None
         from cloudfile_ext.sso.library_share_policy import DesiredShare
         shares = []
         for item in raw:
             external_id = str(item.get('external_group_id') or '').strip()
             permission = str(item.get('permission') or '').strip()
             if not external_id:
-                return None
+                return None, None
             shares.append(DesiredShare(external_id, permission))
-        return shares
+        return shares, revision
 
 
 class AdminLibrarySharesStatusView(APIView):

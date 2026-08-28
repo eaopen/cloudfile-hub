@@ -182,3 +182,44 @@ def test_the_limit_is_measured_against_managed_members_only():
 
     with pytest.raises(reconcile.SyncRefused):
         reconcile.build([group('eng', 'Engineering', [])], mapped, members)
+
+def test_quarantined_group_plans_no_removals():
+    """A snapshot that could not read a group completely must not read as
+    "these people left".
+
+    One unresolvable login would otherwise plan a removal of every member the
+    feed failed to name, and the sync would faithfully revoke real people.
+    Additions still apply; the next clean snapshot lifts the quarantine.
+    """
+    mapped = {'eng': {'group_id': 7, 'name': 'Engineering'}}
+    members = {7: ['a', 'b']}
+
+    plan = reconcile.build(
+        [group('eng', 'Engineering', ['a', 'c'])], mapped, members,
+        quarantined={'eng'})
+
+    assert {'group_id': 7, 'identity': 'c'} in plan.add
+    assert not plan.remove
+
+
+def test_quarantine_is_per_group_and_lifts_on_a_clean_read():
+    mapped = {'eng': {'group_id': 7, 'name': 'Engineering'},
+              'hr': {'group_id': 8, 'name': 'HR'}}
+    members = {7: ['a', 'stale'], 8: ['x', 'y']}
+
+    # eng's feed is broken this tick; hr's is complete.
+    plan = reconcile.build(
+        [group('eng', 'Engineering', ['a']),
+         group('hr', 'HR', ['x'])],
+        mapped, members, quarantined={'eng'})
+
+    assert {'group_id': 8, 'identity': 'y'} in plan.remove
+    assert not any(entry['group_id'] == 7 for entry in plan.remove)
+
+    # Next tick, eng reads clean: the stale member goes.
+    plan = reconcile.build(
+        [group('eng', 'Engineering', ['a']),
+         group('hr', 'HR', ['x'])],
+        mapped, members)
+
+    assert {'group_id': 7, 'identity': 'stale'} in plan.remove

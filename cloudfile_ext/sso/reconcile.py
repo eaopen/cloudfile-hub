@@ -109,7 +109,7 @@ class Plan(object):
 
 
 def build(snapshot, mapped, members, protected=None,
-          max_removal_ratio=DEFAULT_MAX_REMOVAL_RATIO):
+          max_removal_ratio=DEFAULT_MAX_REMOVAL_RATIO, quarantined=()):
     """Return the Plan that makes `members` match `snapshot`.
 
     ``snapshot``   what the directory says: a list of
@@ -132,6 +132,11 @@ def build(snapshot, mapped, members, protected=None,
                    practice the group's creator: Seafile groups need an owner,
                    and a directory that does not list the service account
                    would otherwise ask us to remove it on the first tick.
+    ``quarantined`` external_ids whose snapshot this tick could not read
+                   completely (some members unresolved). No ``remove`` is
+                   planned for them: a truncated member list must not read as
+                   "these people left". Additions still apply, and the next
+                   clean snapshot lifts the quarantine.
 
     Creates are emitted parents-before-children (snapshot.dept_order) so the
     apply layer can resolve a sub-department's parent group_id from the rows
@@ -141,6 +146,7 @@ def build(snapshot, mapped, members, protected=None,
     docstring for why that is a refusal rather than a partial apply.
     """
     protected = protected or {}
+    quarantined = set(quarantined or ())
 
     if not snapshot and mapped:
         raise SyncRefused(
@@ -191,6 +197,10 @@ def build(snapshot, mapped, members, protected=None,
         for identity in wanted:
             if identity not in current_set:
                 plan.add.append({'group_id': group_id, 'identity': identity})
+        if external_id in quarantined:
+            # Snapshot for this group is incomplete; removals wait for a
+            # complete read. See the quarantined docstring above.
+            continue
         for identity in current:
             if identity not in wanted_set and identity not in keep:
                 plan.remove.append({'group_id': group_id, 'identity': identity})
