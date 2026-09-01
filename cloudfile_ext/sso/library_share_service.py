@@ -45,9 +45,24 @@ class StaleRevision(Exception):
             % (rejected if rejected is not None else '?', accepted))
 
 
+def _connection():
+    """The seafile-db connection cf_* tables live on.
+
+    ``cf_library_share_revision`` (like every cf_* table) is created in
+    seafile-db by cloudfile-server/scripts/sql and reached through the
+    ``cloudfile`` alias the router resolves for cloudfile_ext models. Raw SQL
+    here must use that same connection; ``from django.db import connection``
+    gives the ``default`` (seahub-db) connection, where the table does not
+    exist, and the resulting ProgrammingError was surfacing as an uncaught
+    500 on the desired-state PUT.
+    """
+    from django.db import connections
+    from cloudfile_ext.db_router import _alias
+    return connections[_alias()]
+
+
 def _read_accepted_revision(repo_id):
-    from django.db import connection
-    with connection.cursor() as cursor:
+    with _connection().cursor() as cursor:
         cursor.execute(
             'SELECT policy_revision FROM %s WHERE provider = %%s '
             'AND repo_id = %%s' % REVISION_TABLE,
@@ -57,9 +72,8 @@ def _read_accepted_revision(repo_id):
 
 
 def _record_revision(repo_id, revision):
-    from django.db import connection
     now = int(time.time())
-    with connection.cursor() as cursor:
+    with _connection().cursor() as cursor:
         cursor.execute(
             'INSERT INTO %s (provider, repo_id, policy_revision, ctime, '
             'mtime) VALUES (%%s, %%s, %%s, %%s, %%s) ON DUPLICATE KEY '
