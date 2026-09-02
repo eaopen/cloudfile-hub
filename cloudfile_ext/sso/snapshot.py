@@ -99,6 +99,8 @@ def validate(snapshot):
             'snapshot must be a list of entries, got %r'
             % type(snapshot).__name__)
 
+    # Defensive: some directory feeds include null placeholders.
+    snapshot = [entry for entry in snapshot if entry is not None]
     normalized = [normalize_entry(entry) for entry in snapshot]
 
     seen = {}
