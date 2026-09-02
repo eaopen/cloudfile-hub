@@ -250,6 +250,16 @@ def oauth_callback(request):
         profile.contact_email = contact_email.strip()
         profile.save()
 
+    # CloudFile: SSO 建号时 OAuthBackend 不传 email（新用户 remote_user=None），
+    # create_oauth_user 的 contact_email 落空；identity.resolve_user 依赖
+    # convert_login_str_to_username 查 profile_profile.contact_email 才能把
+    # 登录邮箱映射到 hash@auth.local 身份，否则目录同步成员全部 UnknownSubject。
+    # 这里在首次登录后回填一次，已手动设置过 contact_email 的不动。
+    login_email = oauth_user_info.get('email', '')
+    if login_email and not profile.contact_email:
+        profile.contact_email = login_email.strip()
+        profile.save()
+
     if login_id:
         profile.login_id = login_id.strip()
         profile.save()

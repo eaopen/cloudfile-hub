@@ -42,6 +42,14 @@ REVISION = 'revision'
 MEMBER_USER_IDS = 'member_user_ids'
 MEMBERS = 'members'
 
+#: Contract v2.1 (etech deployment): directory also sends the login account
+#: for each member (e.g. 'admin' for org_user.account_). The identity layer
+#: turns account into {account}@<domain> and maps it onto the Seafile
+#: identity via contact_email, which is what SSO logins actually produce.
+#: Optional and additive -- absent means the resolver falls back to
+#: member_user_ids, same as before.
+MEMBER_ACCOUNTS = 'member_accounts'
+
 
 class SnapshotRejected(Exception):
     """The snapshot is not internally consistent; nothing will be applied.
@@ -69,10 +77,13 @@ def normalize_entry(entry):
         members = list(entry.get(MEMBER_USER_IDS) or [])
     else:
         members = list(entry.get(MEMBERS) or [])
+    accounts = entry.get(MEMBER_ACCOUNTS)
+    accounts = list(accounts) if accounts else None
     return {
         'external_id': (entry.get('external_id') or '').strip(),
         'name': (entry.get('name') or '').strip(),
         'members': members,
+        MEMBER_ACCOUNTS: accounts,
         SUBJECT_TYPE: subject_type,
         PARENT_EXTERNAL_ID: parent,
     }
