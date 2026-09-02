@@ -76,27 +76,15 @@ def max_removal_ratio():
 
 # -- reading the world -----------------------------------------------------
 
-def _member_email_domain():
-    """Domain the SSO identity provider puts on login accounts.
-
-    etech's Authentik policy composes the userinfo email as
-    ``{account}@shanghai-electric.com``; the directory sends bare accounts,
-    so the resolver has to put the domain back on before mapping the login
-    string onto the Seafile identity. Configurable because another
-    deployment's IdP can choose differently.
-    """
-    return getattr(_settings(), 'CF_SSO_MEMBER_EMAIL_DOMAIN',
-                   'shanghai-electric.com')
-
 def _resolve_members(snapshot):
     """Map directory logins onto Seafile identities.
 
-    Contract v2.1: entries may carry ``member_accounts`` (bare login
-    accounts) alongside ``member_user_ids``. Accounts are preferred when
-    present because they are what the SSO login actually maps: the IdP
-    issues ``{account}@<domain>`` and the identity layer resolves that email
-    onto the opaque Seafile id via profile contact_email. UserIds, being
-    OBPM-internal, are never a Seafile login and resolve to nothing.
+    Contract v2.1: entries may carry ``member_accounts`` (login emails,
+    e.g. ``admin@shanghai-electric.com``) alongside ``member_user_ids``.
+    Accounts are preferred when present because they are what the SSO login
+    actually maps: the identity layer resolves the email onto the opaque
+    Seafile id via profile contact_email. UserIds, being OBPM-internal,
+    are never a Seafile login and resolve to nothing.
 
     Unresolvable members are dropped and *named* in the report rather than
     passed through: a login that does not exist yet is normal during a
@@ -114,14 +102,12 @@ def _resolve_members(snapshot):
     resolved = []
     unresolved = []
     quarantined = set()
-    domain = _member_email_domain()
     for group in snapshot:
         members = []
         broken = False
         accounts = group.get(snapshot.MEMBER_ACCOUNTS)
         if accounts:
-            subjects = ('%s@%s' % (str(account).strip(), domain)
-                        for account in accounts if str(account).strip())
+            subjects = [str(a).strip() for a in accounts if str(a).strip()]
         else:
             subjects = group.get('members') or []
         for login in subjects:

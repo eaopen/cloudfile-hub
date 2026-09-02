@@ -192,14 +192,16 @@ def test_members_still_valid_for_unupgraded_providers():
     assert entry['members'] == ['a@e.com']
 
 def test_member_accounts_pass_through():
-    """Contract v2.1: member_accounts rides along untouched; the identity
-    layer, not the validator, decides what the accounts mean."""
+    """Contract v2.1: member_accounts (login emails) rides along untouched;
+    the identity layer, not the validator, decides what they mean."""
     raw = {'external_id': 'dept-a', 'name': 'A',
            'member_user_ids': ['1001'],
-           'member_accounts': ['admin', 'zhangsan']}
+           'member_accounts': ['admin@shanghai-electric.com',
+                                'zhangsan@shanghai-electric.com']}
     entry = snapshot.normalize_entry(raw)
     assert entry['members'] == ['1001']
-    assert entry['member_accounts'] == ['admin', 'zhangsan']
+    assert entry['member_accounts'] == ['admin@shanghai-electric.com',
+                                         'zhangsan@shanghai-electric.com']
     snapshot.validate([entry])
 
 def test_member_accounts_absent_is_none():
