@@ -82,7 +82,12 @@ class ManagedLibraryShareManager(models.Manager):
                 'mtime': now,
             },
             create_defaults={
+                'seafile_group_id': seafile_group_id,
+                'permission': permission,
+                'state': STATE_ACTIVE,
+                'last_error': '',
                 'ctime': now,
+                'mtime': now,
             },
         )
         return obj
