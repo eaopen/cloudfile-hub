@@ -32,6 +32,7 @@ def test_flat_snapshot_without_hierarchy_fields_is_valid():
 
     assert validated == [{'external_id': 'eng', 'name': 'Engineering',
                           'members': ['a'],
+                          'member_accounts': None,
                           'subject_type': 'group',
                           'parent_external_id': None}]
 
