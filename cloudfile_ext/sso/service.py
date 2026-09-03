@@ -76,7 +76,7 @@ def max_removal_ratio():
 
 # -- reading the world -----------------------------------------------------
 
-def _resolve_members(snapshot):
+def _resolve_members(entries):
     """Map directory logins onto Seafile identities.
 
     Contract v2.1: entries may carry ``member_accounts`` (login emails,
@@ -102,7 +102,7 @@ def _resolve_members(snapshot):
     resolved = []
     unresolved = []
     quarantined = set()
-    for group in snapshot:
+    for group in entries:
         members = []
         broken = False
         accounts = group.get(snapshot.MEMBER_ACCOUNTS)
