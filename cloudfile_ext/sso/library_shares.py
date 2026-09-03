@@ -70,25 +70,26 @@ class ManagedLibraryShareManager(models.Manager):
     def record_applied(self, repo_id, external_group_id, seafile_group_id,
                        permission):
         now = int(time.time())
+        # Django 4.2+ contract: when create_defaults is given, the CREATE branch
+        # uses only lookup kwargs + create_defaults -- `defaults` is ignored
+        # entirely. A previous version repeated the field dict in both places
+        # by hand and the create copy was missing seafile_group_id, so the
+        # very first ledger insert (empty table) wrote NULL into a NOT NULL
+        # column: MySQL 1048 "Column 'seafile_group_id' cannot be null".
+        # Build one field dict and derive create_defaults from it.
+        fields = {
+            'seafile_group_id': seafile_group_id,
+            'permission': permission,
+            'state': STATE_ACTIVE,
+            'last_error': '',
+            'mtime': now,
+        }
         obj, _created = self.update_or_create(
             provider=PROVIDER,
             repo_id=repo_id,
             external_group_id=external_group_id,
-            defaults={
-                'seafile_group_id': seafile_group_id,
-                'permission': permission,
-                'state': STATE_ACTIVE,
-                'last_error': '',
-                'mtime': now,
-            },
-            create_defaults={
-                'seafile_group_id': seafile_group_id,
-                'permission': permission,
-                'state': STATE_ACTIVE,
-                'last_error': '',
-                'ctime': now,
-                'mtime': now,
-            },
+            defaults=fields,
+            create_defaults={**fields, 'ctime': now},
         )
         return obj
 
