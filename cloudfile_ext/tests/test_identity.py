@@ -96,3 +96,24 @@ def test_whitespace_is_stripped():
         map_email=mapping({EMAIL: IDENTITY}),
         account_exists=accounts(IDENTITY),
     ) == IDENTITY
+
+
+def test_ambiguous_mapping_is_refused_not_fallback():
+    """Two identities on one contact_email must refuse, never guess.
+
+    Falling through to account_exists here would resolve the email to
+    *something* -- whichever account the server picks -- and the next full
+    sync would move that person's group membership to it, leaving their other
+    sessions able to log in but unable to see a single library. The mapping
+    raising means the directory disagrees with itself about who this is.
+    """
+
+    def ambiguous(_):
+        raise identity.AmbiguousSubject(EMAIL)
+
+    with pytest.raises(identity.AmbiguousSubject):
+        identity.resolve_user(
+            EMAIL,
+            map_email=ambiguous,
+            account_exists=accounts(IDENTITY, EMAIL),  # fallback must not run
+        )

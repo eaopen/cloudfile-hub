@@ -330,20 +330,30 @@ def sync_user(username, registry=None):
     optimisation on top of the full sync, never a replacement: it can only add
     a user to groups that already exist, because creating a group from one
     member's view of the directory would build it half-populated.
+
+    Two rules keep this optimisation from taking access away:
+
+    * **Additions only.** Removal is never done here. The login signal knows
+      one thing -- that this person just authenticated -- and a negative
+      answer from the directory ("no groups") is indistinguishable from a
+      broken or wrong-keyed query; acting on it strips every group the person
+      has until the next full tick. Deciding who left is the full sync's job,
+      where a failed read is an error and not a fact.
+    * **Query by login account, not by identity.** The signal carries the
+      opaque Seafile identity (``...@auth.local``), which the etech directory
+      has never heard of -- it keys users by employee number (工号). Asking it
+      with the identity would read "no such user" as "no groups" -- which is
+      exactly what the additions-only rule above then makes harmless, but the
+      refresh would simply never fire. The identity is mapped back to its
+      login account first; without one the refresh is skipped and the
+      periodic sync stays the contract.
     """
     from cloudfile_ext.registry import registry as default_registry
+    from cloudfile_ext.identity import login_of
     from seaserv import ccnet_api
 
     source = directory.active(registry or default_registry)
     if source is None:
-        return None
-
-    try:
-        external_ids = source.groups_for_user(username)
-    except Exception as exc:
-        logger.info('per-user directory lookup for %s failed: %s', username, exc)
-        return None
-    if external_ids is None:
         return None
 
     try:
@@ -353,11 +363,31 @@ def sync_user(username, registry=None):
         logger.info('per-user sync for %s skipped: %s', username, exc)
         return None
 
+    # The directory is keyed by the login the IdP knows (employee number);
+    # the session is not.
+    login_account = login_of(identity)
+    if not login_account:
+        logger.info('per-user sync for %s skipped: no login account on profile',
+                    identity)
+        return None
+
+    try:
+        external_ids = source.groups_for_user(login_account)
+    except Exception as exc:
+        logger.info('per-user directory lookup for %s failed: %s', username, exc)
+        return None
+    if not external_ids:
+        # None ("this source cannot say") and [] ("says nothing useful") both
+        # mean: do nothing. Neither is evidence that membership should shrink.
+        return None
+
     mapped = SSOGroupMap.objects.as_dict(PROVIDER)
     wanted = {eid for eid in external_ids if eid in mapped}
     changed = 0
 
     for external_id, row in mapped.items():
+        if external_id not in wanted:
+            continue
         group_id = row['group_id']
         try:
             members = {m.user_name for m in ccnet_api.get_group_members(group_id)}
@@ -365,23 +395,12 @@ def sync_user(username, registry=None):
             logger.info('reading group %s failed: %s', group_id, exc)
             continue
 
-        if external_id in wanted and identity not in members:
+        if identity not in members:
             try:
                 ccnet_api.group_add_member(group_id, owner, identity)
                 changed += 1
             except Exception as exc:
                 logger.info('adding %s to %s failed: %s', identity, group_id, exc)
-        elif external_id not in wanted and identity in members:
-            # Removal matters more than addition here: somebody who left a
-            # team keeps their access until the next tick otherwise, and that
-            # is the direction where being slow is a security problem rather
-            # than an inconvenience.
-            try:
-                ccnet_api.group_remove_member(group_id, owner, identity)
-                changed += 1
-            except Exception as exc:
-                logger.info('removing %s from %s failed: %s',
-                            identity, group_id, exc)
 
     return changed
 

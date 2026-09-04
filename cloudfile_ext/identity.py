@@ -37,10 +37,32 @@ class UnknownSubject(Exception):
     """No account/group answers to what the admin typed."""
 
 
+class AmbiguousSubject(UnknownSubject):
+    """More than one account answers to the same login string.
+
+    Two Seafile identities carrying one contact_email means the directory can
+    no longer say *who* a member is. Falling back to the existence check here
+    would store membership against whichever account the API happens to
+    return, and the other identity silently loses every group at the next
+    sync -- the "only the last login sees the libraries" failure. Refuse
+    instead, so the split shows up in the sync report (``unresolved``) rather
+    than moving data between accounts.
+    """
+
+
 def _default_map_email(subject):
-    """Seahub's own login-string -> identity mapping. Returns input if unmapped."""
+    """Seahub's own login-string -> identity mapping. Returns input if unmapped.
+
+    ``MultipleObjectsReturned`` is re-raised as ``AmbiguousSubject`` rather
+    than treated as "no mapping": a duplicated contact_email must refuse, not
+    fall through to the existence check and land on an arbitrary account.
+    """
+    from django.db.utils import MultipleObjectsReturned
     from seahub.profile.models import Profile
-    return Profile.objects.convert_login_str_to_username(subject)
+    try:
+        return Profile.objects.convert_login_str_to_username(subject)
+    except MultipleObjectsReturned:
+        raise AmbiguousSubject(subject)
 
 
 def _default_account_exists(candidate):
@@ -83,6 +105,11 @@ def resolve_user(subject, map_email=None, account_exists=None):
 
     try:
         mapped = map_email(subject)
+    except AmbiguousSubject:
+        # An ambiguous mapping is never a "try the fallback" situation: the
+        # directory disagrees with itself about who this is, and guessing an
+        # account is how membership migrates between a person's identities.
+        raise
     except Exception as e:                                  # pragma: no cover
         logger.warning('login-string mapping for %s failed: %s', subject, e)
         mapped = None
@@ -104,6 +131,28 @@ def resolve_user(subject, map_email=None, account_exists=None):
         logger.warning('account lookup for %s failed: %s', subject, e)
 
     raise UnknownSubject(subject)
+
+
+def login_of(identity):
+    """The login string the directory knows this identity by, or None.
+
+    The reverse of ``resolve_user``: the per-user directory query is keyed by
+    what the etech directory understands -- the employee number (工号), which
+    the IdP sets as ``login_id`` -- and the login refresh receives the opaque
+    identity from the session. Contact email is the fallback for profiles
+    provisioned before login_id was populated. Returning None when the profile
+    carries neither lets the caller skip the refresh rather than query
+    ``/users/<identity>/groups`` and read "no such user" as a fact.
+    """
+    from seahub.profile.models import Profile
+
+    profile = Profile.objects.get_profile_by_user(identity)
+    if profile is None:
+        return None
+    login_id = (profile.login_id or '').strip()
+    if login_id:
+        return login_id
+    return (profile.contact_email or '').strip() or None
 
 
 def resolve_group(subject):
