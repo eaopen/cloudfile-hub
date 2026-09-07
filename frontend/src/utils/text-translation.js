@@ -99,6 +99,10 @@ const TextTranslation = {
     key: 'Open with OnlyOffice',
     value: gettext('OnlyOffice')
   },
+  OPEN_WITH_LOCAL_APP: {
+    key: 'Open with Local App',
+    value: gettext('Local app')
+  },
   LOCK: {
     key: 'Lock',
     value: gettext('Lock')

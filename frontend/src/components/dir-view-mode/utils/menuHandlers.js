@@ -97,6 +97,11 @@ export const menuHandlers = {
     openWithOnlyOffice(repoID, path, dirent);
   },
 
+  [TextTranslation.OPEN_WITH_LOCAL_APP.key]: ({ repoID, path, dirent }) => {
+    const filePath = Utils.joinPath(path, dirent.name);
+    window.open(siteRoot + 'cloudfile/file-actions/?repo_id=' + encodeURIComponent(repoID) + '&path=' + encodeURIComponent(filePath));
+  },
+
   [TextTranslation.CONVERT_TO_MARKDOWN.key]: ({ onItemConvert, dirent }) => {
     onItemConvert && onItemConvert(dirent, 'markdown');
   },
