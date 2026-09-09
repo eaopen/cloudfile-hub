@@ -57,7 +57,7 @@ def _default_map_email(subject):
     than treated as "no mapping": a duplicated contact_email must refuse, not
     fall through to the existence check and land on an arbitrary account.
     """
-    from django.db.utils import MultipleObjectsReturned
+    from django.core.exceptions import MultipleObjectsReturned
     from seahub.profile.models import Profile
     try:
         return Profile.objects.convert_login_str_to_username(subject)
