@@ -23,6 +23,7 @@ from seahub.api2.utils import api_error
 from seahub.constants import PERMISSION_READ_WRITE
 
 from cloudfile_ext.features import is_enabled
+from cloudfile_ext import identity
 from cloudfile_ext.acl import resolver, service, subjects
 from cloudfile_ext.acl.models import DirACL
 from cloudfile_ext.permissions import PermissionService
@@ -77,10 +78,30 @@ def _serialize(rule):
         'path': rule.path,
         'subject_type': rule.subject_type,
         'subject': rule.subject,
+        'subject_login': _subject_login(rule),
         'permission': rule.permission,
         'inherit': bool(rule.inherit),
         'mtime': rule.mtime,
     }
+
+
+def _subject_login(rule):
+    """The login string the directory knows this subject by, or None.
+
+    Rule subjects are stored as Seafile identities (what enforcement compares
+    against -- cf_dir_acl.subject is `xxx@auth.local` on any SSO deployment).
+    An eap-facing client needs the reverse: the employee number / contact email
+    its own directory understands. identity.login_of is that exact reverse
+    mapping for users; dept/group ids pass through (they are the same numbers
+    both sides know).
+    """
+    if rule.subject_type != resolver.SUBJECT_USER:
+        return None
+    try:
+        return identity.login_of(rule.subject)
+    except Exception:
+        logger.warning('login_of(%s) failed', rule.subject, exc_info=True)
+        return None
 
 
 class DirACLView(APIView):

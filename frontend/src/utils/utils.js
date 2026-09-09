@@ -627,7 +627,7 @@ export const Utils = {
     let list = [];
     const {
       SHARE, DOWNLOAD, DELETE, RENAME, MOVE, COPY, UNLOCK, LOCK, UNFREEZE_DOCUMENT, FREEZE_DOCUMENT,
-      HISTORY, ACCESS_LOG, PROPERTIES, OPEN_WITH, OPEN_WITH_DEFAULT, OPEN_VIA_CLIENT, OPEN_WITH_ONLYOFFICE, ONLYOFFICE_CONVERT,
+      HISTORY, ACCESS_LOG, PROPERTIES, OPEN_WITH, OPEN_WITH_DEFAULT, OPEN_VIA_CLIENT, OPEN_WITH_ONLYOFFICE, OPEN_WITH_LOCAL_APP, ONLYOFFICE_CONVERT,
       CONVERT_AND_EXPORT, CONVERT_TO_MARKDOWN, CONVERT_TO_DOCX, EXPORT_DOCX, EXPORT_MARKDOWN, CONVERT_TO_SDOC, EXPORT_SDOC,
       STAR, UNSTAR, MORE
     } = TextTranslation;
@@ -755,10 +755,16 @@ export const Utils = {
     if (currentRepoInfo.enable_onlyoffice && (fileExt == 'csv' || fileExt == 'pdf')) {
       let subOpList = [];
       subOpList.push(OPEN_WITH_DEFAULT, 'Divider', OPEN_WITH_ONLYOFFICE, OPEN_VIA_CLIENT);
+      if (cloudfileIsEnabled('CF_ENABLE_LOCAL_APP')) {
+        subOpList.push('Divider', OPEN_WITH_LOCAL_APP);
+      }
       list.push({ ...OPEN_WITH, subOpList });
     } else {
       let subOpList = [];
       subOpList.push(OPEN_WITH_DEFAULT, 'Divider', OPEN_VIA_CLIENT);
+      if (cloudfileIsEnabled('CF_ENABLE_LOCAL_APP')) {
+        subOpList.push('Divider', OPEN_WITH_LOCAL_APP);
+      }
       list.push({ ...OPEN_WITH, subOpList });
     }
 

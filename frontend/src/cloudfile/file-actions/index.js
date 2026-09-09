@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Button, Spinner } from 'reactstrap';
-import { gettext } from '../../utils/constants';
+import { gettext, siteRoot } from '../../utils/constants';
 import toaster from '../../components/toast';
 import { cloudFileAPI } from '../cloudfile-api';
 
@@ -40,7 +40,7 @@ function ActionCard({ action, onOpen, busy }) {
 function downloadSessionManifest(session) {
   const payload = JSON.stringify({
     protocol: session.protocol,
-    server: window.location.origin,
+    server: window.location.origin + siteRoot,
     ticket: session.ticket,
     expires_at: session.expires_at,
   }, null, 2);
