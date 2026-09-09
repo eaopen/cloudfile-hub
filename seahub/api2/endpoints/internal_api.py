@@ -205,7 +205,14 @@ class InternalCheckFileOperationAccess(APIView):
                         repo_id, file_path, username))
 
             if op == OP_DOWNLOAD:
-                if not (ignore_download_perms or op_perms.can_download):
+                # 修改逻辑（P0 修复，2026-09-11）：先确保具备读取/预览资格，再应用
+                # ignore_download_perms 豁免。此前 ``not (ignore_download_perms or
+                # can_download)`` 会让 PDF/视频/Markdown 在**路径完全无权限**（invisible/none，
+                # B-1 修复后 parse_repo_perm 全 False）时仍被放行——豁免只应作用于"可见但普通
+                # 下载被限"的预览读取（自定义 preview 权限，can_preview=True 且 can_download=
+                # False），绝不能豁免不可见路径。
+                if not (op_perms.can_download
+                        or (ignore_download_perms and op_perms.can_preview)):
                     error_msg = 'Permission denied.'
                     return api_error(status.HTTP_403_FORBIDDEN, error_msg)
             if op == OP_UPLOAD and not op_perms.can_upload:
