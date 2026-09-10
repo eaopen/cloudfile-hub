@@ -84,6 +84,7 @@ from cloudfile_ext.settings_defaults import *
 | Setting | 默认值 | 说明 |
 |---|---:|---|
 | `CF_ACL_CACHE_TTL` | `30` | Hub 进程内 repo ACL 缓存秒数 |
+| `CF_ACL_MIGRATION_INTERVAL` | `60` | 规则随改名/移动迁移的扫描周期（秒，运行时最小 15）；消费 seafevents Activity 的 rename/move |
 | `CF_SSO_GROUP_OWNER` | `''` | 同步创建组的所有者；为空时同步拒绝执行 |
 | `CF_SSO_SYNC_INTERVAL` | `600` | 全量同步秒数；运行时最小 60 |
 | `CF_SSO_MAX_REMOVAL_RATIO` | `0.5` | 单次允许删除的受管成员比例；空字符串取消限制 |

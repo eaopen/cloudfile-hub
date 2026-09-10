@@ -102,6 +102,11 @@ CF_DATABASE_PORT = '3306'
 # Hub a query per permission check.
 CF_ACL_CACHE_TTL = 30
 
+# 修改逻辑/原因（2026-09-12）：cf_dir_acl / cf_dir_admin 按 path 存储，改名/移动不会自动搬运规则。
+# cf-worker 按此周期消费 seafevents Activity 的 rename/move，把受影响规则重写到新路径
+# （与搜索索引同一事件源；运行时最小 15 秒）。
+CF_ACL_MIGRATION_INTERVAL = 60
+
 # -- SSO directory mapping -------------------------------------------------
 #
 # Login itself is upstream's (ENABLE_OAUTH / ENABLE_ADFS_LOGIN / ENABLE_CAS,
