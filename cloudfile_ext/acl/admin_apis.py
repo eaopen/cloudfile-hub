@@ -21,7 +21,7 @@ from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 
 from cloudfile_ext.features import is_enabled
-from cloudfile_ext.acl import resolver, service, subjects
+from cloudfile_ext.acl import granularity, probes, resolver, service, subjects
 from cloudfile_ext.acl.apis import (
     VALID_PERMISSIONS, VALID_SUBJECT_TYPES, _serialize, _serialize_admin,
     _feature_off,
@@ -63,12 +63,32 @@ class AdminDirACLView(APIView):
         start = (page - 1) * per_page
         rules = qs[start:start + per_page]
 
+        serialized = [_serialize(r) for r in rules]
+        # 修改逻辑/原因（2026-09-12）：存量巡检/报表模式——逐条标注 path_kind 与
+        # eligible（是否具备库级资格），用于找出"配置了但永远不生效"的文件级授权。
+        # 默认关闭：逐条资格探针是 RPC，列表页不该为此变慢（用 annotate_eligibility=true 显式开启）。
+        if str(request.GET.get('annotate_eligibility', '')).strip().lower() in (
+                '1', 'true', 'yes', 'on'):
+            kind_cache = {}
+            eligibility_cache = {}
+            annotated = []
+            for rule, item in zip(rules, serialized):
+                if rule.path not in kind_cache:
+                    kind_cache[rule.path] = probes.path_kind(repo_id, rule.path)
+                key = (rule.subject_type, rule.subject)
+                if key not in eligibility_cache:
+                    eligibility_cache[key] = probes.subject_eligible(
+                        repo_id, rule.subject_type, rule.subject)
+                annotated.append(granularity.annotate(
+                    item, kind_cache[rule.path], eligibility_cache[key]))
+            serialized = annotated
+
         return Response({
             'repo_id': repo_id,
             'total': total,
             'page': page,
             'per_page': per_page,
-            'rules': [_serialize(r) for r in rules],
+            'rules': serialized,
         })
 
     def post(self, request, repo_id):
@@ -102,6 +122,19 @@ class AdminDirACLView(APIView):
         except subjects.UnknownSubject as e:
             return api_error(status.HTTP_400_BAD_REQUEST,
                              'subject not found: %s' % e)
+
+        # 修改逻辑/原因（2026-09-12 粒度策略）：管理通道同样执行"授权只到目录、文件仅 deny"
+        # 与资格校验——空头规则大多正是管理端写入的；需要预置时传 allow_ineffective=true。
+        kind = probes.path_kind(repo_id, path)
+        message = granularity.check_grant(kind, permission)
+        if message:
+            return api_error(status.HTTP_400_BAD_REQUEST, message)
+        if str(request.data.get('allow_ineffective', '')).strip().lower() not in (
+                '1', 'true', 'yes', 'on'):
+            eligible = probes.subject_eligible(repo_id, subject_type, subject)
+            message = granularity.check_eligibility(eligible, subject_type)
+            if message:
+                return api_error(status.HTTP_400_BAD_REQUEST, message)
 
         try:
             rule = DirACL.objects.set_rule(

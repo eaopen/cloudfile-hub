@@ -24,7 +24,7 @@ from seahub.constants import PERMISSION_READ_WRITE
 
 from cloudfile_ext.features import is_enabled
 from cloudfile_ext import identity
-from cloudfile_ext.acl import resolver, service, subjects
+from cloudfile_ext.acl import granularity, probes, resolver, service, subjects
 from cloudfile_ext.acl.models import DirACL
 from cloudfile_ext.permissions import PermissionService
 
@@ -37,6 +37,13 @@ VALID_SUBJECT_TYPES = (resolver.SUBJECT_USER, resolver.SUBJECT_DEPT,
 
 def _feature_off():
     return api_error(status.HTTP_404_NOT_FOUND, 'Directory ACL is not enabled.')
+
+
+def _truthy(value):
+    """Query/body boolean that also accepts the strings a client sends."""
+    if isinstance(value, bool):
+        return value
+    return str(value or '').strip().lower() in ('1', 'true', 'yes', 'on')
 
 
 def _check_can_manage(request, repo_id, path):
@@ -120,10 +127,21 @@ class DirACLView(APIView):
         if error:
             return error
 
-        rules = DirACL.objects.filter(
-            repo_id=repo_id, path_hash=resolver.path_hash(path))
-        return Response({'path': path,
-                         'rules': [_serialize(r) for r in rules]})
+        rules = list(DirACL.objects.filter(
+            repo_id=repo_id, path_hash=resolver.path_hash(path)))
+        # 修改原因（2026-09-12）：列表带上 path_kind/eligible/guidance，
+        # 让"配置了但永远不生效"的规则在管理面可见（此前只能靠直连数据库发现）。
+        kind = probes.path_kind(repo_id, path)
+        eligibility_cache = {}
+        serialized = []
+        for rule in rules:
+            key = (rule.subject_type, rule.subject)
+            if key not in eligibility_cache:
+                eligibility_cache[key] = probes.subject_eligible(
+                    repo_id, rule.subject_type, rule.subject)
+            serialized.append(granularity.annotate(
+                _serialize(rule), kind, eligibility_cache[key]))
+        return Response({'path': path, 'rules': serialized})
 
     def post(self, request, repo_id):
         if not is_enabled('CF_ENABLE_DIR_ACL'):
@@ -156,6 +174,23 @@ class DirACLView(APIView):
         except subjects.UnknownSubject as e:
             return api_error(status.HTTP_400_BAD_REQUEST,
                              'subject not found: %s' % e)
+
+        # 修改逻辑/原因（2026-09-12 粒度策略）：授权粒度=目录/库根；文件路径只接受 deny。
+        # 写内容类操作在上游按父目录判定（file.py 的 parent_dir），文件级 r/rw 会在管理界面
+        # "配置成功"却在写路径静默失效——正是我们排查过的那类工单；因此在写入时直接拒绝并给出引导。
+        kind = probes.path_kind(repo_id, path)
+        message = granularity.check_grant(kind, permission)
+        if message:
+            return api_error(status.HTTP_400_BAD_REQUEST, message)
+
+        # 资格校验：路径规则只能在库级权限内细化，不能凭空造权限
+        # （resolver.resolve 在 native 为 None 时恒返回 None）。默认拒绝"空头支票"，
+        # 需要预置规则时可显式传 allow_ineffective=true 绕过。
+        if not _truthy(request.data.get('allow_ineffective')):
+            eligible = probes.subject_eligible(repo_id, subject_type, subject)
+            message = granularity.check_eligibility(eligible, subject_type)
+            if message:
+                return api_error(status.HTTP_400_BAD_REQUEST, message)
 
         try:
             rule = DirACL.objects.set_rule(
