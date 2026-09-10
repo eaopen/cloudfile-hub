@@ -184,6 +184,49 @@ class AdminDirACLView(APIView):
         return Response({'success': True})
 
 
+class AdminDirACLMigrateView(APIView):
+    """Re-point a library's ACL rules after a rename/move (admin channel).
+
+    修改逻辑/原因（2026-09-12 即时迁移）：规则按 path 存储，改名/移动不会自动搬运。
+    周期任务 acl-path-migration 通过 seafevents Activity 兜底修复，但那是"已提交历史"，
+    存在一个周期的滞后窗口（默认 ≤60s）。门户发起的改名/移动是**已知事件**，eap 在操作成功后
+    直接调用本端点，把该路径下的规则即时迁移到新路径；WebDAV/桌面客户端等其它入口仍由周期任务覆盖。
+
+    幂等：以 (old_path -> new_path) 重写，重复调用不会产生额外变更。
+    """
+
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+    throttle_classes = (UserRateThrottle,)
+
+    def post(self, request, repo_id):
+        if not is_enabled('CF_ENABLE_DIR_ACL'):
+            return _feature_off()
+
+        from cloudfile_ext.acl import migration
+
+        old_path = request.data.get('old_path')
+        new_path = request.data.get('new_path')
+        if not old_path or not new_path:
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'old_path and new_path are required.')
+
+        old_path = resolver.normalize_path(old_path)
+        new_path = resolver.normalize_path(new_path)
+        if old_path == new_path:
+            return Response({'migrated': 0})
+
+        try:
+            migrated = migration.migrate_path(repo_id, old_path, new_path)
+        except Exception as e:
+            logger.error(e)
+            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                             'Internal Server Error')
+
+        service.invalidate_repo(repo_id)
+        return Response({'migrated': migrated})
+
+
 class AdminDirAdminView(APIView):
     """List or clear a library's directory-admin grants, as an administrator.
 

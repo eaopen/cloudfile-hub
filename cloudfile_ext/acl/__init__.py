@@ -23,7 +23,7 @@ def register(registry):
     from cloudfile_ext.acl.apis import (
         DirACLView, DirACLEffectiveView, DirAdminView)
     from cloudfile_ext.acl.admin_apis import (
-        AdminDirACLView, AdminDirAdminView)
+        AdminDirACLView, AdminDirACLMigrateView, AdminDirAdminView)
     from cloudfile_ext.permissions import PermissionService
     from cloudfile_ext.acl.views import acl_page
 
@@ -43,6 +43,9 @@ def register(registry):
                 DirAdminView.as_view(), name='cloudfile-dir-admin'),
         re_path(r'^api/v2.1/admin/cloudfile/repos/%s/dir-acl/$' % repo_id,
                 AdminDirACLView.as_view(), name='cloudfile-admin-dir-acl'),
+        re_path(r'^api/v2.1/admin/cloudfile/repos/%s/dir-acl/migrate/$' % repo_id,
+                AdminDirACLMigrateView.as_view(),
+                name='cloudfile-admin-dir-acl-migrate'),
         re_path(r'^api/v2.1/admin/cloudfile/repos/%s/dir-admin/$' % repo_id,
                 AdminDirAdminView.as_view(), name='cloudfile-admin-dir-admin'),
         path('cloudfile/acl/', acl_page, name='cloudfile-dir-acl-page'),
