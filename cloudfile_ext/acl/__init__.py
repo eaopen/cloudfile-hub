@@ -50,6 +50,15 @@ def register(registry):
 
     registry.register_permission_check(PermissionService.effective_perm)
 
+    # 修改逻辑/原因（2026-09-12 规则随目录迁移）：cf_dir_acl / cf_dir_admin 以 path 定位，
+    # 而改名/移动不会自动搬运规则——目录改名后规则会留在旧路径上静默失配。
+    # 这里注册一个周期任务，按 seafevents 的 Activity（rename/move，带 old_path）
+    # 把受影响规则重写到新路径；与搜索索引同一事件源、同一 best-effort 模型，
+    # 覆盖所有客户端（改名/移动最终都是一次提交）。
+    from cloudfile_ext.acl.migration import migration_tick
+    registry.register_periodic_task('acl-path-migration', _migration_interval(),
+                                    migration_tick)
+
     registry.register_menu({
         'key': 'dir-acl',
         'label': 'Directory permissions',
@@ -64,3 +73,16 @@ def register(registry):
         return sources.active(registry).sync()
 
     registry.register_periodic_task('acl-rule-sync', 300, sync_rules)
+
+def _migration_interval():
+    """How often cf-worker scans for moves, in seconds (default 60)."""
+    import logging
+
+    from django.conf import settings
+
+    logger = logging.getLogger(__name__)
+    try:
+        return max(15, int(getattr(settings, 'CF_ACL_MIGRATION_INTERVAL', 60)))
+    except (TypeError, ValueError):
+        logger.warning('CF_ACL_MIGRATION_INTERVAL is not a number; using 60s')
+        return 60
