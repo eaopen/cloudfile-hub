@@ -56,6 +56,13 @@ def register(registry):
 
     directory.register(registry)
 
+    # Install the external-id -> Seafile group-id resolver on the baseline, so
+    # directory ACL (and anything else resolving a dept/group subject) gets the
+    # SSO translation without importing this capability. See
+    # cloudfile_ext.identity.set_default_group_map_resolver.
+    from cloudfile_ext.identity import set_default_group_map_resolver
+    set_default_group_map_resolver(service.external_group_id)
+
     registry.register_urls([
         path('api/v2.1/admin/cloudfile/sso/sync/',
              AdminSSOSyncView.as_view(), name='cloudfile-admin-sso-sync'),

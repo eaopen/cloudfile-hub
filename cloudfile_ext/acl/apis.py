@@ -195,7 +195,10 @@ class DirACLView(APIView):
                              'subject not found: %s' % e)
 
         try:
-            DirACL.objects.delete_rule(repo_id, path, subject_type, subject)
+            deleted, _ = DirACL.objects.delete_rule(
+                repo_id, path, subject_type, subject)
+            if not deleted:
+                return api_error(status.HTTP_404_NOT_FOUND, 'rule not found.')
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -357,7 +360,10 @@ class DirAdminView(APIView):
 
         try:
             from cloudfile_ext.acl.models import DirAdmin
-            DirAdmin.objects.delete_rule(repo_id, path, subject_type, subject)
+            deleted, _ = DirAdmin.objects.delete_rule(
+                repo_id, path, subject_type, subject)
+            if not deleted:
+                return api_error(status.HTTP_404_NOT_FOUND, 'grant not found.')
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,

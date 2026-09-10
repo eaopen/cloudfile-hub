@@ -139,9 +139,12 @@ class AdminDirACLView(APIView):
                 except subjects.UnknownSubject as e:
                     return api_error(status.HTTP_400_BAD_REQUEST,
                                      'subject not found: %s' % e)
-                DirACL.objects.delete_rule(
+                deleted, _ = DirACL.objects.delete_rule(
                     repo_id, resolver.normalize_path(path), subject_type,
                     subject)
+                if not deleted:
+                    return api_error(status.HTTP_404_NOT_FOUND,
+                                     'rule not found.')
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
@@ -217,9 +220,12 @@ class AdminDirAdminView(APIView):
                 except subjects.UnknownSubject as e:
                     return api_error(status.HTTP_400_BAD_REQUEST,
                                      'subject not found: %s' % e)
-                DirAdmin.objects.delete_rule(
+                deleted, _ = DirAdmin.objects.delete_rule(
                     repo_id, resolver.normalize_path(path), subject_type,
                     subject)
+                if not deleted:
+                    return api_error(status.HTTP_404_NOT_FOUND,
+                                     'grant not found.')
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,

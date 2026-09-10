@@ -117,3 +117,66 @@ def test_ambiguous_mapping_is_refused_not_fallback():
             map_email=ambiguous,
             account_exists=accounts(IDENTITY, EMAIL),  # fallback must not run
         )
+
+
+# -- resolve_group -------------------------------------------------------
+
+
+def groups(*known):
+    """group_exists: a native Seafile group id that answers True."""
+    return lambda gid: gid in known
+
+
+def gmap(table):
+    """group_map: external_id -> seafile_group_id, or None when unmapped."""
+    return lambda external_id: table.get(external_id)
+
+
+def test_group_external_id_maps_to_seafile_id():
+    # '7' is the directory's external id for one dept; the Seafile group id
+    # (583) is what enforcement compares against.
+    assert identity.resolve_group(
+        '7', group_map=gmap({'7': 583}), group_exists=groups(583, 7)) == '583'
+
+
+def test_group_collision_prefers_external_id():
+    # On a numeric collision the external id must win, so a client meaning the
+    # dept is never silently pointed at the unrelated Seafile group.
+    assert identity.resolve_group(
+        '7', group_map=gmap({'7': 583}), group_exists=groups(583, 7)) == '583'
+
+
+def test_group_unmapped_falls_back_to_native_id():
+    # Roles were written by native Seafile group id; an id the map does not
+    # know must still resolve as a group id rather than be refused.
+    assert identity.resolve_group(
+        '1245', group_map=gmap({}), group_exists=groups(1245)) == '1245'
+
+
+def test_group_map_skipped_with_false_group_map():
+    # A false group_map means "no translation", the pre-SSO behaviour.
+    assert identity.resolve_group(
+        '1245', group_map=False, group_exists=groups(1245)) == '1245'
+
+
+def test_group_unknown_is_refused():
+    with pytest.raises(identity.UnknownSubject):
+        identity.resolve_group(
+            '999999', group_map=gmap({}), group_exists=groups())
+
+
+def test_group_non_numeric_unknown_is_refused():
+    with pytest.raises(identity.UnknownSubject):
+        identity.resolve_group(
+            'role:4185', group_map=gmap({}), group_exists=groups())
+
+
+def test_group_role_external_id_maps():
+    assert identity.resolve_group(
+        'role:4185', group_map=gmap({'role:4185': 1245}),
+        group_exists=groups(1245)) == '1245'
+
+
+def test_group_empty_is_refused():
+    with pytest.raises(identity.UnknownSubject):
+        identity.resolve_group('   ', group_map=gmap({}), group_exists=groups())

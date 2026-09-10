@@ -70,6 +70,11 @@ def _default_account_exists(candidate):
     return bool(ccnet_api.get_emailuser(candidate))
 
 
+def _default_group_exists(gid):
+    from seaserv import ccnet_api
+    return ccnet_api.get_group(gid) is not None
+
+
 def resolve_user(subject, map_email=None, account_exists=None):
     """Return the identity enforcement will see, for a typed user subject.
 
@@ -155,17 +160,82 @@ def login_of(identity):
     return (profile.contact_email or '').strip() or None
 
 
-def resolve_group(subject):
-    """Group and department subjects are numeric ids; validate rather than map."""
-    from seaserv import ccnet_api
+#: Process-wide resolver for a directory dept's external id -> Seafile group
+#: id. Installed by the SSO capability at startup when CF_ENABLE_SSO is on;
+#: None means directory ACL resolves depts as native Seafile group ids (the
+#: pre-SSO behaviour). Lives on the baseline so directory ACL reads it without
+#: importing the SSO capability, and SSO sets it without importing directory
+#: ACL -- neither capability depends on the other.
+_DEFAULT_GROUP_MAP_RESOLVER = None
+
+
+def set_default_group_map_resolver(resolver):
+    """Install (or clear, with None) the external-id -> group-id resolver."""
+    global _DEFAULT_GROUP_MAP_RESOLVER
+    _DEFAULT_GROUP_MAP_RESOLVER = resolver
+
+
+def default_group_map_resolver():
+    """The installed resolver, or None."""
+    return _DEFAULT_GROUP_MAP_RESOLVER
+
+
+def resolve_group(subject, group_map=None, group_exists=None):
+    """Return the Seafile group id enforcement compares, for a typed group.
+
+    In an SSO deployment the directory's own id -- ``external_id`` -- differs
+    from the Seafile group id that group membership is enforced against
+    (``cf_sso_group_map``). ``external_id`` is a string: a bare numeric
+    department id, a snowflake id, or a ``role:<id>``. When a mapping is
+    available it is consulted first and, when it answers, its answer wins
+    outright.
+
+    The translation is deliberately *fall-back*, not fail-closed: a subject
+    that is not a known external id is re-read as a native Seafile group id.
+    Both shapes exist in the wild -- departments were written by external id,
+    roles by Seafile group id -- and refusing the latter would break live
+    rules. The order still keeps the dangerous case correct: on a numeric
+    collision (``7`` is external id of one dept and Seafile group id of a
+    different group) the external id wins, so a client meaning the dept is
+    never silently pointed at the group.
+
+    ``group_map`` is injectable for the same reason ``resolve_user`` takes
+    ``map_email``: identity is baseline, and must not depend on the SSO
+    capability that owns ``cf_sso_group_map``. When omitted, the process-wide
+    default installed by the SSO capability is used, so callers that only
+    import ``identity`` still get the translation when SSO is on.
+
+    :param subject: an external id (when mapped) or a numeric Seafile group
+        id, as typed by an admin or API client
+    :param group_map: callable ``external_id -> seafile_group_id | None``,
+        None to use the installed default, or a false value to skip mapping
+    :param group_exists: callable ``gid -> bool``, injectable for tests
+    """
+    group_exists = group_exists or _default_group_exists
+
+    subject = str(subject).strip()
+
+    if group_map is None:
+        group_map = default_group_map_resolver()
+
+    if group_map:
+        try:
+            mapped = group_map(subject)
+        except Exception as e:                              # pragma: no cover
+            logger.warning('group-map lookup for %s failed: %s', subject, e)
+            mapped = None
+        if mapped is not None:
+            return str(mapped)
+        # Not a known external id: fall through to the native group-id check
+        # below, so a raw Seafile group id keeps working (the pre-SSO shape).
 
     try:
-        gid = int(str(subject).strip())
+        gid = int(subject)
     except (TypeError, ValueError):
         raise UnknownSubject('group subject must be a numeric id: %r' % (subject,))
 
     try:
-        if ccnet_api.get_group(gid) is None:
+        if not group_exists(gid):
             raise UnknownSubject('no such group: %s' % gid)
     except UnknownSubject:
         raise

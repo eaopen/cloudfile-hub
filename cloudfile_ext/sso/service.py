@@ -44,6 +44,27 @@ def _settings():
     return settings
 
 
+def external_group_id(external_id):
+    """Resolve a directory external id to its Seafile group id, or None.
+
+    Consumed by directory ACL as the group-map resolver installed at startup:
+    when SSO is on, a dept/group subject typed as an external id is translated
+    before the native group-id check. Returns None when the id is not mapped,
+    which lets the caller fall back to treating it as a Seafile group id --
+    both shapes exist in the wild (departments were written by external id,
+    roles by Seafile group id), so refusing either would break live rules.
+
+    Reads the whole map on each call. That is fine here: rule writes are
+    infrequent admin operations, not a hot path.
+    """
+    try:
+        row = SSOGroupMap.objects.as_dict(PROVIDER).get(external_id)
+    except Exception:
+        logger.exception('group-map lookup failed for %s', external_id)
+        return None
+    return row['group_id'] if row else None
+
+
 def group_owner():
     """The account that owns the groups CloudFile creates.
 
