@@ -49,7 +49,13 @@ def has_search_provider():
     is not there.
     """
     from cloudfile_ext import providers
-    return bool(providers.selected(SEARCH))
+    if providers.selected(SEARCH):
+        return True
+    # 修改逻辑/原因（2026-09-12 降级修复）：内置标签后端不需要任何外部组件，
+    # 因此默认开启 fallback 时，只要 CF_ENABLE_SEARCH 打开就能解锁搜索入口——
+    # 部署既没有 Elasticsearch 也没有 Meilisearch 时，按标签/创建者查询依然可用，
+    # 而不是让用户看到"0 条结果"。
+    return _db_fallback_enabled()
 
 
 def search_files(repos_map, search_path, keyword, obj_desc, start, size,
@@ -87,12 +93,23 @@ def search_files(repos_map, search_path, keyword, obj_desc, start, size,
 
     if provider is None:
         if filters:
-            # Native search cannot express these, so falling through to
-            # Elasticsearch would answer a different question than the one
-            # asked. Same reasoning as UnsupportedFilter.
+            # 修改逻辑/原因（2026-09-12 降级修复）：原生 ES/SeaSearch 无法表达结构化
+            # 过滤（tags/creator），此前直接抛 UnsupportedFilter，被上游 Search 视图的
+            # `except Exception` 吞成 total:0，用户看到"没有匹配文件"——而标签确实存在。
+            # 现在默认路由到内置 DB 标签后端（seahub 自身标签表即可回答），
+            # 只有在 fallback 被显式关闭时才拒绝（拒绝仍然优于静默丢条件）。
+            if _db_fallback_enabled():
+                db_provider = _db_provider()
+                parsed = search_query.parse(filters)
+                # 让声明的算子集合决定是否可答：不支持的谓词显式失败，绝不静默丢弃。
+                search_query.check_supported(db_provider, parsed)
+                return db_provider.search_files(
+                    repos_map, search_path, keyword, obj_desc, start, size,
+                    org_id, search_filename_only, parsed)
             raise search_query.UnsupportedFilter(
                 'structured filters require a CloudFile search provider; '
-                'none is selected (CF_PROVIDER_SEARCH)')
+                'none is selected (CF_PROVIDER_SEARCH) and '
+                'CF_SEARCH_DB_FALLBACK is off')
         return None
 
     filters = search_query.parse(filters)
@@ -105,6 +122,57 @@ def search_files(repos_map, search_path, keyword, obj_desc, start, size,
     return provider.search_files(repos_map, search_path, keyword, obj_desc,
                                  start, size, org_id, search_filename_only,
                                  filters)
+
+
+#: Built-in backend that answers tag/creator predicates from Seahub's own tag
+#: tables (no external index). Registered by cloudfile_ext.search.
+DB_TAGS_PROVIDER = 'db-tags'
+
+
+def _db_fallback_enabled():
+    """Whether the built-in tag backend may answer when no provider is selected."""
+    from django.conf import settings
+    return getattr(settings, 'CF_SEARCH_DB_FALLBACK', True) is True
+
+
+def _db_provider():
+    """The built-in tag backend, or None when it was never registered."""
+    return registry.providers.get(SEARCH, DB_TAGS_PROVIDER)
+
+
+def _native_search_available():
+    """Whether upstream's own Elasticsearch/SeaSearch backend is configured.
+
+    Read lazily: seahub.search.utils imports this module, so importing it at
+    module level would be circular.
+    """
+    try:
+        from seahub.search.utils import es_search
+        return es_search is not None
+    except Exception:
+        return False
+
+
+def search_backend_state():
+    """Which backend answers a search request right now.
+
+    Used by the shadowed search views to fail loudly (501) instead of letting
+    upstream render an empty page for a question this deployment cannot answer:
+
+    * ``external`` -- CF_PROVIDER_SEARCH selected a provider;
+    * ``native``   -- upstream Elasticsearch/SeaSearch is configured;
+    * ``db-tags``  -- only the built-in tag backend answers: tag/creator
+                      filtered queries work, plain full-text does not;
+    * ``none``     -- nothing can answer.
+    """
+    from cloudfile_ext import providers
+    if providers.selected(SEARCH):
+        return 'external'
+    if _native_search_available():
+        return 'native'
+    if _db_fallback_enabled() and _db_provider() is not None:
+        return 'db-tags'
+    return 'none'
 
 
 def is_search_path_denied(username, repo_id, path):

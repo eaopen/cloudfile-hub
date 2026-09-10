@@ -81,6 +81,15 @@ class ProviderSet(object):
         """Registered names for `kind`, sorted. Used by the admin surface."""
         return sorted(self._by_kind.get(kind, {}))
 
+    def get(self, kind, name):
+        """A registered provider by name, or None when it was not registered.
+
+        Used for built-in backends the framework itself falls back to (e.g. the
+        tag-table backend in cloudfile_ext.hooks), which are not selected
+        through CF_PROVIDER_* and therefore never reachable via active().
+        """
+        return self._by_kind.get(kind, {}).get(name)
+
     def active(self, kind):
         """The provider the operator selected, or None when none is.
 

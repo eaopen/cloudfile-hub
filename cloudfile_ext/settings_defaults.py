@@ -136,6 +136,11 @@ CF_SSO_DIRECTORY_STATIC = []
 # configured entirely through seafevents.conf, which cloudfile-docker's
 # bootstrap writes from CF_ENABLE_SEARCH and CF_SEASEARCH_TOKEN.
 
+# 修改逻辑/原因（2026-09-12）：没有外部搜索 provider 时，用内置 DB 标签后端回答
+# tags/creator 过滤（seahub 自身标签表即可作答，无需 ES/Meilisearch），
+# 避免"标签确实存在但搜索返回 0 条"的错误答案；置 False 则回到显式拒绝。
+CF_SEARCH_DB_FALLBACK = True
+
 CF_MEILISEARCH_URL = 'http://meilisearch:7700'
 CF_MEILISEARCH_API_KEY = ''
 # HTTP timeout for a single Meilisearch call. Kept short: a slow search

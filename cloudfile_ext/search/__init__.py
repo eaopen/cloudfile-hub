@@ -62,6 +62,13 @@ def register(registry):
              name='cloudfile-published-repo-search'),
     ])
 
+    # 修改逻辑/原因（2026-09-12 降级修复）：内置标签后端无条件注册——它不需要任何
+    # 外部组件，是"没有 provider 时按标签仍可查询"的兜底；是否启用由
+    # CF_SEARCH_DB_FALLBACK 控制（hooks 侧路由），显式 CF_PROVIDER_SEARCH=db-tags
+    # 也可选中它作为唯一后端。
+    from cloudfile_ext.search.backends.dbtags import DbTagsProvider
+    registry.register_search_provider('db-tags', DbTagsProvider())
+
     if getattr(settings, 'CF_PROVIDER_SEARCH', '') != 'meilisearch':
         # Empty (or any other value) means native SeaSearch/Elasticsearch --
         # no provider to register, no indexer to run. An unrecognised

@@ -43,11 +43,28 @@ from cloudfile_ext.settings_defaults import *
 
 | Setting | 默认值 | 可用值/说明 |
 |---|---|---|
-| `CF_PROVIDER_SEARCH` | `''` | 空值走 CE SeaSearch/Elasticsearch；当前 CloudFile 可注册 `meilisearch` |
+| `CF_PROVIDER_SEARCH` | `''` | 空值走 CE SeaSearch/Elasticsearch；可注册 `meilisearch`，以及内置的 `db-tags`（无需外部索引，按标签表查询） |
 | `CF_PROVIDER_ACL_RULE_SOURCE` | `''` | 未选时 ACL 使用本地数据库；可显式选 `local-db`；`external-service` 未实现 |
 | `CF_PROVIDER_SSO_DIRECTORY` | `''` | 空值不做组映射；可选 `static`、`external-service` |
 
 非空但未注册的名称在第一次使用时抛出 `UnknownProvider`，不会自动降级。
+
+## 搜索降级（2026-09-12）
+
+| Setting | 默认值 | 说明 |
+|---|---|---|
+| `CF_SEARCH_DB_FALLBACK` | `True` | 未选择外部搜索 provider 时，用内置 `db-tags` 后端回答 `tags`/`creator` 过滤（直接查 Seahub 标签表，**不需要 Elasticsearch/Meilisearch**）。关闭后退回显式拒绝 |
+
+背景：`api2/search/?tags=...` 的结构化过滤只有 CloudFile provider 能表达；此前未选 provider 时
+抛 `UnsupportedFilter`，被上游 `Search.get()` 的 `except Exception` 吞成 `total:0`——
+用户看到"没有匹配文件"，而标签其实存在。现在：
+
+* 未选 provider 且有 `tags`/`creator_emails` → 内置 `db-tags` 作答（v2 系统标签 + legacy 用户标签，含目录）；
+* 未选 provider 且无过滤（纯全文）→ 影子视图返回 **501** 并提示如何启用索引，不再返回空结果；
+* 未选 provider 且 `CF_SEARCH_DB_FALLBACK=false` → 仍显式拒绝（拒绝优于静默丢条件）。
+
+`db-tags` 不假装是全文索引：`keyword` 只在标签命中的候选集内做名称/路径子串匹配，
+内容检索仍需 `CF_PROVIDER_SEARCH=meilisearch`。
 
 ## 数据库
 
