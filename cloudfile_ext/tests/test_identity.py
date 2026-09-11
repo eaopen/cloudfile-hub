@@ -180,3 +180,20 @@ def test_group_role_external_id_maps():
 def test_group_empty_is_refused():
     with pytest.raises(identity.UnknownSubject):
         identity.resolve_group('   ', group_map=gmap({}), group_exists=groups())
+
+
+# -- reverse group-id resolver seam --------------------------------------
+
+
+def test_group_id_resolver_seam_roundtrip():
+    # The reverse direction is a bare get/set seam on the baseline; the real
+    # translation lives in the SSO capability (group_external_id). Installing
+    # and clearing it must round-trip without importing that capability.
+    identity.set_default_group_id_resolver(lambda gid: {'583': '7'}.get(str(gid)))
+    try:
+        assert identity.default_group_id_resolver()(583) == '7'
+        assert identity.default_group_id_resolver()(999) is None
+    finally:
+        identity.set_default_group_id_resolver(None)
+    assert identity.default_group_id_resolver() is None
+

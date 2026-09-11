@@ -65,6 +65,29 @@ def external_group_id(external_id):
     return row['group_id'] if row else None
 
 
+def group_external_id(group_id):
+    """Resolve a Seafile group id back to its directory external id, or None.
+
+    The reverse of :func:`external_group_id`, consumed by directory ACL's read
+    path (``_subject_login``) so a stored dept/group subject -- which
+    enforcement compares as a Seafile group id -- is shown to the external
+    system as the id its own directory knows (``583 -> '7'``).
+
+    ``SSOGroupMap.group_id`` is unique, so at most one external id answers.
+    A group id with no mapping (a hand-created Seafile group, or a role group
+    whose row was keyed differently) returns None and the caller passes the
+    group id through unchanged.
+    """
+    try:
+        row = SSOGroupMap.objects.filter(
+            provider=PROVIDER, group_id=group_id).values_list(
+            'external_id', flat=True).first()
+    except Exception:
+        logger.exception('group-id reverse lookup failed for %s', group_id)
+        return None
+    return row
+
+
 def group_owner():
     """The account that owns the groups CloudFile creates.
 

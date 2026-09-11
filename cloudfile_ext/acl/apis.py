@@ -99,16 +99,34 @@ def _subject_login(rule):
     against -- cf_dir_acl.subject is `xxx@auth.local` on any SSO deployment).
     An eap-facing client needs the reverse: the employee number / contact email
     its own directory understands. identity.login_of is that exact reverse
-    mapping for users; dept/group ids pass through (they are the same numbers
-    both sides know).
+    mapping for users.
+
+    dept/group subjects are stored as Seafile group ids; the reverse mapping
+    is the SSO group map (``583 -> '7'``), installed on the baseline as the
+    group-id resolver. When no reverse resolver is installed, or the group id
+    is not mapped (a hand-created group / role keyed differently), the group
+    id passes through unchanged so a client never reads a blank.
     """
-    if rule.subject_type != resolver.SUBJECT_USER:
-        return None
-    try:
-        return identity.login_of(rule.subject)
-    except Exception:
-        logger.warning('login_of(%s) failed', rule.subject, exc_info=True)
-        return None
+    if rule.subject_type == resolver.SUBJECT_USER:
+        try:
+            return identity.login_of(rule.subject)
+        except Exception:
+            logger.warning('login_of(%s) failed', rule.subject, exc_info=True)
+            return None
+
+    # dept / group: translate the stored Seafile group id back to the
+    # directory's external id, falling back to the raw group id.
+    reverse_resolver = identity.default_group_id_resolver()
+    if reverse_resolver:
+        try:
+            mapped = reverse_resolver(rule.subject)
+        except Exception:
+            logger.warning('group-id reverse lookup for %s failed',
+                           rule.subject, exc_info=True)
+            mapped = None
+        if mapped is not None:
+            return mapped
+    return rule.subject
 
 
 class DirACLView(APIView):

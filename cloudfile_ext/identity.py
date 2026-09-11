@@ -180,6 +180,26 @@ def default_group_map_resolver():
     return _DEFAULT_GROUP_MAP_RESOLVER
 
 
+#: Process-wide resolver for the reverse direction: a Seafile group id -> the
+#: directory's external id. Symmetric to _DEFAULT_GROUP_MAP_RESOLVER, so the
+#: read path can translate a stored group subject back to the id the external
+#: system (and its frontend) knows, e.g. ``583 -> '7'``. Installed by the SSO
+#: capability at startup alongside the forward resolver; None means group ids
+#: pass through unchanged (the pre-SSO behaviour).
+_DEFAULT_GROUP_ID_RESOLVER = None
+
+
+def set_default_group_id_resolver(resolver):
+    """Install (or clear, with None) the group-id -> external-id resolver."""
+    global _DEFAULT_GROUP_ID_RESOLVER
+    _DEFAULT_GROUP_ID_RESOLVER = resolver
+
+
+def default_group_id_resolver():
+    """The installed reverse resolver, or None."""
+    return _DEFAULT_GROUP_ID_RESOLVER
+
+
 def resolve_group(subject, group_map=None, group_exists=None):
     """Return the Seafile group id enforcement compares, for a typed group.
 

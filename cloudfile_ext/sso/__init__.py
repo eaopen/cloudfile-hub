@@ -63,6 +63,9 @@ def register(registry):
     from cloudfile_ext.identity import set_default_group_map_resolver
     set_default_group_map_resolver(service.external_group_id)
 
+    from cloudfile_ext.identity import set_default_group_id_resolver
+    set_default_group_id_resolver(service.group_external_id)
+
     registry.register_urls([
         path('api/v2.1/admin/cloudfile/sso/sync/',
              AdminSSOSyncView.as_view(), name='cloudfile-admin-sso-sync'),
