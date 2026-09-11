@@ -44,7 +44,7 @@ function openViaExtension(session) {
     return;
   }
   runtime.sendMessage(EXTENSION_ID, payload, (response) => {
-    if (chrome.runtime.lastError) {
+    if (runtime.lastError) {
       toaster.danger(gettext('CloudFile 本地扩展未响应，请确认扩展已启用。'));
       return;
     }
