@@ -85,21 +85,21 @@ def _serialize(rule):
         'path': rule.path,
         'subject_type': rule.subject_type,
         'subject': rule.subject,
-        'subject_login': _subject_login(rule),
+        'external_subject_id': _external_subject_id(rule),
         'permission': rule.permission,
         'inherit': bool(rule.inherit),
         'mtime': rule.mtime,
     }
 
 
-def _subject_login(rule):
-    """The login string the directory knows this subject by, or None.
+def _external_subject_id(rule):
+    """The external id the directory knows this subject by, or None.
 
     Rule subjects are stored as Seafile identities (what enforcement compares
     against -- cf_dir_acl.subject is `xxx@auth.local` on any SSO deployment).
     An eap-facing client needs the reverse: the employee number / contact email
-    its own directory understands. identity.login_of is that exact reverse
-    mapping for users.
+    / org_group id / role id its own directory understands. identity.login_of
+    is that exact reverse mapping for users.
 
     dept/group subjects are stored as Seafile group ids; the reverse mapping
     is the SSO group map (``583 -> '7'``), installed on the baseline as the
@@ -319,6 +319,7 @@ def _serialize_admin(rule):
         'path': rule.path,
         'subject_type': rule.subject_type,
         'subject': rule.subject,
+        'external_subject_id': _external_subject_id(rule),
         'inherit': bool(rule.inherit),
         'mtime': rule.mtime,
     }

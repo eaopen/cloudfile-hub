@@ -69,7 +69,7 @@ def group_external_id(group_id):
     """Resolve a Seafile group id back to its directory external id, or None.
 
     The reverse of :func:`external_group_id`, consumed by directory ACL's read
-    path (``_subject_login``) so a stored dept/group subject -- which
+    path (``_external_subject_id``) so a stored dept/group subject -- which
     enforcement compares as a Seafile group id -- is shown to the external
     system as the id its own directory knows (``583 -> '7'``).
 
