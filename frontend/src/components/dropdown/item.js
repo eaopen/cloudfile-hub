@@ -50,7 +50,7 @@ export const CustomDropdownItem = ({
       )}
       <span className="dropdown-item-text">
         {icon && <span className={`dropdown-item-icon ${showLeftSlot ? 'mr-2' : 'mr-3'}`}>{icon}</span>}
-        <span className="dropdown-item-label" title={label}>{label}</span>
+        <span className="dropdown-item-label" title={item.tooltip || label}>{label}</span>
       </span>
       {showRightSlot && (
         <span className="dropdown-item-right-slot" aria-hidden="true">

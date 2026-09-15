@@ -99,9 +99,15 @@ const TextTranslation = {
     key: 'Open with OnlyOffice',
     value: gettext('OnlyOffice')
   },
-  OPEN_WITH_LOCAL_APP: {
-    key: 'Open with Local App',
-    value: gettext('Local app')
+  OPEN_WITH_LOCAL_VIEW: {
+    key: 'Open with Local View',
+    value: gettext('本地查看'),
+    tooltip: gettext('使用本地软件以只读方式打开该文件。')
+  },
+  OPEN_WITH_LOCAL_EDIT: {
+    key: 'Open with Local Edit',
+    value: gettext('本地编辑'),
+    tooltip: gettext('使用本地软件编辑该文件，保存后自动写回。')
   },
   LOCK: {
     key: 'Lock',

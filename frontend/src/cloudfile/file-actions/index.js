@@ -134,7 +134,7 @@ function FileActions() {
       {state.error && <div className="cf-error">{state.error}</div>}
       {!state.loading && !state.error && (
         <section className="cf-action-grid">
-          {renderButton('local-view', gettext('本地打开'), gettext('使用本地软件以只读方式打开该文件。'))}
+          {renderButton('local-view', gettext('本地查看'), gettext('使用本地软件以只读方式打开该文件。'))}
           {renderButton('local-edit', gettext('本地编辑'), gettext('使用本地软件编辑该文件，保存后自动写回。'))}
         </section>
       )}

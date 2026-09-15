@@ -5,6 +5,7 @@ import { EVENT_BUS_TYPE } from '@/components/common/event-bus-type';
 import { Dirent } from '@/models';
 import { Utils } from '@/utils/utils';
 import { seafileAPI } from '@/utils/seafile-api';
+import { openLocalSession } from '@/cloudfile/local-open';
 import { siteRoot } from '@/utils/constants';
 import { AttachmentObject } from '../dir-chat/models';
 import { setPendingAttachments } from '../dir-chat/hooks/ai-chat-tools';
@@ -97,9 +98,14 @@ export const menuHandlers = {
     openWithOnlyOffice(repoID, path, dirent);
   },
 
-  [TextTranslation.OPEN_WITH_LOCAL_APP.key]: ({ repoID, path, dirent }) => {
+  [TextTranslation.OPEN_WITH_LOCAL_VIEW.key]: ({ repoID, path, dirent }) => {
     const filePath = Utils.joinPath(path, dirent.name);
-    window.open(siteRoot + 'cloudfile/file-actions/?repo_id=' + encodeURIComponent(repoID) + '&path=' + encodeURIComponent(filePath));
+    openLocalSession(repoID, filePath, 'local-view');
+  },
+
+  [TextTranslation.OPEN_WITH_LOCAL_EDIT.key]: ({ repoID, path, dirent }) => {
+    const filePath = Utils.joinPath(path, dirent.name);
+    openLocalSession(repoID, filePath, 'local-edit');
   },
 
   [TextTranslation.CONVERT_TO_MARKDOWN.key]: ({ onItemConvert, dirent }) => {

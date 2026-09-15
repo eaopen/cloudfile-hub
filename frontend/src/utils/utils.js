@@ -627,7 +627,7 @@ export const Utils = {
     let list = [];
     const {
       SHARE, DOWNLOAD, DELETE, RENAME, MOVE, COPY, UNLOCK, LOCK, UNFREEZE_DOCUMENT, FREEZE_DOCUMENT,
-      HISTORY, ACCESS_LOG, PROPERTIES, OPEN_WITH, OPEN_WITH_DEFAULT, OPEN_VIA_CLIENT, OPEN_WITH_ONLYOFFICE, OPEN_WITH_LOCAL_APP, ONLYOFFICE_CONVERT,
+      HISTORY, ACCESS_LOG, PROPERTIES, OPEN_WITH, OPEN_WITH_DEFAULT, OPEN_VIA_CLIENT, OPEN_WITH_ONLYOFFICE, OPEN_WITH_LOCAL_VIEW, OPEN_WITH_LOCAL_EDIT, ONLYOFFICE_CONVERT,
       CONVERT_AND_EXPORT, CONVERT_TO_MARKDOWN, CONVERT_TO_DOCX, EXPORT_DOCX, EXPORT_MARKDOWN, CONVERT_TO_SDOC, EXPORT_SDOC,
       STAR, UNSTAR, MORE
     } = TextTranslation;
@@ -752,19 +752,34 @@ export const Utils = {
     list.push('Divider');
 
     let fileExt = Utils.getFileExtension(dirent.name, true);
+    // CloudFile 本地打开：拆成「本地查看」「本地编辑」两个菜单项，点击直接交给本地 Agent，不再弹页。
+    // 仅在有读权限时显示「本地查看」，有编辑权限时显示「本地编辑」。
+    let localAppItems = [];
+    if (cloudfileIsEnabled('CF_ENABLE_LOCAL_APP')) {
+      const canRead = permission == 'rw' || permission == 'r' || permission == 'admin' ||
+        permission == 'cloud-edit' || permission == 'preview' ||
+        (isCustomPermission && (customPermission.permission.download || customPermission.permission.preview));
+      const canEdit = permission == 'rw' || permission == 'admin' || permission == 'cloud-edit' ||
+        (isCustomPermission && customPermission.permission.modify);
+      if (canRead || canEdit) {
+        localAppItems.push('Divider');
+      }
+      if (canRead) {
+        localAppItems.push(OPEN_WITH_LOCAL_VIEW);
+      }
+      if (canEdit) {
+        localAppItems.push(OPEN_WITH_LOCAL_EDIT);
+      }
+    }
     if (currentRepoInfo.enable_onlyoffice && (fileExt == 'csv' || fileExt == 'pdf')) {
       let subOpList = [];
       subOpList.push(OPEN_WITH_DEFAULT, 'Divider', OPEN_WITH_ONLYOFFICE, OPEN_VIA_CLIENT);
-      if (cloudfileIsEnabled('CF_ENABLE_LOCAL_APP')) {
-        subOpList.push('Divider', OPEN_WITH_LOCAL_APP);
-      }
+      subOpList = subOpList.concat(localAppItems);
       list.push({ ...OPEN_WITH, subOpList });
     } else {
       let subOpList = [];
       subOpList.push(OPEN_WITH_DEFAULT, 'Divider', OPEN_VIA_CLIENT);
-      if (cloudfileIsEnabled('CF_ENABLE_LOCAL_APP')) {
-        subOpList.push('Divider', OPEN_WITH_LOCAL_APP);
-      }
+      subOpList = subOpList.concat(localAppItems);
       list.push({ ...OPEN_WITH, subOpList });
     }
 
