@@ -166,6 +166,7 @@ class AgentContentView(APIView):
 
         parent, name = os.path.split(session['path'])
         tmp_name = None
+        writeback_error = None
         try:
             with tempfile.NamedTemporaryFile(prefix='cloudfile-agent-', delete=False) as tmp:
                 tmp_name = tmp.name
@@ -178,18 +179,24 @@ class AgentContentView(APIView):
             seafile_api.put_file(session['repo_id'], tmp_name, parent or '/', name,
                                  session['username'], None)
         except Exception:
-            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
-                             'Unable to save local editing result.')
+            writeback_error = True
         finally:
             if tmp_name:
                 try:
                     os.unlink(tmp_name)
                 except OSError:
                     pass
+            # 无论写回成败都必须释放一次性 local-edit 锁：写回失败时若不释放，
+            # 锁会残留到 lease 过期（30min），期间用户既无法重新编辑（自己持锁
+            # 冲突），也无法靠手动解锁恢复（老前端缺 generation，见 FileLockView）。
+            # capability 是单次的，失败后用户重新发起编辑即可重新 acquire。
+            service.release_checkout(session['repo_id'], session['path'],
+                                     session['username'], session['generation'])
+            service.consume_local_edit_session(session_id)
 
-        service.release_checkout(session['repo_id'], session['path'],
-                                 session['username'], session['generation'])
-        service.consume_local_edit_session(session_id)
+        if writeback_error:
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
+                             'Unable to save local editing result.')
         return Response(status=status.HTTP_204_NO_CONTENT)
 
 
@@ -296,9 +303,10 @@ class FileLockView(_FileActionAPIView):
             request, repo_id, request.data.get('path', ''), require_edit=True)
         if error:
             return error
+        # generation 可选：手动解锁（前端只传 path）由 owner 匹配释放，
+        # 传 generation 时额外做一致性校验。C 后端 cf_lock_release 同样按
+        # owner 匹配即可释放，generation 只是更强的护栏，不是必需的。
         generation = request.data.get('generation', '')
-        if not generation:
-            return api_error(status.HTTP_400_BAD_REQUEST, 'generation required.')
         result = service.release_checkout(
             repo_id, path, request.user.username, generation)
         if not result.get('ok'):
