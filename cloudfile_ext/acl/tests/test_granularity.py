@@ -5,6 +5,8 @@ Django-free (the acl package imports Django only inside register()), so the
 shared pytest-only checks can run the whole matrix.
 """
 
+import sys
+
 import pytest
 
 from cloudfile_ext.acl import granularity, probes, resolver
@@ -132,3 +134,75 @@ def test_subject_eligible_returns_unknown_on_probe_failure():
     def boom(*args):
         raise RuntimeError('rpc down')
     assert probes.subject_eligible('r', 'user', 'u', {'user_permission': boom}) is None
+
+
+# -- _group_shared: RepoGroup is gone from seahub.share.models on Seafile 14 --
+#
+# Regression guard. The old implementation opened with
+# ``from seahub.share.models import RepoGroup``; Seafile 14 deleted that model
+# (only the table remains, read through ``db_api.SeafileDB``), so the import
+# raised, ``subject_eligible``'s broad ``except`` swallowed it, and *every*
+# department/group probe answered "unknown" -- which silently disabled both the
+# write-time eligibility check and the report's warning annotation.
+
+# What the raw-SQL reader returns for the library the bug was found on
+# (share-info reported shared_group_ids == [1]).
+SHARED_GROUP_ROWS = [{'share_type': 'group', 'repo_id': 'r', 'path': '/',
+                      'share_from': 'admin', 'share_to': 1, 'permission': 'rw'}]
+
+
+def _share_lister(rows):
+    return lambda repo_id, org_id: rows
+
+
+def test_group_shared_matches_a_direct_share(monkeypatch):
+    monkeypatch.setattr(probes, 'dept_ancestor_ids', lambda gid: [int(gid)])
+    assert probes._group_shared(
+        'r', '1', _share_lister(SHARED_GROUP_ROWS), org_id='') is True
+
+
+def test_group_shared_false_when_no_ancestor_is_shared(monkeypatch):
+    # dept 583 and its parents are not shared: the rule can never take effect,
+    # which is a real finding the report has to be able to state.
+    monkeypatch.setattr(probes, 'dept_ancestor_ids', lambda gid: [int(gid)])
+    assert probes._group_shared(
+        'r', '583', _share_lister(SHARED_GROUP_ROWS), org_id='') is False
+
+
+def test_group_shared_matches_a_parent_department(monkeypatch):
+    # Membership is inherited, so a share with the parent makes 583 eligible.
+    real = probes.dept_ancestor_ids
+    groups = {583: 1, 1: 0}
+    monkeypatch.setattr(
+        probes, 'dept_ancestor_ids',
+        lambda gid: real(gid, lambda g: FakeGroup(groups[g])))
+    assert probes._group_shared(
+        'r', '583', _share_lister(SHARED_GROUP_ROWS), org_id='') is True
+
+
+def test_group_shared_unknown_when_subject_is_not_a_group_id(monkeypatch):
+    monkeypatch.setattr(probes, 'dept_ancestor_ids', lambda gid: [])
+    assert probes._group_shared(
+        'r', 'not-a-number', _share_lister([]), org_id='') is None
+
+
+def test_group_shared_probe_failure_stays_unknown(monkeypatch):
+    # A failing share read must surface as None ("cannot tell"), never as False:
+    # False would let the report declare valid rules dead -- and the batch
+    # cleanup in the admin UI would delete them.
+    monkeypatch.setattr(probes, 'dept_ancestor_ids', lambda gid: [1])
+
+    def boom(repo_id, org_id):
+        raise RuntimeError('db down')
+
+    with pytest.raises(RuntimeError):
+        probes._group_shared('r', '1', boom, org_id='')
+    assert probes.subject_eligible(
+        'r', 'group', '1', {'group_shared': boom}) is None
+
+
+def test_repo_org_id_degrades_to_empty(monkeypatch):
+    # No request context here, so the org has to come from the repo; when that
+    # lookup is unavailable '' still reaches the common non-org table.
+    monkeypatch.setitem(sys.modules, 'seaserv', None)
+    assert probes._repo_org_id('r') == ''
