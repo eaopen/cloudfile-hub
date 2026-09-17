@@ -11,6 +11,27 @@ function errorMessage(error) {
   return gettext('Unable to prepare this file action.');
 }
 
+// Chrome 对「扩展未安装/已禁用」给出的 lastError 固定为
+// "Could not establish connection. Receiving end does not exist."，
+// 据此区分「没装/没启用」与「装了但无响应」两种提示。
+// 「没装/没启用」时引导用户到安装帮助页。
+function openHelpPage() {
+  window.location.href = siteRoot + 'cloudfile/local-app-help/';
+}
+
+function extensionErrorText(lastError) {
+  const message = (lastError && lastError.message) || '';
+  if (/receiving end does not exist/i.test(message)) {
+    return gettext('CloudFile 本地扩展未安装或未启用，即将跳转到安装帮助页。');
+  }
+  return gettext('CloudFile 本地扩展未响应，请确认扩展已启用。');
+}
+
+function extensionMissing(lastError) {
+  const message = (lastError && lastError.message) || '';
+  return /receiving end does not exist/i.test(message);
+}
+
 // 网页 → 扩展 → 本地 Agent 的消息通道。票据仍是一次性短命凭证，安全模型不变。
 function openViaExtension(session) {
   const payload = {
@@ -22,12 +43,18 @@ function openViaExtension(session) {
   };
   const runtime = window.chrome && window.chrome.runtime;
   if (!runtime || typeof runtime.sendMessage !== 'function') {
-    toaster.danger(gettext('CloudFile 本地扩展未安装或未启用，请检查浏览器扩展。'));
+    toaster.danger(gettext('CloudFile 本地扩展未安装或未启用，即将跳转到安装帮助页。'));
+    openHelpPage();
     return;
   }
   runtime.sendMessage(EXTENSION_ID, payload, (response) => {
     if (runtime.lastError) {
-      toaster.danger(gettext('CloudFile 本地扩展未响应，请确认扩展已启用。'));
+      if (extensionMissing(runtime.lastError)) {
+        toaster.danger(gettext('CloudFile 本地扩展未安装或未启用，即将跳转到安装帮助页。'));
+        openHelpPage();
+      } else {
+        toaster.danger(extensionErrorText(runtime.lastError));
+      }
       return;
     }
     if (response && response.ok) {

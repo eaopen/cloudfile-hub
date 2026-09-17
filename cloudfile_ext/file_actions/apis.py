@@ -4,9 +4,6 @@
 import os
 import tempfile
 
-from django.shortcuts import render
-from django.utils.decorators import method_decorator
-from django.views.decorators.cache import never_cache
 from rest_framework import status
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.parsers import FormParser, MultiPartParser
@@ -19,7 +16,6 @@ from seaserv import seafile_api
 from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
-from seahub.auth.decorators import login_required
 from seahub.utils import normalize_file_path
 from seahub.utils.repo import parse_repo_perm
 from seahub.views import check_folder_permission
@@ -368,15 +364,3 @@ class AdminFileLockForceReleaseView(APIView):
             return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
                              'File-lock service is unavailable.')
         return Response(status=status.HTTP_204_NO_CONTENT)
-
-
-@method_decorator(login_required, name='dispatch')
-@method_decorator(never_cache, name='dispatch')
-class FileActionsPageView(APIView):
-    """Render the dedicated React action surface for one requested file."""
-
-    authentication_classes = ()
-    permission_classes = ()
-
-    def get(self, request):
-        return render(request, 'cloudfile_ext/file_actions.html')

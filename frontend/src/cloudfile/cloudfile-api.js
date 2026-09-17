@@ -61,11 +61,6 @@ class CloudFileAPI {
 
   // -- file actions -------------------------------------------------------
 
-  getFileActions(repoID, path) {
-    const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/file-actions/';
-    return this.req.get(url, { params: { path: path } });
-  }
-
   createLocalSession(repoID, path, mode = 'local-view') {
     const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/local-sessions/';
     return this.req.post(url, { path: path, mode: mode });

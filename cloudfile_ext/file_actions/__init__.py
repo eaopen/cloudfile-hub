@@ -23,11 +23,14 @@ def register(registry):
     from cloudfile_ext.file_actions.apis import (
         AdminFileLockForceReleaseView, AgentContentView, AgentSessionClaimView,
         AgentSessionHeartbeatView, CheckoutView,
-        FileActionsPageView, FileActionsView, FileLockView, LocalSessionView,
+        FileActionsView, FileLockView, LocalSessionView,
     )
+    from cloudfile_ext.file_actions.views import local_app_help_page
 
     repo_id = r'(?P<repo_id>[-0-9a-f]{36})'
     registry.register_urls([
+        path('cloudfile/local-app-help/', local_app_help_page,
+             name='cloudfile-local-app-help-page'),
         re_path(r'^api/v2.1/cloudfile/repos/%s/file-actions/$' % repo_id,
                 FileActionsView.as_view(), name='cloudfile-file-actions'),
         re_path(r'^api/v2.1/cloudfile/repos/%s/local-sessions/$' % repo_id,
@@ -45,6 +48,4 @@ def register(registry):
         re_path(r'^api/v2.1/admin/cloudfile/repos/%s/file-lock/force-release/$' % repo_id,
                 AdminFileLockForceReleaseView.as_view(),
                 name='cloudfile-admin-file-lock-force-release'),
-        path('cloudfile/file-actions/', FileActionsPageView.as_view(),
-             name='cloudfile-file-actions-page'),
     ])
