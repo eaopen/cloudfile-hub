@@ -168,7 +168,11 @@ def test_group_shared_matches_a_direct_share(monkeypatch):
 def test_group_shared_false_when_no_ancestor_is_shared(monkeypatch):
     # dept 583 and its parents are not shared: the rule can never take effect,
     # which is a real finding the report has to be able to state.
+    # The subject is spelled out as a department (parent_group_id != 0) because
+    # only departments keep the chain-based verdict; a role gets a member scan
+    # instead (see the 2026-09-17 guard below).
     monkeypatch.setattr(probes, 'dept_ancestor_ids', lambda gid: [int(gid)])
+    monkeypatch.setattr(probes, 'parent_group_id_of', lambda gid: 2)
     assert probes._group_shared(
         'r', '583', _share_lister(SHARED_GROUP_ROWS), org_id='') is False
 
@@ -203,6 +207,167 @@ def test_group_shared_probe_failure_stays_unknown(monkeypatch):
         probes._group_shared('r', '1', boom, org_id='')
     assert probes.subject_eligible(
         'r', 'group', '1', {'group_shared': boom}) is None
+
+
+# -- _group_shared: a role is not an access axis of its own ------------------
+#
+# Regression guard (2026-09-17). A role / plain group (parent_group_id == 0) has
+# no department above it, so its members reach a library through their own
+# departments (a share on a parent department covers sub-department members) or
+# through personal user shares -- neither of which a per-subject probe can see.
+# Judging such a subject by its own share state alone declared working rules
+# "never effective", and the admin UI's batch cleanup then deletes them.
+# Departments keep the chain-based verdict: their department chain *is* the
+# axis their members are reached through.
+
+ORDINARY_GROUP = 0
+
+
+def _never_called(name):
+    def fn(*args, **kwargs):
+        raise AssertionError('%s should not have been called' % name)
+    return fn
+
+
+def test_group_shared_role_scans_members_when_not_shared(monkeypatch):
+    monkeypatch.setattr(probes, 'dept_ancestor_ids', lambda gid: [int(gid)])
+    monkeypatch.setattr(probes, 'parent_group_id_of', lambda gid: ORDINARY_GROUP)
+    seen = []
+
+    def member_reaches(repo_id, group_id):
+        seen.append((repo_id, group_id))
+        return True
+
+    monkeypatch.setattr(probes, '_member_reaches_library', member_reaches)
+    assert probes._group_shared(
+        'r', '1245', _share_lister([]), org_id='') is True
+    assert seen == [('r', '1245')]
+
+
+def test_group_shared_role_without_a_covered_member_is_false(monkeypatch):
+    monkeypatch.setattr(probes, 'dept_ancestor_ids', lambda gid: [int(gid)])
+    monkeypatch.setattr(probes, 'parent_group_id_of', lambda gid: ORDINARY_GROUP)
+    monkeypatch.setattr(probes, '_member_reaches_library', lambda repo, gid: False)
+    assert probes._group_shared(
+        'r', '1245', _share_lister([]), org_id='') is False
+
+
+def test_group_shared_role_member_scan_truncated_stays_unknown(monkeypatch):
+    monkeypatch.setattr(probes, 'dept_ancestor_ids', lambda gid: [int(gid)])
+    monkeypatch.setattr(probes, 'parent_group_id_of', lambda gid: ORDINARY_GROUP)
+    monkeypatch.setattr(probes, '_member_reaches_library', lambda repo, gid: None)
+    assert probes._group_shared(
+        'r', '1245', _share_lister([]), org_id='') is None
+
+
+def test_group_shared_role_shared_directly_skips_the_member_scan(monkeypatch):
+    monkeypatch.setattr(probes, 'dept_ancestor_ids', lambda gid: [int(gid)])
+    monkeypatch.setattr(probes, 'parent_group_id_of',
+                        _never_called('parent_group_id_of'))
+    monkeypatch.setattr(probes, '_member_reaches_library',
+                        _never_called('the member scan'))
+    assert probes._group_shared(
+        'r', '1', _share_lister(SHARED_GROUP_ROWS), org_id='') is True
+
+
+def test_group_shared_department_never_scans_members(monkeypatch):
+    monkeypatch.setattr(probes, 'dept_ancestor_ids', lambda gid: [int(gid)])
+    monkeypatch.setattr(probes, 'parent_group_id_of', lambda gid: 2)
+    monkeypatch.setattr(probes, '_member_reaches_library',
+                        _never_called('the member scan'))
+    assert probes._group_shared(
+        'r', '583', _share_lister([]), org_id='') is False
+
+
+def test_group_shared_unknown_when_the_group_type_cannot_be_read(monkeypatch):
+    # Without a readable parent_group_id a role cannot be told from a
+    # department, so the answer has to be unknown -- never False.
+    monkeypatch.setattr(probes, 'dept_ancestor_ids', lambda gid: [int(gid)])
+    monkeypatch.setattr(probes, 'parent_group_id_of', lambda gid: None)
+    monkeypatch.setattr(probes, '_member_reaches_library',
+                        _never_called('the member scan'))
+    assert probes._group_shared(
+        'r', '1245', _share_lister([]), org_id='') is None
+
+
+# -- parent_group_id_of ------------------------------------------------------
+
+
+def test_parent_group_id_of_classifies_roles_and_departments():
+    groups = {1245: FakeGroup(0), 583: FakeGroup(2), 1: FakeGroup(-1)}
+    assert probes.parent_group_id_of(1245, groups.get) == 0
+    assert probes.parent_group_id_of(583, groups.get) == 2
+    assert probes.parent_group_id_of(1, groups.get) == -1
+
+
+def test_parent_group_id_of_is_unknown_for_bad_or_missing_ids():
+    groups = {1: FakeGroup(-1)}
+    assert probes.parent_group_id_of('not-a-number', groups.get) is None
+    assert probes.parent_group_id_of(999, groups.get) is None
+
+
+# -- _member_reaches_library -------------------------------------------------
+
+
+class FakeMember(object):
+    def __init__(self, user_name):
+        self.user_name = user_name
+
+
+def _member_lister(user_names):
+    def fn(group_id, start, limit=None):
+        return [FakeMember(name) for name in user_names]
+    return fn
+
+
+def test_member_reaches_library_stops_at_the_first_covered_member():
+    checked = []
+
+    def user_permission(repo_id, username):
+        checked.append(username)
+        return 'rw' if username == 'b@x' else None
+
+    assert probes._member_reaches_library(
+        'r', '1245', _member_lister(['a@x', 'b@x', 'c@x']),
+        user_permission) is True
+    assert checked == ['a@x', 'b@x']
+
+
+def test_member_reaches_library_false_only_after_checking_every_member():
+    assert probes._member_reaches_library(
+        'r', '1245', _member_lister(['a@x', 'b@x']),
+        lambda repo, user: None) is False
+
+
+def test_member_reaches_library_false_for_an_empty_group():
+    assert probes._member_reaches_library(
+        'r', '1245', _member_lister([]),
+        _never_called('user_permission')) is False
+
+
+def test_member_reaches_library_unknown_when_the_scan_hits_the_cap():
+    # limit + 1 rows came back, so the list was truncated: a partial scan cannot
+    # prove that no member is covered.
+    assert probes._member_reaches_library(
+        'r', '1245', _member_lister(['a@x', 'b@x', 'c@x']),
+        lambda repo, user: None, limit=2) is None
+
+
+def test_member_reaches_library_accepts_plain_string_members():
+    def members(group_id, start, limit=None):
+        return ['a@x']
+    assert probes._member_reaches_library(
+        'r', '1245', members, lambda repo, user: 'r') is True
+
+
+def test_member_reaches_library_probe_failure_is_not_swallowed():
+    # A failing per-member check must reach subject_eligible's handler and
+    # degrade to unknown, never to a dead-rule verdict.
+    def boom(repo_id, username):
+        raise RuntimeError('rpc down')
+
+    with pytest.raises(RuntimeError):
+        probes._member_reaches_library('r', '1245', _member_lister(['a@x']), boom)
 
 
 def test_repo_org_id_degrades_to_empty(monkeypatch):
