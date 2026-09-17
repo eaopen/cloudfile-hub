@@ -33,21 +33,25 @@ KIND_FILE = 'file'
 #: Permissions that *grant* something (as opposed to denying).
 ALLOW_PERMISSIONS = (resolver.PERMISSION_R, resolver.PERMISSION_RW)
 
+# 修改逻辑/原因（2026-09-16）：以下三条文案是**直接给操作员看的**——既作为列表里的
+# guidance 原样显示在门户「状态」列，也作为写入被拒时的提示语（400/403 的 msg）返回，
+# 使用方全是中文管理员，因此改为中文（此前是英文，英文原文见 git 历史与
+# cloudfile-docker/docs/acl-semantics.md 的口径说明）。
+# 已确认：eap 与门户都不按这些文案做子串匹配，翻译不会影响任何判断逻辑，
+# 但**后续也不要**按中文子串去匹配——文案是给人看的，不是协议。
 GRANT_ON_FILE_MESSAGE = (
-    'Authorisation granularity is the folder: r/rw cannot be granted on a '
-    'file. Move the file into a dedicated folder and grant that folder, or '
-    'create a share link for an external audience. File-level rules are only '
-    'accepted as deny (none / invisible).')
+    '授权粒度只能是目录：文件路径不允许授予 r/rw。'
+    '请把文件移入一个专属目录后授权该目录；需要对外部人员开放时改用分享链接。'
+    '文件路径只接受 deny（none / invisible，即隐藏该文件）。')
 
 INELIGIBLE_MESSAGE = (
-    'This subject has no permission on the library, so a path rule can never '
-    'take effect (a rule refines access, it never creates it). Grant library '
-    'access first, then narrow it with folder rules.')
+    '该用户对本库没有任何权限，路径规则永远不会生效'
+    '（规则只能在已有权限的基础上细化，不能凭空创建权限）。'
+    '请先授予其库级权限，再用目录规则收窄范围。')
 
 INELIGIBLE_GROUP_MESSAGE = (
-    'This group/department has no share on the library, so a path rule can '
-    'never take effect. Share the library with the group (or one of its parent '
-    'departments) first, then narrow it with folder rules.')
+    '该角色/部门未被分享本库，路径规则永远不会生效。'
+    '请先把库分享给该角色/部门（或其任一上级部门），再用目录规则收窄范围。')
 
 
 def check_grant(kind, permission):

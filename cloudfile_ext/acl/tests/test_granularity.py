@@ -25,8 +25,9 @@ def test_grant_on_file_is_refused_with_guidance(permission):
     message = granularity.check_grant(granularity.KIND_FILE, permission)
     assert message
     # The guidance has to name both ways out, otherwise the admin is stuck.
-    assert 'dedicated folder' in message
-    assert 'share link' in message
+    # The wording is Chinese: it is shown verbatim to operators (2026-09-16).
+    assert '专属目录' in message
+    assert '分享链接' in message
 
 
 @pytest.mark.parametrize('permission', list(resolver.DENYING))
@@ -42,12 +43,15 @@ def test_deny_allowed_at_any_depth(kind, permission):
 
 def test_ineligible_user_is_refused():
     message = granularity.check_eligibility(False, resolver.SUBJECT_USER)
-    assert 'no permission on the library' in message
+    assert '没有任何权限' in message
+    # A user-level message must not be the group one.
+    assert granularity.INELIGIBLE_GROUP_MESSAGE not in message
 
 
 def test_ineligible_group_gets_group_specific_message():
     message = granularity.check_eligibility(False, resolver.SUBJECT_GROUP)
-    assert 'share on the library' in message
+    assert '未被分享本库' in message
+    assert message != granularity.INELIGIBLE_MESSAGE
 
 
 def test_unknown_eligibility_must_not_block_a_write():
@@ -72,14 +76,14 @@ def test_annotate_marks_file_grant_with_guidance():
     item = granularity.annotate(_rule(), granularity.KIND_FILE, True)
     assert item['path_kind'] == 'file'
     assert item['eligible'] is True
-    assert 'dedicated folder' in item['guidance']
+    assert '专属目录' in item['guidance']
 
 
 def test_annotate_marks_ineligible_rule():
     item = granularity.annotate(_rule(path='/docs'), granularity.KIND_DIR, False)
     assert item['path_kind'] == 'dir'
     assert item['eligible'] is False
-    assert 'never take effect' in item['guidance']
+    assert '永远不会生效' in item['guidance']
 
 
 def test_annotate_keeps_rule_fields():

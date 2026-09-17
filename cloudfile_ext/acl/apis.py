@@ -5,6 +5,13 @@ Managing ACL on a directory or file is itself a privileged operation: only a
 library admin or a covering directory-level admin (`PermissionService.
 can_manage`) may change it. Requiring plain `rw` would let anyone a folder was
 shared with re-share it more widely.
+
+修改逻辑/原因（2026-09-16）：本模块返回给客户端的报文改为**中文**——它们经 eap 原样透传到
+门户的 res.msg，使用方全是中文管理员（口径同 granularity.py 顶部）。
+其中 `Library not found.` / `Path not found.` / `Permission denied.` / `permission invalid.` /
+`Internal Server Error` 在别的模块也有同名副本，**本次只改了 ACL 这一份**：
+各模块是彼此独立的字面量、不是共享常量，所以不必回头同步别处——
+改别处会外溢到 external_sources / file_actions / seahub 等无关端点。
 """
 
 import logging
@@ -36,7 +43,8 @@ VALID_SUBJECT_TYPES = (resolver.SUBJECT_USER, resolver.SUBJECT_DEPT,
 
 
 def _feature_off():
-    return api_error(status.HTTP_404_NOT_FOUND, 'Directory ACL is not enabled.')
+    # 报文中文化见模块顶部说明（2026-09-16）。admin_apis 也 import 本函数。
+    return api_error(status.HTTP_404_NOT_FOUND, '目录授权功能未启用。')
 
 
 def _truthy(value):
@@ -61,21 +69,21 @@ def _check_can_manage(request, repo_id, path):
     """
     repo = seafile_api.get_repo(repo_id)
     if not repo:
-        return api_error(status.HTTP_404_NOT_FOUND, 'Library not found.')
+        return api_error(status.HTTP_404_NOT_FOUND, '库不存在。')
 
     # Rules may target a directory or a file (acl-semantics.md 4.3); the path
     # must simply exist.
     if (not seafile_api.get_dir_id_by_path(repo_id, path)
             and not seafile_api.get_file_id_by_path(repo_id, path)):
-        return api_error(status.HTTP_404_NOT_FOUND, 'Path not found.')
+        return api_error(status.HTTP_404_NOT_FOUND, '路径不存在。')
 
     username = request.user.username
     if seafile_api.check_permission(repo_id, username) != PERMISSION_READ_WRITE:
-        return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        return api_error(status.HTTP_403_FORBIDDEN, '权限不足。')
 
     if not PermissionService.can_manage(username, repo_id, path):
         return api_error(status.HTTP_403_FORBIDDEN,
-                         'Only a library admin can manage directory ACL.')
+                         '只有库管理员可以管理目录授权。')
     return None
 
 
@@ -173,12 +181,12 @@ class DirACLView(APIView):
 
         if subject_type not in VALID_SUBJECT_TYPES:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'subject_type invalid.')
+                             '主体类型不合法。')
         if not subject:
-            return api_error(status.HTTP_400_BAD_REQUEST, 'subject invalid.')
+            return api_error(status.HTTP_400_BAD_REQUEST, '主体不合法。')
         if permission not in VALID_PERMISSIONS:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'permission invalid.')
+                             '权限值不合法。')
 
         error = _check_can_manage(request, repo_id, path)
         if error:
@@ -217,7 +225,7 @@ class DirACLView(APIView):
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
-                             'Internal Server Error')
+                             '服务器内部错误。')
 
         service.invalidate_repo(repo_id)
         return Response(_serialize(rule))
@@ -232,7 +240,7 @@ class DirACLView(APIView):
 
         if subject_type not in VALID_SUBJECT_TYPES or not subject:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'subject_type or subject invalid.')
+                             '主体类型或主体不合法。')
 
         error = _check_can_manage(request, repo_id, path)
         if error:
@@ -251,11 +259,11 @@ class DirACLView(APIView):
             deleted, _ = DirACL.objects.delete_rule(
                 repo_id, path, subject_type, subject)
             if not deleted:
-                return api_error(status.HTTP_404_NOT_FOUND, 'rule not found.')
+                return api_error(status.HTTP_404_NOT_FOUND, '规则不存在。')
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
-                             'Internal Server Error')
+                             '服务器内部错误。')
 
         service.invalidate_repo(repo_id)
         return Response({'success': True})
@@ -364,9 +372,9 @@ class DirAdminView(APIView):
 
         if subject_type not in VALID_SUBJECT_TYPES:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'subject_type invalid.')
+                             '主体类型不合法。')
         if not subject:
-            return api_error(status.HTTP_400_BAD_REQUEST, 'subject invalid.')
+            return api_error(status.HTTP_400_BAD_REQUEST, '主体不合法。')
 
         error = _check_can_manage(request, repo_id, path)
         if error:
@@ -385,7 +393,7 @@ class DirAdminView(APIView):
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
-                             'Internal Server Error')
+                             '服务器内部错误。')
 
         service.invalidate_repo(repo_id)
         return Response(_serialize_admin(grant))
@@ -400,7 +408,7 @@ class DirAdminView(APIView):
 
         if subject_type not in VALID_SUBJECT_TYPES or not subject:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'subject_type or subject invalid.')
+                             '主体类型或主体不合法。')
 
         error = _check_can_manage(request, repo_id, path)
         if error:
@@ -417,11 +425,11 @@ class DirAdminView(APIView):
             deleted, _ = DirAdmin.objects.delete_rule(
                 repo_id, path, subject_type, subject)
             if not deleted:
-                return api_error(status.HTTP_404_NOT_FOUND, 'grant not found.')
+                return api_error(status.HTTP_404_NOT_FOUND, '委派记录不存在。')
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
-                             'Internal Server Error')
+                             '服务器内部错误。')
 
         service.invalidate_repo(repo_id)
         return Response({'success': True})

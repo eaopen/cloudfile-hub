@@ -4,6 +4,10 @@
 Separate from apis.py because these bypass library ownership: an
 administrator has to be able to inspect and repair ACL on libraries they do
 not own, including ones whose owner has left.
+
+报文中文化同 apis.py 顶部说明（2026-09-16）：本模块返回的报文也是中文，
+其中 `page or per_page invalid.` / `Library not found.` / `Internal Server Error`
+在别的模块有同名副本，本次只改 ACL 这一份，不回改别处。
 """
 
 import logging
@@ -53,10 +57,10 @@ class AdminDirACLView(APIView):
                            MAX_RULES_PER_PAGE)
         except ValueError:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'page or per_page invalid.')
+                             'page 或 per_page 不合法。')
         if page < 1 or per_page < 1:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'page or per_page invalid.')
+                             'page 或 per_page 不合法。')
 
         qs = DirACL.objects.filter(repo_id=repo_id).order_by('path', 'id')
         total = qs.count()
@@ -105,15 +109,15 @@ class AdminDirACLView(APIView):
 
         if subject_type not in VALID_SUBJECT_TYPES:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'subject_type invalid.')
+                             '主体类型不合法。')
         if not subject:
-            return api_error(status.HTTP_400_BAD_REQUEST, 'subject invalid.')
+            return api_error(status.HTTP_400_BAD_REQUEST, '主体不合法。')
         if permission not in VALID_PERMISSIONS:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'permission invalid.')
+                             '权限值不合法。')
 
         if not seafile_api.get_repo(repo_id):
-            return api_error(status.HTTP_404_NOT_FOUND, 'Library not found.')
+            return api_error(status.HTTP_404_NOT_FOUND, '库不存在。')
 
         # As in the owner-facing endpoint: store the identity enforcement
         # compares, not what was typed. See cloudfile_ext/acl/subjects.py.
@@ -143,7 +147,7 @@ class AdminDirACLView(APIView):
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
-                             'Internal Server Error')
+                             '服务器内部错误。')
 
         service.invalidate_repo(repo_id)
         return Response(_serialize(rule))
@@ -166,7 +170,7 @@ class AdminDirACLView(APIView):
             else:
                 if subject_type not in VALID_SUBJECT_TYPES or not subject:
                     return api_error(status.HTTP_400_BAD_REQUEST,
-                                     'subject_type or subject invalid.')
+                                     '主体类型或主体不合法。')
                 try:
                     subject = subjects.resolve(subject_type, subject)
                 except subjects.UnknownSubject as e:
@@ -177,11 +181,11 @@ class AdminDirACLView(APIView):
                     subject)
                 if not deleted:
                     return api_error(status.HTTP_404_NOT_FOUND,
-                                     'rule not found.')
+                                     '规则不存在。')
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
-                             'Internal Server Error')
+                             '服务器内部错误。')
 
         service.invalidate_repo(repo_id)
         return Response({'success': True})
@@ -212,7 +216,7 @@ class AdminDirACLMigrateView(APIView):
         new_path = request.data.get('new_path')
         if not old_path or not new_path:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'old_path and new_path are required.')
+                             '必须提供 old_path 与 new_path。')
 
         old_path = resolver.normalize_path(old_path)
         new_path = resolver.normalize_path(new_path)
@@ -224,7 +228,7 @@ class AdminDirACLMigrateView(APIView):
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
-                             'Internal Server Error')
+                             '服务器内部错误。')
 
         service.invalidate_repo(repo_id)
         return Response({'migrated': migrated})
@@ -254,10 +258,10 @@ class AdminDirAdminView(APIView):
                            MAX_RULES_PER_PAGE)
         except ValueError:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'page or per_page invalid.')
+                             'page 或 per_page 不合法。')
         if page < 1 or per_page < 1:
             return api_error(status.HTTP_400_BAD_REQUEST,
-                             'page or per_page invalid.')
+                             'page 或 per_page 不合法。')
 
         qs = DirAdmin.objects.filter(repo_id=repo_id).order_by('path', 'id')
         total = qs.count()
@@ -290,7 +294,7 @@ class AdminDirAdminView(APIView):
             else:
                 if subject_type not in VALID_SUBJECT_TYPES or not subject:
                     return api_error(status.HTTP_400_BAD_REQUEST,
-                                     'subject_type or subject invalid.')
+                                     '主体类型或主体不合法。')
                 try:
                     subject = subjects.resolve(subject_type, subject)
                 except subjects.UnknownSubject as e:
@@ -301,11 +305,11 @@ class AdminDirAdminView(APIView):
                     subject)
                 if not deleted:
                     return api_error(status.HTTP_404_NOT_FOUND,
-                                     'grant not found.')
+                                     '委派记录不存在。')
         except Exception as e:
             logger.error(e)
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
-                             'Internal Server Error')
+                             '服务器内部错误。')
 
         service.invalidate_repo(repo_id)
         return Response({'success': True})
