@@ -55,7 +55,6 @@ const entryFiles = {
   cloudfileAdmin: '/cloudfile/admin/index.js',
   cloudfileAcl: '/cloudfile/acl/index.js',
   cloudfileExternalSources: '/cloudfile/external-sources/index.js',
-  cloudfileLocalAppHelp: '/cloudfile/local-app-help/index.js',
 };
 
 const getEntries = (isEnvDevelopment) => {

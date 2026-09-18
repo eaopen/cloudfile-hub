@@ -15,8 +15,10 @@ function errorMessage(error) {
 // "Could not establish connection. Receiving end does not exist."，
 // 据此区分「没装/没启用」与「装了但无响应」两种提示。
 // 「没装/没启用」时引导用户到安装帮助页。
+// 安装帮助页为静态页，位于静态发布目录 /cloudfile-updates/help.html（根路径，
+// 与 siteRoot 无关）。改帮助内容直接改该静态 HTML 即可，无需 build 前端 / 重启 seahub。
 function openHelpPage() {
-  window.location.href = siteRoot + 'cloudfile/local-app-help/';
+  window.location.href = window.location.origin + '/cloudfile-updates/help.html';
 }
 
 function extensionErrorText(lastError) {
