@@ -391,6 +391,15 @@ def sync_user(username, registry=None):
       refresh would simply never fire. The identity is mapped back to its
       login account first; without one the refresh is skipped and the
       periodic sync stays the contract.
+
+    Returns the number of memberships added, or ``None`` when the refresh could
+    not be attempted at all (no directory selected, identity unresolvable, no
+    login account on the profile, or the directory lookup failed).
+    **Callers rely on ``None`` vs ``0`` being different**: the login signal in
+    ``cloudfile_ext/sso/__init__.py`` only throttles its next run after an
+    attempt that actually ran -- a skipped first login (the profile is written
+    *after* ``auth.login()`` fires the signal) must not burn the throttle
+    window. Keep the two apart if this is ever refactored.
     """
     from cloudfile_ext.registry import registry as default_registry
     from cloudfile_ext.identity import login_of

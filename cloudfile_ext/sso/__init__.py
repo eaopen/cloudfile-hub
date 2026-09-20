@@ -143,11 +143,25 @@ def _connect_login_refresh():
         key = 'cf_sso_login_refresh:%s' % username
         if cache.get(key):
             return
+        # 先占窗口：同一用户的并发/快速重复登录不会都去打目录（在途保护）。
         cache.set(key, 1, LOGIN_REFRESH_TTL)
         try:
-            service.sync_user(username)
+            result = service.sync_user(username)
         except Exception:
             logger.exception('SSO refresh on login failed for %s', username)
+            # 异常不算"跑过"：释放窗口，下次登录可重试。
+            cache.delete(key)
+            return
+        # 修改逻辑/原因（2026-09-20）：sync_user 返回 None 表示它**没能执行**（主体解析不出 /
+        # profile 里还没有登录账号 / 目录查询失败），返回 int（含 0）表示跑完了（不论是否加了人）。
+        # 原先无论结果如何都保留窗口，于是"没执行成"也会白占 600s —— 而**最需要立刻重试的恰恰是它**：
+        # seahub/oauth/views.py 里 auth.login() 先触发本信号，之后（241-265 行）才回填 profile 的
+        # login_id / contact_email，所以**首次登录必然"没有登录账号"、必然被跳过**；若那次就占掉窗口，
+        # 用户 600s 内再登录也不会刷新，只能干等周期同步（CF_SSO_SYNC_INTERVAL）。
+        # 副作用（已知并接受）：目录明确回答"此人没有组"时也会释放窗口，于是这类用户每次登录都会
+        # 查一次目录 —— 一次 HTTP GET，且换来"新加的组在下一次登录即可见"，划算。
+        if result is None:
+            cache.delete(key)
 
     # Keep a reference so the receiver survives. Django holds receivers weakly,
     # and a function defined inside another function has no other owner -- it
