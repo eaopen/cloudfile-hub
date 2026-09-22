@@ -1,7 +1,7 @@
 import React from 'react';
 import { Modal, ModalBody, ModalFooter, Button } from 'reactstrap';
 import PropTypes from 'prop-types';
-import { gettext } from '../../utils/constants';
+import { gettext } from '@/utils/constants';
 
 const propTypes = {
   affectedMembers: PropTypes.number.isRequired,

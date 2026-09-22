@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { Button, Input, Spinner } from 'reactstrap';
 import { createRoot } from 'react-dom/client';
-import toaster from '../../components/toast';
-import { gettext } from '../../utils/constants';
+import toaster from '@/components/toast';
+import { gettext } from '@/utils/constants';
 import { cloudFileAPI } from '../cloudfile-api';
 import { loadFeatures } from '../features';
 

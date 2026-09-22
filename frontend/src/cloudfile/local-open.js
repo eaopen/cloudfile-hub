@@ -1,5 +1,5 @@
-import toaster from '../components/toast';
-import { gettext, siteRoot } from '../utils/constants';
+import toaster from '@/components/toast';
+import { gettext, siteRoot } from '@/utils/constants';
 import { cloudFileAPI } from './cloudfile-api';
 
 const EXTENSION_ID = 'gocnpbhnbikcpnlafmodflddgnmfcjoc';
