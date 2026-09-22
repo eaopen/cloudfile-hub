@@ -45,8 +45,9 @@ def register(registry):
     from cloudfile_ext.external_sources.overlay_apis import ExternalOverlayView
     from cloudfile_ext.external_sources.search_apis import ExternalSourceSearchView
     from cloudfile_ext.external_sources.shadows import (
-        ExternalApi2FileView, ExternalDirView, ExternalFileDetailView,
-        ExternalFileView, ExternalRepoView, ExternalReposView,
+        ExternalApi2FileView, ExternalDirDetailView, ExternalDirView,
+        ExternalFileDetailView, ExternalFileTagsView, ExternalFileView,
+        ExternalRepoView, ExternalReposView, ExternalRepoTagsView,
     )
     from cloudfile_ext.external_sources.views import external_sources_page
 
@@ -104,6 +105,17 @@ def register(registry):
                 ExternalApi2FileView.as_view(), name='cloudfile-external-shadow-api2-file'),
         re_path(r'^api2/repos/%s/file/detail/$' % r'(?P<repo_id>[-0-9a-f]{36})',
                 ExternalFileDetailView.as_view(), name='cloudfile-external-shadow-file-detail'),
+        # Three more native read paths the library view calls on an external
+        # source. Upstream answers 404 for a synthetic repo id, and the
+        # frontend surfaces two of those as error toasts (`repo-tags` on
+        # every directory load, `file-tags` on preview), so each needs a
+        # shadow that returns the native shape.
+        re_path(r'^api/v2.1/repos/%s/repo-tags/$' % r'(?P<repo_id>[-0-9a-f]{36})',
+                ExternalRepoTagsView.as_view(), name='cloudfile-external-shadow-repo-tags'),
+        re_path(r'^api/v2.1/repos/%s/file-tags/$' % r'(?P<repo_id>[-0-9a-f]{36})',
+                ExternalFileTagsView.as_view(), name='cloudfile-external-shadow-file-tags'),
+        re_path(r'^api/v2.1/repos/%s/dir/detail/$' % r'(?P<repo_id>[-0-9a-f]{36})',
+                ExternalDirDetailView.as_view(), name='cloudfile-external-shadow-dir-detail'),
     ])
 
     registry.register_menu({

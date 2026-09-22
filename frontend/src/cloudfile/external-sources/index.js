@@ -284,7 +284,7 @@ function ExternalSources() {
   const refreshAdmin = () => loadSources().catch((error) => toaster.danger(errorMessage(error, gettext('Unable to refresh external sources.'))));
   return (
     <main className="cf-external-shell">
-      <header className="cf-external-hero"><span className="cf-external-eyebrow">CLOUDFILE / EXTERNAL MOUNTS</span><h1>{gettext('External sources')}</h1><p>{gettext('Browse mounted SMB or NFS files without copying them into CloudFile storage.')}</p></header>
+      <header className="cf-external-hero"><span className="cf-external-eyebrow">CLOUDFILE / EXTERNAL MOUNTS</span><h1>{gettext('External sources')}</h1><p>{gettext('Browse read-only local directories mounted on the host. SMB, NFS and third-party drives are mounted as local directories by your administrator.')}</p></header>
       <div className="cf-external-notice"><span>!</span>{gettext('External files are read-only here. Upload, sync, history, locking, and archive download are not available.')}</div>
       {state.loading && <p className="cf-external-loading"><Spinner /> {gettext('Loading external sources…')}</p>}
       {state.error && <p className="cf-external-error">{state.error}</p>}

@@ -6,6 +6,11 @@ library routes, but it must never reach ``seafile_api``: that API assumes a
 commit tree and would turn a harmless browse into a 404/500. These views run
 first (rooturl.py's extension ordering), answer only synthetic ids, and defer
 unchanged requests to upstream views.
+
+Answering a synthetic id is not enough on its own: the native React library view
+consumes these payloads directly, so the fields it reads have to keep the native
+shapes -- `parent_dir` with a trailing slash, and `with_parents` expanded to the
+ancestor chain. Both are covered by tests/e2e/external_sources_matrix.py.
 """
 
 import os
@@ -21,6 +26,11 @@ from seahub.api2.endpoints.file import FileView as NativeFileView
 from seahub.api2.endpoints.repos import (
     RepoView as NativeRepoView, ReposView as NativeReposView,
 )
+from seahub.api2.endpoints.dir import DirDetailView as NativeDirDetailView
+from seahub.api2.endpoints.file_tag import (
+    RepoFileTagsView as NativeRepoFileTagsView,
+)
+from seahub.api2.endpoints.repo_tags import RepoTagsView as NativeRepoTagsView
 from seahub.api2.views import (
     FileDetailView as NativeFileDetailView, FileView as NativeApi2FileView,
 )
@@ -61,6 +71,42 @@ def _path(request, key='p', required=False):
     return value, None
 
 
+def _list_with_parents(request, source, path, with_parents):
+    """``[(directory, entry), ...]`` for one directory, or for its whole chain.
+
+    Native Seahub answers ``with_parents=1`` with the dirents of ``/``, ``/a``
+    and ``/a/b`` as one flat list, each entry carrying its own ``parent_dir``.
+    The React folder tree groups that list by ``parent_dir`` and fills one node
+    per directory, so the entries must arrive ancestor-first for every node to
+    exist by the time it is looked up. Answering with the requested directory
+    alone left every ancestor node permanently unloaded.
+
+    An ancestor is expanded only when the caller may read it: letting the flag
+    enumerate a parent that a directory ACL hides would undo that rule by
+    naming a path below it. When any ancestor is unreadable the whole expansion
+    is dropped, which is the previous behaviour and therefore leaks nothing.
+    """
+    listing = service.list_dir(source, path)
+    if not with_parents or path == '/':
+        return [(path, entry) for entry in listing]
+
+    is_staff = bool(getattr(request.user, 'is_staff', False))
+    dirs = service.ancestor_dirs(path)
+    for directory in dirs:
+        if service.permission_for(request.user.username, source, directory,
+                                  is_staff=is_staff) is None:
+            return [(path, entry) for entry in listing]
+
+    expanded = []
+    for directory in dirs:
+        # The requested directory was already read above; only the ancestors
+        # cost an extra listing.
+        entries = listing if directory == path else service.list_dir(source, directory)
+        for entry in entries:
+            expanded.append((directory, entry))
+    return expanded
+
+
 def _entry(source, entry, parent, permission):
     path = '/' + entry.name if parent == '/' else posixpath.join(parent, entry.name)
     result = {
@@ -71,13 +117,18 @@ def _entry(source, entry, parent, permission):
         'name': entry.name,
         'mtime': entry.mtime,
         'permission': permission,
-        'parent_dir': parent,
+        'parent_dir': service.native_parent_dir(parent),
         'path': path,
         'starred': False,
     }
     if not entry.is_dir:
+        # `can_edit: False` is a true statement about a read-only source.
+        # There is deliberately no `can_preview`: preview does work
+        # (the download URL below serves the bytes), and nothing in the
+        # frontend reads either flag, so a `False` here would only be a
+        # lie waiting for the first caller that trusts it.
         result.update({'size': entry.size, 'is_locked': False,
-                       'can_preview': False, 'can_edit': False})
+                       'can_edit': False})
     return result
 
 
@@ -168,15 +219,20 @@ class ExternalDirView(NativeDirView):
         if request.GET.get('recursive', '0') == '1':
             return api_error(status.HTTP_400_BAD_REQUEST,
                              'Recursive listing is not available for external sources.')
+        # `with_parents` is answered rather than ignored: the native side tree
+        # sends it on every navigation into a subdirectory, and without the
+        # ancestor entries its nodes can never be filled.
+        with_parents = request.GET.get('with_parents', '0') == '1'
         try:
-            entries = service.list_dir(source, path)
+            listing = _list_with_parents(request, source, path, with_parents)
         except SourceNotFound:
             return api_error(status.HTTP_404_NOT_FOUND, 'Folder not found.')
         except (SourceError, paths.UnsafePath):
             return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
                              'Source is currently unreachable.')
         request_type = request.GET.get('t', '')
-        values = [_entry(source, entry, path, permission) for entry in entries
+        values = [_entry(source, entry, directory, permission)
+                  for directory, entry in listing
                   if not request_type or
                   (request_type == 'd' and entry.is_dir) or
                   (request_type == 'f' and not entry.is_dir)]
@@ -272,4 +328,98 @@ class ExternalFileDetailView(NativeFileDetailView):
             'last_modifier_email': '', 'last_modifier_name': '',
             'last_modifier_contact_email': '', 'size': item.size,
             'is_external_source': True,
+        })
+
+
+def _null_payload_for(request, repo_id, native_get, payload):
+    """Answer a synthetic repo with `payload`, or delegate a real one.
+
+    Three native endpoints the library view calls on paths an external source
+    cannot serve are handled by a near-identical body, so the shared shape is
+    written once. Each caller still declares its own payload: a wildcard
+    "return empty for anything unshadowed" would turn a real fault -- a dropped
+    mount, a broken index -- into what looks like an empty result, which is the
+    one reading this module must never produce.
+    """
+    source, _permission, error = _external_source(request, repo_id)
+    if source is None:
+        return native_get(request, repo_id)
+    if error:
+        return error
+    return Response(payload)
+
+
+class ExternalRepoTagsView(NativeRepoTagsView):
+    """`GET /repo-tags/` for an external source: an empty tag set.
+
+    The library view calls this on every directory load (`loadDirData`), and
+    the upstream view answers 404 for a repo id that names no row in seafile-db.
+    The frontend's handler is a `.catch(... toaster.danger)`, so before this
+    shadow every visit to an external source opened with a red error toast.
+    Returning the native shape with no tags is also the truthful answer: an
+    external source does not enter the tag model at all.
+    """
+
+    def get(self, request, repo_id):
+        return _null_payload_for(request, repo_id, super().get, {'repo_tags': []})
+
+    def post(self, request, repo_id):
+        source, _permission, _error = _external_source(request, repo_id)
+        return _read_only() if source is not None else super().post(request, repo_id)
+
+    def put(self, request, repo_id):
+        source, _permission, _error = _external_source(request, repo_id)
+        return _read_only() if source is not None else super().put(request, repo_id)
+
+
+class ExternalFileTagsView(NativeRepoFileTagsView):
+    """`GET /file-tags/` for an external source: an empty tag set.
+
+    Reached from the preview path (`showFile`), which also reported the 404 as
+    an error toast while the preview itself worked.
+    """
+
+    def get(self, request, repo_id):
+        return _null_payload_for(request, repo_id, super().get, {'file_tags': []})
+
+    def post(self, request, repo_id):
+        source, _permission, _error = _external_source(request, repo_id)
+        return _read_only() if source is not None else super().post(request, repo_id)
+
+
+class ExternalDirDetailView(NativeDirDetailView):
+    """`GET /dir/detail/` for an external source.
+
+    The dirent detail panel asks this for a selected folder. The native view
+    returns exactly these three fields, so the shadow returns the same three
+    from the provider's `stat` rather than a 404.
+    """
+
+    def get(self, request, repo_id):
+        path, path_error = _path(request, key='path', required=True)
+        if path_error:
+            return path_error
+        source, permission, error = _external_source(request, repo_id, path)
+        if source is None:
+            return super().get(request, repo_id)
+        if error:
+            return error
+        try:
+            item = service.backend_for(source).stat(source.root_path, path)
+        except SourceNotFound:
+            return api_error(status.HTTP_404_NOT_FOUND, 'Folder not found.')
+        except (SourceError, paths.UnsafePath):
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
+                             'Source is currently unreachable.')
+        if not item.is_dir:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'path is not a directory.')
+        # 修改逻辑/原因（2026-09-23 review）：原生 DirDetailView 返回 5 个字段
+        # （repo_id/path/name/mtime/permission），详情面板把响应整体存进 state，
+        # 少了 repo_id/path 会渲染出 undefined。path 用原生格式（带尾斜杠）。
+        return Response({
+            'repo_id': repo_id,
+            'path': service.native_parent_dir(path),
+            'name': item.name,
+            'mtime': timestamp_to_isoformat_timestr(item.mtime),
+            'permission': permission,
         })

@@ -206,7 +206,7 @@ def test_switch_on_is_not_quiet(switched):
         return
 
     assert 'local-path' in registry.external_sources, registry.external_sources
-    assert len(registry.urls) == 15, registry.urls
+    assert len(registry.urls) == 18, registry.urls
 
 
 def test_switch_on_registers_the_backend_and_nothing_shared(switched,
@@ -241,9 +241,11 @@ def test_switch_on_registers_the_backend_and_nothing_shared(switched,
     monkeypatch.setitem(sys.modules, search.__name__, search)
 
     shadows = types.ModuleType('cloudfile_ext.external_sources.shadows')
-    for attr in ('ExternalApi2FileView', 'ExternalDirView',
-                 'ExternalFileDetailView', 'ExternalFileView',
-                 'ExternalRepoView', 'ExternalReposView'):
+    for attr in ('ExternalApi2FileView', 'ExternalDirDetailView',
+                 'ExternalDirView', 'ExternalFileDetailView',
+                 'ExternalFileTagsView', 'ExternalFileView',
+                 'ExternalRepoView', 'ExternalReposView',
+                 'ExternalRepoTagsView'):
         setattr(shadows, attr, types.SimpleNamespace(as_view=lambda: None))
     monkeypatch.setitem(sys.modules, shadows.__name__, shadows)
 
@@ -254,7 +256,7 @@ def test_switch_on_registers_the_backend_and_nothing_shared(switched,
     registry = switched(True)
 
     assert 'local-path' in registry.external_sources
-    assert len(registry.urls) == 15, registry.urls
+    assert len(registry.urls) == 18, registry.urls
     assert registry.permission_checks == []
     assert registry.periodic_tasks == []
     assert registry.menu == [{
@@ -280,9 +282,11 @@ def test_meilisearch_registers_the_bounded_scanner(switched, monkeypatch):
             'cloudfile_ext.external_sources.overlay_apis': ('ExternalOverlayView',),
             'cloudfile_ext.external_sources.search_apis': ('ExternalSourceSearchView',),
             'cloudfile_ext.external_sources.shadows': (
-                'ExternalApi2FileView', 'ExternalDirView',
-                'ExternalFileDetailView', 'ExternalFileView',
-                'ExternalRepoView', 'ExternalReposView'),
+                'ExternalApi2FileView', 'ExternalDirDetailView',
+                'ExternalDirView', 'ExternalFileDetailView',
+                'ExternalFileTagsView', 'ExternalFileView',
+                'ExternalRepoView', 'ExternalReposView',
+                'ExternalRepoTagsView'),
     }.items():
         module = types.ModuleType(module_name)
         for attr in attrs:

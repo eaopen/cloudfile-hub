@@ -143,6 +143,45 @@ def serialize_entry(entry, parent_path):
     }
 
 
+def native_parent_dir(path):
+    """``parent_dir`` in the shape the native Seahub endpoints emit.
+
+    ``seahub.utils.normalize_dir_path`` ends every non-root path with ``/``, and
+    the React library view depends on it: it derives its folder-tree node key as
+    ``parentDir === '/' ? '/' : parentDir.slice(0, -1)``. The shadow layer used
+    to return its own ``/a/b``, so the key became ``/a/``, ``getNodeByPath``
+    returned null, and the side tree threw on ``node.isLoaded`` -- inside a
+    promise whose ``catch`` only clears a loading flag, so the visible symptom
+    was the tree silently no longer following navigation into a subdirectory.
+
+    Lives here rather than in shadows.py because that module imports Django at
+    import time, and a rule that cannot be unit-tested is a rule that ships
+    broken (see authz.py for the same reasoning, and FEATURES item 71).
+    """
+    if not path or path == '/':
+        return '/'
+    return path if path.endswith('/') else path + '/'
+
+
+def ancestor_dirs(path):
+    """``['/', '/a', '/a/b']`` for ``/a/b`` -- native's ``with_parents`` order.
+
+    Native ``DirView`` answers ``with_parents=1`` with the dirents of every
+    ancestor directory as one flat list, each entry carrying its own
+    ``parent_dir``. The React tree groups that list by ``parent_dir`` and fills
+    one node per directory, so ancestor-first order is what makes each node
+    exist by the time the next one is looked up.
+    """
+    if not path or path == '/':
+        return ['/']
+    dirs = ['/']
+    current = ''
+    for segment in path.strip('/').split('/'):
+        current = '%s/%s' % (current, segment)
+        dirs.append(current)
+    return dirs
+
+
 def serialize_source(source, permission=None):
     info = {
         'id': source.id,
