@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Endpoints that are part of the CloudFile framework itself."""
+"""Endpoints and pages that are part of the CloudFile framework itself."""
 
+from django.shortcuts import render
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -8,6 +9,7 @@ from rest_framework.views import APIView
 
 from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
+from seahub.auth.decorators import login_required
 
 from cloudfile_ext.features import enabled_features
 from cloudfile_ext.registry import registry
@@ -41,3 +43,17 @@ class CloudFileFeaturesView(APIView):
             'providers': registry.providers.describe(),
             'menu': registry.menu,
         })
+
+
+@login_required
+def cloudfile_admin_page(request):
+    """Serve the capability-overview page that reports the CF_ENABLE_* state.
+
+    The page existed as a webpack entry (`cloudfileAdmin`) with no template and
+    no route, so the bundle was built and could never load -- the only way to
+    read a deployment's switch state back was the API by hand. This view and
+    `admin.html` close that: the page renders exactly what
+    ``/api/v2.1/cloudfile/features/`` already returns to any authenticated
+    user, so it exposes nothing new and needs no staff gate of its own.
+    """
+    return render(request, 'cloudfile_ext/admin.html')
