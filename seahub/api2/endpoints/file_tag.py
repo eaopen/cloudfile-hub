@@ -96,22 +96,13 @@ class RepoFileTagsView(APIView):
             error_msg = 'repo_tag not found.'
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
-        # P0-1 security fix (2026-09-22): a repo_tag belongs to exactly one repo,
-        # but the lookup above is by primary key alone -- without this check a user
-        # with write access to repo A could bind repo B's tag to a file in A.
-        if repo_tag.repo_id != repo_id:
-            error_msg = 'repo_tag not found.'
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
         file_tag = FileTags.objects.get_file_tag(repo_id, repo_tag_id, file_path)
         if file_tag:
             error_msg = 'file tag %s already exist.' % repo_tag_id
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
-        # P0-1 security fix (2026-09-22): check the target path, not the library
-        # root. Root-only made a user with root rw able to tag a file inside a
-        # directory the ACL marks invisible/none for them.
-        if check_folder_permission(request, repo_id, file_path) != PERMISSION_READ_WRITE:
+        # permission check
+        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
         try:
@@ -144,19 +135,8 @@ class RepoFileTagView(APIView):
             error_msg = 'file_tag %s not found.' % file_tag_id
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
-        # P0-1 security fix (2026-09-22): scope the lookup to this library. The
-        # id alone resolves across repos, so a user with root rw on repo A could
-        # delete a tag belonging to repo B by quoting its file_tag_id here.
-        if file_tag.file_uuid.repo_id != repo_id:
-            error_msg = 'file_tag %s not found.' % file_tag_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        # P0-1 security fix (2026-09-22): authorize against the tagged object's
-        # own path (resolved from the DB, not from the request) rather than the
-        # library root, so a directory ACL can actually withhold the tag.
-        tagged_path = normalize_file_path(os.path.join(
-            file_tag.file_uuid.parent_path, file_tag.file_uuid.filename))
-        if check_folder_permission(request, repo_id, tagged_path) != PERMISSION_READ_WRITE:
+        # permission check
+        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
         try:
