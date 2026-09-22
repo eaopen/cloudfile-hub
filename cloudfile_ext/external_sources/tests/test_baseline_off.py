@@ -1,9 +1,12 @@
 # -*- coding: utf-8 -*-
-"""The iron rule, for this capability: switch off == native CE.
+"""Switch off means this capability contributes nothing.
 
 Merging a capability into ``dev`` is only safe because every CF_ENABLE_* is off
-by default, so this is the invariant that makes the merge safe rather than a
-nicety. It is checked here, at unit level, because the container gate
+by default -- an unverified capability is inactive by default. That is the
+invariant that makes the merge safe rather than a nicety. It is *not* the old
+"switch off == native CE" requirement, which was abolished on 2026-09-22: the
+baseline itself carries patches with no switch at all. It is checked here, at
+unit level, because the container gate
 (tests/e2e/baseline.py) proves the *baseline* registers nothing -- it cannot
 prove that about a capability that has since been merged in, since by then the
 capability is part of the baseline build it is inspecting.
