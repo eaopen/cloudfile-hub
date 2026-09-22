@@ -1,8 +1,8 @@
 import React from 'react';
-import { createRoot } from 'react-dom/client';
 import { Table } from 'reactstrap';
-import { gettext } from '../../utils/constants';
+import { createRoot } from 'react-dom/client';
 import Loading from '../../components/loading';
+import { gettext } from '../../utils/constants';
 import { loadFeatures } from '../features';
 
 /*
