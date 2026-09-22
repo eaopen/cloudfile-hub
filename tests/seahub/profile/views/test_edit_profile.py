@@ -1,5 +1,9 @@
+from django.http import HttpResponse
+from django.test import override_settings
 from django.urls import reverse
+from unittest.mock import patch
 
+from seahub.auth.models import SocialAuthUser
 from seahub.base.templatetags.seahub_tags import email2nickname
 from seahub.profile.models import Profile
 from seahub.test_utils import BaseTestCase
@@ -17,6 +21,16 @@ class EditProfileTest(BaseTestCase):
     def tearDown(self):
         self.remove_user(self.tmp_user.username)
 
+    @patch('seahub.profile.views.render', return_value=HttpResponse())
+    @patch('seahub.utils.auth.DISABLE_SSO_USER_LOCAL_PWD_LOGIN', True)
+    def test_remote_user_cannot_update_local_password(self, mock_render):
+        SocialAuthUser.objects.add(self.tmp_user.username, 'saml', self.tmp_user.username)
+
+        resp = self.client.get(self.url)
+
+        self.assertEqual(200, resp.status_code)
+        self.assertFalse(mock_render.call_args.args[2]['can_update_password'])
+
     def test_can_edit(self):
         assert email2nickname(self.tmp_user.username) == self.tmp_user.username.split('@')[0]
 
@@ -26,3 +40,29 @@ class EditProfileTest(BaseTestCase):
         self.assertEqual(302, resp.status_code)
         self.assertRegex(resp['Location'], r'/profile/')
         assert email2nickname(self.tmp_user.username) == 'new nickname'
+
+    @patch('seahub.profile.views.render', return_value=HttpResponse())
+    @override_settings(ENABLE_WEBDAV=False, ENABLE_WEBDAV_SECRET=True)
+    def test_webdav_setting_is_hidden_when_webdav_is_disabled(self, mock_render):
+        resp = self.client.get(self.url)
+
+        self.assertEqual(200, resp.status_code)
+        self.assertFalse(mock_render.call_args.args[2]['ENABLE_WEBDAV_SECRET'])
+
+    @patch('seahub.profile.views.render', return_value=HttpResponse())
+    @override_settings(ENABLE_WEBDAV=True, ENABLE_WEBDAV_SECRET=False)
+    def test_webdav_setting_is_hidden_when_webdav_secret_is_disabled(
+            self, mock_render):
+        resp = self.client.get(self.url)
+
+        self.assertEqual(200, resp.status_code)
+        self.assertFalse(mock_render.call_args.args[2]['ENABLE_WEBDAV_SECRET'])
+
+    @patch('seahub.profile.views.render', return_value=HttpResponse())
+    @override_settings(ENABLE_WEBDAV=True, ENABLE_WEBDAV_SECRET=True)
+    def test_webdav_setting_is_shown_when_webdav_and_secret_are_enabled(
+            self, mock_render):
+        resp = self.client.get(self.url)
+
+        self.assertEqual(200, resp.status_code)
+        self.assertTrue(mock_render.call_args.args[2]['ENABLE_WEBDAV_SECRET'])

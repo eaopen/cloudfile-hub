@@ -1,0 +1,33 @@
+import React from 'react';
+import { Button } from 'reactstrap';
+import { useMetadataStatus } from '@/hooks';
+import { gettext } from '@/utils/constants';
+import { eventBus, EVENT_BUS_TYPE } from '../event-bus';
+
+const RepoInfoBarMigrate = () => {
+
+  const { enableMetadataManagement } = useMetadataStatus();
+  const openMigrate = () => {
+    const isMigrationTipShown = true;
+    eventBus.dispatch(EVENT_BUS_TYPE.SWITCH_TO_SETTINGS_VIEW, isMigrationTipShown);
+  };
+
+  return (
+    <div className="repo-info-bar-migrate mt-2">
+      {enableMetadataManagement ? (
+        <>
+          {gettext('Tips: There are tags of old version. Please migrate tags to new version.')}
+          <Button color="link" size="sm" tag="a" onClick={openMigrate}>{gettext('Migrate')}</Button>
+        </>
+      ) : (
+        <>{gettext('Tips: These are tags of old version. The feature is deprecated and can no longer be used.')}</>
+      )
+      }
+    </div>
+  );
+};
+
+RepoInfoBarMigrate.propTypes = {
+};
+
+export default RepoInfoBarMigrate;

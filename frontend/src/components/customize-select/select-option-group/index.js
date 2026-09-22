@@ -1,13 +1,13 @@
 import React, { Component } from 'react';
-import PropTypes from 'prop-types';
 import classnames from 'classnames';
+import PropTypes from 'prop-types';
+import { KeyCodes } from '@/constants';
+import { gettext } from '@/utils/constants';
+import SearchEmptyTip from '../../../components/search-empty-tip';
 import ClickOutside from '../../click-outside';
+import Icon from '../../icon';
 import SearchInput from '../../search-input';
 import Option from './option';
-import { KeyCodes } from '../../../constants';
-import Icon from '../../icon';
-import { gettext } from '../../../utils/constants';
-import SearchEmptyTip from '../../../components/common/search-empty-tip';
 
 import './index.css';
 
@@ -160,7 +160,7 @@ class SelectOptionGroup extends Component {
           disableHover={this.state.disableHover}
         >
           {opt.label}
-          {isSelected && <Icon symbol="check" />}
+          {isSelected && <Icon symbol="check" className="flex-shrink-0" />}
         </Option>
       );
     });

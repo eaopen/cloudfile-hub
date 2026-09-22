@@ -1,16 +1,16 @@
 import React, { useState, useMemo, useCallback } from 'react';
 import dayjs from 'dayjs';
-import MainPanelTopbar from '../main-panel-topbar';
+import { orgAdminAPI } from '@/api/org-admin-api';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
+import Chart from '@/components/admin/statistics/chart';
+import StatisticCommonTool from '@/components/admin/statistics/statistic-common-tool';
+import Loading from '@/components/loading';
+import toaster from '@/components/toast';
+import { gettext, orgID } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import StatisticNav from './statistic-nav';
-import StatisticCommonTool from './statistic-common-tool';
-import { orgAdminAPI } from '../../../utils/org-admin-api';
-import Loading from '../../../components/loading';
-import { gettext, orgID } from '../../../utils/constants';
-import { Utils } from '../../../utils/utils';
-import toaster from '../../../components/toast';
-import Chart from '../../../chart';
 
-const OrgStatisticStorage = () => {
+const OrgStatisticStorage = (props) => {
   const [isLoading, setLoading] = useState(true);
   const [data, setData] = useState([]);
 
@@ -45,7 +45,7 @@ const OrgStatisticStorage = () => {
 
   return (
     <>
-      <MainPanelTopbar />
+      <MainPanelTopbar {...props} />
       <div className="cur-view-container">
         <StatisticNav currentItem="storageStatistic" />
         <div className="cur-view-content">

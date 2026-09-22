@@ -1,7 +1,7 @@
 import React, { useCallback, useMemo } from 'react';
-import { PRIVATE_COLUMN_KEY } from '../../../metadata/constants';
-import { gettext, mediaUrl, siteRoot, thumbnailDefaultSize } from '../../../utils/constants';
-import { getCellValueByColumn, getFileMTimeFromRecord } from '../../../metadata/utils/cell';
+import { PRIVATE_COLUMN_KEY } from '@/features/metadata/constants';
+import { getCellValueByColumn, getFileMTimeFromRecord } from '@/features/metadata/utils/cell';
+import { gettext, mediaUrl, siteRoot, thumbnailDefaultSize } from '@/utils/constants';
 
 import './index.css';
 

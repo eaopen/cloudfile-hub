@@ -1,15 +1,15 @@
 import React, { Fragment } from 'react';
 import dayjs from 'dayjs';
-import { gettext, orgID } from '../../../utils/constants';
-import { orgAdminAPI } from '../../../utils/org-admin-api';
-import MainPanelTopbar from '../main-panel-topbar';
+import { orgAdminAPI } from '@/api/org-admin-api';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
+import Chart from '@/components/admin/statistics/chart';
+import StatisticCommonTool from '@/components/admin/statistics/statistic-common-tool';
+import Loading from '@/components/loading';
+import toaster from '@/components/toast';
+import { gettext, orgID } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import StatisticNav from './statistic-nav';
-import StatisticCommonTool from './statistic-common-tool';
-import Loading from '../../../components/loading';
 import UsersTraffic from './statistic-traffic-users';
-import { Utils } from '../../../utils/utils';
-import toaster from '../../../components/toast';
-import Chart from '../../../chart';
 
 class OrgStatisticTraffic extends React.Component {
 
@@ -106,7 +106,7 @@ class OrgStatisticTraffic extends React.Component {
 
     return (
       <Fragment>
-        <MainPanelTopbar />
+        <MainPanelTopbar {...this.props} />
         <div className="cur-view-container">
           <StatisticNav currentItem="trafficStatistic" />
           <div className="cur-view-content">

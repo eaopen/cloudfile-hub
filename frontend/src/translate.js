@@ -1,4 +1,4 @@
-import { gettext } from './utils/constants';
+import { gettext } from '@/utils/constants';
 
 gettext('You have not shared any folders');
 gettext('You don\'t have any share links');
@@ -53,3 +53,4 @@ gettext('How can I help you?');
 gettext('Extended properties are being built.');
 gettext('Delete property');
 gettext('Sort ascending');
+gettext('Pages');

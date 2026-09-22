@@ -1,11 +1,11 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Button, Modal, ModalBody, ModalFooter } from 'reactstrap';
-import { gettext } from '../../../utils/constants';
-import { systemAdminAPI } from '../../../utils/system-admin-api';
-import { Utils } from '../../../utils/utils';
+import PropTypes from 'prop-types';
+import { systemAdminAPI } from '@/api/system-admin-api';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import toaster from '../../toast';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
 
 class DeleteRepoDialog extends React.Component {
 
@@ -14,9 +14,10 @@ class DeleteRepoDialog extends React.Component {
   }
 
   deleteRepo = () => {
+    const { repo } = this.props;
     systemAdminAPI.sysAdminDeleteRepoInDepartment(this.props.groupID, this.props.repo.repo_id).then((res) => {
       if (res.data.success) {
-        this.props.onRepoChanged();
+        this.props.onDeleteRepo(repo.repo_id);
         this.props.toggle();
       }
     }).catch(error => {
@@ -48,7 +49,7 @@ const propTypes = {
   repo: PropTypes.object.isRequired,
   toggle: PropTypes.func.isRequired,
   groupID: PropTypes.number,
-  onRepoChanged: PropTypes.func.isRequired
+  onDeleteRepo: PropTypes.func.isRequired
 };
 
 DeleteRepoDialog.propTypes = propTypes;

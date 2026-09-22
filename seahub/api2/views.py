@@ -113,6 +113,7 @@ from seahub.settings import THUMBNAIL_EXTENSION, THUMBNAIL_ROOT, \
     ENABLE_SEAFILE_AI, SEAFILE_AI_SERVER_URL
 from seahub.subscription.utils import subscription_check
 from seahub.organizations.models import OrgAdminSettings, DISABLE_ORG_ENCRYPTED_LIBRARY
+from seahub.organizations.settings import ORG_MEMBER_QUOTA_DEFAULT
 from seahub.seadoc.utils import get_seadoc_file_uuid, gen_seadoc_image_parent_path, get_seadoc_asset_upload_link
 from seahub.views.file import get_office_feature_by_repo
 from seahub.repo_metadata.models import RepoMetadata, RepoMetadataViews
@@ -128,16 +129,6 @@ try:
     from seahub.settings import MULTI_TENANCY
 except ImportError:
     MULTI_TENANCY = False
-try:
-    from seahub.settings import ORG_MEMBER_QUOTA_DEFAULT
-except ImportError:
-    ORG_MEMBER_QUOTA_DEFAULT = None
-
-try:
-    from seahub.settings import ORG_MEMBER_QUOTA_ENABLED
-except ImportError:
-    ORG_MEMBER_QUOTA_ENABLED = False
-
 try:
     from seahub.settings import OFFICE_WEB_APP_FILE_EXTENSION
 except ImportError:
@@ -2332,7 +2323,7 @@ class UpdateBlksLinkView(APIView):
         url = gen_file_upload_url(token, 'update-blks-api')
         return Response(url)
 
-def get_dir_file_recursively(username, repo_id, path, all_dirs):
+def _collect_dir_file_recursively(username, repo_id, path, all_dirs):
     is_pro = is_pro_version()
     path_id = seafile_api.get_dir_id_by_path(repo_id, path)
     dirs = seafile_api.list_dir_with_perm(repo_id, path,
@@ -2370,25 +2361,31 @@ def get_dir_file_recursively(username, repo_id, path, all_dirs):
 
         all_dirs.append(entry)
 
-        # Use dict to reduce memcache fetch cost in large for-loop.
-        file_list =  [item for item in all_dirs if item['type'] == 'file']
-        contact_email_dict = {}
-        nickname_dict = {}
-        modifiers_set = {x['modifier_email'] for x in file_list}
-        for e in modifiers_set:
-            if e not in contact_email_dict:
-                contact_email_dict[e] = email2contact_email(e)
-            if e not in nickname_dict:
-                nickname_dict[e] = email2nickname(e)
-
-        for e in file_list:
-            e['modifier_contact_email'] = contact_email_dict.get(e['modifier_email'], '')
-            e['modifier_name'] = nickname_dict.get(e['modifier_email'], '')
-
-
         if stat.S_ISDIR(dirent.mode):
             sub_path = posixpath.join(path, dirent.obj_name)
-            get_dir_file_recursively(username, repo_id, sub_path, all_dirs)
+            _collect_dir_file_recursively(username, repo_id, sub_path, all_dirs)
+
+    return all_dirs
+
+
+def get_dir_file_recursively(username, repo_id, path, all_dirs):
+    _collect_dir_file_recursively(username, repo_id, path, all_dirs)
+
+    # Resolve modifier display names once, after the whole tree has been
+    # walked.
+    file_list = [item for item in all_dirs if item['type'] == 'file']
+    contact_email_dict = {}
+    nickname_dict = {}
+    modifiers_set = {x['modifier_email'] for x in file_list}
+    for e in modifiers_set:
+        if e not in contact_email_dict:
+            contact_email_dict[e] = email2contact_email(e)
+        if e not in nickname_dict:
+            nickname_dict[e] = email2nickname(e)
+
+    for e in file_list:
+        e['modifier_contact_email'] = contact_email_dict.get(e['modifier_email'], '')
+        e['modifier_name'] = nickname_dict.get(e['modifier_email'], '')
 
     return all_dirs
 
@@ -5263,6 +5260,14 @@ class OrganizationView(APIView):
             logger.error(e)
             return api_error(status.HTTP_400_BAD_REQUEST, "Quota is not valid")
 
+        try:
+            member_limit = int(member_limit)
+        except (TypeError, ValueError):
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Member limit is not valid')
+
+        if member_limit <= 0:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Member limit is not valid')
+
         vid = get_virtual_id_by_email(username)
         try:
             User.objects.get(email = vid)
@@ -5288,9 +5293,8 @@ class OrganizationView(APIView):
             org_id = org.org_id
 
             # set member limit
-            if ORG_MEMBER_QUOTA_ENABLED:
-                from seahub.organizations.models import OrgMemberQuota
-                OrgMemberQuota.objects.set_quota(org_id, member_limit)
+            from seahub.organizations.models import OrgMemberQuota
+            OrgMemberQuota.objects.set_quota(org_id, member_limit)
 
             # set quota
             quota = quota_mb * get_file_size_unit('MB')

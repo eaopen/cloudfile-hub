@@ -1,0 +1,562 @@
+import React, { Fragment } from 'react';
+import { Link } from '@gatsbyjs/reach-router';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import AboutDialog from '@/components/dialog/about-dialog';
+import CreateGroupDialog from '@/components/dialog/create-group-dialog';
+import EventBus, { EVENT_BUS_TYPE } from '@/components/event-bus';
+import Icon from '@/components/icon';
+import ModalPortal from '@/components/modal-portal';
+import OpIcon from '@/components/op-icon';
+import toaster from '@/components/toast';
+import WechatDialog from '@/components/wechat/wechat-dialog';
+import { isWorkWeixin } from '@/components/wechat/weixin-utils';
+import {
+  ONLY_SHOW_GROUPS_WITH_LIBRARIES_KEY,
+  SIDE_NAV_FILES_UNFOLDED_KEY,
+  SIDE_NAV_SHARE_ADMIN_UNFOLDED_KEY,
+  SUB_NAV_ITEM_HEIGHT
+} from '@/constants';
+import Group from '@/models/group';
+import {
+  gettext, siteRoot, canAddGroup, canAddRepo, canShareRepo,
+  canGenerateShareLink, canGenerateUploadLink, canInvitePeople,
+  enableTC, sideNavFooterCustomHtml, enableShowAbout, showWechatSupportGroup,
+  canViewOrg, enableOCM, enableOCMViaWebdav, canCreateWiki,
+  isPro, isDBSqlite3, customNavItems, helpLink
+} from '@/utils/constants';
+import { Utils } from '@/utils/utils';
+import LibrariesSubNav from './libraries-sub-nav';
+
+const propTypes = {
+  currentTab: PropTypes.oneOfType([PropTypes.string, PropTypes.number]).isRequired,
+  tabItemClick: PropTypes.func.isRequired,
+  toggleFoldSideNav: PropTypes.func
+};
+
+class MainSideNav extends React.Component {
+
+  constructor(props) {
+    super(props);
+
+    this.state = {
+      filesNavUnfolded: localStorage.getItem(SIDE_NAV_FILES_UNFOLDED_KEY) === 'true',
+      isAboutDialogShow: false,
+      sharedExtended: localStorage.getItem(SIDE_NAV_SHARE_ADMIN_UNFOLDED_KEY) === 'true',
+      groupItems: [],
+      onlyShowGroupsWithLibraries: localStorage.getItem(ONLY_SHOW_GROUPS_WITH_LIBRARIES_KEY) === 'true',
+      hasSharedLibraries: false,
+      hasPublicLibraries: false,
+      isCreateGroupDialogOpen: false,
+      isShowWechatDialog: false,
+      isSideNavHovered: false,
+    };
+    this.adminHeight = 0;
+    this.isWorkWeixin = isWorkWeixin(window.navigator.userAgent.toLowerCase());
+    this.sideNavHideTimer = null;
+  }
+
+  componentDidMount() {
+    const eventBus = EventBus.getInstance();
+    this.unsubscribeGroupRenamed = eventBus.subscribe(EVENT_BUS_TYPE.GROUP_RENAMED, this.onGroupRenamed);
+    this.unsubscribeOnlyShowGroupsWithLibrariesChanged = eventBus.subscribe(
+      EVENT_BUS_TYPE.ONLY_SHOW_GROUPS_WITH_LIBRARIES_CHANGED,
+      this.onOnlyShowGroupsWithLibrariesChanged
+    );
+    this.unsubscribeAddSharedRepoIntoGroup = eventBus.subscribe(EVENT_BUS_TYPE.ADD_SHARED_REPO_INTO_GROUP, this.loadGroups);
+    this.unsubscribeUnsharedRepoToGroup = eventBus.subscribe(EVENT_BUS_TYPE.UNSHARE_REPO_TO_GROUP, this.loadGroups);
+    this.unsubscribeGroupLibrariesChanged = eventBus.subscribe(EVENT_BUS_TYPE.GROUP_LIBRARIES_CHANGED, this.loadGroups);
+    this.unsubscribeSharedLibrariesChanged = eventBus.subscribe(EVENT_BUS_TYPE.SHARED_LIBRARIES_CHANGED, this.loadLibraryCounts);
+    if (this.state.filesNavUnfolded) {
+      this.loadGroups();
+      this.loadLibraryCounts();
+    }
+  }
+
+  componentWillUnmount() {
+    clearTimeout(this.sideNavHideTimer);
+    this.unsubscribeGroupRenamed();
+    this.unsubscribeOnlyShowGroupsWithLibrariesChanged();
+    this.unsubscribeAddSharedRepoIntoGroup();
+    this.unsubscribeUnsharedRepoToGroup();
+    this.unsubscribeGroupLibrariesChanged();
+    this.unsubscribeSharedLibrariesChanged();
+  }
+
+  onOnlyShowGroupsWithLibrariesChanged = (onlyShowGroupsWithLibraries) => {
+    this.setState({ onlyShowGroupsWithLibraries });
+  };
+
+  onSideNavMouseEnter = () => {
+    clearTimeout(this.sideNavHideTimer);
+    this.setState({ isSideNavHovered: true });
+  };
+
+  onSideNavMouseLeave = () => {
+    clearTimeout(this.sideNavHideTimer);
+    this.sideNavHideTimer = setTimeout(() => {
+      this.setState({ isSideNavHovered: false });
+    }, 500);
+  };
+
+  onGroupRenamed = ({ newName, groupID }) => {
+    const { groupItems } = this.state;
+    if (groupItems.length == 0) {
+      return;
+    }
+    const targetGroup = groupItems.find(item => item.id == groupID);
+    targetGroup.name = newName;
+    this.setState({ groupItems });
+  };
+
+  toggleWechatDialog = () => {
+    this.setState({ isShowWechatDialog: !this.state.isShowWechatDialog });
+  };
+
+  shExtend = (e) => {
+    if (e && e.currentTarget) {
+      e.currentTarget.blur();
+    }
+    this.setState({
+      sharedExtended: !this.state.sharedExtended,
+    }, () => {
+      localStorage.setItem(SIDE_NAV_SHARE_ADMIN_UNFOLDED_KEY, this.state.sharedExtended);
+    });
+  };
+
+  loadGroups = () => {
+    seafileAPI.listGroups(true).then(res => {
+      let groupList = res.data.map(item => {
+        let group = new Group(item);
+        return group;
+      });
+
+      this.setState({
+        groupItems: groupList.sort((a, b) => {
+          return a.name.toLowerCase() < b.name.toLowerCase() ? -1 : 1;
+        })
+      });
+    }).catch(error => {
+      let errMessage = Utils.getErrorMsg(error);
+      toaster.danger(errMessage);
+    });
+  };
+
+  loadLibraryCounts = () => {
+    seafileAPI.listRepos({ 'type': ['shared', 'public'] }).then(res => {
+      const repoList = res.data.repos;
+      this.setState({
+        hasSharedLibraries: repoList.some(repo => repo.type === 'shared'),
+        hasPublicLibraries: repoList.some(repo => repo.type === 'public'),
+      });
+    }).catch(error => {
+      let errMessage = Utils.getErrorMsg(error);
+      toaster.danger(errMessage);
+    });
+  };
+
+  tabItemClick = (e, param, id) => {
+    if (window.uploader &&
+      window.uploader.isUploadProgressDialogShow &&
+      window.uploader.totalProgress !== 100) {
+      if (!window.confirm(gettext('A file is being uploaded. Are you sure you want to leave this page?'))) {
+        e.preventDefault();
+        return false;
+      }
+      window.uploader.isUploadProgressDialogShow = false;
+    }
+    this.props.tabItemClick(param, id);
+  };
+
+  getActiveClass = (tab) => {
+    return this.props.currentTab === tab ? 'active' : '';
+  };
+
+  getLibrariesSectionActiveClass = () => {
+    const { currentTab } = this.props;
+    const { filesNavUnfolded, groupItems } = this.state;
+    if (currentTab === 'libraries') {
+      return 'active';
+    }
+    if (!filesNavUnfolded) {
+      const filesTabs = ['my-libs', 'shared-libs', 'org', 'shared-with-ocm', 'ocm-via-webdav', 'deleted'];
+      if (filesTabs.includes(currentTab)) {
+        return 'active';
+      }
+      if (groupItems.some(g => g.name === currentTab)) {
+        return 'active';
+      }
+    }
+    return '';
+  };
+
+  getShareAdminSectionActiveClass = () => {
+    const { currentTab } = this.props;
+    const { sharedExtended } = this.state;
+    const shareAdminTabs = ['share-admin-share-links', 'share-admin-upload-links', 'share-admin-libs', 'share-admin-folders'];
+    if (!sharedExtended && shareAdminTabs.includes(currentTab)) {
+      return 'active';
+    }
+    return '';
+  };
+
+  onCreateGroup = (groupData) => {
+    const newGroup = new Group(groupData);
+    const { groupItems: newList } = this.state;
+    newList.push(newGroup);
+
+    const eventBus = EventBus.getInstance();
+    eventBus.dispatch(EVENT_BUS_TYPE.ADD_NEW_GROUP, { group: newGroup });
+
+    this.setState({
+      groupItems: newList
+    });
+  };
+
+  toggleCreateGroupDialog = () => {
+    this.setState({
+      isCreateGroupDialogOpen: !this.state.isCreateGroupDialogOpen
+    });
+  };
+
+  renderAddGroup() {
+    return (
+      <>
+        {canAddGroup && (
+          <>
+            <li
+              className='nav-item'
+              onClick={this.toggleCreateGroupDialog}
+              tabIndex={0}
+              role="button"
+              aria-label={gettext('New Group')}
+              onKeyDown={Utils.onKeyDown}
+            >
+              <div className="nav-link" role="button">
+                <span className="nav-icon">
+                  <Icon symbol="new" />
+                </span>
+                <span className="ellipsis">{gettext('New Group')}</span>
+              </div>
+            </li>
+            {this.state.isCreateGroupDialogOpen &&
+            <CreateGroupDialog
+              toggleDialog={this.toggleCreateGroupDialog}
+              onCreateGroup={this.onCreateGroup}
+            />
+            }
+          </>
+        )}
+      </>
+    );
+  }
+
+  renderSharedAdmin() {
+    let height = 0;
+    if (this.state.sharedExtended) {
+      if (!this.adminHeight) {
+        this.adminHeight = 3 * SUB_NAV_ITEM_HEIGHT;
+      }
+      height = this.adminHeight;
+    }
+    let style = { height, opacity: height === 0 ? 0 : 1 };
+
+    let linksNavItem = null;
+    if (canGenerateShareLink) {
+      linksNavItem = (
+        <li className={`nav-item ${this.getActiveClass('share-admin-share-links')}`}>
+          <Link to={siteRoot + 'share-admin-share-links/'} className={`nav-link ellipsis ${this.getActiveClass('share-admin-share-links')}`} onClick={(e) => this.tabItemClick(e, 'share-admin-share-links')}>
+            <span aria-hidden="true" className="sharp">#</span>
+            <span className="nav-text" title={gettext('Links')}>
+              {gettext('Links')}
+            </span>
+          </Link>
+        </li>
+      );
+    } else if (canGenerateUploadLink) {
+      linksNavItem = (
+        <li className={`nav-item ${this.getActiveClass('share-admin-upload-links')}`}>
+          <Link to={siteRoot + 'share-admin-upload-links/'} className={`nav-link ellipsis ${this.getActiveClass('share-admin-upload-links')}`} onClick={(e) => this.tabItemClick(e, 'share-admin-upload-links')}>
+            <span aria-hidden="true" className="sharp">#</span>
+            <span className="nav-text" title={gettext('Links')}>
+              {gettext('Links')}
+            </span>
+          </Link>
+        </li>
+      );
+    }
+    return (
+      <ul
+        id="share-admin-sub-nav"
+        className={`nav sub-nav nav-pills flex-column ${this.state.sharedExtended ? 'side-panel-slide-share-admin' : 'side-panel-slide-up-share-admin'}`}
+        style={style}
+      >
+        {canAddRepo && canShareRepo && height !== 0 && (
+          <li className={`nav-item ${this.getActiveClass('share-admin-libs')}`}>
+            <Link to={siteRoot + 'share-admin-libs/'} className={`nav-link ellipsis ${this.getActiveClass('share-admin-libs')}`} onClick={(e) => this.tabItemClick(e, 'share-admin-libs')}>
+              <span aria-hidden="true" className="sharp">#</span>
+              <span className="nav-text" title={gettext('Libraries')}>
+                {gettext('Libraries')}
+              </span>
+            </Link>
+          </li>
+        )}
+        {canShareRepo && height !== 0 && (
+          <li className={`nav-item ${this.getActiveClass('share-admin-folders')}`}>
+            <Link to={siteRoot + 'share-admin-folders/'} className={`nav-link ellipsis ${this.getActiveClass('share-admin-folders')}`} onClick={(e) => this.tabItemClick(e, 'share-admin-folders')}>
+              <span aria-hidden="true" className="sharp">#</span>
+              <span className="nav-text" title={gettext('Folders')}>
+                {gettext('Folders')}
+              </span>
+            </Link>
+          </li>
+        )}
+        { height !== 0 && linksNavItem}
+      </ul>
+    );
+  }
+
+  renderCustomNavItems() {
+    return (
+      customNavItems.map((item, idx) => {
+        return (
+          <li key={idx} className='nav-item'>
+            <a href={item.link} className="nav-link ellipsis">
+              <span className={item.icon} aria-hidden="true"></span>
+              <span className="nav-text" title={item.desc}>
+                {item.desc}
+              </span>
+            </a>
+          </li>
+        );
+      })
+    );
+  }
+
+  toggleLibrariesNav = (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (e && e.currentTarget) {
+      e.currentTarget.blur();
+    }
+    this.setState({
+      filesNavUnfolded: !this.state.filesNavUnfolded
+    }, () => {
+      localStorage.setItem(SIDE_NAV_FILES_UNFOLDED_KEY, this.state.filesNavUnfolded);
+      if (this.state.filesNavUnfolded) {
+        this.loadGroups();
+        this.loadLibraryCounts();
+      }
+    });
+  };
+
+  toggleAboutDialog = () => {
+    this.setState({ isAboutDialogShow: !this.state.isAboutDialogShow });
+  };
+
+  render() {
+    let showActivity = isPro || !isDBSqlite3;
+    const { filesNavUnfolded, groupItems, sharedExtended, onlyShowGroupsWithLibraries, hasSharedLibraries, hasPublicLibraries } = this.state;
+    const visibleGroupItems = onlyShowGroupsWithLibraries ? groupItems.filter(group => group.repos.length > 0) : groupItems;
+    const showSharedLibraries = !onlyShowGroupsWithLibraries || hasSharedLibraries;
+    const showPublicLibraries = !onlyShowGroupsWithLibraries || hasPublicLibraries;
+    const filesNavHeight = (visibleGroupItems.length + (canAddGroup ? 1 : 0) + (canAddRepo ? 1 : 0) + (canViewOrg && showPublicLibraries ? 1 : 0) + (enableOCM ? 1 : 0) + (enableOCMViaWebdav ? 1 : 0) + (showSharedLibraries ? 1 : 0)) * SUB_NAV_ITEM_HEIGHT;
+    return (
+      <Fragment>
+        <div className="side-nav">
+          {/* Make sure scrollbar is hidden by default in the UI. */}
+          <div
+            className="side-nav-con d-flex flex-column"
+            style={{ overflowY: this.state.isSideNavHovered ? 'auto' : 'hidden' }}
+            onMouseEnter={this.onSideNavMouseEnter}
+            onMouseLeave={this.onSideNavMouseLeave}
+          >
+            <h2 className="mb-2 px-2 font-weight-normal heading">{gettext('Workspace')}</h2>
+            <ul className="nav nav-pills flex-column nav-container">
+              <li id="files" className={`nav-item flex-column ${this.getLibrariesSectionActiveClass()}`}>
+                <Link to={ siteRoot + 'libraries/' } className={`nav-link ellipsis justify-content-between ${this.getLibrariesSectionActiveClass()}`} onClick={(e) => this.tabItemClick(e, 'libraries')}>
+                  <div className="d-flex align-items-center">
+                    <Icon symbol="libraries" />
+                    <span className="nav-text" title={gettext('Libraries')}>
+                      {gettext('Libraries')}
+                    </span>
+                  </div>
+                  <OpIcon
+                    id="nav-fold-btn"
+                    className={`op-icon ${filesNavUnfolded ? '' : 'rotate-90'}`}
+                    symbol="down"
+                    tooltip={filesNavUnfolded ? gettext('Fold') : gettext('Unfold')}
+                    op={this.toggleLibrariesNav}
+                  />
+                </Link>
+                <ul
+                  id="files-sub-nav"
+                  className={`nav sub-nav nav-pills flex-column ${filesNavUnfolded ? 'side-panel-slide' : 'side-panel-slide-up'}`}
+                  style={ filesNavUnfolded ? { height: filesNavHeight, 'opacity': 1 } : { 'height': 0, 'opacity': 0 }}
+                >
+                  {filesNavUnfolded && (
+                    <>
+                      <LibrariesSubNav
+                        groupItems={visibleGroupItems}
+                        showSharedLibraries={showSharedLibraries}
+                        showPublicLibraries={showPublicLibraries}
+                        tabItemClick={this.tabItemClick}
+                        currentTab={this.props.currentTab}
+                      />
+                      {this.renderAddGroup()}
+                    </>
+                  )}
+                </ul>
+              </li>
+
+              <li className={`nav-item ${this.getActiveClass('starred')}`}>
+                <Link className={`nav-link ellipsis ${this.getActiveClass('starred')}`} to={siteRoot + 'starred/'} onClick={(e) => this.tabItemClick(e, 'starred')}>
+                  <Icon symbol="favorites" />
+                  <span className="nav-text" title={gettext('Favorites')}>
+                    {gettext('Favorites')}
+                  </span>
+                </Link>
+              </li>
+              {showActivity &&
+              <li className={`nav-item ${this.getActiveClass('dashboard')}`}>
+                <Link className={`nav-link ellipsis ${this.getActiveClass('dashboard')}`} to={siteRoot + 'activities/all'} onClick={(e) => this.tabItemClick(e, 'dashboard')}>
+                  <Icon symbol="activities" />
+                  <span className="nav-text" title={gettext('Activities')}>
+                    {gettext('Activities')}
+                  </span>
+                </Link>
+              </li>
+              }
+              {canCreateWiki &&
+              <li className={`nav-item ${this.getActiveClass('published')}`}>
+                <Link className={`nav-link ellipsis ${this.getActiveClass('published')}`} to={siteRoot + 'published/'} onClick={(e) => this.tabItemClick(e, 'published')}>
+                  <Icon symbol="wiki" />
+                  <span className="nav-text" title={gettext('Wikis')}>
+                    {gettext('Wikis')}
+                  </span>
+                </Link>
+              </li>
+              }
+              {canInvitePeople &&
+              <li className={`nav-item ${this.getActiveClass('invitations')}`}>
+                <Link className={`nav-link ellipsis ${this.getActiveClass('invitations')}`} to={siteRoot + 'invitations/'} onClick={(e) => this.tabItemClick(e, 'invitations')}>
+                  <Icon symbol="invite-guests" />
+                  <span className="nav-text" title={gettext('Invite Guest')}>{gettext('Invite Guest')}</span>
+                </Link>
+              </li>
+              }
+              <li id="share-admin-nav" className={`nav-item flex-column ${this.getShareAdminSectionActiveClass()}`}>
+                <div
+                  className={`nav-link ellipsis justify-content-between ${this.getShareAdminSectionActiveClass()}`}
+                  onClick={this.shExtend}
+                  tabIndex={0}
+                  role="button"
+                  onKeyDown={Utils.onKeyDown}
+                >
+                  <div className="d-flex align-items-center overflow-hidden">
+                    <Icon symbol="share-admin" />
+                    <span className="nav-text" title={gettext('Share Admin')}>
+                      {gettext('Share Admin')}
+                    </span>
+                  </div>
+                  <OpIcon id="shared-nav-fold-btn" symbol="down" className={`op-icon ${this.state.sharedExtended ? '' : 'rotate-90'}`} tooltip={sharedExtended ? gettext('Fold') : gettext('Unfold')} />
+                </div>
+                {this.renderSharedAdmin()}
+              </li>
+              {customNavItems && this.renderCustomNavItems()}
+            </ul>
+
+            <h2 className="mb-2 pt-1 px-2 font-weight-normal heading">{gettext('Help and resources')}</h2>
+            {sideNavFooterCustomHtml ? (
+              <div className='side-nav-footer' dangerouslySetInnerHTML={{ __html: sideNavFooterCustomHtml }}></div>
+            ) : (
+              <ul className="nav nav-pills flex-column nav-container">
+                <li className='nav-item'>
+                  <a className={'nav-link'} href={helpLink || siteRoot + 'help/'}>
+                    <Icon symbol="help" />
+                    <span className="nav-text" title={gettext('Help')}>
+                      {gettext('Help')}
+                    </span>
+                  </a>
+                </li>
+                {enableTC &&
+                <li className='nav-item'>
+                  <a href={`${siteRoot}terms/`} className="nav-link">
+                    <Icon symbol="terms" />
+                    <span className="nav-text" title={gettext('Terms')}>
+                      {gettext('Terms')}
+                    </span>
+                  </a>
+                </li>
+                }
+                <li className='nav-item'>
+                  <a href={siteRoot + 'download_client_program/'} className="nav-link">
+                    <Icon symbol="clients" />
+                    <span className="nav-text" title={gettext('Clients')}>{gettext('Clients')}</span>
+                  </a>
+                </li>
+                {enableShowAbout &&
+                <li className='nav-item'>
+                  <div
+                    className="nav-link"
+                    onClick={this.toggleAboutDialog}
+                    tabIndex={0}
+                    role="button"
+                    onKeyDown={Utils.onKeyDown}
+                  >
+                    <Icon symbol="about" />
+                    <span className="nav-text" title={gettext('About')}>
+                      {gettext('About')}
+                    </span>
+                  </div>
+                </li>
+                }
+                {showWechatSupportGroup &&
+                <li className='nav-item'>
+                  <div
+                    className="nav-link"
+                    onClick={this.toggleWechatDialog}
+                    tabIndex={0}
+                    role="button"
+                    onKeyDown={Utils.onKeyDown}
+                  >
+                    <Icon symbol="hi" />
+                    <span className="nav-text">
+                      {`加入${this.isWorkWeixin ? '企业' : ''}微信咨询群`}
+                    </span>
+                  </div>
+                </li>
+                }
+              </ul>
+            )
+            }
+            <div
+              className="side-nav-bottom-toolbar d-none d-md-flex mt-auto px-2 rounded flex-shrink-0 align-items-center"
+              onClick={this.props.toggleFoldSideNav}
+              tabIndex={0}
+              role="button"
+              onKeyDown={Utils.onKeyDown}
+            >
+              <Icon className="mr-2" symbol="fold-sidebar" />
+              <span className="d-inline-flex overflow-hidden text-nowrap">{gettext('Fold the sidebar')}</span>
+            </div>
+          </div>
+        </div>
+        {this.state.isAboutDialogShow && enableShowAbout && (
+          <ModalPortal>
+            <AboutDialog onCloseAboutDialog={this.toggleAboutDialog} />
+          </ModalPortal>
+        )}
+        {this.state.isShowWechatDialog &&
+          <ModalPortal>
+            <WechatDialog toggleWechatDialog={this.toggleWechatDialog}/>
+          </ModalPortal>
+        }
+      </Fragment>
+    );
+  }
+}
+
+MainSideNav.propTypes = propTypes;
+
+export default MainSideNav;

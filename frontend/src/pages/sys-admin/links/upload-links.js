@@ -1,16 +1,16 @@
 import React, { Component, Fragment } from 'react';
-import PropTypes from 'prop-types';
+import classnames from 'classnames';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import classnames from 'classnames';
-import { systemAdminAPI } from '../../../utils/system-admin-api';
-import { gettext } from '../../../utils/constants';
-import toaster from '../../../components/toast';
-import { Utils } from '../../../utils/utils';
-import EmptyTip from '../../../components/empty-tip';
-import Loading from '../../../components/loading';
-import Paginator from '../../../components/paginator';
-import OpIcon from '../../../components/op-icon';
+import PropTypes from 'prop-types';
+import { systemAdminAPI } from '@/api/system-admin-api';
+import EmptyTip from '@/components/empty-tip';
+import Loading from '@/components/loading';
+import OpIcon from '@/components/op-icon';
+import Paginator from '@/components/paginator';
+import toaster from '@/components/toast';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import UserLink from '../user-link';
 
 dayjs.extend(relativeTime);
@@ -155,7 +155,7 @@ class Item extends Component {
           <td>
             <OpIcon
               className={`op-icon ${isOpIconShown ? '' : 'invisible'}`}
-              symbol="delete1"
+              symbol="delete"
               title={gettext('Remove')}
               op={this.deleteUploadLink}
             />

@@ -1,11 +1,11 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { Utils } from '../../utils/utils';
-import SelectEditor from './select-editor';
-import { seafileAPI } from '../../utils/seafile-api';
-import CustomPermission from '../../models/custom-permission';
+import { seafileAPI } from '@/api/seafile-api';
+import CustomPermission from '@/models/custom-permission';
+import { isPro } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import toaster from '../toast';
-import { isPro } from '../../utils/constants';
+import SelectEditor from './select-editor';
 
 const propTypes = {
   repoID: PropTypes.string,

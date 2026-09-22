@@ -1,14 +1,14 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { siteRoot, mediaUrl, logoPath, logoWidth, logoHeight, siteTitle } from './utils/constants';
-import SideNav from './components/user-settings/side-nav';
-import Account from './components/common/account';
-import Notification from './components/common/notification';
-import Subscription from './components/subscription';
+import Account from '@/components/account';
+import Notification from '@/components/notification';
+import Subscription from '@/components/subscription';
+import SideNav from '@/components/user-settings/side-nav';
+import { siteRoot, mediaUrl, logoPath, logoWidth, logoHeight, siteTitle } from '@/utils/constants';
 
-import './css/toolbar.css';
-import './css/search.css';
-import './css/user-settings.css';
+import '@/css/toolbar.css';
+import '@/css/search.css';
+import '@/css/user-settings.css';
 
 
 class UserSubscription extends React.Component {

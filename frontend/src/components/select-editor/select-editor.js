@@ -1,15 +1,15 @@
 import React from 'react';
-import PropTypes from 'prop-types';
-import classnames from 'classnames';
 import Select, { components } from 'react-select';
-import { gettext } from '../../utils/constants';
-import { MenuSelectStyle } from '../common/select';
+import classnames from 'classnames';
+import PropTypes from 'prop-types';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import OpIcon from '../../components/op-icon';
 import Icon from '../icon';
-import { Utils } from '../../utils/utils';
+import { MenuSelectStyle } from '../select';
 import SelectDropdownIndicator from '../select-dropdown-indicator';
 
-import '../../css/select-editor.css';
+import './index.css';
 
 const propTypes = {
   isTextMode: PropTypes.bool.isRequired, // there will be two mode. first: text and select. second: just select

@@ -1,10 +1,10 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Modal, ModalBody } from 'reactstrap';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
-import { orgAdminAPI } from '../../utils/org-admin-api';
-import { gettext } from '../../utils/constants';
-import { Utils } from '../../utils/utils';
+import PropTypes from 'prop-types';
+import { orgAdminAPI } from '@/api/org-admin-api';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import toaster from '../toast';
 
 const propTypes = {

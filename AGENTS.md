@@ -1,5 +1,4 @@
 <!-- generated-by: gsd-doc-writer -->
-<!-- generated-by: gsd-doc-writer -->
 # AGENTS.md — cloudfile-hub
 
 > 用途：约束 Hub/Web/API 扩展、测试和上游同步工作。
@@ -131,6 +130,18 @@ cloudfile_ext/
 用例集。因此能力包的 `__init__.py` 里，`from cloudfile_ext.features import
 is_enabled` 要**放在 `register()` 内部**而不是模块顶层——否则 `import` 该包
 就会拉进 Django。
+
+## 上游局部指南
+
+上游在本仓库根部之外另有两份局部指南，**在各自目录内优先于本文件**：
+
+- `frontend/AGENTS.md` —— React 前端的命令与前置条件
+- `seahub/AGENTS.md` —— Django 检查与测试环境要求
+
+它们随上游同步更新，本文件不复制其内容，避免两份说明各说各话。上游根指南里的
+通用约定同样适用：改动范围保持最小、不顺手重排无关文件；生成文件提交前先审查；
+`pip install -r dev-requirements.txt` 装开发依赖，`python manage.py runserver`
+起服务，`make dist` 出静态与本地化产物。
 
 ## 测试
 

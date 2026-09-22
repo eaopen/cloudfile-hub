@@ -1,10 +1,10 @@
 import React, { Suspense } from 'react';
-import PropTypes from 'prop-types';
-import { MarkdownViewer } from '@seafile/seafile-editor';
 import { I18nextProvider } from 'react-i18next';
-import i18n from '../../_i18n/i18n-seafile-editor';
-import { gettext, mediaUrl, serviceURL, sharedToken, slug } from '../../utils/constants';
-import { Utils } from '../../utils/utils';
+import { MarkdownViewer } from '@seafile/seafile-editor';
+import PropTypes from 'prop-types';
+import i18n from '@/_i18n/i18n-seafile-editor';
+import { gettext, mediaUrl, serviceURL, sharedToken, slug } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import Loading from '../loading';
 
 import './style.css';

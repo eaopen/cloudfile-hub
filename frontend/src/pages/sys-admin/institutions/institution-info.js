@@ -1,13 +1,13 @@
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
-import { Utils } from '../../../utils/utils';
-import { systemAdminAPI } from '../../../utils/system-admin-api';
-import { gettext } from '../../../utils/constants';
-import toaster from '../../../components/toast';
-import Loading from '../../../components/loading';
-import EditIcon from '../../../components/edit-icon';
-import SysAdminSetInstitutionQuotaDialog from '../../../components/dialog/sysadmin-dialog/set-quota';
-import MainPanelTopbar from '../main-panel-topbar';
+import { systemAdminAPI } from '@/api/system-admin-api';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
+import SysAdminSetInstitutionQuotaDialog from '@/components/dialog/sysadmin-dialog/set-quota';
+import EditIcon from '@/components/edit-icon';
+import Loading from '@/components/loading';
+import toaster from '@/components/toast';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import InstitutionNav from './institution-nav';
 
 class Content extends Component {

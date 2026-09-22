@@ -1,10 +1,10 @@
 import React, { Component } from 'react';
-import PropTypes from 'prop-types';
-import { seafileAPI } from '../../utils/seafile-api';
 import { Modal, ModalBody, ModalFooter, Button } from 'reactstrap';
-import { gettext } from '../../utils/constants';
-import { Utils } from '../../utils/utils';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 
 const propTypes = {
   repo: PropTypes.object.isRequired,

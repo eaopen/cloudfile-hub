@@ -1,14 +1,14 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Button, Modal, ModalBody, ModalFooter, FormGroup, Label, Input, Alert } from 'reactstrap';
 import dayjs from 'dayjs';
-import { gettext, siteRoot, orgID } from '../../utils/constants';
-import { orgAdminAPI } from '../../utils/org-admin-api';
-import { userAPI } from '../../utils/user-api';
+import PropTypes from 'prop-types';
+import { orgAdminAPI } from '@/api/org-admin-api';
+import { userAPI } from '@/api/user-api';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import { gettext, siteRoot, orgID } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import toaster from '../../components/toast';
-import { Utils } from '../../utils/utils';
 import SeahubIODialog from '../dialog/seahub-io-dialog';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
 
 
 class OrgLogsExportExcelDialog extends React.Component {

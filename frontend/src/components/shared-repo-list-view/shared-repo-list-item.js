@@ -1,34 +1,34 @@
 import React, { Fragment } from 'react';
-import PropTypes from 'prop-types';
+import { DropdownItem } from 'reactstrap';
+import { Link, navigate } from '@gatsbyjs/reach-router';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import { Link, navigate } from '@gatsbyjs/reach-router';
-import { DropdownItem } from 'reactstrap';
-import { Utils } from '../../utils/utils';
-import { gettext, siteRoot, isPro, username, folderPermEnabled, isSystemStaff, enableResetEncryptedRepoPassword, isEmailConfigured, enableStorageClasses } from '../../utils/constants';
-import ModalPortal from '../../components/modal-portal';
-import ShareDialog from '../../components/dialog/share-dialog';
-import LibSubFolderPermissionDialog from '../../components/dialog/lib-sub-folder-permission-dialog';
-import DeleteRepoDialog from '../../components/dialog/delete-repo-dialog';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import { userAPI } from '@/api/user-api';
+import { LIST_MODE } from '@/constants/view-mode';
+import { gettext, siteRoot, isPro, username, folderPermEnabled, isSystemStaff, enableResetEncryptedRepoPassword, isEmailConfigured, enableStorageClasses } from '@/utils/constants';
+import { formatWithTimezone } from '@/utils/time';
+import { Utils } from '@/utils/utils';
 import ChangeRepoPasswordDialog from '../../components/dialog/change-repo-password-dialog';
+import DeleteRepoDialog from '../../components/dialog/delete-repo-dialog';
+import LibSubFolderPermissionDialog from '../../components/dialog/lib-sub-folder-permission-dialog';
 import ResetEncryptedRepoPasswordDialog from '../../components/dialog/reset-encrypted-repo-password-dialog';
+import ShareDialog from '../../components/dialog/share-dialog';
 import MobileItemMenu from '../../components/mobile-item-menu';
-import Rename from '../rename';
-import { seafileAPI } from '../../utils/seafile-api';
-import { userAPI } from '../../utils/user-api';
-import toaster from '../toast';
-import RepoAPITokenDialog from '../dialog/repo-api-token-dialog';
-import RepoShareAdminDialog from '../dialog/repo-share-admin-dialog';
-import { LIST_MODE } from '../dir-view-mode/constants';
-import TransferDialog from '../dialog/transfer-dialog';
+import ModalPortal from '../../components/modal-portal';
 import OpIcon from '../../components/op-icon';
-import { formatWithTimezone } from '../../utils/time';
-import Icon from '../icon';
 import Tooltip from '../../components/tooltip';
-import RepoWebhookDialog from '../dialog/repo-webhook-dialog';
-import RepoArchiveDialog from '../dialog/repo-archive-dialog';
 import ArchiveIcon from '../archive-icon';
+import RepoAPITokenDialog from '../dialog/repo-api-token-dialog';
+import RepoArchiveDialog from '../dialog/repo-archive-dialog';
+import RepoShareAdminDialog from '../dialog/repo-share-admin-dialog';
+import RepoWebhookDialog from '../dialog/repo-webhook-dialog';
+import TransferDialog from '../dialog/transfer-dialog';
 import CustomDropdown from '../dropdown';
+import Icon from '../icon';
+import Rename from '../rename';
+import toaster from '../toast';
 
 dayjs.extend(relativeTime);
 
@@ -527,7 +527,7 @@ class SharedRepoListItem extends React.Component {
       <OpIcon
         id={`delete-icon-${idx}`}
         className="op-icon"
-        symbol="delete1"
+        symbol="delete"
         tooltip={gettext('Delete')}
         role="button" aria-label={gettext('Delete')}
         op={this.onItemDeleteToggle}
@@ -726,7 +726,7 @@ class SharedRepoListItem extends React.Component {
     return (
       <Fragment>
         <tr className={this.state.highlight ? 'tr-highlight' : ''} onMouseEnter={this.onMouseEnter} onMouseOver={this.onMouseOver} onMouseLeave={this.onMouseLeave}>
-          <td onClick={this.visitRepo}><img src={iconUrl} title={iconTitle} width="20" alt={iconTitle}/></td>
+          <td onClick={this.visitRepo}><img src={iconUrl} title={iconTitle} width="20" alt={iconTitle} /></td>
           <td onClick={this.visitRepo}>
             {this.state.isRenaming ?
               <Rename name={repo.repo_name} onRenameConfirm={this.onRenameConfirm} onRenameCancel={this.onRenameCancel} /> :

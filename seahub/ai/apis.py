@@ -34,6 +34,15 @@ from seahub.views.file import get_file_view_path_and_perm, get_file_content
 logger = logging.getLogger(__name__)
 
 
+def is_chat_and_search_enabled(repo_id):
+    metadata = RepoMetadata.objects.filter(repo_id=repo_id).first()
+    configured = verify_chat_ai_config()
+    enabled = bool(configured and metadata and metadata.enabled and metadata.summary_enabled)
+    if not enabled:
+        logger.info('AI Chat and Search is unavailable for library %s: configured=%s', repo_id, configured)
+    return enabled
+
+
 class ImageCaption(APIView):
     authentication_classes = (TokenAuthentication, SessionAuthentication)
     permission_classes = (IsAuthenticated,)
@@ -211,6 +220,10 @@ class GenerateFileTags(APIView):
         if not path:
             return api_error(status.HTTP_400_BAD_REQUEST, 'path invalid')
 
+        metadata = RepoMetadata.objects.filter(repo_id=repo_id).first()
+        if not metadata or not metadata.enabled or not metadata.tags_enabled:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Metadata tags are not enabled')
+
         repo = seafile_api.get_repo(repo_id)
         if not repo:
             error_msg = 'Library %s not found.' % repo_id
@@ -244,26 +257,9 @@ class GenerateFileTags(APIView):
 
         file_type, _ = get_file_type_and_ext(os.path.basename(path))
         if file_type == IMAGE:
-            try:
-                record = RepoMetadata.objects.filter(repo_id=repo_id).first()
-            except Exception as e:
-                logger.error(e)
-                error_msg = 'Internal Server Error'
-                return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
             params['file_type'] = 'image'
-            params['lang'] = record.tags_lang if record and record.tags_enabled else None
         else:
-            from seahub.repo_metadata.metadata_server_api import MetadataServerAPI
-            from seafevents.repo_metadata.constants import TAGS_TABLE
-            metadata_server_api = MetadataServerAPI(repo_id, request.user.username)
-
-            sql = f'SELECT `{TAGS_TABLE.columns.name.name}` FROM `{TAGS_TABLE.name}`'
-            query_result = metadata_server_api.query_rows(sql).get('results', [])
-
             params['file_type'] = 'doc'
-            params['candidate_tags'] = [item[TAGS_TABLE.columns.name.name].strip() for item in query_result]
-
         try:
             resp = generate_file_tags(params)
             resp_json = resp.json()
@@ -513,6 +509,8 @@ class ChatSessionsView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, 'Library not found.')
         if not check_folder_permission(request, repo_id, '/'): 
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        if not is_chat_and_search_enabled(repo_id):
+            return api_error(status.HTTP_403_FORBIDDEN, 'AI Chat and Search is not enabled for this library.')
         if not user_passes_ai_chat_folder_permissions(request, repo_id):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
@@ -535,6 +533,8 @@ class ChatSessionsView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, 'Library not found.')
         if repo.is_virtual:
             return api_error(status.HTTP_403_FORBIDDEN, 'Virtual library is not supported.')
+        if not is_chat_and_search_enabled(repo_id):
+            return api_error(status.HTTP_403_FORBIDDEN, 'AI Chat and Search is not enabled for this library.')
         if not check_folder_permission(request, repo_id, '/'):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
         if not user_passes_ai_chat_folder_permissions(request, repo_id):
@@ -555,6 +555,8 @@ class ChatSessionView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, 'Session not found.')
         if not check_folder_permission(request, session.repo_id, '/'):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        if not is_chat_and_search_enabled(session.repo_id):
+            return api_error(status.HTTP_403_FORBIDDEN, 'AI Chat and Search is not enabled for this library.')
         if not user_passes_ai_chat_folder_permissions(request, session.repo_id):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
         if session.username != request.user.username:
@@ -578,6 +580,8 @@ class ChatSessionView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, 'Session not found.')
         if not check_folder_permission(request, session.repo_id, '/'):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        if not is_chat_and_search_enabled(session.repo_id):
+            return api_error(status.HTTP_403_FORBIDDEN, 'AI Chat and Search is not enabled for this library.')
         if not user_passes_ai_chat_folder_permissions(request, session.repo_id):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
         if session.username != request.user.username:
@@ -600,6 +604,8 @@ class ChatSessionCopyView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, 'Session not found.')
         if not check_folder_permission(request, session.repo_id, '/'):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        if not is_chat_and_search_enabled(session.repo_id):
+            return api_error(status.HTTP_403_FORBIDDEN, 'AI Chat and Search is not enabled for this library.')
         if not user_passes_ai_chat_folder_permissions(request, session.repo_id):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
         if session.username != request.user.username and not session.is_shared:
@@ -629,6 +635,8 @@ class ChatMessagesView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, 'Session not found.')
         if not check_folder_permission(request, session.repo_id, '/'):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        if not is_chat_and_search_enabled(session.repo_id):
+            return api_error(status.HTTP_403_FORBIDDEN, 'AI Chat and Search is not enabled for this library.')
         if not user_passes_ai_chat_folder_permissions(request, session.repo_id):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
         if not check_session_access(session, request.user.username):
@@ -674,6 +682,8 @@ class ChatMarkdownArtifactView(APIView):
         file_path = os.path.join(uuid_map.parent_path, uuid_map.filename)
         if not check_folder_permission(request, repo_id, '/'):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        if not is_chat_and_search_enabled(repo_id):
+            return api_error(status.HTTP_403_FORBIDDEN, 'Chat & Search is not enabled for this library.')
         if not user_passes_ai_chat_folder_permissions(request, repo_id):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
@@ -720,6 +730,8 @@ class ChatView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, 'Session not found.')
         if not check_folder_permission(request, session.repo_id, '/'):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        if not is_chat_and_search_enabled(session.repo_id):
+            return api_error(status.HTTP_403_FORBIDDEN, 'Chat & Search is not enabled for this library.')
         if not user_passes_ai_chat_folder_permissions(request, session.repo_id):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
         if not check_session_access(session, request.user.username):
@@ -768,6 +780,8 @@ class ChatView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, 'Library not found.')
         if repo.is_virtual:
             return api_error(status.HTTP_403_FORBIDDEN, 'Virtual library is not supported.')
+        if not is_chat_and_search_enabled(repo_id):
+            return api_error(status.HTTP_403_FORBIDDEN, 'AI Chat and Search is not enabled for this library.')
         if not check_folder_permission(request, repo_id, '/'):
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
         if not user_passes_ai_chat_folder_permissions(request, repo_id):

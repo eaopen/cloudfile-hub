@@ -1,14 +1,13 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import MainPanelTopbar from '../main-panel-topbar';
-import DevicesNav from './devices-nav';
-import { useLocation } from '@gatsbyjs/reach-router';
 import { Button } from 'reactstrap';
-import { gettext } from '../../../utils/constants';
-import { systemAdminAPI } from '../../../utils/system-admin-api';
-import toaster from '../../../components/toast';
-import { Utils } from '../../../utils/utils';
-import { EVENT_BUS_TYPE } from '../../../components/common/event-bus-type';
-import { eventBus } from '../../../components/common/event-bus';
+import { useLocation } from '@gatsbyjs/reach-router';
+import { systemAdminAPI } from '@/api/system-admin-api';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
+import { EVENT_BUS_TYPE, eventBus } from '@/components/event-bus';
+import toaster from '@/components/toast';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
+import DevicesNav from './devices-nav';
 
 const Devices = ({ children, ...commonProps }) => {
   const [isCleanBtnShown, setIsCleanBtnShown] = useState(false);

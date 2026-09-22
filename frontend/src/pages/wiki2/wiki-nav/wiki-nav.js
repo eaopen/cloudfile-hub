@@ -1,18 +1,18 @@
 import React, { Component } from 'react';
-import PropTypes from 'prop-types';
-import classNames from 'classnames';
 import { DndProvider } from 'react-dnd';
 import { HTML5Backend } from 'react-dnd-html5-backend';
-import PageItem from './pages/page-item';
+import classNames from 'classnames';
+import PropTypes from 'prop-types';
+import CustomDropdown from '@/components/dropdown';
+import Icon from '@/components/icon';
+import OpIcon from '@/components/op-icon';
+import toaster from '@/components/toast';
+import { gettext, wikiPermission } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import PageDragLayer from './pages/page-drag-layer';
-import { gettext, wikiPermission } from '../../../utils/constants';
-import { Utils } from '../../../utils/utils';
-import toaster from '../../../components/toast';
-import Icon from '../../../components/icon';
-import OpIcon from '../../../components/op-icon';
-import CustomDropdown from '../../../components/dropdown';
+import PageItem from './pages/page-item';
 
-import '../css/wiki-nav.css';
+import './index.css';
 
 class WikiNav extends Component {
 
@@ -169,7 +169,7 @@ class WikiNav extends Component {
     const pageOperationItems = [{
       key: 'import-page',
       label: gettext('Import page'),
-      icon_dom: <Icon symbol="import-sdoc" className="mr-2" aria-hidden="true" />,
+      icon_dom: <Icon symbol="import-sdoc" aria-hidden="true" />,
       children: [
         { key: 'import-docx', label: gettext('Import page from docx'), onClick: () => this.handleImportPage('.docx') },
         { key: 'import-md', label: gettext('Import page from Markdown'), onClick: () => this.handleImportPage('.md') },

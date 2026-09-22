@@ -1,13 +1,13 @@
 import React, { Component, Fragment } from 'react';
 import { Button, Form, FormGroup, Input, Col } from 'reactstrap';
-import { Utils } from '../../../utils/utils';
-import { systemAdminAPI } from '../../../utils/system-admin-api';
-import { gettext } from '../../../utils/constants';
-import Paginator from '../../../components/paginator';
-import toaster from '../../../components/toast';
-import SysAdminUserSetQuotaDialog from '../../../components/dialog/sysadmin-dialog/set-quota';
-import CommonOperationConfirmationDialog from '../../../components/dialog/common-operation-confirmation-dialog';
-import MainPanelTopbar from '../main-panel-topbar';
+import { systemAdminAPI } from '@/api/system-admin-api';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
+import CommonOperationConfirmationDialog from '@/components/dialog/common-operation-confirmation-dialog';
+import SysAdminUserSetQuotaDialog from '@/components/dialog/sysadmin-dialog/set-quota';
+import Paginator from '@/components/paginator';
+import toaster from '@/components/toast';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import Content from './users-content';
 
 

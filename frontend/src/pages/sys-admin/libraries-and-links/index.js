@@ -1,0 +1,234 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Button } from 'reactstrap';
+import { useLocation, navigate, Router } from '@gatsbyjs/reach-router';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
+import toaster from '@/components/toast';
+import { gettext, siteRoot } from '@/utils/constants';
+import LinksNav from '../links/links-nav';
+import ShareLinks from '../links/share-links';
+import UploadLinks from '../links/upload-links';
+import AllRepos from '../repos/all-repos';
+import AllWikis from '../repos/all-wikis';
+import SystemRepo from '../repos/system-repo';
+import TrashRepos from '../repos/trash-repos';
+import Search from '../search';
+import ReposNav from './repos-nav';
+
+const LINKS_PATH_NAME_MAP = {
+  'share-links': 'shareLinks',
+  'upload-links': 'uploadLinks'
+};
+
+const LibrariesAndLinks = ({ ...commonProps }) => {
+  const [sortBy, setSortBy] = useState('');
+  const [sortOrder, setSortOrder] = useState('asc');
+  const [perPage, setPerPage] = useState(100);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [isCreateRepoDialogOpen, setIsCreateRepoDialogOpen] = useState(false);
+  const [isCleanTrashDialogOpen, setIsCleanTrashDialogOpen] = useState(false);
+  const callbackRef = React.useRef(null);
+
+  const location = useLocation();
+  const path = location.pathname.split('/').filter(Boolean).pop();
+  let curTab = '';
+  const isLibraries = useMemo(() => path === 'all-libraries' || path === 'trash-libraries' || path === 'all-wikis' || path === 'system-library', [path]);
+  if (isLibraries) {
+    curTab = path;
+  } else {
+    curTab = LINKS_PATH_NAME_MAP[path];
+  }
+
+  const getValueLength = (str) => {
+    let code; let len = 0;
+    for (let i = 0, length = str.length; i < length; i++) {
+      code = str.charCodeAt(i);
+      if (code === 10) { // solve enter problem
+        len += 2;
+      } else if (code < 0x007f) {
+        len += 1;
+      } else if (code >= 0x0080 && code <= 0x07ff) {
+        len += 2;
+      } else if (code >= 0x0800 && code <= 0xffff) {
+        len += 3;
+      }
+    }
+    return len;
+  };
+
+  const searchRepos = (repoNameOrID) => {
+    if (getValueLength(repoNameOrID) < 3) {
+      toaster.notify(gettext('Required at least three letters.'));
+      return;
+    }
+    navigate(`${siteRoot}sys/search-libraries/?name_or_id=${encodeURIComponent(repoNameOrID)}`);
+  };
+
+  const getSearch = () => {
+    return (
+      <Search
+        placeholder={gettext('Search libraries by name or ID')}
+        submit={searchRepos}
+      />
+    );
+  };
+
+  const toggleCreateRepoDialog = useCallback(() => {
+    setIsCreateRepoDialogOpen(!isCreateRepoDialogOpen);
+  }, [isCreateRepoDialogOpen]);
+
+  const toggleCleanTrashDialog = useCallback(() => {
+    setIsCleanTrashDialogOpen(!isCleanTrashDialogOpen);
+  }, [isCleanTrashDialogOpen]);
+
+  const sortItems = (orderValueOrField, sortOrder) => {
+    const field = orderValueOrField;
+    const direction = sortOrder;
+    const newPage = 1;
+
+    setSortBy(field);
+    if (!isLibraries && direction) {
+      setSortOrder(direction);
+    }
+    setCurrentPage(newPage);
+
+    const url = new URL(window.location.href);
+    const searchParams = new URLSearchParams(url.search);
+    searchParams.set('page', newPage);
+    searchParams.set('order_by', field);
+    if (isLibraries) {
+      searchParams.delete('direction');
+    } else if (direction) {
+      searchParams.set('direction', direction);
+    }
+    const next = url.pathname + (searchParams.toString() ? `?${searchParams.toString()}` : '');
+    navigate(next);
+  };
+
+  const onResetPerPage = (perPage, callBack) => {
+    setPerPage(perPage);
+    setCurrentPage(1);
+    callbackRef.current = callBack;
+  };
+
+  useEffect(() => {
+    if (callbackRef.current) {
+      callbackRef.current();
+      callbackRef.current = null;
+    }
+  }, [perPage, currentPage]);
+
+  const resetAllStates = useCallback(() => {
+    setSortBy('');
+    setSortOrder('asc');
+    setPerPage(100);
+    setCurrentPage(1);
+    setIsCreateRepoDialogOpen(false);
+    setIsCleanTrashDialogOpen(false);
+  }, []);
+
+  useEffect(() => {
+    const urlParams = (new URL(window.location.href)).searchParams;
+    setSortBy(urlParams.get('order_by') || sortBy);
+    setSortOrder(urlParams.get('direction') || sortOrder);
+    setPerPage(parseInt(urlParams.get('per_page') || perPage));
+    setCurrentPage(parseInt(urlParams.get('page') || currentPage));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    const currentPathType = isLibraries ? 'library' : 'link';
+    resetAllStates();
+
+    const cleanUrlParams = () => {
+      const url = new URL(window.location.href);
+      const paramsToKeep = currentPathType === 'library' ? ['page', 'per_page', 'order_by'] : ['order_by', 'direction'];
+      const validOrderBy = currentPathType === 'library'
+        ? new Set(['size', 'file_count'])
+        : new Set(['ctime', 'view_cnt']);
+
+      const urlOrderBy = url.searchParams.get('order_by');
+      const isOrderValid = urlOrderBy ? validOrderBy.has(urlOrderBy) : false;
+
+      const searchParams = new URLSearchParams();
+
+      Array.from(url.searchParams.entries()).forEach(([key, value]) => {
+        if (!paramsToKeep.includes(key)) return;
+        if (key === 'order_by' && !isOrderValid) return;
+        if (key === 'direction' && currentPathType === 'link' && !isOrderValid) return;
+        searchParams.set(key, value);
+      });
+
+      const next = url.pathname + (searchParams.toString() ? `?${searchParams.toString()}` : '');
+      if (url.pathname + url.search !== next) {
+        navigate(next);
+      }
+    };
+
+    cleanUrlParams();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isLibraries]);
+
+  const safeLinkSortBy = !isLibraries && (sortBy === 'ctime' || sortBy === 'view_cnt') ? sortBy : '';
+  const safeLinkSortOrder = safeLinkSortBy ? sortOrder : undefined;
+
+  return (
+    <>
+      {path === 'all-libraries' && (
+        <MainPanelTopbar search={getSearch()} { ...commonProps }>
+          <Button className="btn btn-secondary operation-item" onClick={toggleCreateRepoDialog} aria-label={gettext('New Library')}>
+            {gettext('New Library')}
+          </Button>
+        </MainPanelTopbar>
+      )}
+      {path === 'trash-libraries' && (
+        <MainPanelTopbar {...commonProps}>
+          <Button className="operation-item" onClick={toggleCleanTrashDialog}>{gettext('Clean')}</Button>
+        </MainPanelTopbar>
+      )}
+      {(path === 'all-wikis' || path === 'system-library') && (
+        <MainPanelTopbar {...commonProps} />
+      )}
+      {!isLibraries && <MainPanelTopbar {...commonProps} />}
+      {isLibraries ? (
+        <ReposNav currentItem={curTab} sortBy={sortBy} sortItems={sortItems} />
+      ) : (
+        <LinksNav currentItem={curTab} sortBy={safeLinkSortBy} sortOrder={safeLinkSortOrder} sortItems={sortItems} />
+      )}
+      <Router className="d-flex overflow-hidden">
+        <AllRepos
+          path="all-libraries"
+          sortBy={sortBy}
+          perPage={perPage}
+          currentPage={currentPage}
+          onResetPerPage={onResetPerPage}
+          isCreateRepoDialogOpen={isCreateRepoDialogOpen}
+          toggleCreateRepoDialog={toggleCreateRepoDialog}
+        />
+        <AllWikis
+          path="all-wikis"
+          sortBy={sortBy}
+          perPage={perPage}
+          currentPage={currentPage}
+          onResetPerPage={onResetPerPage}
+        />
+        <SystemRepo path="system-library" />
+        <TrashRepos
+          path="trash-libraries"
+          isCleanTrashDialogOpen={isCleanTrashDialogOpen}
+          toggleCleanTrashDialog={toggleCleanTrashDialog}
+        />
+        <ShareLinks
+          path="share-links"
+          perPage={perPage}
+          currentPage={currentPage}
+          sortBy={safeLinkSortBy}
+          sortOrder={safeLinkSortOrder}
+          onResetPerPage={onResetPerPage}
+        />
+        <UploadLinks path="upload-links" />
+      </Router>
+    </>
+  );
+};
+
+export default LibrariesAndLinks;

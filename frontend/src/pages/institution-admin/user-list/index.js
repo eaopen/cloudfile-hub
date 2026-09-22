@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import PropTypes from 'prop-types';
-import Loading from '../../../components/loading';
-import { gettext } from '../../../utils/constants';
-import Paginator from '../../../components/paginator';
-import CommonOperationConfirmationDialog from '../../../components/dialog/common-operation-confirmation-dialog';
-import UserItem from './user-item';
+import CommonOperationConfirmationDialog from '@/components/dialog/common-operation-confirmation-dialog';
+import Loading from '@/components/loading';
+import Paginator from '@/components/paginator';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import instAdminAPI from '../api';
-import { Utils } from '../../../utils/utils';
+import UserItem from './user-item';
 
 const UserList = ({ onUserLinkClick }) => {
   const [isLoading, setIsLoading] = useState(true);

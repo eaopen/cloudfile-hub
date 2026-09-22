@@ -1,14 +1,14 @@
 import React, { cloneElement, isValidElement, useCallback, useMemo, useRef } from 'react';
-import PropTypes from 'prop-types';
 import classnames from 'classnames';
-import { Utils } from '../../../../../../utils/utils';
-import OpIcon from '../../../../../../components/op-icon';
-import { getCellValueByColumn } from '../../../../utils/cell';
-import { cellCompare, checkCellValueChanged } from '../../../../utils/selection';
-import { checkIsColumnEditable, checkIsNameColumn } from '../../../../utils/column';
-import { NODE_CONTENT_LEFT_INDENT, NODE_ICON_LEFT_INDENT } from '../../../../constants/tree';
-import { ROW_HEIGHT } from '@/metadata/constants';
+import PropTypes from 'prop-types';
+import { ROW_HEIGHT } from '@/features/metadata/constants';
 import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
+import OpIcon from '../../../../../../components/op-icon';
+import { NODE_CONTENT_LEFT_INDENT, NODE_ICON_LEFT_INDENT } from '../../../../constants/tree';
+import { getCellValueByColumn } from '../../../../utils/cell';
+import { checkIsColumnEditable, checkIsNameColumn } from '../../../../utils/column';
+import { cellCompare, checkCellValueChanged } from '../../../../utils/selection';
 
 import './index.css';
 

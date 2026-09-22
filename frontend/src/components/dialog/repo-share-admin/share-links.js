@@ -1,17 +1,17 @@
 import React, { Component, Fragment } from 'react';
-import PropTypes from 'prop-types';
-import dayjs from 'dayjs';
-import classnames from 'classnames';
 import { Link } from '@gatsbyjs/reach-router';
-import { Utils } from '../../../utils/utils';
-import { seafileAPI } from '../../../utils/seafile-api';
-import { repoShareAdminAPI } from '../../../utils/repo-share-admin-api';
-import { gettext, siteRoot } from '../../../utils/constants';
-import Loading from '../../loading';
-import toaster from '../../../components/toast';
-import EmptyTip from '../../../components/empty-tip';
+import classnames from 'classnames';
+import dayjs from 'dayjs';
+import PropTypes from 'prop-types';
+import { repoShareAdminAPI } from '@/api/repo-share-admin-api';
+import { seafileAPI } from '@/api/seafile-api';
+import { gettext, siteRoot } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import CommonOperationConfirmationDialog from '../../../components/dialog/common-operation-confirmation-dialog';
+import EmptyTip from '../../../components/empty-tip';
+import toaster from '../../../components/toast';
 import Icon from '../../icon';
+import Loading from '../../loading';
 
 const itemPropTypes = {
   item: PropTypes.object.isRequired,
@@ -119,7 +119,7 @@ class Item extends Component {
             title={gettext('Delete')}
             aria-label={gettext('Delete')}
           >
-            <Icon symbol="delete1" />
+            <Icon symbol="delete" />
           </span>
         </td>
       </tr>

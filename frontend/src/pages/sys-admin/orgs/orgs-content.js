@@ -1,18 +1,18 @@
 import React, { Component, Fragment } from 'react';
-import PropTypes from 'prop-types';
 import { Link } from '@gatsbyjs/reach-router';
 import dayjs from 'dayjs';
-import { Utils } from '../../../utils/utils';
-import { siteRoot, gettext } from '../../../utils/constants';
-import EmptyTip from '../../../components/empty-tip';
-import Loading from '../../../components/loading';
-import Paginator from '../../../components/paginator';
-import OpIcon from '../../../components/op-icon';
-import { systemAdminAPI } from '../../../utils/system-admin-api';
-import Selector from '../../../components/single-selector';
-import CommonOperationConfirmationDialog from '../../../components/dialog/common-operation-confirmation-dialog';
+import PropTypes from 'prop-types';
+import { systemAdminAPI } from '@/api/system-admin-api';
+import CommonOperationConfirmationDialog from '@/components/dialog/common-operation-confirmation-dialog';
+import EmptyTip from '@/components/empty-tip';
+import Loading from '@/components/loading';
+import OpIcon from '@/components/op-icon';
+import Paginator from '@/components/paginator';
+import Selector from '@/components/single-selector';
+import toaster from '@/components/toast';
+import { siteRoot, gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import UserLink from '../user-link';
-import toaster from '../../../components/toast';
 
 const { availableRoles } = window.sysadmin.pageOptions;
 
@@ -78,14 +78,14 @@ class Content extends Component {
             </tbody>
           </table>
           {this.props.currentPage &&
-          <Paginator
-            currentPage={this.props.currentPage}
-            hasNextPage={this.props.hasNextPage}
-            curPerPage={this.props.curPerPage}
-            resetPerPage={this.props.resetPerPage}
-            gotoPreviousPage={this.getPreviousPage}
-            gotoNextPage={this.getNextPage}
-          />
+            <Paginator
+              currentPage={this.props.currentPage}
+              hasNextPage={this.props.hasNextPage}
+              curPerPage={this.props.curPerPage}
+              resetPerPage={this.props.resetPerPage}
+              gotoPreviousPage={this.getPreviousPage}
+              gotoNextPage={this.getNextPage}
+            />
           }
         </Fragment>
       );
@@ -280,7 +280,7 @@ class Item extends Component {
           <td>
             <OpIcon
               className={`op-icon ${highlighted ? '' : 'invisible'}`}
-              symbol="delete1"
+              symbol="delete"
               title={gettext('Delete')}
               op={this.toggleDeleteDialog}
             />

@@ -1,16 +1,16 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Button } from 'reactstrap';
-import { isPro, gettext } from '../../../utils/constants';
-import { seafileAPI } from '../../../utils/seafile-api';
-import { systemAdminAPI } from '../../../utils/system-admin-api';
-import { Utils } from '../../../utils/utils';
-import toaster from '../../toast';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import { systemAdminAPI } from '@/api/system-admin-api';
+import { isPro, gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import EmptyTip from '../../../components/empty-tip';
-import SharePermissionEditor from '../../select-editor/share-permission-editor';
-import GroupSelect from '../../common/group-select';
 import Loading from '../../../components/loading';
+import GroupSelect from '../../group-select';
 import Icon from '../../icon';
+import SharePermissionEditor from '../../select-editor/share-permission-editor';
+import toaster from '../../toast';
 
 class GroupItem extends React.Component {
 

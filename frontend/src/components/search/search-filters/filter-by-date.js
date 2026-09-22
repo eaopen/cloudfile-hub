@@ -1,16 +1,16 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import PropTypes from 'prop-types';
 import { Dropdown, DropdownItem, DropdownMenu, DropdownToggle } from 'reactstrap';
-import dayjs from 'dayjs';
 import classNames from 'classnames';
-import { gettext } from '../../../utils/constants';
-import { Utils } from '../../../utils/utils';
+import dayjs from 'dayjs';
+import PropTypes from 'prop-types';
+import { DROPDOWN_MENU_OFFSET_DEFAULT } from '@/components/dropdown/utils';
+import { SEARCH_FILTERS_KEY, SEARCH_FILTER_BY_DATE_OPTION_KEY, SEARCH_FILTER_BY_DATE_TYPE_KEY } from '@/constants';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import OpIcon from '../../../components/op-icon';
 import Picker from '../../date-and-time-picker';
-import ModalPortal from '../../modal-portal';
-import { SEARCH_FILTERS_KEY, SEARCH_FILTER_BY_DATE_OPTION_KEY, SEARCH_FILTER_BY_DATE_TYPE_KEY } from '../../../constants';
 import Icon from '../../icon';
-import { DROPDOWN_MENU_OFFSET_DEFAULT } from '@/components/dropdown/utils';
+import ModalPortal from '../../modal-portal';
 
 const DATE_INPUT_WIDTH = 118;
 
@@ -247,7 +247,7 @@ const FilterByDate = ({ date, onChange }) => {
                     id="clear-date-btn"
                     className="op-icon"
                     tooltip={gettext('Delete')}
-                    symbol="delete1"
+                    symbol="delete"
                     op={onClearDate}
                   />
                 )}

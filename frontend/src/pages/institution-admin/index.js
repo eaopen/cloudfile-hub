@@ -1,13 +1,11 @@
 import React, { useState } from 'react';
-import { LocationProvider, globalHistory } from '@gatsbyjs/reach-router';
-import { createRoot } from 'react-dom/client';
 import MediaQuery from 'react-responsive';
 import { Modal } from 'reactstrap';
-import SidePanel from './side-panel';
 import MainPanel from './main-panel';
+import SidePanel from './side-panel';
 
-import '../../css/layout.css';
-import '../../css/toolbar.css';
+import '@/css/layout.css';
+import '@/css/toolbar.css';
 
 export default function Institutions() {
 
@@ -29,10 +27,3 @@ export default function Institutions() {
     </>
   );
 }
-
-const root = createRoot(document.getElementById('wrapper'));
-root.render(
-  <LocationProvider history={globalHistory}>
-    <Institutions />
-  </LocationProvider>
-);

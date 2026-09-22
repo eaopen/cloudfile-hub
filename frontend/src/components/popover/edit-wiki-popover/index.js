@@ -1,13 +1,13 @@
 import React from 'react';
-import PropTypes from 'prop-types';
-import classNames from 'classnames';
 import { Alert, Button, Input, Label, Popover } from 'reactstrap';
+import classNames from 'classnames';
+import PropTypes from 'prop-types';
+import wikiAPI from '@/api/wiki-api';
+import { enableSeafileAI, gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import Icon from '../../icon';
-import Tooltip from '../../tooltip';
-import wikiAPI from '../../../utils/wiki-api';
-import { enableSeafileAI, gettext } from '../../../utils/constants';
-import { Utils } from '../../../utils/utils';
 import toaster from '../../toast';
+import Tooltip from '../../tooltip';
 import {
   DEFAULT_WIKI_COLOR,
   WIKI_ICON_COLORS,

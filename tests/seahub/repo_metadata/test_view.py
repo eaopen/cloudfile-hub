@@ -1,7 +1,10 @@
 import os
 import json
 import time
-from django.urls import reverse
+from unittest.mock import patch
+
+from django.urls import NoReverseMatch, reverse
+from django.utils import timezone
 
 from seahub.repo_metadata.models import RepoMetadata, RepoMetadataViews
 from seahub.test_utils import BaseTestCase
@@ -25,6 +28,7 @@ class MetadataManagerTest(BaseTestCase):
         self.assertEqual(200, resp.status_code)
         json_resp = json.loads(resp.content)
         self.assertFalse(json_resp['enabled'])
+        self.assertNotIn('tags_lang', json_resp)
     
     def test_put_metadata_manage(self):
         resp = self.client.put(self.management_url)
@@ -42,6 +46,128 @@ class MetadataManagerTest(BaseTestCase):
 
         metadata = RepoMetadata.objects.get(repo_id=self.repo_id)
         self.assertFalse(metadata.enabled)
+
+    # Face recognition has been removed. Keep the related tests below commented
+    # out until legacy metadata cleanup needs to be tested again.
+    # def test_face_recognition_is_not_exposed(self):
+    #     self.client.put(self.management_url)
+    #     metadata = RepoMetadata.objects.get(repo_id=self.repo_id)
+    #     metadata.face_recognition_enabled = True
+    #     metadata.save(update_fields=['face_recognition_enabled'])
+    #     metadata_views = RepoMetadataViews.objects.get(repo_id=self.repo_id)
+    #     view_details = json.loads(metadata_views.details)
+    #     view_details['views'].append({
+    #         '_id': '_legacy_face_recognition',
+    #         'name': 'People',
+    #         'type': 'face_recognition',
+    #     })
+    #     view_details['navigation'].append({
+    #         '_id': '_legacy_face_recognition',
+    #         'type': 'view',
+    #     })
+    #     metadata_views.details = json.dumps(view_details)
+    #     metadata_views.save(update_fields=['details'])
+
+    #     resp = self.client.get(self.management_url)
+    #     self.assertEqual(200, resp.status_code)
+    #     json_resp = json.loads(resp.content)
+    #     self.assertFalse(json_resp['face_recognition_enabled'])
+
+    #     with self.assertRaises(NoReverseMatch):
+    #         reverse('api-v2.1-metadata-face-recognition', args=[self.repo_id])
+
+    #     views_url = reverse('api-v2.1-metadata-views', args=[self.repo_id])
+    #     resp = self.client.get(views_url)
+    #     json_resp = json.loads(resp.content)
+    #     self.assertNotIn('_legacy_face_recognition', [view['_id'] for view in json_resp['views']])
+    #     self.assertNotIn('_legacy_face_recognition', [item['_id'] for item in json_resp['navigation']])
+
+    #     resp = self.client.post(views_url, {
+    #         'name': 'People',
+    #         'type': 'face_recognition',
+    #     })
+    #     self.assertEqual(400, resp.status_code)
+
+
+class MetadataAISummaryStatusTest(BaseTestCase):
+    def setUp(self):
+        self.login_as(self.user)
+        self.repo_id = self.create_repo(
+            name='test-repo',
+            desc='',
+            username=self.user.username,
+            passwd=None,
+        )
+        self.url = reverse('api-v2.1-metadata-summary-status', args=[self.repo_id])
+        self.metadata = RepoMetadata.objects.enable_metadata_and_tags(self.repo_id)
+        self.metadata.summary_enabled = True
+        self.metadata.ai_summary_indexed_at = timezone.now()
+        self.metadata.save(update_fields=['summary_enabled', 'ai_summary_indexed_at'])
+
+    @patch('seahub.repo_metadata.apis.EMBEDDING_MODEL_CONFIGURED', True)
+    @patch('seahub.repo_metadata.apis.HAS_FILE_SEASEARCH', True)
+    @patch('seahub.repo_metadata.apis.MetadataServerAPI')
+    def test_get_ai_summary_status(self, mock_metadata_server_api, mock_has_file_seasearch, mock_embedding_model_configured):
+        status_cases = {
+            '': ('pending', 'completed'),
+            'in_summary': ('crawling', 'pending'),
+            'indexing': ('completed', 'crawling'),
+            'summary_failed': ('failed', 'pending'),
+            'index_failed': ('completed', 'failed'),
+        }
+
+        for processing_status, expected_statuses in status_cases.items():
+            self.metadata.ai_processing_status = processing_status
+            self.metadata.save(update_fields=['ai_processing_status'])
+            mock_metadata_server_api.return_value.query_rows.side_effect = [
+                {'results': [{'_suffix': 'PDF', 'count': 5}, {'_suffix': 'xlsx', 'count': 2}]},
+                {'results': [{'_suffix': 'PDF', 'count': 4}, {'_suffix': 'xlsx', 'count': 2}]},
+                {'results': [{'_suffix': 'PDF', 'count': 3}, {'_suffix': 'xlsx', 'count': 2}]},
+            ]
+
+            response = self.client.get(self.url)
+            self.assertEqual(200, response.status_code)
+            result = json.loads(response.content)
+            self.assertTrue(result['enabled'])
+            self.assertTrue(result['index_enabled'])
+            self.assertEqual(5, result['total_files'])
+            self.assertEqual(4, result['summary']['processed_count'])
+            self.assertEqual(3, result['index']['indexed_count'])
+            self.assertEqual(expected_statuses[0], result['summary']['status'])
+            self.assertEqual(expected_statuses[1], result['index']['status'])
+            self.assertTrue(result['latest_index_time'].endswith(('Z', '+00:00')))
+
+        first_query = mock_metadata_server_api.return_value.query_rows.call_args_list[0].args[0]
+        self.assertIn('GROUP BY `_suffix`', first_query)
+        self.assertNotIn('LOWER(', first_query)
+
+    @patch('seahub.repo_metadata.apis.EMBEDDING_MODEL_CONFIGURED', False)
+    @patch('seahub.repo_metadata.apis.HAS_FILE_SEASEARCH', True)
+    @patch('seahub.repo_metadata.apis.MetadataServerAPI')
+    def test_get_ai_summary_status_without_index(self, mock_metadata_server_api, mock_has_file_seasearch, mock_embedding_model_configured):
+        mock_metadata_server_api.return_value.query_rows.side_effect = [
+            {'results': [{'_suffix': 'pdf', 'count': 5}]},
+            {'results': [{'_suffix': 'pdf', 'count': 4}]},
+        ]
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(200, response.status_code)
+        result = json.loads(response.content)
+        self.assertFalse(result['index_enabled'])
+        self.assertNotIn('index', result)
+
+    def test_get_ai_summary_status_when_disabled(self):
+        self.metadata.summary_enabled = False
+        self.metadata.save(update_fields=['summary_enabled'])
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(409, response.status_code)
+        self.assertEqual(
+            'The AI summary feature is not enabled for this library.',
+            json.loads(response.content)['error_msg'],
+        )
 
 
 class MetadataDetailSettingsTest(BaseTestCase):
@@ -258,6 +384,25 @@ class MetadataViewsTest(BaseTestCase):
         json_resp = json.loads(resp.content)
         self.assertEqual(json_resp['view']['_id'], view_id)
 
+    # def test_get_legacy_face_recognition_view_detail(self):
+    #     metadata_views = RepoMetadataViews.objects.get(repo_id=self.repo_id)
+    #     view_details = json.loads(metadata_views.details)
+    #     view_details['views'].append({
+    #         '_id': '_legacy_face_recognition',
+    #         'name': 'People',
+    #         'type': 'face_recognition',
+    #     })
+    #     view_details['navigation'].append({
+    #         '_id': '_legacy_face_recognition',
+    #         'type': 'view',
+    #     })
+    #     metadata_views.details = json.dumps(view_details)
+    #     metadata_views.save(update_fields=['details'])
+
+    #     url = reverse('api-v2.1-metadata-views-detail', args=[self.repo_id, '_legacy_face_recognition'])
+    #     resp = self.client.get(url)
+    #     self.assertEqual(404, resp.status_code)
+
     def test_put_view(self):
         url = reverse('api-v2.1-metadata-views', args=[self.repo_id])
         resp = self.client.post(url, {
@@ -274,6 +419,20 @@ class MetadataViewsTest(BaseTestCase):
         self.assertEqual(200, resp.status_code)
         json_resp = json.loads(resp.content)
         self.assertTrue(json_resp['success'])
+
+    # def test_put_rejects_face_recognition_view(self):
+    #     url = reverse('api-v2.1-metadata-views', args=[self.repo_id])
+    #     resp = self.client.post(url, {
+    #         'name': 'test_view',
+    #         'type': 'table'
+    #     }, 'application/json')
+    #     view_id = json.loads(resp.content)['view']['_id']
+
+    #     resp = self.client.put(url, {
+    #         'view_id': view_id,
+    #         'view_data': {'type': 'face_recognition'}
+    #     }, 'application/json')
+    #     self.assertEqual(400, resp.status_code)
 
     def test_delete_view(self):
         url = reverse('api-v2.1-metadata-views', args=[self.repo_id])
@@ -323,6 +482,25 @@ class MetadataViewsDuplicateViewTest(BaseTestCase):
         self.assertIn('view', json_resp)
         self.assertNotEqual(json_resp['view']['_id'], self.view_id)
         self.assertTrue(json_resp['view']['name'].startswith('test_view'))
+
+    # def test_duplicate_face_recognition_view(self):
+    #     metadata_views = RepoMetadataViews.objects.get(repo_id=self.repo_id)
+    #     view_details = json.loads(metadata_views.details)
+    #     view_details['views'].append({
+    #         '_id': '_legacy_face_recognition',
+    #         'name': 'People',
+    #         'type': 'face_recognition',
+    #     })
+    #     view_details['navigation'].append({
+    #         '_id': '_legacy_face_recognition',
+    #         'type': 'view',
+    #     })
+    #     metadata_views.details = json.dumps(view_details)
+    #     metadata_views.save(update_fields=['details'])
+
+    #     url = reverse('api-v2.1-metadata-view-duplicate', args=[self.repo_id])
+    #     resp = self.client.post(url, {'view_id': '_legacy_face_recognition'}, 'application/json')
+    #     self.assertEqual(400, resp.status_code)
 
 
 class MetadataViewsMoveViewTest(BaseTestCase):
@@ -455,68 +633,6 @@ class MetadataFoldersTest(BaseTestCase):
         self.assertTrue(json_resp['success'])
 
 
-class FacesRecordsTest(BaseTestCase):
-    def setUp(self):
-        self.login_as(self.user)
-        self.repo = seafile_api.get_repo(self.create_repo(
-            name='test-repo',
-            desc='',
-            username=self.user.username,
-            passwd=None
-        ))
-        self.repo_id = self.repo.id
-        
-        url = reverse('api-v2.1-metadata', args=[self.repo_id])
-        self.client.put(url)
-        url = reverse('api-v2.1-metadata-face-recognition', args=[self.repo_id])
-        self.client.post(url)
-
-    def test_get_face_records(self):
-        url = reverse('api-v2.1-metadata-face-records', args=[self.repo_id])
-        resp = self.client.get(url)
-        self.assertEqual(200, resp.status_code)
-        json_resp = json.loads(resp.content)
-        self.assertIn('metadata', json_resp)
-        self.assertIn('results', json_resp)
-
-
-class FaceRecognitionManageTest(BaseTestCase):
-    def setUp(self):
-        self.login_as(self.user)
-        self.repo = seafile_api.get_repo(self.create_repo(
-            name='test-repo',
-            desc='',
-            username=self.user.username,
-            passwd=None
-        ))
-        self.repo_id = self.repo.id
-        
-        url = reverse('api-v2.1-metadata', args=[self.repo_id])
-        self.client.put(url)
-
-    def test_enable_face_recognition(self):
-        url = reverse('api-v2.1-metadata-face-recognition', args=[self.repo_id])
-        resp = self.client.post(url)
-        self.assertEqual(200, resp.status_code)
-        json_resp = json.loads(resp.content)
-        self.assertIn('task_id', json_resp)
-        metadata = RepoMetadata.objects.filter(repo_id=self.repo_id).first()
-        face_recognition_status = metadata.face_recognition_enabled
-        self.assertEqual(1, face_recognition_status)
-
-    def test_disable_face_recognition(self):
-        url = reverse('api-v2.1-metadata-face-recognition', args=[self.repo_id])
-        self.client.post(url)
-
-        resp = self.client.delete(url)
-        self.assertEqual(200, resp.status_code)
-        json_resp = json.loads(resp.content)
-        self.assertTrue(json_resp['success'])
-        metadata = RepoMetadata.objects.filter(repo_id=self.repo_id).first()
-        face_recognition_status = metadata.face_recognition_enabled
-        self.assertEqual(0, face_recognition_status)
-
-
 class MetadataTagsStatusManageTest(BaseTestCase):
     def setUp(self):
         self.login_as(self.user)
@@ -533,20 +649,16 @@ class MetadataTagsStatusManageTest(BaseTestCase):
 
     def test_enable_tags(self):
         url = reverse('api-v2.1-metadata-tags-status', args=[self.repo_id])
-        data = {
-            'lang': 'en'
-        }
-        resp = self.client.put(url, data, 'application/json')
+        resp = self.client.put(url)
         self.assertEqual(200, resp.status_code)
         json_resp = json.loads(resp.content)
         self.assertTrue(json_resp['success'])
         metadata = RepoMetadata.objects.filter(repo_id=self.repo_id).first()
         self.assertEqual(1, metadata.tags_enabled)
-        self.assertEqual('en', metadata.tags_lang)
 
     def test_disable_tags(self):
         url = reverse('api-v2.1-metadata-tags-status', args=[self.repo_id])
-        self.client.put(url, {'lang': 'en'}, 'application/json')
+        self.client.put(url)
         
         resp = self.client.delete(url)
         self.assertEqual(200, resp.status_code)
@@ -570,7 +682,7 @@ class MetadataTagsTest(BaseTestCase):
         url = reverse('api-v2.1-metadata', args=[self.repo_id])
         self.client.put(url)
         url = reverse('api-v2.1-metadata-tags-status', args=[self.repo_id])
-        self.client.put(url, {'lang': 'en'}, 'application/json')
+        self.client.put(url)
 
     def test_create_and_get_tags(self):
         url = reverse('api-v2.1-metadata-tags', args=[self.repo_id])
@@ -653,7 +765,7 @@ class MetadataTagsLinksTest(BaseTestCase):
         self.client.put(url)
         
         url = reverse('api-v2.1-metadata-tags-status', args=[self.repo_id])
-        self.client.put(url, {'lang': 'en'}, 'application/json')
+        self.client.put(url)
 
         url = reverse('api-v2.1-metadata-tags', args=[self.repo_id])
         data = {
@@ -751,7 +863,7 @@ class MetadataFileTagsTest(BaseTestCase):
         time.sleep(0.2)
 
         url = reverse('api-v2.1-metadata-tags-status', args=[self.repo_id])
-        self.client.put(url, {'lang': 'en'}, 'application/json')
+        self.client.put(url)
 
         url = reverse('api-v2.1-metadata-tags', args=[self.repo_id])
         data = {
@@ -804,7 +916,7 @@ class MetadataTagFilesTest(BaseTestCase):
         self.client.put(url)
         
         url = reverse('api-v2.1-metadata-tags-status', args=[self.repo_id])
-        self.client.put(url, {'lang': 'en'}, 'application/json')
+        self.client.put(url)
 
         url = reverse('api-v2.1-metadata-tags', args=[self.repo_id])
         data = {
@@ -858,7 +970,7 @@ class MetadataMergeTagsTest(BaseTestCase):
         self.client.put(url)
 
         url = reverse('api-v2.1-metadata-tags-status', args=[self.repo_id])
-        self.client.put(url, {'lang': 'en'}, 'application/json')
+        self.client.put(url)
 
         url = reverse('api-v2.1-metadata-tags', args=[self.repo_id])
         data = {
@@ -895,4 +1007,3 @@ class MetadataMergeTagsTest(BaseTestCase):
         tag_ids = [tag['_id'] for tag in json_resp['results']]
         self.assertIn(self.target_tag_id, tag_ids)
         self.assertNotIn(self.merge_tag_id, tag_ids)
-

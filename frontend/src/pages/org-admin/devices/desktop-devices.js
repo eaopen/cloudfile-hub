@@ -1,7 +1,7 @@
 import React, { Component, Fragment } from 'react';
-import DevicesNav from './devices-nav';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
 import DevicesByPlatform from './devices-by-platform';
-import MainPanelTopbar from '../main-panel-topbar';
+import DevicesNav from './devices-nav';
 
 class OrgDesktopDevices extends Component {
 
@@ -12,7 +12,7 @@ class OrgDesktopDevices extends Component {
   render() {
     return (
       <Fragment>
-        <MainPanelTopbar />
+        <MainPanelTopbar {...this.props} />
         <div className="main-panel-center flex-row">
           <div className="cur-view-container">
             <DevicesNav currentItem="desktop" />

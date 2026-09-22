@@ -1,20 +1,20 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { EXTERNAL_EVENTS, EventBus } from '@seafile/seafile-editor';
-import { gettext, canGenerateShareLink, isPro, mediaUrl, canLockUnlockFile } from '../../../utils/constants';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import EmbeddedFileDetails from '@/components/dirent-detail/embedded-file-details';
+import CommentPanel from '@/components/file-view/comment-panel';
+import Icon from '@/components/icon';
+import IconButton from '@/components/icon-button';
+import Tooltip from '@/components/tooltip';
+import Dirent from '@/models/dirent';
+import { gettext, canGenerateShareLink, isPro, mediaUrl, canLockUnlockFile } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import ButtonGroup from './button-group';
-import MoreMenu from './more-menu';
 import FileInfo from './file-info';
-import Icon from '../../../components/icon';
-import IconButton from '../../../components/icon-button';
-import EmbeddedFileDetails from '../../../components/dirent-detail/embedded-file-details';
-import CommentPanel from '../../../components/file-view/comment-panel';
-import { seafileAPI } from '../../../utils/seafile-api';
-import { Utils } from '../../../utils/utils';
-import Dirent from '../../../../src/models/dirent';
-import Tooltip from '../../../components/tooltip';
+import MoreMenu from './more-menu';
 
-import '../css/header-toolbar.css';
+import './index.css';
 
 const { canDownloadFile, repoID, filePath, isRepoAdmin } = window.app.pageOptions;
 

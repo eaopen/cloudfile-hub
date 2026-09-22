@@ -7,6 +7,7 @@ import os
 import re
 import copy
 import json
+from django.core.exceptions import ImproperlyConfigured
 from .config_parser import ConfigParser
 
 from seaserv import FILE_SERVER_PORT
@@ -38,6 +39,7 @@ DATABASES = {
         'PASSWORD': 'root',
         'HOST': '127.0.0.1',
         'PORT': '3306',
+        'OPTIONS': {'charset': 'utf8mb4'},
     }
 }
 _preset_db_cfg = copy.deepcopy(DATABASES)
@@ -324,7 +326,7 @@ ENABLE_ADFS_LOGIN = False
 
 ENABLE_MULTI_ADFS = False
 
-DISABLE_ADFS_USER_PWD_LOGIN = False
+DISABLE_SSO_USER_LOCAL_PWD_LOGIN = False
 
 ENABLE_OAUTH = False
 ENABLE_WATERMARK = False
@@ -477,12 +479,6 @@ USER_STRONG_PASSWORD_REQUIRED = False
 
 # Force user to change password when admin add/reset a user.
 FORCE_PASSWORD_CHANGE = True
-
-# Enable a user to change password in 'settings' page.
-ENABLE_CHANGE_PASSWORD = True
-
-# Enable a sso user to change password in 'settings' page.
-ENABLE_SSO_USER_CHANGE_PASSWORD = True
 
 # Enable a user to get auth token in 'settings' page.
 ENABLE_GET_AUTH_TOKEN_BY_SESSION = False
@@ -911,6 +907,7 @@ ENABLE_PDF_THUMBNAIL = True
 # template for create new office file
 OFFICE_TEMPLATE_ROOT = os.path.join(MEDIA_ROOT, 'office-template')
 
+ENABLE_WEBDAV = os.environ.get('ENABLE_SEAFDAV', 'false').lower() == 'true'
 ENABLE_WEBDAV_SECRET = True
 WEBDAV_SECRET_MIN_LENGTH = 1
 WEBDAV_SECRET_STRENGTH_LEVEL = 1
@@ -974,12 +971,6 @@ SEADOC_SERVER_URL = 'http://127.0.0.1:7070'
 EXCALIDRAW_SERVER_URL = SEADOC_SERVER_URL
 FILE_CONVERTER_SERVER_URL = 'http://127.0.0.1:8888'
 
-
-##########################
-# Settings for tldraw    #
-##########################
-
-ENABLE_WHITEBOARD = False
 
 ######################################
 # Settings for notification server   #
@@ -1087,14 +1078,13 @@ METADATA_FILE_TYPES = {
                'm4v', 'mkv', 'flv', 'vob'),
     '_audio': ('mp3', 'oga', 'ogg', 'wav', 'flac', 'opus', 'aac', 'au', 'm4a', 'aif', 'aiff', 'wma', 'mp1', 'mp2'),
     '_compressed': ('rar', 'zip', '7z', 'tar', 'gz', 'bz2', 'tgz', 'xz', 'lzma'),
-    '_diagram': ('draw', 'exdraw'),
+    '_diagram': ('exdraw',),
 }
 
 ##############################
 #         seafile ai         #
 ##############################
 ENABLE_SEAFILE_AI = False
-ENABLE_AI_CHAT = False
 ENABLE_FACE_RECOGNITION = False
 
 SEAFILE_AI_SERVER_URL = ''
@@ -1275,7 +1265,16 @@ JWT_PRIVATE_KEY = os.environ.get('JWT_PRIVATE_KEY', '') or JWT_PRIVATE_KEY
 # config in yaml & env
 ai_yaml_file_path = os.path.join(central_conf_dir, os.environ.get('SEAFILE_AI_CONFIG_NAME', 'seafile_ai_config.yaml'))
 ai_configs = ConfigParser(ai_yaml_file_path, 'seahub')
-AI_PRICES = get_llm_price(ai_configs.get('LLM_MODELS', []) + [ai_configs.get('EMBEDDING_MODEL', {})])
+EMBEDDING_MODEL = ai_configs.get('EMBEDDING_MODEL', {})
+EMBEDDING_MODEL_CONFIGURED = bool(validate_llm_models([EMBEDDING_MODEL]))
+EMBEDDING_DIMENSIONS = 1024
+try:
+    dimensions = int(EMBEDDING_MODEL.get('dimensions', EMBEDDING_DIMENSIONS))
+    if dimensions > 0:
+        EMBEDDING_DIMENSIONS = dimensions
+except (TypeError, ValueError):
+    pass
+AI_PRICES = get_llm_price(ai_configs.get('LLM_MODELS', []) + [EMBEDDING_MODEL])
 
 LLM_MODELS = [
     {
@@ -1413,6 +1412,8 @@ if os.environ.get('ENABLE_FACE_RECOGNITION'):
     ENABLE_FACE_RECOGNITION = os.environ.get('ENABLE_FACE_RECOGNITION', 'false').lower() == 'true'
 
 ENABLE_FACE_RECOGNITION = ENABLE_METADATA_MANAGEMENT and ENABLE_SEAFILE_AI and ENABLE_FACE_RECOGNITION
+
+ENABLE_AI_CHAT = ENABLE_SEAFILE_AI
 
 SEAFEVENTS_SERVER_URL = 'http://127.0.0.1:8889'
 

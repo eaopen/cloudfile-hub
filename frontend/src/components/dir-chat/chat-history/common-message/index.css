@@ -1,0 +1,88 @@
+.sea-ai-ask-message-content img:hover {
+  cursor: pointer;
+}
+
+.sea-ai-ask-chat.user-input-chat>.sea-ai-chat-message-attachments {
+  max-width: 100%;
+  flex-wrap: wrap !important;
+  justify-content: flex-end !important;
+}
+
+.sea-ai-ask-message-content .sf-slate-viewer-scroll-container {
+  padding-top: 0;
+  padding-bottom: 0;
+  background-color: inherit;
+}
+
+.sea-ai-ask-message-content .sf-slate-viewer-scroll-container .sf-slate-article-content {
+  overflow: hidden;
+}
+
+.sea-ai-ask-message-content .article {
+  padding: 0 !important;
+  width: 100%;
+  max-width: 100%;
+  border: none !important;
+  box-shadow: none !important;
+  color: inherit !important;
+  background-color: inherit !important;
+}
+
+.sea-ai-ask-message-content .article h1,
+.sea-ai-ask-message-content .article h2,
+.sea-ai-ask-message-content .article h3,
+.sea-ai-ask-message-content .article h4,
+.sea-ai-ask-message-content .article h5,
+.sea-ai-ask-message-content .article h6 {
+  color: inherit !important;
+}
+
+.sea-ai-ask-message-content .sf-code-block-container {
+  background: var(--bs-bg-code);
+}
+
+.sea-ai-ask-message-content .sf-code-block-container pre {
+  background: var(--bs-bg-code);
+}
+
+.sea-ai-ask-message-content .sf-code-block-container pre {
+  background: var(--bs-bg-code);
+  color: var(--bs-body-color);
+  text-shadow: none;
+}
+
+.sea-ai-ask-message-content .sf-code-block-container .sf-lang-selector {
+  color: var(--bs-body-color);
+  background: var(--bs-body-secondary-bg);
+}
+
+.sea-ai-ask-message-content .article blockquote {
+  color: var(--bs-body-secondary-color);
+  border-left-color: var(--bs-border-secondary-color);
+}
+
+.sea-ai-ask-message-content .article h2 {
+  border-bottom-color: var(--bs-border-tertiary-color);
+}
+
+.sea-ai-ask-message-content .sdoc-divider-element {
+  border-top-color: var(--bs-border-tertiary-color);
+}
+
+.sea-ai-ask-message-content .article table {
+  border-left-color: var(--bs-border-secondary-color);
+  border-top-color: var(--bs-border-secondary-color);
+}
+
+.sea-ai-ask-message-content .article table td,
+.sea-ai-ask-message-content .article table th {
+  border-color: var(--bs-border-tertiary-color);
+}
+
+.sea-ai-ask-message-content .article tr:nth-child(odd) {
+  background-color: var(--bs-bg-secondary-color);
+}
+
+.sea-ai-ask-message-content.rich-text .article :last-child {
+  margin-bottom: 0;
+}

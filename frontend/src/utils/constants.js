@@ -37,8 +37,8 @@ export const appAvatarURL = window.app.config.avatarURL;
 export const faviconPath = window.app.config.faviconPath;
 export const loginBGPath = window.app.config.loginBGPath;
 export const enableRepoAutoDel = window.app.config.enableRepoAutoDel;
-export const cloudMode = window.app.pageOptions.cloudMode;
-export const isOrgContext = window.app.pageOptions.isOrgContext;
+export const cloudMode = window.app.config.cloudMode;
+export const isOrgContext = window.app.config.isOrgContext;
 
 // pageOptions
 export const trashReposExpireDays = window.app.pageOptions.trashReposExpireDays;
@@ -106,8 +106,7 @@ export const enableSSOToThirdpartWebsite = window.app.pageOptions.enableSSOToThi
 export const enableSeadoc = window.app.pageOptions.enableSeadoc;
 export const enableMetadataManagement = window.app.pageOptions.enableMetadataManagement;
 export const enableSeafileAI = window.app.pageOptions.enableSeafileAI;
-export const enableAIChat = window.app.pageOptions.enableAIChat;
-export const enableFaceRecognitionFeature = window.app.pageOptions.enableFaceRecognition;
+export const chatAndSearchAvailable = window.app.pageOptions.chatAndSearchAvailable;
 export const enableWhiteboard = window.app.pageOptions.enableWhiteboard;
 export const enableMultipleOfficeSuite = window.app.pageOptions.enableMultipleOfficeSuite;
 export const officeSuiteEditFileExtension = window.app.pageOptions.officeSuiteEditFileExtension || [];
@@ -182,7 +181,6 @@ export const isVirtualRepo = window.fileHistory ? window.fileHistory.pageOptions
 export const orgID = window.org ? window.org.pageOptions.orgID : '';
 export const orgName = window.org ? window.org.pageOptions.orgName : '';
 export const invitationLink = window.org ? window.org.pageOptions.invitationLink : '';
-export const orgMemberQuotaEnabled = window.org ? window.org.pageOptions.orgMemberQuotaEnabled : '';
 export const orgEnableAdminCustomLogo = window.org ? window.org.pageOptions.orgEnableAdminCustomLogo === 'True' : false;
 export const orgEnableAdminCustomName = window.org ? window.org.pageOptions.orgEnableAdminCustomName === 'True' : false;
 export const orgEnableAdminInviteUser = window.org ? window.org.pageOptions.orgEnableAdminInviteUser === 'True' : false;

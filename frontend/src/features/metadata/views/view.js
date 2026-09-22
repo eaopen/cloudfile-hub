@@ -1,0 +1,64 @@
+import React, { useCallback } from 'react';
+import CenteredLoading from '@/components/centered-loading';
+import Loading from '@/components/loading';
+import { gettext } from '@/utils/constants';
+import { VIEW_TYPE } from '../constants';
+import { useMetadataView } from '../hooks/metadata-view';
+import Card from './card';
+import Gallery from './gallery';
+import Kanban from './kanban';
+import Map from './map';
+import Statistics from './statistics';
+import Table from './table';
+
+const View = () => {
+  const { isLoading, isBeingBuilt, metadata, errorMessage } = useMetadataView();
+
+  const renderView = useCallback((metadata) => {
+    if (!metadata) return null;
+    const viewType = metadata.view.type;
+    switch (viewType) {
+      case VIEW_TYPE.GALLERY: {
+        return <Gallery />;
+      }
+      case VIEW_TYPE.TABLE: {
+        return <Table />;
+      }
+      case VIEW_TYPE.KANBAN: {
+        return <Kanban />;
+      }
+      case VIEW_TYPE.MAP: {
+        return <Map />;
+      }
+      case VIEW_TYPE.CARD: {
+        return <Card />;
+      }
+      case VIEW_TYPE.STATISTICS: {
+        return <Statistics />;
+      }
+      default:
+        return null;
+    }
+  }, []);
+
+  if (isLoading) {
+    if (isBeingBuilt) {
+      return (
+        <div className="sf-metadata-loading-wrapper">
+          <Loading className="sf-metadata-loading-tip center" />
+          <span className="sf-metadata-loading-tip">{gettext('Extended properties are being built.')}</span>
+        </div>
+      );
+    }
+    return (<CenteredLoading />);
+  }
+
+  return (
+    <div className="sf-metadata-wrapper" id="sf-metadata-wrapper">
+      {errorMessage ? <div className="d-center-middle error">{errorMessage}</div> : renderView(metadata)}
+    </div>
+  );
+
+};
+
+export default View;

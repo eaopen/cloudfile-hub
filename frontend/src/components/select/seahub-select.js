@@ -1,0 +1,161 @@
+import React from 'react';
+import Select, { components } from 'react-select';
+import PropTypes from 'prop-types';
+import { gettext } from '@/utils/constants';
+import Icon from '../icon';
+import SearchEmptyTip from '../search-empty-tip';
+import SelectDropdownIndicator from '../select-dropdown-indicator';
+import { MenuSelectStyle } from './seahub-select-style';
+import './seahub-select.css';
+
+const DropdownIndicator = props => {
+  return (
+    <components.DropdownIndicator {...props}>
+      <SelectDropdownIndicator />
+    </components.DropdownIndicator>
+  );
+};
+
+const ClearIndicator = ({ innerProps, ...props }) => {
+  const onMouseDown = e => {
+    e.nativeEvent.stopImmediatePropagation();
+    innerProps.onMouseDown(e);
+  };
+  props.innerProps = { ...innerProps, onMouseDown };
+  return (
+    <components.ClearIndicator {...props} >
+      <span className="d-flex align-items-center" style={{ marginLeft: '-2px' }} aria-hidden="true">
+        <Icon symbol="close" style={{ width: '12px', height: '12px' }} />
+      </span>
+    </components.ClearIndicator>
+  );
+};
+
+ClearIndicator.propTypes = {
+  innerProps: PropTypes.object,
+};
+
+const MenuList = (props) => (
+  <div onClick={e => e.nativeEvent.stopImmediatePropagation()} onMouseDown={e => e.nativeEvent.stopImmediatePropagation()} >
+    <components.MenuList {...props} className="seahub-select-menu-list">{props.children}</components.MenuList>
+  </div>
+);
+
+MenuList.propTypes = {
+  children: PropTypes.oneOfType([PropTypes.object, PropTypes.array]),
+};
+
+const NoOptionsMessage = props => {
+  return <SearchEmptyTip text={props.children} />;
+};
+
+NoOptionsMessage.propTypes = {
+  children: PropTypes.node,
+};
+
+const Option = props => {
+  return (
+    <div style={props.data.style}>
+      <components.Option {...props} />
+    </div>
+  );
+};
+
+Option.propTypes = {
+  data: PropTypes.shape({
+    style: PropTypes.object,
+  }),
+};
+
+const ValueContainer = ({ children, ...props }) => {
+  // Do not show '--'
+  const isClearOption = props.selectProps.value?.value === null;
+  if (isClearOption) {
+    return (
+      <components.ValueContainer {...props}/>
+    );
+  }
+  return (
+    <components.ValueContainer {...props} className='seahub-select-value-container'>
+      {children}
+    </components.ValueContainer>
+  );
+};
+
+class SeahubSelect extends React.Component {
+
+  getMenuPortalTarget = () => {
+    const { menuPortalTarget = '.modal' } = this.props;
+    return document.querySelector(menuPortalTarget);
+  };
+
+  render() {
+    const { options = [], onChange, value = {}, isSearchable = false, placeholder = '',
+      isMulti = false, menuPosition, isClearable = true, noOptionsMessage = (() => { return gettext('No results'); }),
+      classNamePrefix, innerRef, isDisabled = false, form, className = '' } = this.props;
+
+    const isClearOption = (option) => option && option.value === null && option.label === '--';
+    const hasSelectedOption = !isMulti && value && value.value !== null && value.label !== '--';
+    const normalizedOptions = options.filter(option => !isClearOption(option));
+    const selectOptions = isClearable && hasSelectedOption
+      ? [{ value: null, label: '--' }, ...normalizedOptions]
+      : normalizedOptions;
+
+    const optionsWithCheck = selectOptions.map(option => {
+      const isSelected = hasSelectedOption && value.value === option.value;
+      return {
+        ...option,
+        label: (
+          <span className="d-flex align-items-center justify-content-between">
+            {option.label}
+            {isSelected && <Icon symbol="check" style={{ width: '12px', height: '12px' }} />}
+          </span>
+        )
+      };
+    });
+
+    return (
+      <Select
+        value={value}
+        isDisabled={isDisabled}
+        ref={innerRef}
+        onChange={onChange}
+        options={optionsWithCheck}
+        isMulti={isMulti}
+        className={className}
+        classNamePrefix={classNamePrefix}
+        styles={MenuSelectStyle}
+        components={{ Option, DropdownIndicator, MenuList, ClearIndicator, ValueContainer, NoOptionsMessage }}
+        placeholder={placeholder}
+        isSearchable={isSearchable}
+        isClearable={false}
+        menuPosition={menuPosition || 'fixed'} // when use default menuPosition(absolute), menuPortalTarget is unnecessary.
+        menuShouldScrollIntoView
+        menuPortalTarget={this.getMenuPortalTarget()}
+        captureMenuScroll={false}
+        noOptionsMessage={noOptionsMessage}
+        form={form}
+      />
+    );
+  }
+}
+
+SeahubSelect.propTypes = {
+  isMulti: PropTypes.bool,
+  options: PropTypes.array.isRequired,
+  value: PropTypes.oneOfType([PropTypes.object, PropTypes.array, PropTypes.string]),
+  isSearchable: PropTypes.bool,
+  isClearable: PropTypes.bool,
+  placeholder: PropTypes.string,
+  classNamePrefix: PropTypes.string,
+  className: PropTypes.string,
+  form: PropTypes.string,
+  onChange: PropTypes.func.isRequired,
+  menuPortalTarget: PropTypes.string,
+  menuPosition: PropTypes.string,
+  noOptionsMessage: PropTypes.func,
+  innerRef: PropTypes.object,
+  isDisabled: PropTypes.bool,
+};
+
+export default SeahubSelect;

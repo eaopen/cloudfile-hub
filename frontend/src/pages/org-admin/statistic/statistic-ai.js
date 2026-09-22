@@ -1,9 +1,9 @@
 import React, { Fragment, useCallback } from 'react';
-import MainPanelTopbar from '../main-panel-topbar';
+import { orgAdminAPI } from '@/api/org-admin-api';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
+import AIStatisticsPage from '@/components/admin/statistics/ai-statistics';
+import { gettext, orgID } from '@/utils/constants';
 import StatisticNav from './statistic-nav';
-import { gettext, orgID } from '../../../utils/constants';
-import { orgAdminAPI } from '../../../utils/org-admin-api';
-import AIStatisticsPage from '../../common/ai-statistics';
 
 const tabs = [
   { value: 'overview', label: gettext('Overview') },
@@ -21,7 +21,7 @@ const detailOptionsMap = {
   ],
 };
 
-const OrgStatisticAI = () => {
+const OrgStatisticAI = (props) => {
   const listFetcher = useCallback((date, month, groupBy, page, perPage) => {
     return orgAdminAPI.orgAdminGetAIStatistics(orgID, date, month, groupBy, page, perPage);
   }, []);
@@ -36,7 +36,7 @@ const OrgStatisticAI = () => {
 
   return (
     <Fragment>
-      <MainPanelTopbar />
+      <MainPanelTopbar {...props} />
       <div className="cur-view-container">
         <StatisticNav currentItem="aiStatistic" />
         <div className="cur-view-content">

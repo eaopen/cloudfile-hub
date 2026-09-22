@@ -1,18 +1,17 @@
 import React, { Fragment } from 'react';
-import PropTypes from 'prop-types';
 import { Button } from 'reactstrap';
 import classnames from 'classnames';
-import { gettext, isPro, isSeafilePlus, enableShareToDepartment } from '../../utils/constants';
-import { seafileAPI } from '../../utils/seafile-api';
-import { Utils, isMobile } from '../../utils/utils';
-import toaster from '../toast';
-import SharePermissionEditor from '../select-editor/share-permission-editor';
-import EventBus from '../common/event-bus';
-import { EVENT_BUS_TYPE } from '../common/event-bus-type';
-import GroupSelect from '../common/group-select';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import { gettext, isPro, isSeafilePlus, enableShareToDepartment } from '@/utils/constants';
+import { Utils, isMobile } from '@/utils/utils';
 import EmptyTip from '../../components/empty-tip';
 import Loading from '../../components/loading';
+import EventBus, { EVENT_BUS_TYPE } from '../event-bus';
+import GroupSelect from '../group-select';
 import OpIcon from '../op-icon';
+import SharePermissionEditor from '../select-editor/share-permission-editor';
+import toaster from '../toast';
 
 class GroupItem extends React.Component {
 

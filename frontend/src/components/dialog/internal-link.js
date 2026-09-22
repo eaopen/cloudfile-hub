@@ -1,12 +1,12 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Button } from 'reactstrap';
-import toaster from '../toast';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import copy from '../copy-to-clipboard';
-import { gettext } from '../../utils/constants';
-import { seafileAPI } from '../../utils/seafile-api';
-import { Utils } from '../../utils/utils';
 import Loading from '../loading';
+import toaster from '../toast';
 
 const propTypes = {
   path: PropTypes.string.isRequired,

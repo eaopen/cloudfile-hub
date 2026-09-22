@@ -1,14 +1,14 @@
 import React, { useState, useCallback, useMemo, forwardRef, useImperativeHandle } from 'react';
 import classnames from 'classnames';
-import ModalPortal from '@/components/modal-portal';
-import Icon from '@/components/icon';
-import EventBus from '@/components/common/event-bus';
-import { RenamePopover, OptionsPopover } from '@/metadata/components/popover';
-import NumberFormatPopover from './number-format-popover';
 import CustomDropdown from '@/components/dropdown';
+import EventBus from '@/components/event-bus';
+import Icon from '@/components/icon';
+import ModalPortal from '@/components/modal-portal';
+import { RenamePopover, OptionsPopover } from '@/features/metadata/components/popover';
+import { CellType, DEFAULT_DATE_FORMAT, SORT_COLUMN_OPTIONS, SHOW_DISABLED_SORT_COLUMNS, SORT_TYPE, EVENT_BUS_TYPE } from '@/features/metadata/constants';
+import { getDateDisplayString } from '@/features/metadata/utils/cell';
 import { gettext } from '@/utils/constants';
-import { getDateDisplayString } from '@/metadata/utils/cell';
-import { CellType, DEFAULT_DATE_FORMAT, SORT_COLUMN_OPTIONS, SHOW_DISABLED_SORT_COLUMNS, SORT_TYPE, EVENT_BUS_TYPE } from '@/metadata/constants';
+import NumberFormatPopover from './number-format-popover';
 
 import './index.css';
 
@@ -227,7 +227,7 @@ const HeaderDropdownMenu = forwardRef(({
     items.push({
       key: 'delete',
       label: gettext('Delete property'),
-      icon_dom: <Icon className="sf-metadata-icon" symbol="delete1" />,
+      icon_dom: <Icon className="sf-metadata-icon" symbol="delete" />,
       disabled: !canDeleteColumnFn,
       onClick: onDelete,
     });

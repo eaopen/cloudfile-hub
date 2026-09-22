@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
-import PropTypes from 'prop-types';
 import { FormGroup, Label, InputGroup, Input, Button } from 'reactstrap';
 import classnames from 'classnames';
-import PasswordStrengthChecker from './password-strength-checker';
-import { isMobile } from '../../../utils/utils';
+import PropTypes from 'prop-types';
+import { isMobile } from '@/utils/utils';
 import Icon from '../../icon';
+import PasswordStrengthChecker from './password-strength-checker';
 
-import '../../../css/password-input.css';
+import './password-input.css';
 
 const propTypes = {
   value: PropTypes.string,

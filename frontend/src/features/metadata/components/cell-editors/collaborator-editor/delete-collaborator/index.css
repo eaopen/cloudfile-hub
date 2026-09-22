@@ -1,0 +1,54 @@
+.sf-metadata-collaborator-editor .sf-metadata-delete-collaborator {
+  background-color: var(--bs-th-bg);
+  border-bottom: 1px solid var(--bs-border-secondary-color);
+  border-radius: 3px 3px 0 0;
+  min-height: 35px;
+  padding: 8px;
+  line-height: 1;
+}
+
+.sf-metadata-delete-collaborator .collaborator {
+  width: fit-content;
+  background: #eaeaea;
+  border-radius: 10px;
+  display: inline-flex;
+  align-items: center;
+  font-size: 13px;
+  height: 20px;
+  margin: 0 4px 4px 0;
+  padding: 0 8px 0 2px;
+}
+
+.sf-metadata-delete-collaborator .collaborator .collaborator-avatar-container {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.sf-metadata-delete-collaborator .collaborator .collaborator-avatar {
+  height: 16px;
+  width: 16px;
+  border-radius: 50%;
+  vertical-align: middle;
+}
+
+.sf-metadata-delete-collaborator .collaborator .collaborator-name {
+  color: #212529;
+  margin-left: 4px;
+  max-width: 200px;
+  flex: 1 1;
+  line-height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sf-metadata-delete-collaborator .collaborator .collaborator-remove {
+  font-size: 10px;
+  position: relative;
+  margin-left: 4px;
+}
+
+.sf-metadata-delete-collaborator .collaborator .collaborator-remove .seafile-multicolor-icon-close {
+  color: #666;
+}

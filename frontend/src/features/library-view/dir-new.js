@@ -1,0 +1,295 @@
+import React from 'react';
+import { Button } from 'reactstrap';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import TipDialog from '@/components/dialog/tip-dialog';
+import CustomDropdown from '@/components/dropdown';
+import { EVENT_BUS_TYPE } from '@/components/event-bus';
+import Icon from '@/components/icon';
+import toaster from '@/components/toast';
+import {
+  METADATA_MODE,
+  TAGS_MODE,
+  SETTINGS_MODE,
+  HISTORY_MODE,
+  TRASH_MODE
+} from '@/constants/view-mode';
+import { enableSeadoc, gettext, onlyofficeSupportEditDocxf } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
+
+const propTypes = {
+  currentMode: PropTypes.string,
+  path: PropTypes.string,
+  repoID: PropTypes.string.isRequired,
+  repoEncrypted: PropTypes.bool.isRequired,
+  userPerm: PropTypes.string.isRequired,
+  onUploadFile: PropTypes.func.isRequired,
+  onUploadFolder: PropTypes.func.isRequired,
+  direntList: PropTypes.array,
+  eventBus: PropTypes.object,
+  loadDirentList: PropTypes.func
+};
+
+class DirNew extends React.Component {
+
+  constructor(props) {
+    super(props);
+    this.state = {
+      operationMenuStyle: '',
+      isDesktopMenuOpen: false,
+      isSubMenuShown: false,
+      isMobileOpMenuOpen: false,
+      isImportingSdoc: false,
+    };
+    this.fileInputRef = React.createRef();
+  }
+
+  toggleDesktopOpMenu = () => {
+    this.setState({ isDesktopMenuOpen: !this.state.isDesktopMenuOpen });
+  };
+
+  toggleMobileOpMenu = () => {
+    this.setState({ isMobileOpMenuOpen: !this.state.isMobileOpMenuOpen });
+  };
+
+  onUploadFile = (e) => {
+    this.props.onUploadFile(e);
+  };
+
+  onUploadFolder = (e) => {
+    this.props.onUploadFolder(e);
+  };
+
+  onCreateFolder = () => {
+    const { eventBus, path, direntList } = this.props;
+    this.setState({ isDesktopMenuOpen: false });
+    eventBus.dispatch(EVENT_BUS_TYPE.CREATE_FOLDER, path, direntList);
+  };
+
+  onCreateFile = (fileType = '') => {
+    const { eventBus, path, direntList } = this.props;
+    this.setState({ isDesktopMenuOpen: false });
+    eventBus.dispatch(EVENT_BUS_TYPE.CREATE_FILE, path, direntList, fileType);
+  };
+
+  onDropDownMouseMove = (e) => {
+    if (this.state.isSubMenuShown && e.target && e.target.className === 'dropdown-item') {
+      this.setState({
+        isSubMenuShown: false
+      });
+    }
+  };
+
+  toggleSubMenu = (e) => {
+    e.stopPropagation();
+    this.setState({
+      isSubMenuShown: !this.state.isSubMenuShown
+    });
+  };
+
+  toggleSubMenuShown = (item) => {
+    this.setState({
+      isSubMenuShown: true,
+      currentItem: item.text
+    });
+  };
+
+  onUploadSdoc = (e) => {
+    this.fileInputRef.current.click();
+  };
+
+  uploadSdoc = (e) => {
+    // no file selected
+    if (!this.fileInputRef.current.files.length) {
+      return;
+    }
+    this.setState({ isImportingSdoc: true });
+    const file = this.fileInputRef.current.files[0];
+    let { repoID, path } = this.props;
+    seafileAPI.importSdoc(file, repoID, path).then((res) => {
+      this.props.loadDirentList(path);
+    }).catch((error) => {
+      let errMsg = Utils.getErrorMsg(error);
+      toaster.danger(errMsg);
+    }).finally(() => {
+      this.fileInputRef.current.value = '';
+      setTimeout(() => {
+        this.setState({ isImportingSdoc: false });
+      }, 500);
+    });
+  };
+
+  render() {
+    const { userPerm, currentMode } = this.props;
+    const { isCustomPermission, customPermission } = Utils.getUserPermission(userPerm);
+    const isBtnShown = (userPerm === 'rw' || userPerm === 'admin' || userPerm === 'cloud-edit' || isCustomPermission);
+    if (!isBtnShown) {
+      return null;
+    }
+
+    const newBtnClassName = 'dir-new-btn btn btn-secondary';
+
+    if ([METADATA_MODE, TAGS_MODE, SETTINGS_MODE, HISTORY_MODE, TRASH_MODE].includes(currentMode)) {
+      return (
+        <div className="dir-new-container d-flex">
+          <Button
+            className={newBtnClassName}
+            disabled={true}
+          >
+            <Icon symbol="new" className="mr-2" />
+            {gettext('New')}
+          </Button>
+        </div>
+      );
+    }
+
+    let canUpload = true;
+    let canCreate = true;
+    if (isCustomPermission) {
+      const { permission } = customPermission;
+      canUpload = permission.upload;
+      canCreate = permission.create;
+    }
+
+    let content = null;
+    if (Utils.isDesktop()) {
+      const { repoEncrypted } = this.props;
+      let opList = [];
+
+      if (canCreate) {
+        let newSubOpList = [];
+        newSubOpList.push({ key: 'new-file', label: gettext('New Text File'), onClick: () => this.onCreateFile('') });
+        newSubOpList.push('Divider');
+
+        if (enableSeadoc && !repoEncrypted) {
+          newSubOpList.push({ key: 'new-seadoc-file', label: gettext('New SeaDoc File'), onClick: () => this.onCreateFile('.sdoc') });
+          newSubOpList.push({ key: 'new-excalidraw-file', label: gettext('New Excalidraw File'), onClick: () => this.onCreateFile('.exdraw') });
+        }
+
+        newSubOpList.push(
+          { key: 'new-markdown-file', label: gettext('New Markdown File'), onClick: () => this.onCreateFile('.md') },
+          { key: 'new-excel-file', label: gettext('New Excel File'), onClick: () => this.onCreateFile('.xlsx') },
+          { key: 'new-powerpoint-file', label: gettext('New PowerPoint File'), onClick: () => this.onCreateFile('.pptx') },
+          { key: 'new-word-file', label: gettext('New Word File'), onClick: () => this.onCreateFile('.docx') },
+        );
+        if (onlyofficeSupportEditDocxf) {
+          newSubOpList.push({ key: 'new-docxf-file', label: gettext('New Docxf File'), onClick: () => this.onCreateFile('.docxf') });
+        }
+
+        opList.push({
+          key: 'new-folder',
+          label: gettext('New Folder'),
+          icon_dom: <Icon symbol="new-folder" className="dropdown-item-icon" />,
+          onClick: this.onCreateFolder
+        },
+        {
+          key: 'new-file',
+          label: gettext('New File'),
+          icon_dom: <Icon symbol="new-file" className="dropdown-item-icon" />,
+          'subOpList': newSubOpList
+        });
+      }
+
+      if (canUpload) {
+        if (opList.length > 0) {
+          opList.push('Divider');
+        }
+        if (Utils.isSupportUploadFolder()) {
+          opList.push({
+            key: 'upload-files',
+            label: gettext('Upload Files'),
+            icon_dom: <Icon symbol="upload-files" className="dropdown-item-icon" />,
+            onClick: this.onUploadFile
+          }, {
+            key: 'upload-folder',
+            label: gettext('Upload Folder'),
+            icon_dom: <Icon symbol="upload-folder" className="dropdown-item-icon" />,
+            onClick: this.onUploadFolder
+          });
+        } else {
+          opList.push({
+            key: 'upload-files',
+            label: gettext('Upload'),
+            icon_dom: <Icon symbol="upload-files" className="dropdown-item-icon" />,
+            onClick: this.onUploadFile
+          });
+        }
+      }
+
+      if (enableSeadoc && !repoEncrypted) {
+        if (opList.length > 0) {
+          opList.push('Divider');
+        }
+        opList.push({
+          key: 'import-sdoc',
+          label: gettext('Import sdoc'),
+          icon_dom: <Icon symbol="import-sdoc" className="dropdown-item-icon" />,
+          onClick: this.onUploadSdoc
+        });
+      }
+
+      if (opList.length > 0) {
+        content = (
+          <CustomDropdown
+            className="d-flex w-100"
+            items={opList}
+            toggleProps={{ 'tag': 'button', 'type': 'button', 'role': '' }}
+            trigger={(
+              <>
+                <Icon symbol="new" className="mr-2" />
+                {gettext('New')}
+              </>
+            )}
+            triggerClassName={newBtnClassName}
+            menuClassName="position-fixed"
+          />
+        );
+      }
+    } else {
+      const opListForMobile = [];
+      if (canCreate) {
+        opListForMobile.push(
+          { key: 'new-folder', label: gettext('New Folder'), onClick: this.onCreateFolder },
+          { key: 'new-file', label: gettext('New File'), onClick: () => this.onCreateFile('') }
+        );
+      }
+      if (canUpload) {
+        opListForMobile.push({ key: 'upload-files', label: gettext('Upload'), onClick: this.onUploadFile });
+      }
+
+      if (opListForMobile.length > 0) {
+        content = (
+          <CustomDropdown
+            className="d-flex w-100"
+            items={opListForMobile}
+            toggleProps={{ 'tag': 'button', 'type': 'button', 'role': '' }}
+            trigger={(
+              <>
+                <Icon symbol="new" className="mr-2" />
+                {gettext('New')}
+              </>
+            )}
+            triggerClassName={newBtnClassName}
+            menuClassName="position-fixed"
+          />
+        );
+      }
+    }
+
+    if (!content) {
+      return null;
+    }
+
+    return (
+      <div className="dir-new-container">
+        {content}
+        {this.state.isImportingSdoc && <TipDialog/>}
+        <input className="d-none" type="file" onChange={this.uploadSdoc} ref={this.fileInputRef} accept=".sdoczip"/>
+      </div>
+    );
+  }
+}
+
+DirNew.propTypes = propTypes;
+
+export default DirNew;

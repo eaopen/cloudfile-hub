@@ -1,0 +1,329 @@
+import React, { Fragment } from 'react';
+import { navigate } from '@gatsbyjs/reach-router';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import { userAPI } from '@/api/user-api';
+import ChangeRepoPasswordDialog from '@/components/dialog/change-repo-password-dialog';
+import LabelRepoStateDialog from '@/components/dialog/label-repo-state-dialog';
+import LibSubFolderPermissionDialog from '@/components/dialog/lib-sub-folder-permission-dialog';
+import RenameRepoDialog from '@/components/dialog/rename-repo';
+import RepoAPITokenDialog from '@/components/dialog/repo-api-token-dialog';
+import RepoArchiveDialog from '@/components/dialog/repo-archive-dialog';
+import OfficeSuiteDialog from '@/components/dialog/repo-office-suite-dialog';
+import RepoShareAdminDialog from '@/components/dialog/repo-share-admin-dialog';
+import RepoWebhookDialog from '@/components/dialog/repo-webhook-dialog';
+import ResetEncryptedRepoPasswordDialog from '@/components/dialog/reset-encrypted-repo-password-dialog';
+import TransferDialog from '@/components/dialog/transfer-dialog';
+import Icon from '@/components/icon';
+import LibraryOpMenu from '@/components/library-op-menu';
+import ModalPortal from '@/components/modal-portal';
+import toaster from '@/components/toast';
+import { gettext, siteRoot } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
+
+const propTypes = {
+  repo: PropTypes.object.isRequired,
+  updateRepoInfo: PropTypes.func.isRequired
+};
+
+class LibraryMoreOperations extends React.Component {
+
+  constructor(props) {
+    super(props);
+    this.state = {
+      isRenameRepoDialogOpen: false,
+      isTransferDialogOpen: false,
+      isChangePasswordDialogOpen: false,
+      isResetPasswordDialogOpen: false,
+      isLabelRepoStateDialogOpen: false,
+      isFolderPermissionDialogOpen: false,
+      isAPITokenDialogOpen: false,
+      isWebhookDialogOpen: false,
+      isRepoShareAdminDialogOpen: false,
+      isOfficeSuiteDialogOpen: false,
+      isArchiveDialogOpen: false,
+    };
+  }
+
+  onMenuItemClick = (e, item) => {
+    e.preventDefault();
+    e.stopPropagation();
+    switch (item) {
+      case 'Star':
+      case 'Unstar':
+        this.onToggleStarRepo();
+        break;
+      case 'Rename':
+        this.onRenameToggle();
+        break;
+      case 'Transfer':
+        this.onTransferToggle();
+        break;
+      case 'Folder Permission':
+        this.onFolderPermissionToggle();
+        break;
+      case 'Share Admin':
+        this.toggleRepoShareAdminDialog();
+        break;
+      case 'Change Password':
+        this.onChangePasswordToggle();
+        break;
+      case 'Reset Password':
+        this.onResetPasswordToggle();
+        break;
+      case 'API Token':
+        this.onAPITokenToggle();
+        break;
+      case 'Webhooks':
+        this.onWebhookToggle();
+        break;
+      case 'Label Current State':
+        this.onLabelToggle();
+        break;
+      case 'Office Suite':
+        this.onOfficeSuiteToggle();
+        break;
+      case 'Archive':
+        this.onArchiveToggle();
+        break;
+      default:
+        break;
+    }
+  };
+
+  onToggleStarRepo = () => {
+    const { repo } = this.props;
+    const { repo_name: repoName } = repo;
+    const onSuccess = () => {
+      this.props.updateRepoInfo({ starred: !repo.starred });
+    };
+    if (repo.starred) {
+      seafileAPI.unstarItem(repo.repo_id, '/').then(() => {
+        onSuccess();
+        const msg = gettext('Successfully unstarred {library_name_placeholder}.').replace('{library_name_placeholder}', repoName);
+        toaster.success(msg);
+      }).catch(error => {
+        const errMessage = Utils.getErrorMsg(error);
+        toaster.danger(errMessage);
+      });
+    } else {
+      seafileAPI.starItem(repo.repo_id, '/').then(() => {
+        onSuccess();
+        const msg = gettext('Successfully starred {library_name_placeholder}.').replace('{library_name_placeholder}', repoName);
+        toaster.success(msg);
+      }).catch(error => {
+        const errMessage = Utils.getErrorMsg(error);
+        toaster.danger(errMessage);
+      });
+    }
+  };
+
+  onRenameToggle = () => {
+    this.setState({ isRenameRepoDialogOpen: !this.state.isRenameRepoDialogOpen });
+  };
+
+  onTransferToggle = () => {
+    this.setState({ isTransferDialogOpen: !this.state.isTransferDialogOpen });
+  };
+
+  onChangePasswordToggle = () => {
+    this.setState({ isChangePasswordDialogOpen: !this.state.isChangePasswordDialogOpen });
+  };
+
+  onResetPasswordToggle = () => {
+    this.setState({ isResetPasswordDialogOpen: !this.state.isResetPasswordDialogOpen });
+  };
+
+  onLabelToggle = () => {
+    this.setState({ isLabelRepoStateDialogOpen: !this.state.isLabelRepoStateDialogOpen });
+  };
+
+  onFolderPermissionToggle = () => {
+    this.setState({ isFolderPermissionDialogOpen: !this.state.isFolderPermissionDialogOpen });
+  };
+
+  onAPITokenToggle = () => {
+    this.setState({ isAPITokenDialogOpen: !this.state.isAPITokenDialogOpen });
+  };
+
+  onWebhookToggle = () => {
+    this.setState({ isWebhookDialogOpen: !this.state.isWebhookDialogOpen });
+  };
+
+  onOfficeSuiteToggle = () => {
+    this.setState({ isOfficeSuiteDialogOpen: !this.state.isOfficeSuiteDialogOpen });
+  };
+
+  toggleRepoShareAdminDialog = () => {
+    this.setState({ isRepoShareAdminDialogOpen: !this.state.isRepoShareAdminDialogOpen });
+  };
+
+  onArchiveToggle = () => {
+    this.setState({ isArchiveDialogOpen: !this.state.isArchiveDialogOpen });
+  };
+
+  renameRepo = (newName) => {
+    const { repo } = this.props;
+    const { repo_id: repoID } = repo;
+    seafileAPI.renameRepo(repoID, newName).then((res) => {
+      this.props.updateRepoInfo({ 'repo_name': newName });
+      const message = gettext('Successfully renamed the library.');
+      toaster.success(message);
+    }).catch(error => {
+      let errMessage = Utils.getErrorMsg(error);
+      toaster.danger(errMessage);
+    });
+  };
+
+  onTransferRepo = (email, reshare) => {
+    const { repo } = this.props;
+    const { repo_id: repoID } = repo;
+    userAPI.transferRepo(repoID, email, reshare).then(res => {
+      const message = gettext('Successfully transferred the library.');
+      toaster.success(message);
+      navigate(siteRoot);
+    }).catch(error => {
+      let errMessage = Utils.getErrorMsg(error);
+      toaster.danger(errMessage);
+    });
+  };
+
+  onArchiveRepo = (repo) => {
+    const archiveStatus = !repo.archive_status ? 'archived' : null;
+    const status = archiveStatus === null ? 'normal' : 'read-only';
+    const permission = archiveStatus === null ? 'rw' : 'r';
+    this.props.updateRepoInfo({ 'archive_status': archiveStatus, status, permission });
+  };
+
+  render() {
+    const { repo } = this.props;
+    const {
+      isRenameRepoDialogOpen, isTransferDialogOpen
+    } = this.state;
+    return (
+      <Fragment>
+        <LibraryOpMenu
+          isPC={true}
+          isLibView={true}
+          repo={repo}
+          isStarred={repo.starred}
+          onMenuItemClick={this.onMenuItemClick}
+        >
+          <>
+            <span className="d-flex align-items-center"><Icon symbol="more-level" /></span>
+            <span className="dir-others-item-text" title={gettext('More')}>
+              {gettext('More')}
+            </span>
+          </>
+        </LibraryOpMenu>
+        {isRenameRepoDialogOpen && (
+          <ModalPortal>
+            <RenameRepoDialog
+              name={repo.repo_name}
+              renameRepo={this.renameRepo}
+              toggleDialog={this.onRenameToggle}
+            />
+          </ModalPortal>
+        )}
+        {isTransferDialogOpen && (
+          <ModalPortal>
+            <TransferDialog
+              itemName={repo.repo_name}
+              onTransferRepo={this.onTransferRepo}
+              toggleDialog={this.onTransferToggle}
+            />
+          </ModalPortal>
+        )}
+        {this.state.isChangePasswordDialogOpen && (
+          <ModalPortal>
+            <ChangeRepoPasswordDialog
+              repoID={repo.repo_id}
+              repoName={repo.repo_name}
+              toggleDialog={this.onChangePasswordToggle}
+            />
+          </ModalPortal>
+        )}
+        {this.state.isResetPasswordDialogOpen && (
+          <ModalPortal>
+            <ResetEncryptedRepoPasswordDialog
+              repoID={repo.repo_id}
+              toggleDialog={this.onResetPasswordToggle}
+            />
+          </ModalPortal>
+        )}
+
+        {this.state.isLabelRepoStateDialogOpen && (
+          <ModalPortal>
+            <LabelRepoStateDialog
+              repoID={repo.repo_id}
+              repoName={repo.repo_name}
+              toggleDialog={this.onLabelToggle}
+            />
+          </ModalPortal>
+        )}
+
+        {this.state.isFolderPermissionDialogOpen && (
+          <ModalPortal>
+            <LibSubFolderPermissionDialog
+              toggleDialog={this.onFolderPermissionToggle}
+              repoID={repo.repo_id}
+              repoName={repo.repo_name}
+            />
+          </ModalPortal>
+        )}
+
+        {this.state.isAPITokenDialogOpen && (
+          <ModalPortal>
+            <RepoAPITokenDialog
+              repo={repo}
+              onRepoAPITokenToggle={this.onAPITokenToggle}
+            />
+          </ModalPortal>
+        )}
+
+        {this.state.isWebhookDialogOpen && (
+          <ModalPortal>
+            <RepoWebhookDialog
+              repo={repo}
+              onRepoWebhookToggle={this.onWebhookToggle}
+            />
+          </ModalPortal>
+        )}
+
+        {this.state.isRepoShareAdminDialogOpen && (
+          <ModalPortal>
+            <RepoShareAdminDialog
+              repo={repo}
+              toggleDialog={this.toggleRepoShareAdminDialog}
+            />
+          </ModalPortal>
+        )}
+
+        {this.state.isOfficeSuiteDialogOpen && (
+          <ModalPortal>
+            <OfficeSuiteDialog
+              repoID={repo.repo_id}
+              repoName={repo.repo_name}
+              toggleDialog={this.onOfficeSuiteToggle}
+            />
+          </ModalPortal>
+        )}
+
+        {this.state.isArchiveDialogOpen && (
+          <ModalPortal>
+            <RepoArchiveDialog
+              repo={repo}
+              onArchiveRepo={this.onArchiveRepo}
+              toggle={this.onArchiveToggle}
+            />
+          </ModalPortal>
+        )}
+
+      </Fragment>
+    );
+  }
+}
+
+LibraryMoreOperations.propTypes = propTypes;
+
+export default LibraryMoreOperations;

@@ -1,26 +1,26 @@
 import React, { Component, Fragment } from 'react';
-import axios from 'axios';
-import PropTypes from 'prop-types';
-import isHotkey from 'is-hotkey';
-import classnames from 'classnames';
 import MediaQuery from 'react-responsive';
-import { seafileAPI } from '../../utils/seafile-api';
-import searchAPI from '../../utils/search-api';
-import { gettext, mediaUrl } from '../../utils/constants';
+import axios from 'axios';
+import classnames from 'classnames';
+import isHotkey from 'is-hotkey';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import searchAPI from '@/api/search-api';
+import { PRIVATE_FILE_TYPE, SEARCH_FILTER_BY_DATE_OPTION_KEY, SEARCH_FILTER_BY_DATE_TYPE_KEY, SEARCH_FILTERS_KEY, SEARCH_FILTERS_SHOW_KEY } from '@/constants';
+import { SEARCH_MASK, SEARCH_CONTAINER } from '@/constants/zIndexes';
+import { CollaboratorsProvider } from '@/features/metadata/hooks/collaborators';
+import { gettext, mediaUrl } from '@/utils/constants';
+import { debounce, Utils } from '@/utils/utils';
+import Icon from '../icon';
+import Loading from '../loading';
+import OpIcon from '../op-icon';
+import toaster from '../toast';
+import Tooltip from '../tooltip';
+import SearchedItemDetails from './details';
+import SearchFilters from './search-filters';
 import SearchResultItem from './search-result-item';
 import SearchResultLibrary from './search-result-library';
-import { debounce, Utils } from '../../utils/utils';
-import toaster from '../toast';
-import Loading from '../loading';
-import { SEARCH_MASK, SEARCH_CONTAINER } from '../../constants/zIndexes';
-import { PRIVATE_FILE_TYPE, SEARCH_FILTER_BY_DATE_OPTION_KEY, SEARCH_FILTER_BY_DATE_TYPE_KEY, SEARCH_FILTERS_KEY, SEARCH_FILTERS_SHOW_KEY } from '../../constants';
-import SearchFilters from './search-filters';
 import SearchTags from './search-tags';
-import SearchedItemDetails from './details';
-import { CollaboratorsProvider } from '../../metadata';
-import Icon from '../icon';
-import OpIcon from '../op-icon';
-import Tooltip from '../tooltip';
 
 const propTypes = {
   repoID: PropTypes.string,
@@ -45,6 +45,20 @@ const searchScope = {
 const isEnter = isHotkey('enter');
 const isUp = isHotkey('up');
 const isDown = isHotkey('down');
+
+const getResultItemKey = (item) => `${item.repo_id}\u0000${item.path}`;
+
+const deduplicateResultItems = (items) => {
+  const itemKeys = new Set();
+
+  return items.filter((item) => {
+    const itemKey = getResultItemKey(item);
+    if (itemKeys.has(itemKey)) return false;
+
+    itemKeys.add(itemKey);
+    return true;
+  });
+};
 
 class Search extends Component {
 
@@ -169,20 +183,20 @@ class Search extends Component {
   };
 
   loadMore = () => {
-    const { hasMore, isLoadingMore, inputValue, searchType, resultItems } = this.state;
+    const { hasMore, isLoadingMore } = this.state;
     if (!hasMore || isLoadingMore) return;
 
-    if (inputValue.trim() === '') return;
+    if (!this.queryData?.q) return;
 
-    const isPublic = this.props.isPublic;
-    const queryData = this.buildSearchParams({
-      q: inputValue,
-      search_repo: isPublic ? this.queryData?.search_repo : this.props.repoID || 'all',
-      search_ftypes: 'all',
-      ...(searchType === searchScope.FOLDER && this.props.path && this.props.path !== '/' ? { search_path: this.props.path } : {}),
-    });
-
-    const remainingItems = MAX_ITEMS - resultItems.length;
+    // SeaSearch returns the first `count` results regardless of page. Re-request
+    // the complete display limit with the original query instead of treating this
+    // as a conventional second page. This also keeps the selected search scope,
+    // path and filters unchanged while loading more.
+    const queryData = {
+      ...this.queryData,
+      page: 1,
+      per_page: MAX_ITEMS,
+    };
 
     this.setState({ isLoadingMore: true }, () => {
       if (this.source) {
@@ -190,47 +204,45 @@ class Search extends Component {
       }
       this.source = seafileAPI.getSource();
 
-      this.sendLoadMoreRequest(queryData, this.source.token, remainingItems);
+      this.sendLoadMoreRequest(queryData, this.source.token);
     });
   };
 
-  sendLoadMoreRequest = (queryData, cancelToken, remainingItems) => {
+  sendLoadMoreRequest = (queryData, cancelToken) => {
     const isPublic = this.props.isPublic;
 
     if (isPublic) {
-      seafileAPI.searchFilesInPublishedRepo(queryData.search_repo, queryData.q, 2, remainingItems, queryData.search_filename_only).then(res => {
+      seafileAPI.searchFilesInPublishedRepo(queryData.search_repo, queryData.q, queryData.page, queryData.per_page, queryData.search_filename_only).then(res => {
         this.source = null;
         const newItems = this.formatResultItems(res.data.results);
 
-        this.setState(prevState => ({
-          resultItems: [...prevState.resultItems, ...newItems],
+        this.setState({
+          resultItems: newItems,
           hasMore: false,
           isLoadingMore: false,
-          page: 2,
+          page: queryData.page,
           totalCount: res.data.total,
-        }));
+        });
       }).catch(error => {
         this.handleLoadMoreError(error);
       });
     } else {
-      this.loadMoreNormalSearch(queryData, cancelToken, remainingItems);
+      this.loadMoreNormalSearch(queryData, cancelToken);
     }
   };
 
-  loadMoreNormalSearch = (queryData, cancelToken, remainingItems) => {
-    queryData['per_page'] = remainingItems;
-    queryData['page'] = 2;
+  loadMoreNormalSearch = (queryData, cancelToken) => {
     seafileAPI.searchFiles(queryData, cancelToken).then(res => {
       this.source = null;
       const newItems = this.formatResultItems(res.data.results);
 
-      this.setState(prevState => ({
-        resultItems: [...prevState.resultItems, ...newItems],
+      this.setState({
+        resultItems: newItems,
         hasMore: false,
         isLoadingMore: false,
-        page: 2,
+        page: queryData.page,
         totalCount: res.data.total,
-      }));
+      });
     }).catch(error => {
       this.handleLoadMoreError(error);
     });
@@ -499,20 +511,11 @@ class Search extends Component {
    * @param {string} savedRepoID - The saved repo ID. If empty string, save in global localStorage.
    */
   keepVisitedItem = (targetItem, savedRepoID) => {
-    let targetIndex;
-    const { path: targetPath } = targetItem;
+    const { repo_id: targetRepoID, path: targetPath } = targetItem;
     const storeKey = 'sfVisitedSearchItems' + savedRepoID;
-    const items = JSON.parse(localStorage.getItem(storeKey)) || [];
-    for (let i = 0, len = items.length; i < len; i++) {
-      const { repo_id, path } = items[i];
-      if (repo_id == savedRepoID && path == targetPath) {
-        targetIndex = i;
-        break;
-      }
-    }
-    if (targetIndex != undefined) {
-      items.splice(targetIndex, 1);
-    }
+    const items = (JSON.parse(localStorage.getItem(storeKey)) || []).filter(({ repo_id, path }) => {
+      return repo_id !== targetRepoID || path !== targetPath;
+    });
     items.unshift(targetItem);
     if (items.length > 50) { // keep 50 items at most
       items.pop();
@@ -616,20 +619,24 @@ class Search extends Component {
       resultItems: [],
       highlightIndex: 0,
     });
+    const normalizedQueryData = {
+      ...queryData,
+      q: queryData.q.trim(),
+    };
     this.source = seafileAPI.getSource();
-    this.sendInitialRequest(queryData, this.source.token);
+    this.sendInitialRequest(normalizedQueryData, this.source.token);
   };
 
   sendInitialRequest = (queryData, cancelToken) => {
     let isPublic = this.props.isPublic;
-    this.queryData = queryData;
+    this.queryData = { ...queryData };
 
     if (isPublic) {
       seafileAPI.searchFilesInPublishedRepo(queryData.search_repo, queryData.q, 1, INITIAL_PAGE_SIZE, queryData.search_filename_only).then(res => {
         this.source = null;
         if (res.data.total > 0) {
           const newItems = this.formatResultItems(res.data.results);
-          const hasMore = newItems.length > 0 && newItems.length < MAX_ITEMS;
+          const hasMore = this.hasMoreResults(res.data, newItems.length);
           this.setState({
             resultItems: newItems,
             isResultGotten: true,
@@ -657,13 +664,16 @@ class Search extends Component {
   };
 
   onInitialSearch = (queryData, cancelToken) => {
-    queryData['per_page'] = INITIAL_PAGE_SIZE;
-    queryData['page'] = 1;
-    seafileAPI.searchFiles(queryData, cancelToken).then(res => {
+    const initialQueryData = {
+      ...queryData,
+      per_page: INITIAL_PAGE_SIZE,
+      page: 1,
+    };
+    seafileAPI.searchFiles(initialQueryData, cancelToken).then(res => {
       this.source = null;
       if (res.data.total > 0) {
         const newItems = this.formatResultItems(res.data.results);
-        const hasMore = newItems.length > 0 && newItems.length < MAX_ITEMS;
+        const hasMore = this.hasMoreResults(res.data, newItems.length);
         this.setState({
           resultItems: newItems,
           isResultGotten: true,
@@ -705,8 +715,17 @@ class Search extends Component {
       items[i]['tags'] = data[i].tags || [];
       items[i]['matched_tags'] = data[i].matched_tags || [];
     }
-    return items;
+    return deduplicateResultItems(items);
   }
+
+  hasMoreResults = (result, itemCount) => {
+    if (itemCount === 0 || itemCount >= MAX_ITEMS) return false;
+
+    // SeaSearch reports only the count returned in this response and always
+    // returns has_more=false. A full initial batch is therefore the only signal
+    // that a larger top-N request may produce more visible results.
+    return result.has_more || result.total > itemCount || itemCount === INITIAL_PAGE_SIZE;
+  };
 
   resetToDefault() {
     this.debouncedSearch.cancel();
@@ -778,7 +797,7 @@ class Search extends Component {
       return (
         <div className="search-result-none search-result-start-searching-tip">
           <img className='none-image' src={`${mediaUrl}img/start-searching.png`} alt="" width="48" height="48" />
-          <span className='none-tip'>{gettext('Type characters to start search')}</span>
+          <span className='none-tip'>{gettext('Enter characters to start searching')}</span>
         </div>
       );
     } else if (!isResultGotten) {
@@ -902,7 +921,7 @@ class Search extends Component {
   searchRepo = () => {
     const { value } = this.state;
     const queryData = {
-      q: value,
+      q: value.trim(),
       search_repo: this.props.repoID,
       search_ftypes: 'all',
     };
@@ -913,7 +932,7 @@ class Search extends Component {
   searchFolder = () => {
     const { value } = this.state;
     const queryData = {
-      q: value,
+      q: value.trim(),
       search_repo: this.props.repoID,
       search_ftypes: 'all',
       search_path: this.props.path,
@@ -925,7 +944,7 @@ class Search extends Component {
   searchAllRepos = () => {
     const { value } = this.state;
     const queryData = {
-      q: value,
+      q: value.trim(),
       search_repo: 'all',
       search_ftypes: 'all',
     };

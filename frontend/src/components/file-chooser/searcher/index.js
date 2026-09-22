@@ -1,11 +1,11 @@
 import React, { useState, useRef, useCallback, useEffect } from 'react';
-import PropTypes from 'prop-types';
 import { Input } from 'reactstrap';
-import { gettext } from '../../../utils/constants';
-import { seafileAPI } from '../../../utils/seafile-api';
-import { SEARCH_CONTAINER } from '../../../constants/zIndexes';
-import Icon from '../../icon';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
 import Tooltip from '@/components/tooltip';
+import { SEARCH_CONTAINER } from '@/constants/zIndexes';
+import { gettext } from '@/utils/constants';
+import Icon from '../../icon';
 
 import './index.css';
 

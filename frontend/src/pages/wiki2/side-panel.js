@@ -1,30 +1,30 @@
 import React, { PureComponent } from 'react';
-import PropTypes from 'prop-types';
-import deepCopy from 'deep-copy';
-import classNames from 'classnames';
 import { Button } from 'reactstrap';
 import { EventBus, EXTERNAL_EVENT } from '@seafile/seafile-sdoc-editor';
-import { wikiId, wikiPermission, gettext, isPro, canPublishWiki } from '../../utils/constants';
-import toaster from '../../components/toast';
-import Loading from '../../components/loading';
-import Icon from '../../components/icon';
-import Tooltip from '../../components/tooltip';
+import classNames from 'classnames';
+import deepCopy from 'deep-copy';
+import PropTypes from 'prop-types';
+import { userAPI } from '@/api/user-api';
+import wikiAPI from '@/api/wiki-api';
+import ImportWikiPageDialog from '@/components/dialog/import-wiki-page-dialog';
+import Icon from '@/components/icon';
+import Loading from '@/components/loading';
+import PublishedWikiEntrance from '@/components/published-wiki-entrance';
+import Wiki2Search from '@/components/search/wiki2-search';
+import toaster from '@/components/toast';
+import Tooltip from '@/components/tooltip';
+import { wikiId, wikiPermission, gettext, isPro, canPublishWiki } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
+import CommonUndoTool from './common-undo-tool';
+import { DEFAULT_PAGE_NAME } from './constant';
+import Page from './models/page';
+import PublishWikiPopover from './publish-wiki-popover';
+import { isObjectNotEmpty, isPageInSubtree } from './utils';
+import WikiExternalOperations from './wiki-external-operations';
 import WikiNav from './wiki-nav/index';
 import PageUtils from './wiki-nav/page-utils';
-import Page from './models/page';
-import { isObjectNotEmpty, isPageInSubtree } from './utils';
-import wikiAPI from '../../utils/wiki-api';
-import { Utils } from '../../utils/utils';
-import WikiExternalOperations from './wiki-external-operations';
-import WikiTrashDialog from './wiki-trash-dialog';
-import { DEFAULT_PAGE_NAME } from './constant';
-import Wiki2Search from '../../components/search/wiki2-search';
-import CommonUndoTool from '../../components/common/common-undo-tool';
-import PublishedWikiEntrance from '../../components/published-wiki-entrance';
-import { userAPI } from '../../utils/user-api';
-import ImportWikiPageDialog from '../../components/dialog/import-wiki-page-dialog';
 import WikiSettingsDialog from './wiki-settings';
-import PublishWikiPopover from './publish-wiki-popover';
+import WikiTrashDialog from './wiki-trash-dialog';
 
 import './side-panel.css';
 
@@ -273,7 +273,7 @@ class SidePanel extends PureComponent {
         enableServerRender: false,
         isShowPublishPopover: false,
       });
-      toaster.success(gettext('Wiki custom URL deleted'));
+      toaster.success(gettext('Wiki unpublished'));
     }).catch((error) => {
       const errorMsg = Utils.getErrorMsg(error);
       toaster.danger(errorMsg);
@@ -383,7 +383,7 @@ class SidePanel extends PureComponent {
           getCurrentPageId={this.props.getCurrentPageId}
           setCurrentPage={this.props.setCurrentPage}
         />}
-        {canManagePublish &&
+        {Utils.isDesktop() && canManagePublish &&
           <>
             <Button
               id="wiki2-publish"

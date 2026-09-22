@@ -1,13 +1,13 @@
 import React, { Fragment } from 'react';
-import PropTypes from 'prop-types';
 import { Link } from '@gatsbyjs/reach-router';
+import classnames from 'classnames';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import classnames from 'classnames';
-import { gettext } from '../../../utils/constants';
-import { Utils } from '../../../utils/utils';
-import Loading from '../../../components/loading';
-import OpIcon from '../../../components/op-icon';
+import PropTypes from 'prop-types';
+import Loading from '@/components/loading';
+import OpIcon from '@/components/op-icon';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 
 dayjs.extend(relativeTime);
 
@@ -72,7 +72,7 @@ class DirentItem extends React.Component {
             {isOpIconShown && fromSystemRepo &&
               <OpIcon
                 className="op-icon"
-                symbol="delete1"
+                symbol="delete"
                 title={gettext('Delete')}
                 op={this.deleteDirent}
               />

@@ -1,8 +1,8 @@
 /* this component works only as an operation menu for an item(such as a library item, a folder/file item) in mobile */
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Dropdown, DropdownToggle, DropdownMenu } from 'reactstrap';
-import { gettext } from '../utils/constants';
+import PropTypes from 'prop-types';
+import { gettext } from '@/utils/constants';
 import Icon from './icon';
 
 const propTypes = {

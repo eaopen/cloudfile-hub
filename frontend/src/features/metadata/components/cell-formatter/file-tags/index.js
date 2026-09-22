@@ -1,0 +1,68 @@
+import React, { useContext, useMemo } from 'react';
+import classnames from 'classnames';
+import PropTypes from 'prop-types';
+import { getRowById } from '@/components/sf-table/utils/table';
+import { TagsContext } from '@/features/tag/hooks';
+import { getTagColor, getTagName } from '@/features/tag/utils/cell';
+import { ROW_HEIGHT } from '../../../constants';
+
+import '../../tag-ui/index.css';
+import './index.css';
+
+const FileTagsFormatter = ({ value: oldValue, className, children: emptyFormatter, showName = false, tagsData: tagsDataProp, height = ROW_HEIGHT }) => {
+  // Use context directly to safely check if provider exists
+  const context = useContext(TagsContext);
+  const tagsData = tagsDataProp || context?.tagsData;
+  const isDefaultRowHeight = useMemo(() => {
+    return height === ROW_HEIGHT || height === ROW_HEIGHT - 1;
+  }, [height]);
+
+  const value = useMemo(() => {
+    if (!Array.isArray(oldValue) || oldValue.length === 0) return [];
+    return oldValue.filter(item => getRowById(tagsData, item?.row_id)).map(item => item.row_id);
+  }, [oldValue, tagsData]);
+
+  // CloudFile review tags-008: three or more tags fold to the first two plus
+  // an ellipsis, so a heavily-tagged row stays one line.
+  const visibleIds = value.length > 2 ? value.slice(0, 2) : value;
+  const hiddenCount = value.length - visibleIds.length;
+
+  if (value.length === 0) return emptyFormatter || null;
+  return (
+    <div className={classnames('sf-metadata-ui cell-formatter-container tags-formatter', className, {
+      'multi-line-tags-formatter': !isDefaultRowHeight,
+    })}>
+      <div className="sf-metadata-ui-tags-container">
+        {visibleIds.map((id) => {
+          const tag = getRowById(tagsData, id);
+          const tagColor = getTagColor(tag);
+          const tagName = getTagName(tag);
+          if (!showName) return (
+            <span key={id} className="sf-metadata-ui-tag-color" style={{ backgroundColor: tagColor }} title={tagName}></span>
+          );
+          return (
+            <div key={id} className="sf-metadata-ui-tag" title={tagName}>
+              <span className="sf-metadata-ui-tag-color" style={{ backgroundColor: tagColor }}></span>
+              <span className="sf-metadata-ui-tag-text">{tagName}</span>
+            </div>
+          );
+        })}
+        {hiddenCount > 0 && (
+          <span className="sf-metadata-ui-tag-more" title={`+${hiddenCount}`}>…</span>
+        )}
+      </div>
+    </div>
+  );
+};
+
+FileTagsFormatter.propTypes = {
+  value: PropTypes.array,
+  tagsData: PropTypes.object,
+  height: PropTypes.number,
+  className: PropTypes.string,
+  showName: PropTypes.bool,
+};
+
+FileTagsFormatter.displayName = 'FileTagsFormatter';
+
+export default FileTagsFormatter;

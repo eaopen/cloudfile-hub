@@ -1,22 +1,22 @@
 import React from 'react';
-import { createRoot } from 'react-dom/client';
-import PropTypes from 'prop-types';
-import classnames from 'classnames';
 import { navigate } from '@gatsbyjs/reach-router';
-import { Utils } from './utils/utils';
-import { gettext, siteRoot, mediaUrl, logoPath, logoWidth, logoHeight, siteTitle } from './utils/constants';
-import { seafileAPI } from './utils/seafile-api';
-import Loading from './components/loading';
-import ModalPortal from './components/modal-portal';
-import toaster from './components/toast';
-import CommonToolbar from './components/toolbar/common-toolbar';
-import ConfirmRestoreRepo from './components/dialog/confirm-restore-repo';
-import Icon from './components/icon';
-import OpIcon from './components/op-icon';
+import classnames from 'classnames';
+import PropTypes from 'prop-types';
+import { createRoot } from 'react-dom/client';
+import { seafileAPI } from '@/api/seafile-api';
+import ConfirmRestoreRepo from '@/components/dialog/confirm-restore-repo';
+import Icon from '@/components/icon';
+import Loading from '@/components/loading';
+import ModalPortal from '@/components/modal-portal';
+import OpIcon from '@/components/op-icon';
+import toaster from '@/components/toast';
+import CommonToolbar from '@/components/toolbar/common-toolbar';
+import { gettext, siteRoot, mediaUrl, logoPath, logoWidth, logoHeight, siteTitle } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 
-import './css/toolbar.css';
-import './css/search.css';
-import './css/repo-snapshot.css';
+import '@/css/toolbar.css';
+import '@/css/search.css';
+import '@/css/repo-snapshot.css';
 
 const {
   repoID, repoName, canRestoreRepo,

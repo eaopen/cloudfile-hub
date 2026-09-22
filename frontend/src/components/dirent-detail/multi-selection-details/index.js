@@ -1,17 +1,17 @@
 import React, { useCallback, useMemo, useState, useEffect } from 'react';
 import PropTypes from 'prop-types';
-import { Detail, Header, Body } from '../detail';
-import { Utils } from '../../../utils/utils';
-import { gettext, siteRoot, thumbnailSizeForGrid } from '../../../utils/constants';
-import DetailItem from '../detail-item';
-import { CellType, PRIVATE_COLUMN_KEY } from '../../../metadata/constants';
-import { useMetadataStatus } from '../../../hooks';
-import RateEditor from '../../../metadata/components/detail-editor/rate-editor';
-import metadataAPI from '../../../metadata/api';
+import metadataAPI from '@/features/metadata/api';
+import RateEditor from '@/features/metadata/components/detail-editor/rate-editor';
+import { CellType, PRIVATE_COLUMN_KEY } from '@/features/metadata/constants';
+import { getCellValueByColumn, getFileObjIdFromRecord, getRecordIdFromRecord } from '@/features/metadata/utils/cell';
+import { getColumnDisplayName } from '@/features/metadata/utils/column';
+import { useMetadataStatus } from '@/hooks';
+import { gettext, siteRoot, thumbnailSizeForGrid } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import Loading from '../../loading';
-import { getColumnDisplayName } from '../../../metadata/utils/column';
+import { Detail, Header, Body } from '../detail';
+import DetailItem from '../detail-item';
 import DirentsTagsEditor from './dirents-tags-editor';
-import { getCellValueByColumn, getFileObjIdFromRecord, getRecordIdFromRecord } from '../../../metadata/utils/cell';
 
 import './index.css';
 

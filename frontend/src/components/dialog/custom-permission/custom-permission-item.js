@@ -1,7 +1,7 @@
 import React, { Fragment } from 'react';
-import PropTypes from 'prop-types';
 import classnames from 'classnames';
-import { gettext } from '../../../utils/constants';
+import PropTypes from 'prop-types';
+import { gettext } from '@/utils/constants';
 import OpIcon from '../../op-icon';
 
 const propTypes = {
@@ -81,7 +81,7 @@ class CustomPermissionItem extends React.Component {
               />
               <OpIcon
                 id={`delete-icon-${index}`}
-                symbol="delete1"
+                symbol="delete"
                 className="op-icon"
                 tooltip={gettext('Delete')}
                 op={this.onDeleteCustomPermission}

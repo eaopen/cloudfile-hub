@@ -1,17 +1,16 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import classnames from 'classnames';
+import PropTypes from 'prop-types';
+import { EVENT_BUS_TYPE, CellType, PRIVATE_COLUMN_KEYS, PRIVATE_COLUMN_KEY } from '@/features/metadata/constants';
+import { getFileNameFromRecord } from '@/features/metadata/utils/cell';
+import { Utils } from '@/utils/utils';
 import ClickOutside from '../../../click-outside';
-import Editor from './editor';
-import { Utils } from '../../../../utils/utils';
+import EventBus from '../../../event-bus';
 import { EDITOR_CONTAINER as Z_INDEX_EDITOR_CONTAINER } from '../../constants/z-index';
-import EventBus from '../../../common/event-bus';
+import { getCellValueByColumn, getColumnOptionNameById, getColumnOptionNamesByIds } from '../../utils/cell';
 import { checkIsColumnEditable, getColumnOriginName } from '../../utils/column';
 import { checkCellValueChanged } from '../../utils/selection';
-import { getCellValueByColumn, getColumnOptionNameById, getColumnOptionNamesByIds } from '../../utils/cell';
-import { EVENT_BUS_TYPE } from '@/metadata/constants';
-import { CellType, PRIVATE_COLUMN_KEYS, PRIVATE_COLUMN_KEY } from '../../../../metadata/constants';
-import { getFileNameFromRecord } from '@/metadata/utils/cell';
+import Editor from './editor';
 
 const NOT_SUPPORT_EDITOR_COLUMN_TYPES = [
   CellType.CTIME, CellType.MTIME, CellType.CREATOR, CellType.LAST_MODIFIER, CellType.FILE_NAME,

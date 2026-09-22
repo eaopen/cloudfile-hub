@@ -1,8 +1,8 @@
 import React, { useContext, useEffect, useCallback, useState, useRef, forwardRef, useImperativeHandle } from 'react';
-import ModalPortal from '../../components/modal-portal';
-import LibSubFolderPermissionDialog from '../../components/dialog/lib-sub-folder-permission-dialog';
-import { EVENT_BUS_TYPE } from '../../components/common/event-bus-type';
-import { folderPermEnabled, isPro, siteRoot } from '../../utils/constants';
+import LibSubFolderPermissionDialog from '@/components/dialog/lib-sub-folder-permission-dialog';
+import { EVENT_BUS_TYPE } from '@/components/event-bus';
+import ModalPortal from '@/components/modal-portal';
+import { folderPermEnabled, isPro, siteRoot } from '@/utils/constants';
 
 // This hook provides content about lib sub-folder permission
 const LibSubFolderPermissionContext = React.createContext(null);

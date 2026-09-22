@@ -1,23 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { gettext } from '../../utils/constants';
-import { EVENT_BUS_TYPE, PRIVATE_COLUMN_KEY } from '../../metadata/constants';
-import RowUtils from '../sf-table/utils/row';
-import { buildGalleryToolbarMenuOptions } from '../../metadata/utils/menu-builder';
-import TextTranslation from '../../utils/text-translation';
-import { getFileNameFromRecord } from '../../metadata/utils/cell/core';
-import { Utils } from '../../utils/utils';
-import { openInNewTab, openParentFolder } from '../../metadata/utils/file';
-import { checkIsDir } from '../../metadata/utils/row';
-import { useMetadataStatus } from '../../hooks';
-import { getColumnByKey } from '../../metadata/utils/column';
+import { EVENT_BUS_TYPE, PRIVATE_COLUMN_KEY } from '@/features/metadata/constants';
+import { getParentDirFromRecord } from '@/features/metadata/utils/cell';
+import { getFileNameFromRecord } from '@/features/metadata/utils/cell/core';
+import { getColumnByKey } from '@/features/metadata/utils/column';
+import { openInNewTab, openParentFolder } from '@/features/metadata/utils/file';
+import { buildGalleryToolbarMenuOptions } from '@/features/metadata/utils/menu-builder';
+import { checkIsDir } from '@/features/metadata/utils/row';
+import { useMetadataStatus } from '@/hooks';
+import { gettext } from '@/utils/constants';
+import TextTranslation from '@/utils/text-translation';
+import { Utils } from '@/utils/utils';
+import { setPendingAttachments } from '../dir-chat/hooks/ai-chat-tools';
+import { AttachmentObject } from '../dir-chat/models';
+import CustomDropdown from '../dropdown';
+import EventBus, { eventBus as globalEventBus, EVENT_BUS_TYPE as DIR_EVENT_BUS_TYPE } from '../event-bus';
 import Icon from '../icon';
 import OpIcon from '../op-icon';
-import CustomDropdown from '../dropdown';
-import EventBus, { eventBus as globalEventBus } from '../common/event-bus';
-import { EVENT_BUS_TYPE as DIR_EVENT_BUS_TYPE } from '../common/event-bus-type';
-import { setPendingAttachments } from '../dir-view-mode/dir-chat/hooks/ai-chat-tools';
-import { AttachmentObject } from '../dir-view-mode/dir-chat/models';
-import { getParentDirFromRecord } from '../../metadata/utils/cell';
+import RowUtils from '../sf-table/utils/row';
 
 const GalleryFilesToolbar = () => {
   const [selectedRecordIds, setSelectedRecordIds] = useState([]);
@@ -210,7 +209,7 @@ const GalleryFilesToolbar = () => {
         </>
       )}
       <OpIcon id="download-btn" symbol="download" className="cur-view-path-btn" tooltip={gettext('Download')} aria-label={gettext('Download')} op={onDownloadClick} />
-      {!readOnly && <OpIcon id="delete-btn" symbol="delete1" className="cur-view-path-btn" tooltip={gettext('Delete')} aria-label={gettext('Delete')} op={onDeleteClick} />}
+      {!readOnly && <OpIcon id="delete-btn" symbol="delete" className="cur-view-path-btn" tooltip={gettext('Delete')} aria-label={gettext('Delete')} op={onDeleteClick} />}
 
       {toolbarMenuOptions.length > 0 && (
         <CustomDropdown

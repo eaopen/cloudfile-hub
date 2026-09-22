@@ -1,0 +1,138 @@
+import React from 'react';
+import { seafileAPI } from '@/api/seafile-api';
+import RemoveWebdavPassword from '@/components/dialog/remove-webdav-password';
+import ResetWebdavPassword from '@/components/dialog/reset-webdav-password';
+import SetWebdavPassword from '@/components/dialog/set-webdav-password';
+import ModalPortal from '@/components/modal-portal';
+import toaster from '@/components/toast';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
+
+const { contactEmail, webdavUrl, webdavPasswordSetted } = window.app.pageOptions;
+
+class WebdavPassword extends React.Component {
+
+  constructor(props) {
+    super(props);
+    this.state = {
+      isWebdavPasswordSetted: webdavPasswordSetted,
+      isSetPasserdDialogOpen: false,
+      isResetPasserdDialogOpen: false,
+      isRemovePasserdDialogOpen: false,
+    };
+  }
+
+  toggleSetPasswordDialog = () => {
+    this.setState({
+      isSetPasserdDialogOpen: !this.state.isSetPasserdDialogOpen,
+    });
+  };
+
+  setPassword = (password) => {
+    seafileAPI.updateWebdavSecret(password).then((res) => {
+      this.toggleSetPasswordDialog();
+      this.setState({
+        isWebdavPasswordSetted: !this.state.isWebdavPasswordSetted,
+      });
+      toaster.success(gettext('Password updated'));
+    }).catch((error) => {
+      let errorMsg = Utils.getErrorMsg(error);
+      this.toggleSetPasswordDialog();
+      toaster.danger(errorMsg);
+    });
+  };
+
+  toggleResetPasswordDialog = () => {
+    this.setState({
+      isResetPasswordDialogOpen: !this.state.isResetPasswordDialogOpen,
+    });
+  };
+
+  resetPassword = (password) => {
+    seafileAPI.updateWebdavSecret(password).then((res) => {
+      this.toggleResetPasswordDialog();
+      toaster.success(gettext('Password reset'));
+    }).catch((error) => {
+      let errorMsg = Utils.getErrorMsg(error);
+      this.toggleResetPasswordDialog();
+      toaster.danger(errorMsg);
+    });
+  };
+
+  toggleRemovePasswordDialog = () => {
+    this.setState({
+      isRemovePasswordDialogOpen: !this.state.isRemovePasswordDialogOpen,
+    });
+  };
+
+  removePassword = () => {
+    seafileAPI.updateWebdavSecret().then((res) => {
+      this.toggleRemovePasswordDialog();
+      this.setState({
+        isWebdavPasswordSetted: !this.state.isWebdavPasswordSetted,
+      });
+      toaster.success(gettext('Password removed'));
+    }).catch((error) => {
+      let errorMsg = Utils.getErrorMsg(error);
+      this.toggleRemovePasswordDialog();
+      toaster.danger(errorMsg);
+    });
+  };
+
+  onIconKeyDown = (e) => {
+    if (e.key == 'Enter' || e.key == 'Space') {
+      e.target.click();
+    }
+  };
+
+  render() {
+    const { isWebdavPasswordSetted } = this.state;
+    return (
+      <React.Fragment>
+        <div id="update-webdav-passwd" className="setting-item">
+          <h3 className="setting-item-heading">{gettext('WebDAV Access')}</h3>
+          <p>WebDAV URL: <a href={webdavUrl}>{webdavUrl}</a></p>
+          <p>{gettext('WebDAV username:')} {contactEmail}</p>
+          {!isWebdavPasswordSetted ?
+            <React.Fragment>
+              <p>{gettext('WebDAV password:')} {gettext('not set')}</p>
+              <button className="btn btn-outline-primary" onClick={this.toggleSetPasswordDialog}>{gettext('Set Password')}</button>
+            </React.Fragment>
+            :
+            <React.Fragment>
+              <p>{gettext('WebDAV password:')} ***</p>
+              <button className="btn btn-outline-primary mr-2" onClick={this.toggleResetPasswordDialog}>{gettext('Reset Password')}</button>
+              <button className="btn btn-outline-primary" onClick={this.toggleRemovePasswordDialog}>{gettext('Delete Password')}</button>
+            </React.Fragment>
+          }
+        </div>
+        {this.state.isSetPasserdDialogOpen && (
+          <ModalPortal>
+            <SetWebdavPassword
+              setPassword={this.setPassword}
+              toggle={this.toggleSetPasswordDialog}
+            />
+          </ModalPortal>
+        )}
+        {this.state.isResetPasswordDialogOpen && (
+          <ModalPortal>
+            <ResetWebdavPassword
+              resetPassword={this.resetPassword}
+              toggle={this.toggleResetPasswordDialog}
+            />
+          </ModalPortal>
+        )}
+        {this.state.isRemovePasswordDialogOpen && (
+          <ModalPortal>
+            <RemoveWebdavPassword
+              removePassword={this.removePassword}
+              toggle={this.toggleRemovePasswordDialog}
+            />
+          </ModalPortal>
+        )}
+      </React.Fragment>
+    );
+  }
+}
+
+export default WebdavPassword;

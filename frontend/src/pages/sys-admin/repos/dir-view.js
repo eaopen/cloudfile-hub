@@ -1,16 +1,16 @@
 import React, { Component, Fragment } from 'react';
-import PropTypes from 'prop-types';
 import { Button } from 'reactstrap';
 import axios from 'axios';
-import { Utils } from '../../../utils/utils';
-import { systemAdminAPI } from '../../../utils/system-admin-api';
-import { siteRoot, gettext } from '../../../utils/constants';
-import toaster from '../../../components/toast';
-import CreateFolderDialog from '../../../components/dialog/create-folder-dialog';
-import Dirent from '../../../models/system-admin/dirent';
-import MainPanelTopbar from '../main-panel-topbar';
-import DirPathBar from './dir-path-bar';
+import PropTypes from 'prop-types';
+import { systemAdminAPI } from '@/api/system-admin-api';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
+import CreateFolderDialog from '@/components/dialog/create-folder-dialog';
+import toaster from '@/components/toast';
+import Dirent from '@/models/system-admin/dirent';
+import { siteRoot, gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import DirContent from './dir-content';
+import DirPathBar from './dir-path-bar';
 
 class DirView extends Component {
 

@@ -1,9 +1,9 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Button, Modal, ModalBody, ModalFooter, Input, Form, FormGroup, Label } from 'reactstrap';
-import { gettext, orgID } from '../../utils/constants';
-import { orgAdminAPI } from '../../utils/org-admin-api';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
+import PropTypes from 'prop-types';
+import { orgAdminAPI } from '@/api/org-admin-api';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import { gettext, orgID } from '@/utils/constants';
 
 const propTypes = {
   groupID: PropTypes.string,
