@@ -4,6 +4,10 @@
 > 用途：按代码和测试证据标记 Hub/Web/API 的真实能力状态。
 > 适用版本：Seafile CE 14.x。
 > 状态：已完成（状态快照：`dev`，2026-08-15；状态已与 `cloudfile-docker/docs/feature-matrix.md` 对齐）。
+>
+> 默认值提示（2026-09-22）：本表的“状态”描述能力成熟度，**不等于默认开关**。
+> 不依赖第三方的已验收能力已默认打开，逐项默认值见
+> `cloudfile-docker/docs/configuration.md`。
 
 ## 状态口径
 

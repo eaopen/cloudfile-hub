@@ -1,15 +1,21 @@
 # -*- coding: utf-8 -*-
 """Switch off means this capability contributes nothing.
 
-Merging a capability into ``dev`` is only safe because every CF_ENABLE_* is off
-by default -- an unverified capability is inactive by default. That is the
-invariant that makes the merge safe rather than a nicety. It is *not* the old
-"switch off == native CE" requirement, which was abolished on 2026-09-22: the
-baseline itself carries patches with no switch at all. It is checked here, at
-unit level, because the container gate
-(tests/e2e/baseline.py) proves the *baseline* registers nothing -- it cannot
-prove that about a capability that has since been merged in, since by then the
-capability is part of the baseline build it is inspecting.
+Merging a capability into ``dev`` is safe because an unverified capability is
+inactive by default -- default-off still holds for every switch that has not
+been accepted, and that property, not the old rule, is what makes the merge
+safe. Note that "off by default" is no longer universal: the accepted,
+no-external-dependency capabilities (DIR_ACL, AUDIT, METADATA, TAGS, ...) now
+default to True. This test therefore asserts the *behaviour when the switch is
+off*, which is independent of the default: it stays the contract that keeps a
+switch-off deployment free of the capability's contributions.
+
+It is *not* the old "switch off == native CE" requirement, which was abolished
+on 2026-09-22: the baseline itself carries patches with no switch at all. It is
+checked here, at unit level, because the container gate
+(tests/e2e/baseline.py) proves the *default* set is what the docs say -- it
+cannot prove that about a capability that has since been merged in, since by
+then the capability is part of the baseline build it is inspecting.
 
 Three separate things are asserted, and the third is the one that would
 otherwise rot silently:

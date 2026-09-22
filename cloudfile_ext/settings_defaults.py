@@ -18,29 +18,57 @@ EXTRA_INSTALLED_APPS = [
 
 # -- feature switches -----------------------------------------------------
 #
-# CF_ENABLE_DIR_ACL defaults to True (product decision 2026-08-21): 目录级权限
-# 是网盘产品线核心需求，其 deny-veto + 部门祖先继承语义已对照被替换的
-# eap 本地表实现（sys_cloud_item_permission，9.1 决策下线）验证等强。
-# 运维仍可通过 compose .env 显式 CF_ENABLE_DIR_ACL=false 关闭还原纯 CE 行为；
-# 其余开关保持默认关闭（opt-in）不变。
+# Defaults follow the 2026-09-22 product decision: a capability that needs no
+# third-party service, host mount or client install is ON by default, and the
+# rest stay opt-in.
+#
+# Why: the 網盤 delivery must not require flipping every switch by hand, and
+# "code default off while the test environment runs it on" split the story we
+# tell. The old guarantee that made default-off worthwhile -- "all switches off
+# == native CE" -- was abolished on 2026-09-22, so default-off no longer buys
+# anything for upgrade cost.
+#
+# ON by default (capability and code both live in this stack; METADATA/TAGS ride
+# the official seafile-md-server, which now starts in the default compose stack):
+#   DIR_ACL, AUDIT, METADATA, TAGS, FILE_PREVIEW, FILE_LOCK, CHECKOUT,
+#   FAVORITES_ID, WATCH, FILEOPS, SHARE_RESTRICT
+# OFF by default (third-party service, host mount or client install -- see the
+# per-switch comment below):
+#   SSO, SEARCH, ONLYOFFICE, CONVERT_EXPORT, S3_STORAGE, EXTERNAL_SOURCES,
+#   LOCAL_APP
+#
+# Operators can invert any switch through the compose .env; these defaults only
+# apply when nothing is configured. Per-switch list: cloudfile-docker's
+# docs/configuration.md.
 CF_ENABLE_DIR_ACL = True
+CF_ENABLE_AUDIT = True
+CF_ENABLE_METADATA = True
+CF_ENABLE_TAGS = True
+CF_ENABLE_FILE_PREVIEW = True
+CF_ENABLE_FILE_LOCK = True
+CF_ENABLE_CHECKOUT = True
+CF_ENABLE_FAVORITES_ID = True
+CF_ENABLE_WATCH = True
+CF_ENABLE_FILEOPS = True
+CF_ENABLE_SHARE_RESTRICT = True
 
+# Third-party identity provider (Authentik/OIDC/SAML/LDAP): login is unusable
+# without an IdP.
 CF_ENABLE_SSO = False
-CF_ENABLE_AUDIT = False
-CF_ENABLE_METADATA = False
-CF_ENABLE_TAGS = False
+# Third-party search backend (SeaSearch/Elasticsearch/Meilisearch) container
+# and its index.
 CF_ENABLE_SEARCH = False
-CF_ENABLE_FILE_PREVIEW = False
+# Third-party OnlyOffice Document Server container.
 CF_ENABLE_ONLYOFFICE = False
-CF_ENABLE_FILE_LOCK = False
-CF_ENABLE_FAVORITES_ID = False
-CF_ENABLE_WATCH = False
+# SeaDoc container plus JWT_PRIVATE_KEY; bootstrap fails fast if either is absent.
 CF_ENABLE_CONVERT_EXPORT = False
-CF_ENABLE_CHECKOUT = False
-CF_ENABLE_LOCAL_APP = False
+# Third-party S3/MinIO object-storage endpoint.
 CF_ENABLE_S3_STORAGE = False
+# SMB/NFS share mounted on the host (external sources).
 CF_ENABLE_EXTERNAL_SOURCES = False
-CF_ENABLE_FILEOPS = False
+# Requires the Chrome extension and Local Agent on the user's machine; on by
+# default would advertise the entry point to users who cannot use it.
+CF_ENABLE_LOCAL_APP = False
 
 # -- providers -------------------------------------------------------------
 

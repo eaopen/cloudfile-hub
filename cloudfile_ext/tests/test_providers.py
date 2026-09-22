@@ -63,7 +63,9 @@ def test_nothing_selected_means_native_behaviour(cf):
     r.register_search_provider('meilisearch', FakeSearch())
     r.seal()
     # Registering must not activate: a build may ship several backends and the
-    # deployment picks one. This is the "all switches off = native CE" rule.
+    # deployment picks one. (The "all switches off == native CE" rule this used
+    # to cite was abolished on 2026-09-22; what is asserted here is only that
+    # registering a provider does not select it.)
     assert r.active_search_provider() is None
 
 

@@ -3,7 +3,7 @@
 
 > 用途：记录 Hub 代码实际读取的 `CF_*` 设置、默认值和生效边界。
 > 适用版本：Seafile CE 14.x。
-> 状态：已完成（与 `cloudfile_ext/settings_defaults.py` 及调用点核对，2026-08-11）。
+> 状态：已完成（与 `cloudfile_ext/settings_defaults.py` 及调用点核对，2026-09-22）。
 
 ## 配置来源
 
@@ -17,25 +17,31 @@ from cloudfile_ext.settings_defaults import *
 
 ## 功能开关
 
-全部默认 `False`，且只有严格的布尔值 `True` 才算开启。
+修改说明（2026-09-22 产品决策）：不再“全部默认 `False`”。不依赖第三方/外部服务的已验收能力默认 `True`
+（DIR_ACL、AUDIT、METADATA、TAGS、FILE_PREVIEW、FILE_LOCK、CHECKOUT、FAVORITES_ID、WATCH、FILEOPS、SHARE_RESTRICT），
+其余默认 `False`；**新增开关仍默认 `False`**。只有严格的布尔值 `True` 才算开启。
+默认值以 `cloudfile_ext/settings_defaults.py` 为准，部署由 compose `.env` 覆盖。
 
 | Setting | 默认值 | 当前 Hub 状态 |
 |---|---:|---|
 | `CF_ENABLE_SSO` | `False` | 组织映射验证中；登录复用 CE |
-| `CF_ENABLE_DIR_ACL` | `False` | 验证中 |
-| `CF_ENABLE_AUDIT` | `False` | 部分完成 |
-| `CF_ENABLE_METADATA` | `False` | 规划 |
-| `CF_ENABLE_TAGS` | `False` | 规划 |
+| `CF_ENABLE_DIR_ACL` | `True` | 验证中 |
+| `CF_ENABLE_AUDIT` | `True` | 部分完成 |
+| `CF_ENABLE_METADATA` | `True` | 规划 |
+| `CF_ENABLE_TAGS` | `True` | 规划 |
 | `CF_ENABLE_SEARCH` | `False` | 验证中 |
-| `CF_ENABLE_FILE_PREVIEW` | `False` | 部分完成 |
+| `CF_ENABLE_FILE_PREVIEW` | `True` | 部分完成 |
 | `CF_ENABLE_ONLYOFFICE` | `False` | CE 复用；CloudFile 回调未注册 |
-| `CF_ENABLE_FILE_LOCK` | `False` | 验证中 |
-| `CF_ENABLE_WATCH` | `False` | 验证中；复用 CE monitored-repos API 并放开非 Pro gate |
+| `CF_ENABLE_FILE_LOCK` | `True` | 验证中 |
+| `CF_ENABLE_WATCH` | `True` | 验证中；复用 CE monitored-repos API 并放开非 Pro gate |
 | `CF_ENABLE_CONVERT_EXPORT` | `False` | 规划 |
-| `CF_ENABLE_CHECKOUT` | `False` | 验证中 |
+| `CF_ENABLE_CHECKOUT` | `True` | 验证中 |
+| `CF_ENABLE_FAVORITES_ID` | `True` | 验证中；`obj_id` 化收藏 |
 | `CF_ENABLE_LOCAL_APP` | `False` | 部分完成 |
 | `CF_ENABLE_S3_STORAGE` | `False` | Hub 仅有维护脚本边界 |
 | `CF_ENABLE_EXTERNAL_SOURCES` | `False` | 验证中 |
+| `CF_ENABLE_FILEOPS` | `True` | 验证中；复制/移动预检查 |
+| `CF_ENABLE_SHARE_RESTRICT` | `True` | 验证中；外部分享管控 |
 
 不要仅凭开关存在判断能力可用，详细证据见 [能力矩阵](CAPABILITIES.md)。
 

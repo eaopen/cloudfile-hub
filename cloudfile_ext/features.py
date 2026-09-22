@@ -1,10 +1,17 @@
 # -*- coding: utf-8 -*-
 """CloudFile feature switches.
 
-Every switch defaults to False except CF_ENABLE_DIR_ACL (True since the
-2026-08-21 product decision; directory ACL is core to the 网盘 line).
-Turning them all off must still restore native CE behaviour -- operators do
-that by setting the switch to false, which the compose .env passes through.
+Defaults follow the 2026-09-22 product decision: capabilities with no
+third-party or external-service dependency default to True (DIR_ACL, AUDIT,
+METADATA, TAGS, FILE_PREVIEW, FILE_LOCK, CHECKOUT, FAVORITES_ID, WATCH,
+FILEOPS, SHARE_RESTRICT) and the rest stay False. The reason is that
+default-off accepted capabilities forced every deployment to flip switches by
+hand and split the story between "code default off" and "test environment on";
+the guarantee that once justified default-off -- "all switches off == native
+CE" -- was abolished on 2026-09-22. Defaults do not weaken the isolation rule:
+unaccepted capabilities are still False by default and operators can override
+any switch through the compose .env. Full list and dependency boundary:
+cloudfile-docker's docs/configuration.md.
 
 Switches are read from Django settings, which pick them up from
 conf/seahub_settings.py, which the docker bootstrap writes from the compose

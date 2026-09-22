@@ -15,7 +15,9 @@
 
 `haiwen/seahub` 的 fork，CloudFile（Seafile CE 企业扩展版）的 Web/API 层。
 
-`dev` = **扩展基线 + 已验收能力**，全部 `CF_ENABLE_*` 默认关闭。
+`dev` = **扩展基线 + 已验收能力**，默认值分默认打开集与默认关闭集，见
+`cloudfile-docker/docs/configuration.md`（修改于 2026-09-22：不依赖第三方的
+已验收能力默认打开；**新增开关仍默认 `false`**）。
 开发中的能力在 `feature/<耦合簇>`（例如 `feature/dir-acl`），
 **验收后合回 `dev` 并删除分支**——不长期分叉，理由见
 `cloudfile-docker/docs/BRANCHES.md` 第一节。
