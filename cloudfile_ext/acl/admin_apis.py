@@ -116,6 +116,16 @@ class AdminDirACLView(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST,
                              '权限值不合法。')
 
+        # 修改逻辑/原因（2026-09-23 口径说明）：这一行（以及 acl/apis.py 的同名
+        # 校验）就是「外部资料源配不了目录级 ACL」的成因——合成 repo_id 不是真实
+        # 库，必然 404。判定路径是通的（外部源把合成 id 交给权限钩子，钩子只查
+        # cf_dir_acl），所以 v1 的授权只到源级 grant。
+        # 放行方案（三项加法式改动，需容器 E2E 证明后再做，清单见
+        # docs/features/external-sources.md「权限」）：① 本端点改判「真实库 or
+        # 已启用的外部源」；② probes.path_kind 对外部源改问 provider；
+        # ③ probes.subject_eligible 对外部源改判「已有源级 grant」。
+        # 不要在没有 E2E 的情况下直接放行：ACL 模块有「逻辑不可测 → 同一缺陷
+        # 发布两次」的前例（FEATURES 第 71 项）。
         if not seafile_api.get_repo(repo_id):
             return api_error(status.HTTP_404_NOT_FOUND, '库不存在。')
 

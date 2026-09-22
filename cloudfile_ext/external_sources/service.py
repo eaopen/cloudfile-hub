@@ -61,8 +61,13 @@ def permission_for(username, source, path='/', is_staff=False):
     Two stages, and the order matters. First the source's own grants decide the
     native permission (:func:`decide`). Then the registered permission chain
     may narrow it -- which is what makes a directory ACL rule apply to an
-    external source's subdirectory with no code here at all, since the source
-    carries a synthetic repo_id that cf_dir_acl can be keyed by.
+    external source's subdirectory, since the source carries a synthetic
+    repo_id that cf_dir_acl can be keyed by.
+
+    修改逻辑/原因（2026-09-23）：上面说的是**判定**路径。**写**路径目前不可用
+    ——两个 dir-acl 写端点都先校验 seafile_api.get_repo()，合成 id 必 404，
+    所以这样的规则今天无法通过任何 API 创建。v1 的授权因此只到源级 grant，
+    详见 docs/features/external-sources.md「权限」。
 
     Deliberately **not** routed through seahub.views.check_folder_permission.
     That asks seafile_api.check_permission_by_path first, and the synthetic

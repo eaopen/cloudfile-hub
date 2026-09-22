@@ -32,8 +32,15 @@ class ExternalSourceManager(models.Manager):
 
         The repo id is generated here rather than by a caller so there is one
         place that decides what it is. It matches no real library: it exists so
-        cf_dir_acl rules can be written against this source's subdirectories
-        with no new code, and so the shadow layer has an id to present.
+        the shadow layer has an id to present, and so the directory-ACL
+        *decision* path can be keyed by it.
+
+        修改逻辑/原因（2026-09-23 口径更正）：原 docstring 称 cf_dir_acl 规则
+        "can be written against this source's subdirectories with no new code"——
+        该说法对**写路径**不成立：两个 dir-acl 写端点都先校验
+        seafile_api.get_repo(repo_id)，合成 id 必然 404，只有判定路径可用。
+        因此 v1 的授权只到源级 grant，详见
+        docs/features/external-sources.md「权限」。
         """
         now = int(time.time())
         return self.create(
