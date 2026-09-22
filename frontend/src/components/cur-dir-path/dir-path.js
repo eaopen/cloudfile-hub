@@ -1,22 +1,22 @@
 import React, { Fragment } from 'react';
-import PropTypes from 'prop-types';
 import { Link } from '@gatsbyjs/reach-router';
-import DirOperationToolbar from '../../components/toolbar/dir-operation-toolbar';
-import MetadataViewName from '../../metadata/components/metadata-view-name';
-import TagViewName from '../../tag/components/tag-view-name';
-import { siteRoot, gettext, username, enableUserCleanTrash } from '../../utils/constants';
-import { debounce, Utils } from '../../utils/utils';
-import { PRIVATE_FILE_TYPE } from '../../constants';
-import { EVENT_BUS_TYPE } from '../../metadata/constants';
-import { ALL_TAGS_ID } from '../../tag/constants';
+import PropTypes from 'prop-types';
+import { PRIVATE_FILE_TYPE } from '@/constants';
+import { getTrashPath } from '@/features/library-view/dir-trash-view/utils';
+import MetadataViewName from '@/features/metadata/components/metadata-view-name';
+import { EVENT_BUS_TYPE } from '@/features/metadata/constants';
+import TagViewName from '@/features/tag/components/tag-view-name';
+import { ALL_TAGS_ID } from '@/features/tag/constants';
+import { siteRoot, gettext, username, enableUserCleanTrash } from '@/utils/constants';
+import { debounce, Utils } from '@/utils/utils';
 import OpIcon from '../../components/op-icon';
-import Icon from '../icon';
-import { getTrashPath } from '../dir-view-mode/dir-trash-view/utils';
-import EventBus from '../common/event-bus';
-import CleanTrash from '../dialog/clean-trash';
+import DirOperationToolbar from '../../components/toolbar/dir-operation-toolbar';
 import ArchiveIcon from '../archive-icon';
-import Tooltip from '../tooltip';
+import CleanTrash from '../dialog/clean-trash';
 import CustomDropdown from '../dropdown';
+import EventBus from '../event-bus';
+import Icon from '../icon';
+import Tooltip from '../tooltip';
 
 const propTypes = {
   currentRepoInfo: PropTypes.object.isRequired,

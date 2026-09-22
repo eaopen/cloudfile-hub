@@ -1,10 +1,10 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Button, Modal, ModalBody, ModalFooter, Input, Form, FormGroup, Label, Alert } from 'reactstrap';
-import { gettext, orgID } from '../../utils/constants';
-import { orgAdminAPI } from '../../utils/org-admin-api';
-import { Utils } from '../../utils/utils';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
+import PropTypes from 'prop-types';
+import { orgAdminAPI } from '@/api/org-admin-api';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import { gettext, orgID } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 
 const propTypes = {
   toggle: PropTypes.func.isRequired,

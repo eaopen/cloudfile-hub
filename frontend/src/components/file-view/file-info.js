@@ -1,9 +1,9 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import dayjs from 'dayjs';
-import { isPro, gettext, mediaUrl, siteRoot } from '../../utils/constants';
-import InternalLinkOperation from '../operations/internal-link-operation';
+import PropTypes from 'prop-types';
+import { isPro, gettext, mediaUrl, siteRoot } from '@/utils/constants';
 import OpIcon from '../../components/op-icon';
+import InternalLinkOperation from '../operations/internal-link-operation';
 
 const propTypes = {
   toggleStar: PropTypes.func.isRequired,

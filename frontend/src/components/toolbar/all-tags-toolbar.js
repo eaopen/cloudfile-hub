@@ -1,12 +1,12 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { gettext } from '../../utils/constants';
-import { EVENT_BUS_TYPE } from '../../metadata/constants';
-import TextTranslation from '../../utils/text-translation';
-import EventBus from '../common/event-bus';
+import { EVENT_BUS_TYPE } from '@/features/metadata/constants';
+import { gettext } from '@/utils/constants';
+import TextTranslation from '@/utils/text-translation';
 import OpElement from '../../components/op-element';
 import OpIcon from '../../components/op-icon';
-import Icon from '../icon';
 import CustomDropdown from '../dropdown';
+import EventBus from '../event-bus';
+import Icon from '../icon';
 
 const AllTagsToolbar = () => {
   const [selectedTagIds, setSelectedTagIds] = useState([]);
@@ -84,7 +84,7 @@ const AllTagsToolbar = () => {
         <OpIcon
           id="delete-btn"
           className="cur-view-path-btn"
-          symbol="delete1"
+          symbol="delete"
           tooltip={gettext('Delete')}
           op={deleteTags}
         />

@@ -1,10 +1,9 @@
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
-import Loading from '../../loading';
-import { isOrgContext } from '../../../utils/constants';
-import { gettext } from '@/utils/constants';
+import { gettext, isOrgContext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import Icon from '../../icon';
-import { Utils } from '../../../utils/utils';
+import Loading from '../../loading';
 
 const ItemPropTypes = {
   department: PropTypes.object,

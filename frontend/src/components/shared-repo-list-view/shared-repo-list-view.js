@@ -1,15 +1,15 @@
 import React, { Fragment } from 'react';
 import PropTypes from 'prop-types';
-import { gettext } from '../../utils/constants';
-import { Utils } from '../../utils/utils';
-import LibsMobileThead from '../libs-mobile-thead';
-import SharedRepoListItem from './shared-repo-list-item';
-import toaster from '../toast';
-import Loading from '../loading';
-import { LIST_MODE } from '../dir-view-mode/constants';
-import ContextMenu from '../context-menu/context-menu';
+import { LIST_MODE } from '@/constants/view-mode';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import { hideMenu, handleContextClick } from '../context-menu/actions';
-import RepoListCard from '../repo-list-card/repo-list-card';
+import ContextMenu from '../context-menu/context-menu';
+import LibsMobileThead from '../libs-mobile-thead';
+import Loading from '../loading';
+import RepoListCard from '../repo-list-card';
+import toaster from '../toast';
+import SharedRepoListItem from './shared-repo-list-item';
 
 const propTypes = {
   currentViewMode: PropTypes.string,

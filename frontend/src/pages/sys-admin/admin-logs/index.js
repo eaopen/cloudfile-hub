@@ -1,7 +1,7 @@
 import React from 'react';
-import MainPanelTopbar from '../main-panel-topbar';
-import LogsNav from './logs-nav';
 import { useLocation } from '@gatsbyjs/reach-router';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
+import LogsNav from './logs-nav';
 
 const AdminLogs = ({ children, ...commonProps }) => {
   const location = useLocation();

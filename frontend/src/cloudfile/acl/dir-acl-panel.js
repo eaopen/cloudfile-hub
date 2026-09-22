@@ -1,9 +1,9 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Button, Form, FormGroup, Input, Label, Table } from 'reactstrap';
-import { gettext } from '../../utils/constants';
-import toaster from '../../components/toast';
-import Loading from '../../components/loading';
+import PropTypes from 'prop-types';
+import Loading from '@/components/loading';
+import toaster from '@/components/toast';
+import { gettext } from '@/utils/constants';
 import { cloudFileAPI } from '../cloudfile-api';
 
 const SUBJECT_TYPES = [

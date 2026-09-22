@@ -1,12 +1,12 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Table } from 'reactstrap';
-import { Utils } from '../utils/utils';
-import { gettext } from '../utils/constants';
-import { seafileAPI } from '../utils/seafile-api';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
+import OpIcon from './op-icon';
 import RoleSelector from './single-selector';
 import toaster from './toast';
-import OpIcon from './op-icon';
 
 const propTypes = {
   groupMembers: PropTypes.array.isRequired,

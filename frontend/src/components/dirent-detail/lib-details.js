@@ -1,15 +1,15 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import PropTypes from 'prop-types';
-import toaster from '../toast';
+import { seafileAPI } from '@/api/seafile-api';
+import Formatter from '@/features/metadata/components/formatter';
+import { CellType } from '@/features/metadata/constants';
+import Repo from '@/models/repo';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import Loading from '../loading';
+import toaster from '../toast';
 import { Detail, Header, Body } from './detail';
 import DetailItem from './detail-item';
-import Formatter from '../../metadata/components/formatter';
-import { Utils } from '../../utils/utils';
-import { gettext } from '../../utils/constants';
-import { seafileAPI } from '../../utils/seafile-api';
-import Repo from '../../models/repo';
-import { CellType } from '../../metadata/constants';
 
 const LibDetail = React.memo(({ currentRepoInfo, onClose, isInSearch }) => {
   const [isLoading, setLoading] = useState(true);

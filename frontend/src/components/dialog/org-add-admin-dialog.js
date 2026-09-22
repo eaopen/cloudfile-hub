@@ -1,13 +1,13 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Button, Modal, ModalBody, ModalFooter, Alert } from 'reactstrap';
-import { gettext, orgID } from '../../utils/constants';
-import { Utils } from '../../utils/utils';
+import PropTypes from 'prop-types';
+import { orgAdminAPI } from '@/api/org-admin-api';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import OrgUserInfo from '@/models/org-user';
+import { gettext, orgID } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import toaster from '../toast';
 import UserSelect from '../user-select';
-import { orgAdminAPI } from '../../utils/org-admin-api';
-import OrgUserInfo from '../../models/org-user';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
 
 const propTypes = {
   toggle: PropTypes.func.isRequired,

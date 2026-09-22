@@ -1,5 +1,5 @@
-import * as zIndexes from './zIndexes';
 import KeyCodes from './keyCodes';
+import * as zIndexes from './zIndexes';
 
 export const DIALOG_MAX_HEIGHT = window.innerHeight - 56; // Dialog margin is 3.5rem (56px)
 
@@ -54,6 +54,12 @@ export const TREE_PANEL_STATE_KEY = 'sf_dir_view_tree_panel_open';
 export const TREE_PANEL_SECTION_STATE_KEY = 'sf_dir_view_tree_panel_section_state';
 
 export const RECENTLY_USED_LIST_KEY = 'recently_used_list';
+
+export const ONLY_SHOW_GROUPS_WITH_LIBRARIES_KEY = 'sf_only_show_groups_with_libraries';
+
+export const SIDE_NAV_FILES_UNFOLDED_KEY = 'sf_user_side_nav_files_unfolded';
+
+export const SIDE_NAV_SHARE_ADMIN_UNFOLDED_KEY = 'sf_user_side_nav_share_admin_unfolded';
 
 export const SEARCH_FILTERS_KEY = {
   SEARCH_FILENAME_AND_CONTENT: 'search_filename_and_content',

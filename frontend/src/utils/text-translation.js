@@ -27,10 +27,6 @@ const TextTranslation = {
     key: 'New Word File',
     value: gettext('New Word File')
   },
-  NEW_TLDRAW_FILE: {
-    key: 'New Whiteboard File',
-    value: gettext('New Whiteboard File')
-  },
   NEW_EXCALIDRAW_FILE: {
     key: 'New Excalidraw File',
     value: gettext('New Excalidraw File')
@@ -300,7 +296,7 @@ const TextTranslation = {
   },
   GENERATE_TAGS: {
     key: 'Generate tags',
-    value: gettext('Generate file tags'),
+    value: gettext('Suggest file tags'),
   },
   DETECT_FACES: {
     key: 'Detect faces',

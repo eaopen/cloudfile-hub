@@ -1,13 +1,13 @@
 import React, { Fragment } from 'react';
-import PropTypes from 'prop-types';
 import { Button, Modal, ModalBody, ModalFooter } from 'reactstrap';
 import dayjs from 'dayjs';
-import { gettext, siteRoot, LARGE_DIALOG_STYLE } from '../../utils/constants';
-import { seafileAPI } from '../../utils/seafile-api';
-import { Utils } from '../../utils/utils';
-import toaster from '../toast';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import { gettext, siteRoot, LARGE_DIALOG_STYLE } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import Icon from '../icon';
+import toaster from '../toast';
 
 const propTypes = {
   repoID: PropTypes.string.isRequired,

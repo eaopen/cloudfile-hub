@@ -1,13 +1,13 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { gettext } from '../../../utils/constants';
-import { KeyCodes } from '../../../constants';
-import { isModG, isModShiftG } from '../../../utils/hotkey';
-import SFTableSearcherInput from './searcher-input';
-import { checkHasSearchResult } from '../utils/search';
-import { EVENT_BUS_TYPE } from '../../../metadata/constants';
+import EventBus from '@/components/event-bus';
+import { KeyCodes } from '@/constants';
+import { EVENT_BUS_TYPE } from '@/features/metadata/constants';
+import { gettext } from '@/utils/constants';
+import { isModG, isModShiftG } from '@/utils/hotkey';
 import OpIcon from '../../../components/op-icon';
 import Icon from '../../icon';
-import EventBus from '@/components/common/event-bus';
+import { checkHasSearchResult } from '../utils/search';
+import SFTableSearcherInput from './searcher-input';
 
 const SFTableSearcher = ({ recordsCount, columnsCount, searchResult, searchCells, closeSearcher, focusNextMatchedCell, focusPreviousMatchedCell, showResultNavigation = true }) => {
   const [isSearchActive, setIsSearchActive] = useState(false);

@@ -1,0 +1,50 @@
+import React, { useCallback, useMemo } from 'react';
+import classnames from 'classnames';
+import PropTypes from 'prop-types';
+import EventBus, { EVENT_BUS_TYPE } from '@/components/event-bus';
+import FileNameFormatter from '@/features/metadata/components/cell-formatter/file-name-formatter';
+import { Utils } from '@/utils/utils';
+
+const FileName = ({ repoID, column, record, className: propsClassName, value, hideIcon = false, isCellSelected, ...params }) => {
+  const isDir = useMemo(() => record.is_dir, [record]);
+
+  const className = useMemo(() => {
+    if (!value || !Utils.imageCheck(value)) return propsClassName;
+    return classnames(propsClassName, 'sf-metadata-image-file-formatter');
+  }, [propsClassName, value]);
+
+  const iconUrl = useMemo(() => {
+    if (!value) return {};
+    if (hideIcon) return {};
+    if (isDir) {
+      const icon = Utils.getFolderIconUrl();
+      return { iconUrl: icon, defaultIconUrl: icon, iconType: 'file-img' };
+    }
+    const defaultIconUrl = Utils.getFileIconUrl(value);
+    return { iconUrl: defaultIconUrl, defaultIconUrl, iconType: 'file-img' };
+  }, [hideIcon, isDir, value]);
+
+  const onFileNameClick = useCallback((event) => {
+    event.preventDefault();
+    event.nativeEvent.stopImmediatePropagation();
+
+    if (!isCellSelected) return;
+
+    const eventBus = EventBus.getInstance();
+    eventBus.dispatch(EVENT_BUS_TYPE.ON_TRASH_ITEM_CLICK, record);
+  }, [isCellSelected, record]);
+
+  return (<FileNameFormatter { ...params } className={className} value={value} onClickName={onFileNameClick} { ...iconUrl } />);
+
+};
+
+FileName.propTypes = {
+  value: PropTypes.string,
+  hideIcon: PropTypes.bool,
+  isCellSelected: PropTypes.bool,
+  record: PropTypes.object,
+  className: PropTypes.string,
+  onFileNameClick: PropTypes.func,
+};
+
+export default FileName;

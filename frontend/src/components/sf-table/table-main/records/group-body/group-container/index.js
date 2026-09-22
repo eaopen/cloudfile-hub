@@ -1,12 +1,12 @@
 import React, { Component } from 'react';
-import PropTypes from 'prop-types';
 import joinClasses from 'classnames';
-import GroupContainerLeft from './group-container-left';
-import GroupContainerRight from './group-container-right';
-import { isMobile } from '../../../../../../utils/utils';
-import { checkIsColumnFrozen } from '../../../../utils/column';
+import PropTypes from 'prop-types';
+import { isMobile } from '@/utils/utils';
 import { GROUP_VIEW_OFFSET } from '../../../../constants/group';
 import { GROUP_BACKDROP as Z_INDEX_GROUP_BACKDROP } from '../../../../constants/z-index';
+import { checkIsColumnFrozen } from '../../../../utils/column';
+import GroupContainerLeft from './group-container-left';
+import GroupContainerRight from './group-container-right';
 
 import './index.css';
 

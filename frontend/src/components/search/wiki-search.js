@@ -1,15 +1,15 @@
 import React, { Component, Fragment } from 'react';
-import PropTypes from 'prop-types';
 import MediaQuery from 'react-responsive';
-import { seafileAPI } from '../../utils/seafile-api';
-import { gettext } from '../../utils/constants';
-import SearchResultItem from './search-result-item';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import { SEARCH_MASK, SEARCH_CONTAINER } from '@/constants/zIndexes';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
+import Icon from '../icon';
 import More from '../more';
-import { Utils } from '../../utils/utils';
 import toaster from '../toast';
 import { getValueLength } from './constant';
-import { SEARCH_MASK, SEARCH_CONTAINER } from '../../constants/zIndexes';
-import Icon from '../icon';
+import SearchResultItem from './search-result-item';
 
 const propTypes = {
   repoID: PropTypes.string,

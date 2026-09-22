@@ -1,13 +1,13 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Modal, ModalBody, ModalFooter, Button } from 'reactstrap';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
+import PropTypes from 'prop-types';
 import CreatableSelect from 'react-select/creatable';
-import { MenuSelectStyle } from '../common/select/seahub-select-style';
-import { gettext } from '../../utils/constants';
-import { Utils } from '../../utils/utils';
+import wikiAPI from '@/api/wiki-api';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
+import { MenuSelectStyle } from '../select/seahub-select-style';
 import toaster from '../toast';
-import wikiAPI from '../../utils/wiki-api';
 
 const propTypes = {
   wikiId: PropTypes.string.isRequired,

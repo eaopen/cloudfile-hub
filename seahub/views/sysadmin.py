@@ -42,7 +42,7 @@ from seahub.utils.ldap import get_ldap_info
 from seahub.utils.licenseparse import parse_license
 from seahub.utils.ms_excel import write_xls
 from seahub.utils.repo import get_related_users_by_repo, get_repo_owner
-from seahub.utils.auth import get_login_bg_image_path
+from seahub.utils.auth import get_login_bg_image_path, user_local_password_enabled
 from seahub.views import get_system_default_repo_id
 from seahub.views.file import send_file_access_msg
 from seahub.forms import SetUserQuotaForm, AddUserForm
@@ -95,7 +95,6 @@ def sysadmin_react_fake_view(request, **kwargs):
         'multi_tenancy': MULTI_TENANCY,
         'multi_institution': multi_institution,
         'institutions': institutions,
-        'send_email_on_adding_system_member': SEND_EMAIL_ON_ADDING_SYSTEM_MEMBER,
         'sysadmin_extra_enabled': True if is_pro_version() else False,
         'enable_guest_invitation': ENABLE_GUEST_INVITATION,
         'enable_terms_and_conditions': config.ENABLE_TERMS_AND_CONDITIONS,
@@ -578,6 +577,10 @@ def user_reset(request, email):
     """Reset password for user."""
     try:
         user = User.objects.get(email=email)
+        if not user_local_password_enabled(user):
+            messages.error(request, _('Unable to reset password.'))
+            return HttpResponseRedirect(reverse('sys_info'))
+
         if isinstance(INIT_PASSWD, FunctionType):
             new_password = INIT_PASSWD()
         else:
@@ -915,6 +918,9 @@ def sys_sudo_mode(request):
         ip = get_remote_ip(request)
         if password:
             user = authenticate(username=username, password=password)
+            if user and not user_local_password_enabled(user):
+                user = None
+
             # After local user authentication process is completed, authenticate LDAP user
             if user is None and settings.ENABLE_LDAP and not settings.USE_LDAP_SYNC_ONLY:
                 user = authenticate(ldap_user=username, password=password)

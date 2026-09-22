@@ -1,23 +1,23 @@
 import React from 'react';
-import { createRoot } from 'react-dom/client';
-import PropTypes from 'prop-types';
 import { navigate } from '@gatsbyjs/reach-router';
 import dayjs from 'dayjs';
-import { Utils } from './utils/utils';
-import { gettext, siteRoot, mediaUrl, logoPath, logoWidth, logoHeight, siteTitle } from './utils/constants';
-import { seafileAPI } from './utils/seafile-api';
-import Loading from './components/loading';
-import Paginator from './components/paginator';
-import ModalPortal from './components/modal-portal';
-import CommonToolbar from './components/toolbar/common-toolbar';
-import CommitDetails from './components/dialog/commit-details';
-import UpdateRepoCommitLabels from './components/dialog/edit-repo-commit-labels';
-import { formatWithTimezone } from './utils/time';
-import Icon from './components/icon';
+import PropTypes from 'prop-types';
+import { createRoot } from 'react-dom/client';
+import { seafileAPI } from '@/api/seafile-api';
+import CommitDetails from '@/components/dialog/commit-details';
+import UpdateRepoCommitLabels from '@/components/dialog/edit-repo-commit-labels';
+import Icon from '@/components/icon';
+import Loading from '@/components/loading';
+import ModalPortal from '@/components/modal-portal';
+import Paginator from '@/components/paginator';
+import CommonToolbar from '@/components/toolbar/common-toolbar';
+import { gettext, siteRoot, mediaUrl, logoPath, logoWidth, logoHeight, siteTitle } from '@/utils/constants';
+import { formatWithTimezone } from '@/utils/time';
+import { Utils } from '@/utils/utils';
 
-import './css/toolbar.css';
-import './css/search.css';
-import './css/repo-history.css';
+import '@/css/toolbar.css';
+import '@/css/search.css';
+import '@/css/repo-history.css';
 
 const {
   repoID,

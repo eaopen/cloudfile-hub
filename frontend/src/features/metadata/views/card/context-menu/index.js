@@ -1,0 +1,179 @@
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import PropTypes from 'prop-types';
+import { setPendingAttachments } from '@/components/dir-chat/hooks/ai-chat-tools';
+import { AttachmentObject } from '@/components/dir-chat/models';
+import EventBus, { eventBus as globalEventBus, EVENT_BUS_TYPE as DIR_EVENT_BUS_TYPE } from '@/components/event-bus';
+import { getRowById } from '@/components/sf-table/utils/table';
+import { useFileOperations, useMetadataStatus } from '@/hooks';
+import TextTranslation from '@/utils/text-translation';
+import { Utils } from '@/utils/utils';
+import ContextMenu from '../../../components/context-menu';
+import RenameDialog from '../../../components/dialog/rename-dialog';
+import { PRIVATE_COLUMN_KEY, EVENT_BUS_TYPE } from '../../../constants';
+import { useMetadataView } from '../../../hooks/metadata-view';
+import { getFileNameFromRecord, getParentDirFromRecord } from '../../../utils/cell';
+import { getColumnByKey } from '../../../utils/column';
+import { openInNewTab, openParentFolder } from '../../../utils/file';
+import { buildCardMenuOptions } from '../../../utils/menu-builder';
+import { checkIsDir } from '../../../utils/row';
+
+const CardContextMenu = ({ selectedCard, onDelete, onRename }) => {
+  const [isRenameDialogShow, setIsRenameDialogShow] = useState(false);
+  const { enableFaceRecognition, enableTags } = useMetadataStatus();
+  const { handleDownload: handleDownloadAPI } = useFileOperations();
+  const {
+    metadata,
+    updateRecordDetails,
+    updateFaceRecognition,
+    updateRecordDescription,
+    onOCR,
+    generateFileTags
+  } = useMetadataView();
+
+  const selectedRecord = useMemo(() => getRowById(metadata, selectedCard), [metadata, selectedCard]);
+  const isDir = useMemo(() => checkIsDir(selectedRecord), [selectedRecord]);
+  const oldName = useMemo(() => getFileNameFromRecord(selectedRecord), [selectedRecord]);
+  const parentDir = useMemo(() => getParentDirFromRecord(selectedRecord), [selectedRecord]);
+  const repoID = window.sfMetadataContext.getSetting('repoID');
+  const readOnly = !window.sfMetadataContext.canModify();
+  const record = useMemo(() => getRowById(metadata, selectedCard), [metadata, selectedCard]);
+
+  const options = useMemo(() => {
+    const metadataStatus = {
+      enableFaceRecognition,
+      enableGenerateDescription: getColumnByKey(metadata.columns, PRIVATE_COLUMN_KEY.FILE_DESCRIPTION) !== null,
+      enableTags
+    };
+    return buildCardMenuOptions(
+      [record],
+      readOnly,
+      metadataStatus,
+      selectedCard,
+    );
+  }, [enableFaceRecognition, metadata.columns, enableTags, record, readOnly, selectedCard]);
+
+  const openRenameDialog = useCallback(() => {
+    setIsRenameDialogShow(true);
+  }, []);
+
+  const handleRename = useCallback((newName) => {
+    if (!selectedCard) return;
+    const record = getRowById(metadata, selectedCard);
+    if (!record) return;
+
+    const oldName = getFileNameFromRecord(record);
+    const updates = { [PRIVATE_COLUMN_KEY.FILE_NAME]: newName };
+    const oldRowData = { [PRIVATE_COLUMN_KEY.FILE_NAME]: oldName };
+    onRename(selectedCard, updates, oldRowData, updates, oldRowData, {
+      success_callback: () => setIsRenameDialogShow(false),
+    });
+  }, [metadata, selectedCard, onRename]);
+
+  const handleDownload = useCallback(() => {
+    handleDownloadAPI(parentDir, [{ name: oldName, is_dir: isDir }]);
+  }, [handleDownloadAPI, parentDir, oldName, isDir]);
+
+  const handleOptionClick = useCallback((option) => {
+    switch (option.key) {
+      case TextTranslation.OPEN_FILE_IN_NEW_TAB.key: {
+        openInNewTab(repoID, record);
+        break;
+      }
+      case TextTranslation.OPEN_PARENT_FOLDER.key: {
+        openParentFolder(record);
+        break;
+      }
+      case TextTranslation.RENAME.key: {
+        openRenameDialog();
+        break;
+      }
+      case TextTranslation.MOVE.key:
+        window.sfMetadataContext.eventBus.dispatch(EVENT_BUS_TYPE.TOGGLE_MOVE_DIALOG, [record]);
+        break;
+      case TextTranslation.COPY.key:
+        window.sfMetadataContext.eventBus.dispatch(EVENT_BUS_TYPE.TOGGLE_COPY_DIALOG, [record]);
+        break;
+      case TextTranslation.DOWNLOAD.key: {
+        handleDownload();
+        break;
+      }
+      case TextTranslation.CHAT_WITH_AI.key: {
+        const attachments = record ? [new AttachmentObject({
+          repo_id: repoID,
+          path: Utils.joinPath(parentDir, oldName),
+          name: oldName,
+        })] : [];
+
+        setPendingAttachments(attachments, true);
+        globalEventBus.dispatch(DIR_EVENT_BUS_TYPE.SWITCH_TO_CHAT_VIEW);
+        if (attachments.length > 0) {
+          EventBus.getInstance().dispatch(DIR_EVENT_BUS_TYPE.CHAT_ATTACH_FILES, {
+            attachments,
+            reset: true,
+          });
+        }
+        break;
+      }
+      case TextTranslation.DELETE.key: {
+        onDelete([selectedCard]);
+        break;
+      }
+      case TextTranslation.DETECT_FACES.key: {
+        updateFaceRecognition([record]);
+        break;
+      }
+      case TextTranslation.EXTRACT_FILE_DETAIL.key: {
+        updateRecordDetails([record]);
+        break;
+      }
+      case TextTranslation.GENERATE_DESCRIPTION.key: {
+        updateRecordDescription(record);
+        break;
+      }
+      case TextTranslation.GENERATE_TAGS.key: {
+        generateFileTags(record);
+        break;
+      }
+      case TextTranslation.EXTRACT_TEXT.key: {
+        onOCR(record, '.sf-metadata-card-item-image-container');
+        break;
+      }
+      default: {
+        break;
+      }
+    }
+  }, [record, repoID, openRenameDialog, handleDownload, parentDir, oldName, onDelete, selectedCard, updateFaceRecognition, updateRecordDetails, updateRecordDescription, generateFileTags, onOCR]);
+
+  useEffect(() => {
+    const unsubscribe = window.sfMetadataContext.eventBus.subscribe(EVENT_BUS_TYPE.TOGGLE_CARD_RENAME_DIALOG, openRenameDialog);
+    return () => {
+      unsubscribe();
+    };
+  }, [openRenameDialog]);
+
+  return (
+    <>
+      <ContextMenu
+        options={options}
+        onOptionClick={handleOptionClick}
+        allowedTriggerElements={['.sf-metadata-view-card']}
+      />
+      {isRenameDialogShow && (
+        <RenameDialog
+          isDir={isDir}
+          oldName={oldName}
+          onSubmit={handleRename}
+          onCancel={() => setIsRenameDialogShow(false)}
+        />
+      )}
+    </>
+  );
+};
+
+CardContextMenu.propTypes = {
+  selectedCard: PropTypes.string,
+  onDelete: PropTypes.func,
+  onRename: PropTypes.func,
+};
+
+export default CardContextMenu;

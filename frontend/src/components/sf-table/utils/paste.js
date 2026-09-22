@@ -1,8 +1,8 @@
-import { getColumnByIndex, getColumnOriginName } from './column';
-import { getCellValueByColumn, getFileNameFromRecord, isCellValueChanged } from './cell';
-import { PASTE_SOURCE, TRANSFER_TYPES } from '../constants/transfer-types';
-import { CellType, PRIVATE_COLUMN_KEY } from '../../../metadata/constants';
+import { CellType, PRIVATE_COLUMN_KEY } from '@/features/metadata/constants';
 import { Utils } from '@/utils/utils';
+import { PASTE_SOURCE, TRANSFER_TYPES } from '../constants/transfer-types';
+import { getCellValueByColumn, getFileNameFromRecord, isCellValueChanged } from './cell';
+import { getColumnByIndex, getColumnOriginName } from './column';
 import { convertCellValue } from './convert-utils';
 
 const isCopyPaste = true;

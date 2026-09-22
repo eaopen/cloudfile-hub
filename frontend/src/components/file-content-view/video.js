@@ -1,7 +1,7 @@
 import React from 'react';
+import { MimetypesKind } from '@/utils/constants';
 import VideoPlayer from '../video-player';
-import { MimetypesKind } from '../../utils/constants';
-import '../../css/video-file-view.css';
+import '@/css/video-file-view.css';
 
 const {
   rawPath, fileExt

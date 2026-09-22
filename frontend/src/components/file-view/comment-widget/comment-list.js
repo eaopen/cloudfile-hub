@@ -1,17 +1,17 @@
 import React from 'react';
-import PropTypes from 'prop-types';
-import dayjs from 'dayjs';
 import { SeafileCommentEditor } from '@seafile/comment-editor';
-import { gettext } from '../../../utils/constants';
-import { seafileAPI } from '../../../utils/seafile-api';
-import { Utils } from '../../../utils/utils';
-import toaster from '../../toast';
-import Loading from '../../loading';
-import CommentItemReadOnly from './comment-item-readonly';
-import Icon from '../../icon';
+import dayjs from 'dayjs';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
 import OpIcon from '@/components/op-icon';
 import Tooltip from '@/components/tooltip';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import CustomDropdown from '../../dropdown';
+import Icon from '../../icon';
+import Loading from '../../loading';
+import toaster from '../../toast';
+import CommentItemReadOnly from './comment-item-readonly';
 
 const { username, repoID, filePath } = window.app.pageOptions;
 

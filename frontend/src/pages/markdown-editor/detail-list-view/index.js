@@ -1,12 +1,12 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import { gettext } from '../../../utils/constants';
-import { Utils } from '../../../utils/utils';
+import PropTypes from 'prop-types';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 
-import '../../../css/dirent-detail.css';
-import '../css/detail-list-view.css';
+import '@/css/dirent-detail.css';
+import './index.css';
 
 dayjs.extend(relativeTime);
 

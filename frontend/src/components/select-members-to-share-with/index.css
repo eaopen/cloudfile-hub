@@ -1,0 +1,19 @@
+.add-members .toggle-detail-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  border-bottom-left-radius: 0;
+  border-top-left-radius: 0;
+  /* the height of its parent may vary */
+  height: 100%;
+  cursor: pointer;
+}
+
+/* for the input before .toggle-detail-btn */
+.add-members .user-select-trigger:has(+ .toggle-detail-btn) {
+  padding-right: 40px;
+}
+
+.add-members:has(.toggle-detail-btn) .select-dropdown-indicator {
+  display: none!important;
+}

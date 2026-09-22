@@ -1,14 +1,13 @@
 import React, { Fragment } from 'react';
-import { createRoot } from 'react-dom/client';
-import { Utils } from '../../utils/utils';
-import { seafileAPI } from '../../utils/seafile-api';
-import { gettext } from '../../utils/constants';
-import Logo from '../../components/logo';
-import Account from '../../components/common/account';
+import { seafileAPI } from '@/api/seafile-api';
+import Account from '@/components/account';
+import Icon from '@/components/icon';
+import Logo from '@/components/logo';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import FileUploader from './file-uploader';
-import Icon from '../../components/icon';
 
-import '../../css/upload-link.css';
+import '@/css/upload-link.css';
 
 const loggedUser = window.app.pageOptions.username;
 const {
@@ -78,5 +77,5 @@ class SharedUploadLink extends React.Component {
   }
 }
 
-const root = createRoot(document.getElementById('wrapper'));
-root.render(<SharedUploadLink />);
+export default SharedUploadLink;
+

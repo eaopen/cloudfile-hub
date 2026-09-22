@@ -1,14 +1,14 @@
+import React from 'react';
+import { isEnabled as cloudfileIsEnabled } from '@/cloudfile/features';
+import toaster from '@/components/toast';
+import { PRIVATE_FILE_TYPE } from '@/constants';
+import { compareTwoString } from './compare-two-string';
 import { mediaUrl, gettext, serviceURL, siteRoot, isPro, fileAuditEnabled, canGenerateShareLink, canGenerateUploadLink, shareLinkPasswordMinLength, username, folderPermEnabled, cloudFileLockEnabled, onlyofficeConverterExtensions, enableSeadoc, enableRepoSnapshotLabel,
   enableResetEncryptedRepoPassword, isEmailConfigured, isSystemStaff,
   enableOnlyoffice, onlyofficeEditFileExtension,
   enableOfficeWebApp, officeWebAppEditFileExtension, enableMultipleOfficeSuite, officeSuiteEditFileExtension } from './constants';
+import PermissionDeniedTip from './permission-denied-tip';
 import TextTranslation from './text-translation';
-import React from 'react';
-import toaster from '../components/toast';
-import PermissionDeniedTip from '../components/permission-denied-tip';
-import { compareTwoString } from './compare-two-string';
-import { PRIVATE_FILE_TYPE } from '../constants';
-import { isEnabled as cloudfileIsEnabled } from '../cloudfile/features';
 
 export const Utils = {
 
@@ -117,7 +117,6 @@ export const Utils = {
     'webp': 'pic.png',
     'jfif': 'pic.png',
     'avif': 'pic.png',
-    'draw': 'draw.png',
     'exdraw': 'draw.png',
 
     // photoshop file
@@ -621,6 +620,20 @@ export const Utils = {
     }
 
     return list;
+  },
+
+  canDownloadFile: function (dirent) {
+    const { permission } = dirent;
+    const { isCustomPermission, customPermission } = Utils.getUserPermission(permission);
+    return (permission == 'rw' || permission == 'r') || (isCustomPermission && customPermission.permission.download);
+  },
+
+  canDeleteFile: function (dirent) {
+    const { permission } = dirent;
+    const { isCustomPermission, customPermission } = Utils.getUserPermission(permission);
+    const perm = (permission == 'rw' || permission == 'cloud-edit') || (isCustomPermission && customPermission.permission.delete);
+    const locked = !dirent.is_locked || (dirent.is_locked && dirent.locked_by_me);
+    return perm && locked;
   },
 
   getFileOperationList: function (isRepoOwner, currentRepoInfo, dirent, isContextmenu) {

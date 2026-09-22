@@ -1,0 +1,54 @@
+import React, { useState } from 'react';
+import { Button } from 'reactstrap';
+import { useLocation } from '@gatsbyjs/reach-router';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
+import LogsExportExcelDialog from '@/components/dialog/sysadmin-dialog/sysadmin-logs-export-excel-dialog';
+import ModalPortal from '@/components/modal-portal';
+import { gettext } from '@/utils/constants';
+import LogsNav from './logs-nav';
+import './logs.css';
+
+const LOG_PATH_NAME_MAP = {
+  'login': 'loginLogs',
+  'file-access': 'fileAccessLogs',
+  'file-update': 'fileUpdateLogs',
+  'share-permission': 'sharePermissionLogs',
+  'repo-transfer': 'fileTransfer',
+  'group-member-audit': 'groupMember',
+};
+
+const Logs = ({ children, ...commonProps }) => {
+  const [isExportExcelDialogOpen, setIsExportExcelDialogOpen] = useState(false);
+  const location = useLocation();
+  const path = location.pathname.split('/').filter(Boolean).pop();
+  const curTab = LOG_PATH_NAME_MAP[path];
+
+  const toggleDialog = () => {
+    setIsExportExcelDialogOpen(!isExportExcelDialogOpen);
+  };
+
+  const showDefaultTopbar = curTab === 'fileTransfer' || curTab === 'groupMember';
+  return (
+    <>
+      {showDefaultTopbar ? (
+        <MainPanelTopbar {...commonProps} />
+      ) : (
+        <MainPanelTopbar {...commonProps}>
+          <Button className="btn btn-secondary operation-item" onClick={toggleDialog}>{gettext('Export Excel')}</Button>
+        </MainPanelTopbar>
+      )}
+      <LogsNav currentItem={curTab} {...commonProps} />
+      <div className="system-admin-logs h-100 w-100 d-flex overflow-auto">{children}</div>
+      {isExportExcelDialogOpen &&
+        <ModalPortal>
+          <LogsExportExcelDialog
+            logType={curTab}
+            toggle={toggleDialog}
+          />
+        </ModalPortal>
+      }
+    </>
+  );
+};
+
+export default Logs;

@@ -1,0 +1,286 @@
+.sea-ai-ask-wrapper .sea-ai-ask-chat-input-wrapper {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  border-radius: 16px;
+}
+
+.sea-ai-ask-chat-input-container {
+  position: relative;
+  width: 100%;
+  padding: 16px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 16px;
+  background-color: var(--bs-body-bg);
+  box-shadow: 0 0 0 1px var(--bs-border-color);
+}
+
+.sea-ai-ask-chat-input-content {
+  width: 100%;
+  height: fit-content;
+  position: relative;
+}
+
+.sea-ai-ask-chat-input-content .message-input {
+  width: 100%;
+  height: 100%;
+  min-height: 80px;
+  max-height: 184px;
+  overflow-y: auto;
+  padding: 0 16px 12px;
+  border: none;
+  border-radius: 6px;
+  cursor: text;
+  resize: none;
+  line-height: 22px;
+  color: var(--bs-body-color);
+  background-color: transparent;
+}
+
+.sea-ai-ask-chat-input-content .message-input::placeholder {
+  color: var(--bs-placeholder-input-color);
+  font-size: 14px;
+  line-height: 22px;
+}
+
+.sea-ai-ask-chat-input-content .message-input:focus-visible {
+  outline: none;
+}
+
+.sea-ai-ask-chat-input-wrapper.disabled .sea-ai-ask-chat-input-content .message-input {
+  cursor: default;
+}
+
+.sea-ai-ask-chat-input-content .message-input.message-input-value {
+  overscroll-behavior: contain;
+  position: absolute;
+  top: 0;
+}
+
+.sea-ai-ask-chat-input-content .message-input.message-input-value:disabled {
+  background-color: transparent;
+}
+
+.sea-ai-ask-chat-input-content .message-input.message-input-preview {
+  border-radius: 0;
+  visibility: hidden;
+  pointer-events: none;
+  height: fit-content;
+}
+
+.sea-ai-ask-chat-operations-container {
+  height: 48px;
+  padding-top: 12px;
+  width: 100%;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.sea-ai-ask-chat-operations-container .sea-ai-ask-icon-btn {
+  width: 32px;
+  min-width: 32px;
+  height: 32px;
+  z-index: 1;
+}
+
+.sea-ai-ask-chat-operations-container .attach-files-btn {
+  height: 36px !important;
+  width: 36px !important;
+  border-radius: 8px;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  cursor: pointer;
+}
+
+.sea-ai-ask-chat-operations-container .attach-files-btn .selected-option {
+  display: flex;
+}
+
+.sea-ai-ask-chat-operations-container .attach-files-btn:hover {
+  background-color: var(--bs-icon-btn-hover-bg-color);
+}
+
+.sea-ai-ask-chat-operations-container .icon-send-wrapper {
+  background-color: var(--bs-bg-disabled-secondary);
+  border: 1px solid var(--bs-bg-disabled-secondary);
+  border-radius: 16px;
+}
+
+.sea-ai-ask-chat-operations-container .icon-send-wrapper:not(.disabled) {
+  background-color: var(--bs-primary);
+  border-color: var(--bs-primary);
+  cursor: pointer;
+}
+
+.sea-ai-ask-chat-operations-container .icon-send-wrapper:not(.disabled):hover {
+  background-color: var(--bs-orange);
+  border-color: var(--bs-orange);
+}
+
+.sea-ai-ask-chat-operations-container .icon-send-wrapper.disabled {
+  cursor: default;
+}
+
+.sea-ai-ask-chat-operations-container-left .sea-ai-ask-icon-btn,
+.sea-ai-ask-chat-operations-container-right .sea-ai-ask-icon-btn {
+  margin: 0;
+  cursor: pointer;
+}
+
+.sea-ai-ask-chat-operations-container .icon-send-wrapper:not(.disabled) .sea-ai-icon-svg {
+  color: #fff;
+}
+
+.sea-ai-ask-chat-operations-container .icon-send-wrapper.disabled .sea-ai-icon-svg {
+  color: #fff;
+}
+
+.sea-ai-ask-chat-operations-container .attach-files-btn .sea-ai-icon-svg {
+  color: var(--bs-icon-color);
+}
+
+.sea-ai-ask-chat-operations-container .sea-ai-icon-svg {
+  height: 1rem;
+  width: 1rem;
+}
+
+.sea-ai-ask-chat-operations-container .sea-ai-icon-svg {
+  color: var(--bs-icon-color);
+}
+
+.sea-ai-ask-chat-operations-container .sea-ai-ask-chat-operations-container-left {
+  display: flex;
+  align-items: center;
+  padding: 0 8px 0 16px;
+  gap: 8px;
+}
+
+.sea-ai-ask-chat-operations-container .sea-ai-ask-chat-operations-container-right {
+  display: flex;
+  align-items: center;
+  padding: 0 16px 0 8px;
+  gap: 12px;
+  overflow: hidden;
+}
+
+.sea-ai-model-selector .selected-option-show {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+}
+
+.sea-ai-model-selector .selected-option {
+  display: flex;
+  flex: 1;
+  height: 100%;
+  overflow: hidden;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sea-ai-model-selector .selected-option-show .sea-ai-model-logo,
+.sea-ai-model-selector .selected-option-show .sea-ai-model-logo img {
+  height: 16px;
+  width: 16px;
+}
+
+.sea-ai-model-selector .selected-option-show .sea-ai-model-logo {
+  margin-right: 8px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.sea-ai-model-selector .sea-ai-model-logo-openai img,
+.sea-ai-model-selector-editor .option-editor-option-icon[src$="openai.png"] {
+  filter: var(--bs-image-filter);
+}
+
+.sea-ai-model-selector .sea-ai-model-name {
+  display: flex;
+  height: 100%;
+  align-items: center;
+  min-width: 0;
+}
+
+.sea-ai-model-selector .selected-option .sea-ai-icon-svg {
+  flex-shrink: 0;
+}
+
+.sea-ai-model-selector .seafile-multicolor-icon-arrow-down {
+  width: 12px;
+  height: 12px;
+}
+
+.sea-ai-ask-chat-records-selector {
+  width: 36px !important;
+  padding: 0 10px !important;
+}
+
+.sea-ai-ask-chat-records-selector.simple .selected-option-show {
+  display: none;
+}
+
+.sea-ai-model-selector-editor .popover,
+.sea-ai-model-selector-editor .option-editor-container {
+  height: auto;
+}
+
+.sea-ai-model-selector-editor .popover {
+  min-width: fit-content;
+  width: fit-content;
+}
+
+.sea-ai-model-selector-editor .option-editor-container .option-editor-content {
+  flex: 0 1 auto;
+  min-height: 0;
+  max-height: 200px;
+}
+
+.attach-files-trigger-container {
+  position: relative;
+}
+
+.attach-files-popover {
+  position: absolute;
+  left: 0;
+  bottom: 48px;
+  width: 360px;
+  height: 420px;
+  overflow: hidden;
+  border-radius: 12px;
+  background-color: var(--bs-popover-bg);
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.12);
+  border: 1px solid var(--bs-border-secondary-color);
+  z-index: 30;
+}
+
+.attach-files-popover .file-chooser-search-input {
+  padding: 12px 16px !important;
+}
+
+.attach-files-popover .file-chooser-search-input .search-input {
+  color: var(--bs-body-color);
+  background-color: transparent;
+  border-color: var(--bs-border-color);
+}
+
+.attach-files-popover .file-chooser-scroll-wrapper {
+  height: calc(100% - 61px);
+}
+
+.attach-files-popover .file-chooser-container {
+  padding-bottom: 12px;
+}

@@ -24,7 +24,7 @@ from seahub.repo_metadata.constants import METADATA_RECORD_UPDATE_LIMIT
 from seahub.repo_metadata.metadata_server_api import list_metadata_view_records, MetadataServerAPI
 from seahub.repo_metadata.models import RepoMetadata, RepoMetadataViews
 from seahub.repo_metadata.utils import get_update_record, get_unmodifiable_columns, can_read_metadata, \
-    remove_tags_table, init_tags, get_table_by_name
+    remove_tags_table, init_tags, get_table_by_name, filter_face_recognition_views
 from seahub.seadoc.models import SeadocHistoryName, SeadocCommentReply
 from seahub.utils.file_op import if_locked_by_online_office
 from seahub.seadoc.utils import get_seadoc_file_uuid
@@ -645,7 +645,7 @@ class ViaRepoBatchMove(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         permission = check_folder_permission_by_repo_api(request, repo_id, None)
-        if not permission:
+        if permission != PERMISSION_READ_WRITE:
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -716,7 +716,7 @@ class ViaRepoBatchCopy(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         permission = check_folder_permission_by_repo_api(request, repo_id, None)
-        if not permission:
+        if permission != PERMISSION_READ_WRITE:
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
         # argument check
@@ -783,7 +783,7 @@ class ViaRepoBatchDelete(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         permission = check_folder_permission_by_repo_api(request, repo_id, None)
-        if not permission:
+        if permission != PERMISSION_READ_WRITE:
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -1692,6 +1692,8 @@ class ViaRepoMetadataViews(APIView):
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
+        metadata_views = filter_face_recognition_views(metadata_views)
+
         return Response(metadata_views)
 
     def post(self, request):
@@ -1731,6 +1733,10 @@ class ViaRepoMetadataViews(APIView):
         if permission != 'rw':
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+
+        if view_type == 'face_recognition':
+            error_msg = 'The face recognition view is no longer available.'
+            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         try:
             new_view = RepoMetadataViews.objects.add_view(repo_id, view_name, view_type, view_data, folder_id)
@@ -1784,6 +1790,8 @@ class ViaRepoMetadataViews(APIView):
 
         try:
             result = RepoMetadataViews.objects.update_view(repo_id, view_id, view_data)
+            if result is None:
+                return api_error(status.HTTP_400_BAD_REQUEST, 'update view failed')
         except Exception as e:
             logger.exception(e)
             error_msg = 'Internal Server Error'
@@ -1994,6 +2002,10 @@ class ViaRepoMetadataViewsDetailView(APIView):
             logger.exception(e)
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
+
+        if not view:
+            error_msg = 'Metadata view %s not found.' % view_id
+            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         return Response({'view': view})
 
@@ -2277,11 +2289,7 @@ class ViaRepoMetadataTagsStatusManage(APIView):
 
     def put(self, request):
         repo_id = request.repo_api_token_obj.repo_id
-        lang = request.data.get('lang')
         username = request.repo_api_token_obj.generated_by
-        if not lang:
-            error_msg = 'lang invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         # resource check
         repo = seafile_api.get_repo(repo_id)
@@ -2303,7 +2311,6 @@ class ViaRepoMetadataTagsStatusManage(APIView):
 
         try:
             metadata.tags_enabled = True
-            metadata.tags_lang = lang
             metadata.save()
         except Exception as e:
             logger.exception(e)
@@ -2346,7 +2353,6 @@ class ViaRepoMetadataTagsStatusManage(APIView):
 
         try:
             record.tags_enabled = False
-            record.tags_lang = None
             record.save()
         except Exception as e:
             logger.error(e)

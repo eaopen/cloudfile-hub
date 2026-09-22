@@ -1,14 +1,14 @@
 import React, { Fragment } from 'react';
 import { Input } from 'reactstrap';
 import dayjs from 'dayjs';
-import { gettext } from '../../../utils/constants';
-import TrafficTable from './traffic-table';
+import { systemAdminAPI } from '@/api/system-admin-api';
+import TrafficTable from '@/components/admin/statistics/traffic-table';
+import Loading from '@/components/loading';
+import Paginator from '@/components/paginator';
+import toaster from '@/components/toast';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import TrafficTableBody from './traffic-table-body';
-import { systemAdminAPI } from '../../../utils/system-admin-api';
-import Paginator from '../../../components/paginator';
-import Loading from '../../../components/loading';
-import { Utils } from '../../../utils/utils';
-import toaster from '../../../components/toast';
 
 class OrgsTraffic extends React.Component {
 

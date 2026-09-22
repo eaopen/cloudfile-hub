@@ -1,16 +1,16 @@
 import React, { useCallback, useState, useRef, useEffect, useMemo } from 'react';
-import PropTypes from 'prop-types';
 import { Modal, ModalBody, Input, Button } from 'reactstrap';
 import isHotkey from 'is-hotkey';
-import searchAPI from '../../utils/search-api';
-import { gettext, mediaUrl } from '../../utils/constants';
-import { debounce, Utils } from '../../utils/utils';
-import toaster from '../toast';
-import Loading from '../loading';
-import Wiki2SearchResult from './wiki2-search-result';
-import IconBtn from '../icon-btn';
+import PropTypes from 'prop-types';
+import searchAPI from '@/api/search-api';
+import { gettext, mediaUrl } from '@/utils/constants';
+import { debounce, Utils } from '@/utils/utils';
 import Icon from '../icon';
+import IconBtn from '../icon-btn';
+import Loading from '../loading';
+import toaster from '../toast';
 import Tooltip from '../tooltip';
+import Wiki2SearchResult from './wiki2-search-result';
 
 import './wiki2-search.css';
 
@@ -231,7 +231,7 @@ function Wiki2Search({ setCurrentPage, config, getCurrentPageId, wikiId }) {
               {(value === '' && !isResultGotten) && (
                 <div className="search-result-none search-result-start-searching-tip">
                   <img className='none-image' src={`${mediaUrl}img/start-searching.png`} alt="" width="48" height="48" />
-                  <span className='none-tip'>{gettext('Type characters to start search')}</span>
+                  <span className='none-tip'>{gettext('Enter characters to start searching')}</span>
                 </div>
               )}
               {(value !== '' && isResultGotten && results.length === 0) && (

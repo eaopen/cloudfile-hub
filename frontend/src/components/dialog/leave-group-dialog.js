@@ -1,11 +1,11 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Modal, ModalBody, ModalFooter, Button } from 'reactstrap';
-import { gettext, username } from '../../utils/constants';
-import { seafileAPI } from '../../utils/seafile-api';
-import { Utils } from '../../utils/utils';
+import PropTypes from 'prop-types';
+import { seafileAPI } from '@/api/seafile-api';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import { gettext, username } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import toaster from '../toast';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
 
 class LeaveGroupDialog extends React.Component {
 

@@ -1,10 +1,11 @@
 import React, { Component } from 'react';
 import PropTypes from 'prop-types';
-import { gettext, siteRoot, repoID, slug, username, permission } from '../../utils/constants';
-import Logo from '../../components/logo';
-import Loading from '../../components/loading';
-import TreeView from '../../components/tree-view/tree-view';
+import Loading from '@/components/loading';
+import Logo from '@/components/logo';
+import TreeView from '@/components/tree-view/tree-view';
+import { gettext, siteRoot, repoID, slug, username, permission } from '@/utils/constants';
 import IndexMdViewer from './index-md-viewer';
+import './side-panel.css';
 
 const propTypes = {
   closeSideBar: PropTypes.bool.isRequired,

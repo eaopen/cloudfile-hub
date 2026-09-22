@@ -1,23 +1,22 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import PropTypes from 'prop-types';
-import { gettext } from '../../utils/constants';
-import { EVENT_BUS_TYPE, PRIVATE_COLUMN_KEY } from '../../metadata/constants';
-import TextTranslation from '../../utils/text-translation';
-import RowUtils from '../sf-table/utils/row';
-import { checkIsDir } from '../../metadata/utils/row';
-import { Utils } from '../../utils/utils';
+import { EVENT_BUS_TYPE, PRIVATE_COLUMN_KEY } from '@/features/metadata/constants';
+import { getFileNameFromRecord, getParentDirFromRecord } from '@/features/metadata/utils/cell';
+import { openInNewTab, openParentFolder } from '@/features/metadata/utils/file';
+import { buildTableToolbarMenuOptions } from '@/features/metadata/utils/menu-builder';
+import { checkIsDir } from '@/features/metadata/utils/row';
+import { useMetadataStatus } from '@/hooks';
+import { gettext } from '@/utils/constants';
+import TextTranslation from '@/utils/text-translation';
+import { Utils } from '@/utils/utils';
 import OpIcon from '../../components/op-icon';
-import { getFileNameFromRecord, getParentDirFromRecord } from '../../metadata/utils/cell';
-import { openInNewTab, openParentFolder } from '../../metadata/utils/file';
-import { buildTableToolbarMenuOptions } from '../../metadata/utils/menu-builder';
-import { useMetadataStatus } from '../../hooks';
-import { getColumnByKey } from '../sf-table/utils/column';
-import Icon from '../icon';
-import EventBus, { eventBus as globalEventBus } from '../common/event-bus';
-import { EVENT_BUS_TYPE as DIR_EVENT_BUS_TYPE } from '../common/event-bus-type';
+import { setPendingAttachments } from '../dir-chat/hooks/ai-chat-tools';
+import { AttachmentObject } from '../dir-chat/models';
 import CustomDropdown from '../dropdown';
-import { setPendingAttachments } from '../dir-view-mode/dir-chat/hooks/ai-chat-tools';
-import { AttachmentObject } from '../dir-view-mode/dir-chat/models';
+import EventBus, { eventBus as globalEventBus, EVENT_BUS_TYPE as DIR_EVENT_BUS_TYPE } from '../event-bus';
+import Icon from '../icon';
+import { getColumnByKey } from '../sf-table/utils/column';
+import RowUtils from '../sf-table/utils/row';
 
 const TableFilesToolbar = ({ repoID }) => {
   const [selectedRecordIds, setSelectedRecordIds] = useState([]);
@@ -253,7 +252,7 @@ const TableFilesToolbar = ({ repoID }) => {
         <OpIcon
           id="delete-btn"
           className="cur-view-path-btn"
-          symbol="delete1"
+          symbol="delete"
           tooltip={gettext('Delete')}
           aria-label={gettext('Delete')}
           op={deleteRecords}

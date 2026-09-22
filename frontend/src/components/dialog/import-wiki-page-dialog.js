@@ -1,11 +1,11 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Modal, ModalBody } from 'reactstrap';
-import { gettext } from '../../utils/constants';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
+import PropTypes from 'prop-types';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import { gettext } from '@/utils/constants';
 import Loading from '../loading';
 
-import '../../css/seahub-io-dialog.css';
+import '@/css/seahub-io-dialog.css';
 
 const propTypes = {
   toggleDialog: PropTypes.func.isRequired,

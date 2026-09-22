@@ -1,19 +1,19 @@
 import React, { Component, Fragment } from 'react';
-import PropTypes from 'prop-types';
-import { Utils } from '../../../utils/utils';
-import { orgAdminAPI } from '../../../utils/org-admin-api';
-import { gettext, siteRoot, orgID } from '../../../utils/constants';
-import toaster from '../../../components/toast/index';
-import EmptyTip from '../../../components/empty-tip';
-import Loading from '../../../components/loading';
-import Paginator from '../../../components/paginator';
-import ModalPortal from '../../../components/modal-portal';
-import TransferDialog from '../../../components/dialog/transfer-dialog';
 import { navigate } from '@gatsbyjs/reach-router';
-import OrgAdminRepo from '../../../models/org-admin-repo';
-import MainPanelTopbar from '../main-panel-topbar';
+import PropTypes from 'prop-types';
+import { orgAdminAPI } from '@/api/org-admin-api';
+import MainPanelTopbar from '@/components/admin/layout/main-panel-topbar';
+import TransferDialog from '@/components/dialog/transfer-dialog';
+import CustomDropdown from '@/components/dropdown';
+import EmptyTip from '@/components/empty-tip';
+import Loading from '@/components/loading';
+import ModalPortal from '@/components/modal-portal';
+import Paginator from '@/components/paginator';
+import toaster from '@/components/toast/index';
+import OrgAdminRepo from '@/models/org-admin-repo';
+import { gettext, siteRoot, orgID } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import ReposNav from './org-repo-nav';
-import CustomDropdown from '../../../components/dropdown';
 
 
 class Content extends Component {
@@ -359,7 +359,7 @@ class OrgAllRepos extends Component {
   render() {
     return (
       <Fragment>
-        <MainPanelTopbar />
+        <MainPanelTopbar {...this.props} />
         <div className="main-panel-center flex-row">
           <div className="cur-view-container">
             <ReposNav

@@ -1,0 +1,102 @@
+import React, { useCallback, useMemo, useState, useEffect } from 'react';
+import classnames from 'classnames';
+import PropTypes from 'prop-types';
+import OpIcon from '@/components/op-icon';
+import { HISTORY_MODE } from '@/constants/view-mode';
+import { gettext } from '@/utils/constants';
+import { isEnter, isSpace } from '@/utils/hotkey';
+import HistoryFilterPopover from './history-filter-popover';
+
+const DEFAULT_FILTER = {
+  date: { value: '', from: null, to: null },
+  creators: [],
+  tags: [],
+  suffixes: '',
+};
+const HistoryFilterSetter = ({ mode = HISTORY_MODE, filters = DEFAULT_FILTER, onFiltersChange }) => {
+
+  const [isShowPopover, setShowPopover] = useState(false);
+  const [localFilters, setLocalFilters] = useState(filters);
+
+  useEffect(() => {
+    if (!isShowPopover) {
+      setLocalFilters(filters);
+    }
+  }, [filters, isShowPopover]);
+
+  const filtersCount = useMemo(() => {
+    let count = 0;
+    if (localFilters.date && localFilters.date.value) count++;
+    if (localFilters.creators && localFilters.creators.length > 0) count++;
+    if (localFilters.tags && localFilters.tags.length > 0) count++;
+    if (localFilters.suffixes) count++;
+    return count;
+  }, [localFilters]);
+
+  const message = useMemo(() => {
+    if (filtersCount === 1) return gettext('1 filter');
+    if (filtersCount > 1) return filtersCount + ' ' + gettext('Filters');
+    return gettext('Filter');
+  }, [filtersCount]);
+
+  const onToggle = useCallback(() => {
+    setShowPopover(!isShowPopover);
+  }, [isShowPopover]);
+
+  const onKeyDown = useCallback((event) => {
+    event.stopPropagation();
+    if (isEnter(event) || isSpace(event)) onToggle();
+  }, [onToggle]);
+
+  const handleClose = useCallback(() => {
+    onFiltersChange(localFilters);
+    setShowPopover(false);
+  }, [onFiltersChange, localFilters]);
+
+  const handleChange = useCallback((newFilters) => {
+    setLocalFilters(newFilters);
+  }, []);
+
+  const className = classnames(
+    'sf-history-view-tool-operation-btn',
+    'sf-history-view-tool-filter',
+    { 'active': filtersCount > 0 }
+  );
+
+  return (
+    <div className="history-filter-setter-wrapper">
+      <OpIcon
+        symbol="filter"
+        className={className}
+        op={onToggle}
+        onKeyDown={onKeyDown}
+        tooltip={message}
+        disableTooltip={isShowPopover}
+        aria-label={message}
+        tabIndex={0}
+        id="history-filter-popover-target"
+      />
+      {isShowPopover && (
+        <HistoryFilterPopover
+          mode={mode}
+          target="history-filter-popover-target"
+          filters={localFilters}
+          onClose={handleClose}
+          onChange={handleChange}
+        />
+      )}
+    </div>
+  );
+};
+
+HistoryFilterSetter.propTypes = {
+  filters: PropTypes.shape({
+    date: PropTypes.object,
+    creators: PropTypes.array,
+    tags: PropTypes.array,
+    suffixes: PropTypes.string,
+  }),
+  onFiltersChange: PropTypes.func.isRequired,
+};
+
+export default HistoryFilterSetter;

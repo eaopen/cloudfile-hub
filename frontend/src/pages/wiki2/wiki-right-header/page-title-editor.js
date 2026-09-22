@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
-import PropTypes from 'prop-types';
 import { EventBus } from '@seafile/seafile-sdoc-editor';
-import { gettext } from '../../../utils/constants';
+import PropTypes from 'prop-types';
+import { gettext } from '@/utils/constants';
 import { DEFAULT_PAGE_NAME } from '../constant';
 
 function PageTitleEditor({ isUpdateBySide, currentPageConfig, onUpdatePageConfig }) {

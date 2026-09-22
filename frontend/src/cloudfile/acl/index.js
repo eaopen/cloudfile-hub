@@ -1,6 +1,6 @@
 import React from 'react';
 import { createRoot } from 'react-dom/client';
-import { gettext } from '../../utils/constants';
+import { gettext } from '@/utils/constants';
 import { loadFeatures, isEnabled } from '../features';
 import DirACLPanel from './dir-acl-panel';
 

@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
-import { gettext } from '../../../utils/constants';
-import { systemAdminAPI } from '../../../utils/system-admin-api';
-import AIStatisticsPage from '../../common/ai-statistics';
+import { systemAdminAPI } from '@/api/system-admin-api';
+import AIStatisticsPage from '@/components/admin/statistics/ai-statistics';
+import { gettext } from '@/utils/constants';
 
 const tabs = [
   { value: 'repo', label: gettext('Library') },

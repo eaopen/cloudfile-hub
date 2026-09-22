@@ -1,4 +1,9 @@
-import { Utils } from '../../utils/utils';
+import { Utils } from '@/utils/utils';
+
+jest.mock('../../components/icon', () => ({
+  __esModule: true,
+  default: () => null,
+}));
 
 describe('getFileExtension', () => {
   it('should return the file extension with dot', () => {
@@ -60,4 +65,3 @@ describe('bytesToSize', () => {
     expect(result).toBe('1.0 TB');
   });
 });
-

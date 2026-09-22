@@ -1,5 +1,4 @@
 <!-- generated-by: gsd-doc-writer -->
-<!-- generated-by: gsd-doc-writer -->
 # AGENTS.md — cloudfile-hub
 
 > 用途：约束 Hub/Web/API 扩展、测试和上游同步工作。
@@ -108,11 +107,16 @@ cloudfile_ext/
 
 ## 铁律
 
-**1. 全部开关关闭 = 原生 CE 行为。**
+**1. 没有能力启用 = 不改变行为。**
 
-这是 P0 的验收标准，也是升级成本可控的前提。任何代码在
-`CF_ENABLE_*` 为 False 时都不能改变行为。写完新能力先自问：把开关关掉，
-这段代码还会执行吗？
+`CF_ENABLE_*` 默认 `false`，能力默认不生效——这是未验收能力与已发布能力之间的
+隔离机制。写完新能力先自问：把开关关掉，这段代码还会执行吗？
+
+（2026-09-22 起不再要求"全部关闭 = 原生 CE 逐字一致"。CloudFile 是 CE 的扩展版，
+基线里本就有不受开关约束的补丁——`seahub/api2/endpoints/internal_api.py` 的字节
+通道按目标路径判定、`file_tag.py` 的标签按目标路径判定、`groups.py` 的 CE 群组
+配额兼容、`oauth/views.py` 的 SSO 回填，都不带开关。理由与裁决顺序见
+[cloudfile-docker/BRANCHING.md](../cloudfile-docker/BRANCHING.md)。）
 
 **2. 扩展只能收紧权限，不能放宽。**
 
@@ -131,6 +135,18 @@ cloudfile_ext/
 用例集。因此能力包的 `__init__.py` 里，`from cloudfile_ext.features import
 is_enabled` 要**放在 `register()` 内部**而不是模块顶层——否则 `import` 该包
 就会拉进 Django。
+
+## 上游局部指南
+
+上游在本仓库根部之外另有两份局部指南，**在各自目录内优先于本文件**：
+
+- `frontend/AGENTS.md` —— React 前端的命令与前置条件
+- `seahub/AGENTS.md` —— Django 检查与测试环境要求
+
+它们随上游同步更新，本文件不复制其内容，避免两份说明各说各话。上游根指南里的
+通用约定同样适用：改动范围保持最小、不顺手重排无关文件；生成文件提交前先审查；
+`pip install -r dev-requirements.txt` 装开发依赖，`python manage.py runserver`
+起服务，`make dist` 出静态与本地化产物。
 
 ## 测试
 

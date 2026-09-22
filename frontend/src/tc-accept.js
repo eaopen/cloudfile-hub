@@ -1,13 +1,13 @@
 import React from 'react';
-import { createRoot } from 'react-dom/client';
 import { Button } from 'reactstrap';
-import { gettext } from './utils/constants';
-import Logo from './components/logo';
-import Account from './components/common/account';
-import TermsPreviewWidget from './components/terms-preview-widget';
-import { Utils } from './utils/utils';
+import { createRoot } from 'react-dom/client';
+import Account from '@/components/account';
+import Logo from '@/components/logo';
+import TermsPreviewWidget from '@/components/terms-preview-widget';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 
-import './css/tc-accept.css';
+import '@/css/tc-accept.css';
 
 const { csrfToken } = window.app.pageOptions;
 const {

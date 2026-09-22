@@ -1,7 +1,7 @@
 import React, { Fragment } from 'react';
-import PropTypes from 'prop-types';
 import { Modal, ModalBody } from 'reactstrap';
-import { gettext } from '../../utils/constants';
+import PropTypes from 'prop-types';
+import { gettext } from '@/utils/constants';
 
 const propTypes = {
   toggleDialog: PropTypes.func.isRequired,

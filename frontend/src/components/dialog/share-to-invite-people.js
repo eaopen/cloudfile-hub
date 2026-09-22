@@ -1,17 +1,16 @@
 import React, { Fragment } from 'react';
+import { Button, Input } from 'reactstrap';
+import classnames from 'classnames';
 import dayjs from 'dayjs';
 import PropTypes from 'prop-types';
-import classnames from 'classnames';
-import { gettext } from '../../utils/constants';
-import { Button, Input } from 'reactstrap';
-import { seafileAPI } from '../../utils/seafile-api';
-import { Utils } from '../../utils/utils';
-import toaster from '../toast';
-import Loading from '../loading';
-import SharePermissionEditor from '../select-editor/share-permission-editor';
+import { seafileAPI } from '@/api/seafile-api';
+import { gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import EmptyTip from '../empty-tip';
+import Loading from '../loading';
 import OpIcon from '../op-icon';
-import '../../css/invitations.css';
+import SharePermissionEditor from '../select-editor/share-permission-editor';
+import toaster from '../toast';
 
 class UserItem extends React.Component {
 

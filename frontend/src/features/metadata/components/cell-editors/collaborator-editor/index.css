@@ -1,0 +1,97 @@
+.sf-metadata-collaborator-editor {
+  width: 300px;
+  max-width: none;
+  height: fit-content;
+  padding: 0;
+  overflow: hidden;
+  opacity: 1;
+  position: absolute;
+  left: 0;
+  border-color: var(--bs-border-quartus-color);
+}
+
+.sf-metadata-collaborator-editor .sf-metadata-collaborator-editor-container {
+  max-height: calc(200px - 16px);
+  margin: 8px 0;
+  padding: 0 8px;
+  overflow: auto;
+}
+
+.sf-metadata-collaborator-editor .sf-metadata-search-collaborator-options {
+  position: relative;
+  display: flex;
+  align-items: center;
+  padding: 8px 8px 0 8px;
+}
+
+.sf-metadata-collaborator-editor .sf-metadata-search-collaborator-options .form-control {
+  width: 100% !important;
+  max-height: 28px;
+  font-size: 13px;
+  padding: 4px 8px;
+  border-radius: 4px;
+}
+
+.sf-metadata-collaborator-editor .sf-metadata-search-collaborator-options .form-control:focus {
+  border: 1px solid #3e84f7;
+  box-shadow: none;
+  background-color: transparent;
+}
+
+.sf-metadata-collaborator-editor .collaborator-container {
+  display: flex;
+  align-items: center;
+  width: 100%;
+  height: 32px;
+  border-radius: 4px;
+  font-size: 13px;
+  color: var(--bs-body-color);
+  padding-left: 8px;
+}
+
+.sf-metadata-collaborator-editor .collaborator-container-highlight {
+  background: var(--bs-dropdown-link-hover-bg);
+  cursor: pointer;
+}
+
+.sf-metadata-collaborator-editor .sf-metadata-collaborator-editor-container .collaborator {
+  flex: 1;
+  display: inline-flex;
+  align-items: center;
+  height: 20px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  background-color: transparent;
+}
+
+.sf-metadata-collaborator-editor .collaborator-avatar {
+  width: 16px;
+  height: 16px;
+  line-height: 16px;
+  border-radius: 50%;
+}
+
+.sf-metadata-collaborator-editor .collaborator-name {
+  display: inline-block;
+  height: 20px;
+  line-height: 20px;
+  color: var(--bs-body-color);
+  margin-left: 4px;
+  max-width: 200px;
+}
+
+.sf-metadata-collaborator-editor .sf-metadata-delete-collaborator .collaborator-name {
+  color: var(--bs-body-color);
+}
+
+.sf-metadata-collaborator-editor .collaborator-check-icon {
+  display: inline-flex;
+  justify-content: center;
+  align-items: center;
+  margin-right: 8px;
+  font-size: 13px;
+}
+
+.sf-metadata-collaborator-editor .search-empty-tip-text-only {
+  margin: 40px 0;
+}

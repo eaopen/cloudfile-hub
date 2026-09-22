@@ -1,9 +1,9 @@
 import React from 'react';
-import PropTypes from 'prop-types';
 import { Button } from 'reactstrap';
-import { gettext } from '../../../../utils/constants';
-import Icon from '../../../icon';
+import PropTypes from 'prop-types';
 import Tooltip from '@/components/tooltip';
+import { gettext } from '@/utils/constants';
+import Icon from '../../../icon';
 
 import './index.css';
 

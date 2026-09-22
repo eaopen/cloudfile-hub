@@ -1,14 +1,14 @@
 import React, { Component } from 'react';
-import PropTypes from 'prop-types';
 import { Link } from '@gatsbyjs/reach-router';
+import classnames from 'classnames';
 import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
-import classnames from 'classnames';
-import { Utils } from '../../../utils/utils';
-import { systemAdminAPI } from '../../../utils/system-admin-api';
-import { isPro, siteRoot, gettext } from '../../../utils/constants';
-import EmptyTip from '../../../components/empty-tip';
-import Loading from '../../../components/loading';
+import PropTypes from 'prop-types';
+import { systemAdminAPI } from '@/api/system-admin-api';
+import EmptyTip from '@/components/empty-tip';
+import Loading from '@/components/loading';
+import { isPro, siteRoot, gettext } from '@/utils/constants';
+import { Utils } from '@/utils/utils';
 import UserLink from '../user-link';
 
 const { enableSysAdminViewRepo } = window.sysadmin.pageOptions;

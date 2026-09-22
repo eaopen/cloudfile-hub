@@ -1,10 +1,7 @@
-import axios from 'axios';
-import React, { Suspense, useEffect, useState } from 'react';
-import { createRoot } from 'react-dom/client';
-import { I18nextProvider } from 'react-i18next';
+import React, { useEffect, useState } from 'react';
 import { SDocViewer } from '@seafile/seafile-sdoc-editor';
-import Loading from '../../components/loading';
-import i18n from '../../_i18n/i18n-sdoc-editor';
+import axios from 'axios';
+import Loading from '@/components/loading';
 
 import './index.css';
 
@@ -18,6 +15,9 @@ window.seafile = {
 };
 
 const formatDocument = (document) => {
+  if (!document || typeof document !== 'object') {
+    return { elements: [] };
+  }
   document.elements = document.elements ? document.elements : document.children;
   if (!Array.isArray(document.elements)) {
     document.elements = [{ type: 'paragraph', children: [{ text: '' }] }];
@@ -43,17 +43,10 @@ export default function SdocThumbnail() {
 
   return (
     <div className='sdoc-thumbnail-container'>
-      <SDocViewer document={content}/>
+      {content.elements.length === 0 ?
+        <div id="sdoc-editor-print-wrapper" className="empty-sdoc-thumbnail" /> :
+        <SDocViewer document={content}/>
+      }
     </div>
   );
 }
-
-
-const root = createRoot(document.getElementById('wrapper'));
-root.render(
-  <I18nextProvider i18n={ i18n } >
-    <Suspense fallback={<Loading />}>
-      <SdocThumbnail />
-    </Suspense>
-  </I18nextProvider>
-);

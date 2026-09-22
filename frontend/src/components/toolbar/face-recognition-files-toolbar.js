@@ -1,19 +1,19 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { gettext } from '../../utils/constants';
-import { EVENT_BUS_TYPE, PRIVATE_COLUMN_KEY } from '../../metadata/constants';
-import { useFileOperations } from '../../hooks/file-operations';
-import RowUtils from '../sf-table/utils/row';
-import { buildGalleryToolbarMenuOptions } from '../../metadata/utils/menu-builder';
-import { getColumnByKey } from '../sf-table/utils/column';
-import { useMetadataStatus } from '../../hooks';
-import TextTranslation from '../../utils/text-translation';
-import { openInNewTab, openParentFolder } from '../../metadata/utils/file';
-import { checkIsDir } from '../../metadata/utils/row';
-import { getFileNameFromRecord } from '../../metadata/utils/cell';
-import { Utils } from '../../utils/utils';
+import { EVENT_BUS_TYPE, PRIVATE_COLUMN_KEY } from '@/features/metadata/constants';
+import { getFileNameFromRecord } from '@/features/metadata/utils/cell';
+import { openInNewTab, openParentFolder } from '@/features/metadata/utils/file';
+import { buildGalleryToolbarMenuOptions } from '@/features/metadata/utils/menu-builder';
+import { checkIsDir } from '@/features/metadata/utils/row';
+import { useMetadataStatus } from '@/hooks';
+import { useFileOperations } from '@/hooks/file-operations';
+import { gettext } from '@/utils/constants';
+import TextTranslation from '@/utils/text-translation';
+import { Utils } from '@/utils/utils';
+import CustomDropdown from '../dropdown';
 import Icon from '../icon';
 import OpIcon from '../op-icon';
-import CustomDropdown from '../dropdown';
+import { getColumnByKey } from '../sf-table/utils/column';
+import RowUtils from '../sf-table/utils/row';
 
 const FaceRecognitionFilesToolbar = ({ repoID }) => {
   const [selectedRecordIds, setSelectedRecordIds] = useState([]);
@@ -195,7 +195,7 @@ const FaceRecognitionFilesToolbar = ({ repoID }) => {
         </>
       )}
       <OpIcon id="download-btn" symbol="download" className="cur-view-path-btn" tooltip={gettext('Download')} aria-label={gettext('Download')} op={handleDownload} />
-      {!readOnly && <OpIcon id="delete-btn" symbol="delete1" className="cur-view-path-btn" tooltip={gettext('Delete')} aria-label={gettext('Delete')} op={deleteRecords} />}
+      {!readOnly && <OpIcon id="delete-btn" symbol="delete" className="cur-view-path-btn" tooltip={gettext('Delete')} aria-label={gettext('Delete')} op={deleteRecords} />}
       <CustomDropdown
         target="face-recognition-files-toolbar-menu-toggle"
         forwardedRef={menuRef}

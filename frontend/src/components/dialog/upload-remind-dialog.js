@@ -1,8 +1,8 @@
 import React from 'react';
-import PropTypes from 'prop-types';
-import { gettext } from '../../utils/constants';
 import { Modal, ModalBody, ModalFooter, Button } from 'reactstrap';
-import SeahubModalHeader from '@/components/common/seahub-modal-header';
+import PropTypes from 'prop-types';
+import SeahubModalHeader from '@/components/seahub-modal-header';
+import { gettext } from '@/utils/constants';
 
 const propTypes = {
   currentResumableFile: PropTypes.object.isRequired,
