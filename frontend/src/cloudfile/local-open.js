@@ -2,7 +2,7 @@ import { gettext, siteRoot } from '../utils/constants';
 import toaster from '../components/toast';
 import { cloudFileAPI } from './cloudfile-api';
 
-const EXTENSION_ID = 'nafehcgbhfodbocmoghcigmfgjneogom';
+const EXTENSION_ID = 'gocnpbhnbikcpnlafmodflddgnmfcjoc';
 
 function errorMessage(error) {
   const data = error && error.response && error.response.data;
