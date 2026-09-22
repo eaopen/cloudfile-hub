@@ -97,7 +97,7 @@ collected 265 items
 - `cf_*` DDL、MySQL 路由与真实读写。
 - ACL/锁在 server、Go fileserver、WebDAV、同步客户端中的不可绕过性。
 - seafevents `Activity`、SeaSearch、Meilisearch 的真实数据链。
-- IdP/外部目录、SMB/NFS 挂载、CloudFile Local Agent。
+- IdP/外部目录、宿主机挂载的本地目录（v1 只读，SMB/NFS/OpenList 均由运维转换）、CloudFile Local Agent。
 - CloudFile React 菜单、页面、原生路由 shadow 和本地会话浏览器流程。
 
 因此“265 passed”只能作为 Hub 纯逻辑和适配器级证据，不能升级为整套产品“已验收”。

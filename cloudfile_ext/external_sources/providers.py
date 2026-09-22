@@ -8,9 +8,11 @@ provider)`` -- keyed by type, and deliberately neither a chain nor a
 * Not a chain, because a chain asks "who wants to participate?" and a source is
   answered by exactly one backend -- the one whose type it was registered with.
 * Not a provider kind, because kinds are *interchangeable* implementations of
-  one job with one selected by ``CF_PROVIDER_<KIND>``. Here ``local-path`` and
-  a future ``smb`` coexist in one deployment, each serving its own sources.
-  There is nothing to select.
+  one job with one selected by ``CF_PROVIDER_<KIND>``. Here a source's type
+  names the shape of the directory it points at, and v1 has exactly one:
+  ``local-path``. SMB/NFS/OpenList are not backends because the operator mounts
+  them as local directories first (direct SMB is cancelled, not deferred), so
+  there is nothing to select.
 
 Three rules, each of which exists because breaking it is a real failure mode
 rather than a style violation:
@@ -48,7 +50,7 @@ class SourceNotFound(SourceError):
 
 #: One directory entry. Deliberately the smallest set that a file browser and
 #: an incremental scanner both need, and nothing that only one backend can
-#: supply: no owner, mode or inode, because SMB over a userspace client cannot
+#: supply: no owner, mode or inode, because a share mounted from a NAS cannot
 #: answer those the way a local stat can, and a field that is only sometimes
 #: populated invites callers to depend on it.
 Entry = collections.namedtuple('Entry', 'name is_dir size mtime')

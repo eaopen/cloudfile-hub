@@ -1,8 +1,11 @@
 # -*- coding: utf-8 -*-
-"""SMB/NFS external sources, browsable without entering the Seafile model.
+"""Read-only local-directory external sources, browsable without entering the
+Seafile model. v1 is scoped to local paths only: SMB/NFS, OpenList and every
+other external form are normalized to a local directory on the host first, and
+direct SMB support is cancelled by decision rather than deferred.
 
 Gated by CF_ENABLE_EXTERNAL_SOURCES. Spec: cloudfile-docker/docs/
-external-sources.md.
+features/external-sources.md.
 
 **External sources never enter the repo/commit/block model.** That is the
 definition of the capability, not a first-release limitation, and every other
@@ -47,10 +50,12 @@ def register(registry):
     )
     from cloudfile_ext.external_sources.views import external_sources_page
 
-    # One backend in this release, covering both SMB and NFS because the mount
-    # is the operator's job. Registered by type rather than selected by a
-    # CF_PROVIDER_* setting: local-path and a future smb backend coexist, each
-    # serving the sources registered against it, so there is nothing to select.
+    # One backend in this release, and the only one v1 will have: a local
+    # directory. SMB/NFS/OpenList and everything else reach CloudFile already
+    # mounted by the operator, so they need no backend here -- direct SMB was
+    # cancelled by decision rather than deferred. Registered by type rather
+    # than selected by a CF_PROVIDER_* setting because a source is answered by
+    # exactly one backend, so there is nothing to select.
     local_path.register(registry)
 
     source_id = r'(?P<source_id>\d+)'

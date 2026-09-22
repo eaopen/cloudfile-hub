@@ -70,7 +70,7 @@ graph TD
 | 文件/目录操作日志 | seafevents `Activity` | 只读查询与管理页面 |
 | SeaSearch 索引 | seafevents/SeaSearch | 原生路径，不由 CloudFile 写入 |
 | Meilisearch 索引 | CloudFile `cf_worker` | 增量索引、查询 provider、外部源扫描 |
-| SMB/NFS 内容 | 部署侧挂载目录 | 只读浏览/下载；内容不进入 repo/commit/block 模型 |
+| 外部目录内容 | 部署侧挂载的本地目录（v1 只读；协议转换归运维） | 只读浏览/下载；内容不进入 repo/commit/block 模型 |
 
 ## 目录结构
 

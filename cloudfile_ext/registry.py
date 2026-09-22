@@ -23,7 +23,7 @@ has no single right answer, so several capabilities may each contribute::
     ``search_indexer``       feed documents to an index (several may co-exist:
                              a full-text index and an audit trail both want
                              the same stream)
-    ``external_source``      SMB/NFS-style read-only providers, keyed by type
+    ``external_source``      read-only local-directory providers, keyed by type
     ``periodic_task``        recurring work run by the cf_worker process
 
 *Providers* are interchangeable implementations of one job, and exactly one is

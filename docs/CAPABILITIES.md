@@ -40,7 +40,7 @@
 | `CF_ENABLE_CHECKOUT` | Pro 平替 | CE 文件权限和版本写入 | `file_actions` 中的带 generation 租约签出/释放 | **部分完成**；API 已接线，依赖 server 锁 provider；签出/释放跨协议矩阵同文件锁 21/21（`checkout/` 包内旧占位说明不是实际入口） |
 | `CF_ENABLE_LOCAL_APP` | 新应用扩展 | CE 认证下载与版本写入 | v2 ticket、Agent claim、心跳、带围栏回写 | **验证中**；下载—领取—编辑—写回容器矩阵 14/14 通过（写回已改 `put_file`）；仍缺签名发布包与跨平台升级 |
 | `CF_ENABLE_S3_STORAGE` | CE 补强 | CE/S3 存储与 fsck/gc | 本仓仅有离线维护脚本适配，不存在 Hub 注册模块 | **已完成（Hub 边界）**；Hub 无 S3 模块，跨仓多存储 + MinIO S3 已完成（管理员按库指定存储方案，自助选择 UI 未完成） |
-| `CF_ENABLE_EXTERNAL_SOURCES` | 新应用扩展 | Seahub 列表/文件 API 外形 | local-path provider、授权、只读浏览/下载、overlay、shadow API、Meilisearch 扫描 | **部分完成**；72 个相关测试通过；当前 `local-path` 为只读内容入口，真实 SMB/NFS 挂载、数据库与浏览器流程待验收 |
+| `CF_ENABLE_EXTERNAL_SOURCES` | 新应用扩展 | Seahub 列表/文件 API 外形 | local-path provider、授权、只读浏览/下载、overlay、shadow API、Meilisearch 扫描 | **部分完成**；72 个相关测试通过；v1 只支持只读挂载本地目录（SMB/NFS/OpenList 由运维在宿主机转换，**不做直接 SMB**），`local-path` 为只读内容入口，宿主挂载形态、数据库与浏览器流程待验收 |
 | `CF_ENABLE_FILEOPS` | Pro 平替 | CE `copy_file`/`move_file` 写入 | 影子端点统一预检查（权限/大小/层级/配额/同名冲突）、移动 `affected_members`、`cf_fileop_task` 幂等、失败清单 | **验证中**；纯策略单测通过（`fileops/tests/test_policy.py`），影子 `/api2/repos/{repo}/fileops/{copy,move}/` 运行时接线；容器 E2E 14/14 通过（`review_copy_matrix.py`/`review_move_matrix.py`）；深度测量改用 `stat.S_ISDIR(entry.mode)`、配额错误先于大小策略。移动确认框 UI 与 v2.1 批量入口未接 |
 | `CF_ENABLE_SHARE_RESTRICT` | CE 补强 | CE 外链创建/访问/列表端点 | 开关默认 false；开启后非管理员创建外链 403、匿名访问旧外链按不存在处理（404）、列表/查询端点保留、管理员仍可创建与管理 | **验证中**；`share_links.py`/`views.py`/`views/file.py`/`views/repo.py` 门禁接线，容器 E2E（`review_share_matrix.py`）3/3 通过；前端入口隐藏属浏览器套件阶段 |
 

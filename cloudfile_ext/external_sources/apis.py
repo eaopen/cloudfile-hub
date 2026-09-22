@@ -217,7 +217,7 @@ class ExternalSourceFileView(APIView):
 
         # FileResponse closes the file object it is given once the response is
         # fully written, but the *context manager* also has to be exited, and
-        # only it knows how a future backend (an SMB session, say) releases its
+        # only it knows how a future backend releases its
         # resources. Hence the explicit callback rather than relying on
         # FileResponse alone.
         response = FileResponse(

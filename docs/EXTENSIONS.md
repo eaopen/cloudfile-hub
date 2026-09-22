@@ -20,7 +20,7 @@
 | 权限 | `register_permission_check()` | 顺序传递权限结果，只能收紧 | 目录 ACL |
 | 文件操作 | `register_file_op_hook(phase, fn)` | pre 可拒绝；post 异常只记录 | 当前无已注册实现 |
 | 搜索索引器 | `register_search_indexer()` | 每个索引器都接收文档 | 当前索引任务直接由 worker 调用，未注册链成员 |
-| 外部源 | `register_external_source_provider()` | 按 source type 共存 | `local-path` |
+| 外部源 | `register_external_source_provider()` | 按 source type 注册；v1 仅 `local-path`（只读本地目录） | `local-path` |
 | 周期任务 | `register_periodic_task()` | 单进程串行调度 | ACL 同步、SSO 同步、Meilisearch、外部源扫描 |
 
 `post` 文件操作钩子吞掉并记录异常，避免观察型审计/索引破坏已经完成的写操作；`pre` 异常会阻止操作。

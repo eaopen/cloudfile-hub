@@ -1,10 +1,14 @@
 # -*- coding: utf-8 -*-
-"""The one source backend in this release: a directory in the container.
+"""The one source backend in this release, and the only one v1 supports: a
+directory in the container.
 
-It covers **both** SMB and NFS, because the mount is the operator's job. They
-mount the share on the host and bind-mount it into the container; from here it
-is a directory, and one implementation serves both protocols with no new
-dependency and no privileged container. docs/external-sources.md section three
+v1 is deliberately scoped to "read-only mount of a local directory". SMB/CIFS,
+NFS, OpenList, rclone and third-party drives are all converted to a local
+directory **on the host** before CloudFile sees them; from here it is a
+directory, so there is no protocol branch, no protocol credential and no
+privileged container. Direct SMB is cancelled rather than deferred: it would
+require storing NAS credentials inside CloudFile, which has no secret store,
+while the host already covers the same ground. docs/features/external-sources.md
 has the full reasoning and states the cost: mounts are managed by ops, so an
 administrator registers an already-mounted path rather than connecting to a
 NAS from the web UI.

@@ -64,7 +64,7 @@ CF_ENABLE_ONLYOFFICE = False
 CF_ENABLE_CONVERT_EXPORT = False
 # Third-party S3/MinIO object-storage endpoint.
 CF_ENABLE_S3_STORAGE = False
-# SMB/NFS share mounted on the host (external sources).
+# Local directory mounted on the host (external sources; v1 is local-path only).
 CF_ENABLE_EXTERNAL_SOURCES = False
 # Requires the Chrome extension and Local Agent on the user's machine; on by
 # default would advertise the entry point to users who cannot use it.
@@ -186,10 +186,11 @@ CF_SEARCH_INDEX_INTERVAL = 60
 
 # -- external sources -------------------------------------------------------
 #
-# Container paths a source root may live under. An external source is an
-# SMB/NFS share the operator mounted on the host and bind-mounted here, so this
-# is the boundary between "a share ops chose to expose" and "any path in the
-# container".
+# Container paths a source root may live under. An external source is a local
+# directory the operator mounted on the host and bind-mounted here -- v1 is
+# local-path only, since SMB/NFS/OpenList are normalized to a directory on the
+# host -- so this is the boundary between "a directory ops chose to expose" and
+# "any path in the container".
 #
 # The default is deliberately restrictive rather than empty: an empty allow-list
 # would let the admin API register / as an external source, and a security

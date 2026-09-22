@@ -62,10 +62,12 @@ def normalize_rel_path(path):
         # not what was validated.
         raise UnsafePath('path contains a null byte')
 
-    # Backslash is a separator on SMB shares and a legal filename character on
-    # POSIX. Treating it as a separator here would let a genuine filename be
-    # split into segments; leaving it alone means a Windows-style path simply
-    # does not match anything, which is the safe direction.
+    # A share mounted from an SMB server may expose names written with
+    # backslashes, but inside the container they are POSIX names, where a
+    # backslash is a legal filename character. Treating it as a separator here
+    # would let a genuine filename be split into segments; leaving it alone
+    # means a Windows-style path simply does not match anything, which is the
+    # safe direction.
     parts = []
     for segment in path.replace('\\', '/').split('/'):
         if segment in ('', '.'):
