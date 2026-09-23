@@ -95,20 +95,24 @@ class LocalSessionView(_FileActionAPIView):
         mode = request.data.get('mode', 'local-view')
         path, error = _get_file(
             request, repo_id, request.data.get('path', ''),
-            require_edit=mode == 'local-edit')
+            require_edit=mode in ('local-edit', 'local-edit-exclusive'))
         if error:
             return error
         if mode == 'local-view':
             return Response(service.issue_local_view_session(
                 repo_id, path, request.user.username), status=status.HTTP_201_CREATED)
-        if mode != 'local-edit':
+        if mode == 'local-edit':
+            # 普通本地编辑：免锁，下载到本地镜像目录，手动上传。
+            return Response(service.issue_local_edit_session(
+                repo_id, path, request.user.username), status=status.HTTP_201_CREATED)
+        if mode != 'local-edit-exclusive':
             return api_error(status.HTTP_400_BAD_REQUEST, 'mode invalid.')
+        # 本地编辑（独占）：加锁 + 自动写回（旧 local-edit 行为，暂不暴露按钮）。
         if not service.lock_provider_ready(repo_id, path):
             return api_error(status.HTTP_409_CONFLICT,
                              'Local editing requires the file-lock provider.')
-        file_id = seafile_api.get_file_id_by_path(repo_id, path)
-        result = service.issue_local_edit_session(
-            repo_id, path, request.user.username, file_id)
+        result = service.issue_local_edit_exclusive_session(
+            repo_id, path, request.user.username)
         if not result.get('ok'):
             if result.get('reason') == 'locked':
                 return Response(result, status=status.HTTP_423_LOCKED)

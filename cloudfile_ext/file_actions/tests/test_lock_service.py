@@ -75,12 +75,18 @@ def test_force_release_is_fenced_to_the_generation_an_admin_reviewed(service, mo
 
 def test_browser_descriptor_has_agent_protocol_mode_and_safe_filename(service):
     descriptor = service._agent_session_descriptor(
-        'local-edit', '/plans/roadmap.docx', 'one-time-ticket', 60, 1000)
+        'local-edit', 'repo-uuid', '/plans/roadmap.docx', 'one-time-ticket',
+        60, 1000, file_id='abc123', size=4096, mtime=1700000000)
 
     assert descriptor == {
         'protocol': 'cloudfile-local/v2',
         'mode': 'local-edit',
+        'repo_id': 'repo-uuid',
+        'path': '/plans/roadmap.docx',
         'file': {'name': 'roadmap.docx'},
+        'file_id': 'abc123',
+        'size': 4096,
+        'mtime': 1700000000,
         'ticket': 'one-time-ticket',
         'expires_in': 60,
         'expires_at': 1060,

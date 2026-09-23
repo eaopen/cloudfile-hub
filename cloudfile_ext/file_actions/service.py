@@ -167,23 +167,41 @@ def _ticket_digest(ticket):
     return hashlib.sha256(ticket.encode('utf-8')).hexdigest()
 
 
-def _agent_session_descriptor(mode, path, ticket, ttl, now):
-    """Return only browser-safe claim data; never expose content capability URLs."""
+def _agent_session_descriptor(mode, repo_id, path, ticket, ttl, now,
+                              file_id='', size=0, mtime=0):
+    """Return only browser-safe claim data; never expose content capability URLs.
+
+    repo_id / path / file_id / size / mtime are included so the web page can
+    query the local agent's cached copy (hash compare) and render a
+    "which is newer / larger" conflict dialog before dispatching a session.
+    """
     return {
         'protocol': 'cloudfile-local/v2',
         'mode': mode,
+        'repo_id': repo_id,
+        'path': path,
         'file': {'name': os.path.basename(path)},
+        'file_id': file_id or '',
+        'size': size or 0,
+        'mtime': mtime or 0,
         'ticket': ticket,
         'expires_in': ttl,
         'expires_at': now + ttl,
     }
 
 
-def _issue_agent_session(mode, repo_id, path, username, file_id='', generation=''):
+def _issue_agent_session(mode, repo_id, path, username, generation=''):
     now = int(time.time())
     ttl = _agent_session_ttl()
     session_id = str(uuid.uuid4())
     ticket = secrets.token_urlsafe(32)
+    # Content identity + size + mtime drive the local-cache reuse / conflict
+    # decision on the client. file_id is Seafile's content SHA1 (obj_id).
+    from seaserv import seafile_api
+    dirent = seafile_api.get_dirent_by_path(repo_id, path)
+    file_id = getattr(dirent, 'obj_id', '') or ''
+    size = getattr(dirent, 'size', 0) or 0
+    mtime = getattr(dirent, 'mtime', 0) or 0
     alias = _session_alias()
     with connections[alias].cursor() as cursor:
         cursor.execute(
@@ -193,7 +211,8 @@ def _issue_agent_session(mode, repo_id, path, username, file_id='', generation='
             'VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)',
             [session_id, _ticket_digest(ticket), now + ttl, mode, username, repo_id,
              path, file_id or None, generation or None, 'created', now, now])
-    return _agent_session_descriptor(mode, path, ticket, ttl, now)
+    return _agent_session_descriptor(mode, repo_id, path, ticket, ttl, now,
+                                     file_id, size, mtime)
 
 
 def issue_local_view_session(repo_id, path, username):
@@ -201,8 +220,23 @@ def issue_local_view_session(repo_id, path, username):
     return _issue_agent_session('local-view', repo_id, path, username)
 
 
-def issue_local_edit_session(repo_id, path, username, file_id):
-    """Issue a short-lived agent capability backed by a C lease and fencing."""
+def issue_local_edit_session(repo_id, path, username):
+    """Issue a lock-free local-edit session.
+
+    The file is downloaded to the agent's mirror directory, edited locally,
+    then uploaded manually by the user through the normal web upload path.
+    No C lease is taken, so the server file stays editable by others.
+    """
+    return _issue_agent_session('local-edit', repo_id, path, username)
+
+
+def issue_local_edit_exclusive_session(repo_id, path, username):
+    """Issue a locked local-edit session with automatic write-back.
+
+    This is the former `local-edit` behaviour, kept behind the future
+    「本地编辑(独占)」 button: a C lease fences the file and the agent
+    watches + auto-uploads the result before releasing the lease.
+    """
     lock = _lock_rpc('cf_lock_acquire', {
         'repo_id': repo_id,
         'path': path,
@@ -216,7 +250,7 @@ def issue_local_edit_session(repo_id, path, username, file_id):
 
     try:
         session = _issue_agent_session(
-            'local-edit', repo_id, path, username, file_id, lock['generation'])
+            'local-edit-exclusive', repo_id, path, username, lock['generation'])
     except Exception:
         # A lease without a claimable session is a denial-of-service lock.
         release_checkout(repo_id, path, username, lock['generation'])
@@ -262,7 +296,7 @@ def claim_agent_session(ticket, server_origin):
                 'updated_at = %s WHERE session_id = %s AND state = %s',
                 ['claimed', now, now, row[0], 'created'])
     session_id, mode, username, repo_id, path, base_file_id, generation, expires_at = row
-    if mode == 'local-edit':
+    if mode == 'local-edit-exclusive':
         lock = _lock_rpc('cf_lock_status', {'repo_id': repo_id, 'path': path})
         if not lock.get('locked') or lock.get('owner') != username \
                 or lock.get('kind') != 'local-edit' or lock.get('generation') != generation:
@@ -275,7 +309,7 @@ def claim_agent_session(ticket, server_origin):
             return None
     # Ticket expiry is intentionally one minute; claimed local-edit sessions
     # use the C lease duration and must not inherit that short claim window.
-    capability_ttl = 30 * 60 if mode == 'local-edit' else 5 * 60
+    capability_ttl = 30 * 60 if mode == 'local-edit-exclusive' else 5 * 60
     content_token = uuid.uuid4().hex
     cache.set('thirdparty_editor_access_token_' + content_token, {
         'request_user': username,
@@ -285,13 +319,25 @@ def claim_agent_session(ticket, server_origin):
     }, capability_ttl)
     content_url = server_origin.rstrip('/') + _join_site(
         'thirdparty-editor/file-content/?access_token=' + quote(content_token, safe=''))
+    # Re-read the dirent for size/mtime so the client can render the conflict
+    # dialog accurately even if the dirent changed since the ticket was issued.
+    from seaserv import seafile_api
+    dirent = seafile_api.get_dirent_by_path(repo_id, path)
+    file_id = getattr(dirent, 'obj_id', '') or base_file_id or ''
+    size = getattr(dirent, 'size', 0) or 0
+    mtime = getattr(dirent, 'mtime', 0) or 0
     response = {
         'session_id': session_id,
         'mode': mode,
         'expires_at': now + capability_ttl,
+        'repo_id': repo_id,
+        'path': path,
         'file': {'name': os.path.basename(path), 'content_url': content_url},
+        'file_id': file_id,
+        'size': size,
+        'mtime': mtime,
     }
-    if mode == 'local-edit':
+    if mode == 'local-edit-exclusive':
         capability = secrets.token_urlsafe(32)
         cache.set('cloudfile_local_writeback_' + capability, session_id, capability_ttl)
         response['writeback'] = {
@@ -308,7 +354,7 @@ def local_edit_session(session_id, capability):
     if not capability or cache.get('cloudfile_local_writeback_' + capability) != session_id:
         return None
     session = _read_session(session_id)
-    if not session or session['mode'] != 'local-edit' or session['state'] != 'claimed':
+    if not session or session['mode'] != 'local-edit-exclusive' or session['state'] != 'claimed':
         return None
     return session
 

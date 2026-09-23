@@ -1,4 +1,3 @@
-import { openLocalSession } from '@/cloudfile/local-open';
 import { setPendingAttachments } from '@/components/dir-chat/hooks/ai-chat-tools';
 import { AttachmentObject } from '@/components/dir-chat/models';
 import EventBus, { eventBus as globalEventBus, EVENT_BUS_TYPE } from '@/components/event-bus';
@@ -102,16 +101,6 @@ export const menuHandlers = {
 
   [TextTranslation.OPEN_WITH_ONLYOFFICE.key]: ({ repoID, path, dirent }) => {
     openWithOnlyOffice(repoID, path, dirent);
-  },
-
-  [TextTranslation.OPEN_WITH_LOCAL_VIEW.key]: ({ repoID, path, dirent }) => {
-    const filePath = Utils.joinPath(path, dirent.name);
-    openLocalSession(repoID, filePath, 'local-view');
-  },
-
-  [TextTranslation.OPEN_WITH_LOCAL_EDIT.key]: ({ repoID, path, dirent }) => {
-    const filePath = Utils.joinPath(path, dirent.name);
-    openLocalSession(repoID, filePath, 'local-edit');
   },
 
   [TextTranslation.CONVERT_TO_MARKDOWN.key]: ({ onItemConvert, dirent }) => {
