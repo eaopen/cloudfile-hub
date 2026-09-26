@@ -36,9 +36,20 @@ class PendingHTTPTest(unittest.TestCase):
 
     def request(self, method="get", path="/pending/", secure=True):
         request = getattr(self.requests, method)(path, data="" if method == "post" else None,
-            content_type="application/octet-stream", secure=secure, HTTP_AUTHORIZATION="CloudFilePending " + "a" * 43)
-        request.COOKIES[PendingStatusView.binding_cookie] = "browser-binding-" * 3
+            content_type="application/octet-stream", secure=secure, HTTP_AUTHORIZATION="CloudFilePending " + "a" * 43,
+            HTTP_COOKIE=PendingStatusView.binding_cookie + "=" + "b" * 43)
         return request
+
+    def test_duplicate_binding_cookie_and_body_never_reach_status(self):
+        request = self.request()
+        request.META["HTTP_COOKIE"] += "; " + PendingStatusView.binding_cookie + "=" + "b" * 43
+        self.assertEqual(self.view(request).status_code, 401)
+        request = self.requests.generic("GET", "/pending/", data=b"unexpected", secure=True,
+            HTTP_COOKIE=PendingStatusView.binding_cookie + "=" + "b" * 43,
+            HTTP_AUTHORIZATION="CloudFilePending " + "a" * 43)
+        self.assertEqual(self.view(request).status_code, 400)
+        self.assertEqual(self.view(self.request(), unexpected="route").status_code, 405)
+        self.service.status.assert_not_called()
 
     def test_status_is_fixed_dto_and_never_cached(self):
         response = self.view(self.request())
@@ -67,7 +78,7 @@ class PendingHTTPTest(unittest.TestCase):
         request.META.update(HTTP_X_CSRFTOKEN=csrf, HTTP_ORIGIN="https://testserver")
         response = self.view(request)
         self.assertEqual(response.status_code, 200)
-        self.service.proofs.read.assert_called_once_with("a" * 43, "browser-binding-" * 3)
+        self.service.proofs.read.assert_called_once_with("a" * 43, "b" * 43)
         self.service.proofs.revoke.assert_called_once_with("a" * 43)
         self.service.proofs.browser_bindings.clear.assert_called_once()
 
