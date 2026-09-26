@@ -308,3 +308,18 @@ class Outbox:
             raise ValueError("unknown outbox consumer")
         self._update(claim, name + "_state='queued'," + name + "_expiry=NULL," + name + "_error=%s," +
                      name + "_next_at=TIMESTAMPADD(SECOND,%s,UTC_TIMESTAMP(6))", (code, delay_seconds))
+
+    def require_recovery(self, claim, *, code):
+        """Park one actual owned claim, preserving facts and downstream order.
+
+        No timer/worker restart reclaims this state. A trusted recovery workflow
+        must reconcile immutable plans and remote receipts before any resumption;
+        this method deliberately provides no generic reset-to-queued operation.
+        Existing VARCHAR(16) state columns need no DDL or per-file table.
+        """
+        if (not isinstance(claim, EventClaim) or claim.consumer not in self.CONSUMERS or
+                not isinstance(code, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code)):
+            raise ValueError("actual owned claim and safe recovery code required")
+        name = claim.consumer
+        self._update(claim, name + "_state='recovery'," + name + "_expiry=NULL," +
+            name + "_owner=NULL," + name + "_error=%s", (code,))

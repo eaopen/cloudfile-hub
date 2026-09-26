@@ -61,10 +61,14 @@ class SearchEventConsumer:
             if error.code == "WORKER_LEASE_LOST":
                 raise
             code = error.code if re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", error.code) else "INDEX_UNAVAILABLE"
-            # Durable submitting remains unknown; re-claim only checks it, never
-            # resets it or re-dispatches. Same-stream successor stays blocked.
+            # A recovery result must be durable, not merely a return label on a
+            # queued event. Frozen/uncertain state never resumes on a timer.
+            if code in {"SEARCH_SUBMISSION_UNKNOWN", "SEARCH_TASK_FAILED", "SEARCH_PLAN_CONFLICT",
+                    "SEARCH_PROJECTION_PENDING", "SEARCH_FANOUT_CHANGED"}:
+                self.outbox.require_recovery(claim, code=code)
+                return "recovery_required"
             self.outbox.retry_later(claim, code=code, delay_seconds=30)
-            return "recovery_required" if code in {"SEARCH_SUBMISSION_UNKNOWN", "SEARCH_TASK_FAILED", "SEARCH_PLAN_CONFLICT", "SEARCH_PROJECTION_PENDING"} else "retry"
+            return "retry"
         except Exception:
             # An uncertain network/SQL failure may already have persisted intent.
             # Preserve it and never acknowledge or reset the task here.

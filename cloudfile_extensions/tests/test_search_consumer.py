@@ -32,6 +32,15 @@ class SearchConsumerTest(TestCase):
         self.execution.advance.side_effect = ContractError("SEARCH_SUBMISSION_UNKNOWN", "unknown", 503)
         self.assertEqual(self.consumer.run_once(), "recovery_required")
         self.outbox.acknowledge.assert_not_called()
+        self.outbox.retry_later.assert_not_called()
+        self.outbox.require_recovery.assert_called_once_with(self.claim, code="SEARCH_SUBMISSION_UNKNOWN")
+
+    def test_changed_fanout_is_parked_not_retried(self):
+        self.execution.advance.side_effect = ContractError("SEARCH_FANOUT_CHANGED", "changed", 409)
+        self.assertEqual(self.consumer.run_once(), "recovery_required")
+        self.outbox.require_recovery.assert_called_once_with(self.claim, code="SEARCH_FANOUT_CHANGED")
+        self.outbox.retry_later.assert_not_called()
+        self.outbox.acknowledge.assert_not_called()
 
     def test_success_is_not_acknowledged_a_second_time(self):
         self.execution.advance.return_value = True
