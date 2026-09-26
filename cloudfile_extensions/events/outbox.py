@@ -84,6 +84,18 @@ class EventWriter:
         projection_state = "done" if (value["source"] == "fileserver"
             and value["action"] in {"file.view", "file.download"}
             and value.get("resource_kind") == "file") else "queued"
+        # Definition creation has no prior bindings to reproject. The same
+        # transaction's later resource binding emits its own attributes event.
+        # Definition updates still require bounded fanout and remain queued.
+        if (value["source"] == "hub" and value["action"] == "tags.definition.created" and
+                value["result"] == "succeeded" and isinstance(value.get("reason"), str) and
+                value["reason"].startswith("tag_id:") and not value.get("path") and not value.get("target_path")):
+            try:
+                tag_id = value["reason"][7:]
+                if str(UUID(tag_id)) == tag_id:
+                    projection_state = "done"
+            except (ValueError, AttributeError):
+                pass
         cursor.execute("INSERT INTO cf_event_outbox(event_id,stream,schema_version,payload,created_at,audit_state,"
                        "resource_state,resource_next_at,search_state,search_next_at) VALUES(%s,%s,1,'{}',UTC_TIMESTAMP(6),"
                        "'done',%s,UTC_TIMESTAMP(6),%s,UTC_TIMESTAMP(6))", (value["event_id"], stream, projection_state, projection_state))

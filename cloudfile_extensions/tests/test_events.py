@@ -68,6 +68,21 @@ class EventStoreTest(DatabaseTestCase):
         self.assertIsNotNone(self.outbox.claim("resource", "resource-worker"))
         self.assertIsNotNone(self.outbox.claim("search", "search-worker"))
 
+    def test_new_tag_definition_has_no_projection_but_updates_still_require_fanout(self):
+        created = {**self.event, "event_id": str(uuid4()), "action": "tags.definition.created", "reason": "tag_id:" + str(uuid4())}
+        created.pop("path")
+        self.append(created)
+        self.assertIsNone(self.outbox.claim("search", "search-worker"))
+        self.assertIsNone(self.outbox.claim("resource", "resource-worker"))
+        self.assertEqual(self.count("cf_audit_event"), 1)
+        updated = {**created, "event_id": str(uuid4()), "action": "tags.definition.updated"}
+        self.append(updated)
+        self.assertEqual(self.outbox.claim("search", "search-worker").event_id, updated["event_id"])
+
+    def test_definition_creation_with_resource_path_is_not_silently_skipped(self):
+        self.append({**self.event, "action": "tags.definition.created", "reason": "tag_id:" + str(uuid4())})
+        self.assertIsNotNone(self.outbox.claim("search", "search-worker"))
+
     def test_real_resource_hook_audit_and_outbox_commit_or_rollback_together(self):
         @contextmanager
         def guard(reference, actor):
