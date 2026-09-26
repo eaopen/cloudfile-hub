@@ -79,7 +79,7 @@ class ResourceStore:
         evidence = self._evidence(reference, actor, "read")
         return self._snapshot(reference, evidence, self._row(reference, evidence))
 
-    def resolve_authorized(self, reference, *, authority, lifecycle_reader):
+    def resolve_authorized(self, reference, *, authority, lifecycle_reader, include_tags=False):
         """Same-transaction ordinary read; no earlier inspector boolean grant.
 
         Trusted lifecycle_reader(cursor, reference) must resolve actual native
@@ -88,13 +88,18 @@ class ResourceStore:
         """
         from ..authorization.read import ContentReadAuthority
         if (not isinstance(authority, ContentReadAuthority) or
-                authority.state.connection is not self.connection or not callable(lifecycle_reader)):
+                authority.state.connection is not self.connection or not callable(lifecycle_reader) or
+                type(include_tags) is not bool):
             raise ValueError("same-connection read authority and lifecycle reader required")
         reference = resource_ref(reference)
         def read(cursor, ref):
             evidence = self._validate_evidence(lifecycle_reader(cursor, ref))
             row = self._row(ref, evidence, locking=True)
-            return self._snapshot(ref, evidence, row)
+            result = self._snapshot(ref, evidence, row)
+            if include_tags:
+                from ..tags.read import bound_tags
+                result["tags"] = bound_tags(cursor, resource_uid=row["uid"], repo_id=ref["repo_id"]) if row else []
+            return result
         return authority.consume(reference, read)
 
     def replace_user_tags(self, reference, tag_ids, *, expected_revision, actor, request_id):
