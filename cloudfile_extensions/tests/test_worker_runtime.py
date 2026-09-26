@@ -80,7 +80,7 @@ class WorkerRuntimeTests(unittest.TestCase):
         environment = dict(CLOUDFILE_IMPORT_SOURCES='{"one":"/registered/source"}',
             CLOUDFILE_IMPORT_REPORT_ROOT="/registered/reports", CLOUDFILE_IMPORT_WORK_ROOT="/registered/work")
         handlers = configured_handlers(environment)
-        self.assertEqual(set(handlers), {"migration.scan", "migration.stage"})
+        self.assertEqual(set(handlers), {"migration.scan", "migration.stage", "migration.verify-copy"})
         self.assertNotIn("migration.import", handlers)
         for root in ("", "relative", "/registered/source", "/registered/source/work", "/registered"):
             with self.assertRaises(ValueError):

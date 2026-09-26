@@ -15,6 +15,8 @@ from uuid import uuid4
 from ..migration.dry_run import ImportDryRun
 from ..migration.stage import ImportStage
 from ..migration.working_copy import WorkingCopyBuilder
+from ..migration.verify_copy import WorkingCopyVerifier
+from ..migration.verify_stage import ImportVerifyStage
 from ..schema.runner import SchemaRunner
 from .store import JobStore
 from .worker import Handler, JobWorker
@@ -44,6 +46,8 @@ def configured_handlers(environment):
     if work_root is not None:
         handlers["migration.stage"] = Handler(ImportStage(builder=WorkingCopyBuilder(
             sources=sources, work_root=work_root)))
+        handlers["migration.verify-copy"] = Handler(ImportVerifyStage(
+            verifier=WorkingCopyVerifier(work_root=work_root)))
     return handlers
 
 
