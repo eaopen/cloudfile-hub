@@ -6,6 +6,7 @@ resource UID; incremental lifecycle handling remains a separate requirement.
 """
 import re
 import stat
+from contextlib import contextmanager
 
 from ..common.errors import ContractError
 from ..resources.paths import resource_ref
@@ -23,6 +24,11 @@ class NativeCommitDirectoryReader:
         self.snapshot_scope = snapshot_scope
 
     def page(self, *, repo_id, commit_id, path, offset=0, limit=100):
+        with self.read_page(repo_id=repo_id, commit_id=commit_id, path=path, offset=offset, limit=limit) as page:
+            return page
+
+    @contextmanager
+    def read_page(self, *, repo_id, commit_id, path, offset=0, limit=100):
         ref = resource_ref(dict(repo_id=repo_id, path=path, kind="dir"))
         if (not isinstance(commit_id, str) or not re.fullmatch(r"[0-9a-f]{40}", commit_id) or
                 type(offset) is not int or not 0 <= offset <= 2 ** 31 - 102 or
@@ -54,4 +60,4 @@ class NativeCommitDirectoryReader:
                 except (ValueError, UnicodeError):
                     raise ContractError("SEARCH_REBUILD_PENDING", "Native entry path is invalid", 503) from None
                 items.append(child)
-            return dict(items=items[:limit], next_offset=offset + limit if len(items) > limit else None)
+            yield dict(items=items[:limit], next_offset=offset + limit if len(items) > limit else None)
