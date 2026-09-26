@@ -1,5 +1,6 @@
 """Actual DB-session deletion on the job/index SQL, not a generic callback."""
 from django.conf import settings
+from uuid import uuid4
 
 from ..common.errors import ContractError
 from ..directory.project import qualified
@@ -20,6 +21,34 @@ class NativeDBSessionDelete:
         alias = router.db_for_write(Session)
         if connections[alias].settings_dict.get("NAME") != identity_schema:
             raise ContractError("IDENTITY_UNAVAILABLE", "Native session schema does not match deployment", 503)
+        # Identical schema names do not prove two connections reach the same
+        # server. A random server-local advisory lock proves live co-location
+        # without relying on DNS aliases, ports or non-unique server IDs.
+        native = connections[alias]
+        if native.vendor != "mysql" or not index.connection.get_autocommit():
+            raise ContractError("IDENTITY_UNAVAILABLE", "Native session database is incompatible", 503)
+        lock = "cf.session.proof." + uuid4().hex
+        acquired = False
+        try:
+            with index.connection.cursor() as cursor:
+                cursor.execute("SELECT GET_LOCK(%s,0),CONNECTION_ID()", (lock,))
+                row = cursor.fetchone()
+                acquired = bool(row and row[0] == 1)
+                if not acquired:
+                    raise ValueError("proof lock unavailable")
+                owner = row[1]
+            with native.cursor() as cursor:
+                cursor.execute("SELECT IS_USED_LOCK(%s),DATABASE()", (lock,))
+                if cursor.fetchone() != (owner, identity_schema):
+                    raise ValueError("native session server differs")
+        except Exception:
+            raise ContractError("IDENTITY_UNAVAILABLE", "Native session database identity cannot be proven", 503) from None
+        finally:
+            if acquired:
+                with index.connection.cursor() as cursor:
+                    cursor.execute("SELECT RELEASE_LOCK(%s)", (lock,))
+                    if cursor.fetchone() != (1,):
+                        raise ContractError("IDENTITY_UNAVAILABLE", "Native session database proof cleanup failed", 503)
         self.index = index
         self.schema = identity_schema
         self.table_name = Session._meta.db_table
