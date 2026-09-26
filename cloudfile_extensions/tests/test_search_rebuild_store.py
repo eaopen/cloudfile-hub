@@ -184,6 +184,18 @@ class RebuildStoreTest(DatabaseTestCase):
         first = inspector.advance_checkpoint(**self.identity)
         self.assertEqual(first["state"], "batch_checked")
         self.assertNotEqual(first["checked_through"], first["observed_cutoff"])
+        scopes = []
+        @contextmanager
+        def producer_scope(connection, repo):
+            self.assertIs(connection, self.connection)
+            scopes.append(repo)
+            try:
+                yield
+            finally:
+                scopes.pop()
+        with self.assertRaises(ContractError) as caught:
+            inspector.refresh_target(**self.identity, producer_scope=producer_scope)
+        self.assertEqual(caught.exception.code, "SEARCH_CATCHUP_PENDING")
         append_reads(1)
         # A fresh inspector resumes the durable saved target and position.
         second = SearchCatchupInspector(self.store).advance_checkpoint(**self.identity)
@@ -191,3 +203,13 @@ class RebuildStoreTest(DatabaseTestCase):
         self.assertEqual(second["state"], "observed_cutoff_checked")
         self.assertEqual(second["checked_through"], second["observed_cutoff"])
         self.assertEqual(inspector.advance_checkpoint(**self.identity), second)
+        refreshed = inspector.refresh_target(**self.identity, producer_scope=producer_scope)
+        self.assertEqual(refreshed["state"], "pending")
+        self.assertEqual(refreshed["checked_through"], second["checked_through"])
+        self.assertGreater(int(refreshed["observed_cutoff"]), int(second["observed_cutoff"]))
+        final = inspector.advance_checkpoint(**self.identity)
+        self.assertEqual(final["checked_through"], refreshed["observed_cutoff"])
+        self.assertEqual(final["state"], "observed_cutoff_checked")
+        self.assertEqual(scopes, [])
+        with self.assertRaises(ValueError):
+            inspector.refresh_target(**self.identity, producer_scope=None)

@@ -56,6 +56,40 @@ class SearchCatchupInspector:
         # No caller position/target; resume only the durable database checkpoint.
         return self._inspect(generation=generation, index=index, repo_id=repo_id, persist=True)
 
+    def refresh_target(self, *, generation, index, repo_id, producer_scope):
+        """Extend only a fully checked checkpoint under the real producer guard.
+
+        No caller cutoff, reset, skipped prefix or publication permission. The
+        guard must drain native mutations and their durable event publication.
+        It cannot begin/commit a competing SQL transaction on this connection.
+        """
+        if not callable(producer_scope):
+            raise ValueError("actual native/event producer scope required")
+        ref, _ = self.store._directory(repo_id, "/")
+        with producer_scope(self.store.connection, ref["repo_id"]):
+            with self.store._owned(generation, index) as sql:
+                sql.execute("SELECT source_sequence,state FROM cf_search_rebuild WHERE generation=%s AND repo_id=%s FOR UPDATE", (generation, ref["repo_id"]))
+                job = sql.fetchone()
+                if job is None or job[1] != "scanned":
+                    raise ContractError("SEARCH_REBUILD_PENDING", "Library scan is incomplete", 503)
+                baseline = sequence(job[0])
+                sql.execute("SELECT baseline,target_sequence,checked_sequence,state FROM cf_search_catchup WHERE generation=%s AND repo_id=%s FOR UPDATE", (generation, ref["repo_id"]))
+                checkpoint = sql.fetchone()
+                if (checkpoint is None or len(checkpoint) != 4 or any(type(value) is not int for value in checkpoint[:3]) or
+                        checkpoint[0] != baseline or not baseline <= checkpoint[1] <= 2 ** 64 - 1 or
+                        checkpoint[2] != checkpoint[1] or checkpoint[3] != "complete"):
+                    raise ContractError("SEARCH_CATCHUP_PENDING", "Saved catch-up target must finish first", 409)
+                sql.execute("SELECT MAX(sequence) FROM cf_event_outbox FORCE INDEX(stream_sequence) WHERE stream=%s", ("repo." + ref["repo_id"],))
+                row = sql.fetchone()
+                target = row[0] if row is not None and row[0] is not None else 0
+                if type(target) is not int or not checkpoint[1] <= target <= 2 ** 64 - 1:
+                    raise ContractError("SEARCH_PLAN_CONFLICT", "Producer event boundary moved backwards", 409)
+                state = "complete" if target == checkpoint[2] else "pending"
+                sql.execute("UPDATE cf_search_catchup SET target_sequence=%s,state=%s,updated_at=UTC_TIMESTAMP(6) WHERE generation=%s AND repo_id=%s AND target_sequence=%s AND checked_sequence=%s AND state='complete'", (target, state, generation, ref["repo_id"], checkpoint[1], checkpoint[2]))
+                if sql.rowcount not in (0, 1):
+                    raise ContractError("SEARCH_PLAN_CONFLICT", "Catch-up target changed", 409)
+                return dict(state=state, checked_through=str(checkpoint[2]), observed_cutoff=str(target))
+
     def _inspect(self, *, generation, index, repo_id, after=None, persist=False):
         ref, _ = self.store._directory(repo_id, "/")
         deadline = self.clock() + 20
