@@ -8,6 +8,7 @@ from django.http import HttpResponse, StreamingHttpResponse
 from django.contrib.sessions.middleware import SessionMiddleware
 
 from cloudfile_extensions.identity.session_middleware import CloudFileSessionMiddleware
+from cloudfile_extensions.identity.session_authority import OIDCSessionAuthority
 from cloudfile_extensions.common.errors import ContractError
 
 
@@ -20,7 +21,7 @@ class GuardedSessionMiddlewareTests(unittest.TestCase):
 
     def setUp(self):
         self.middleware = object.__new__(CloudFileSessionMiddleware)
-        self.middleware.authority = Mock()
+        self.middleware.authority = Mock(spec=OIDCSessionAuthority)
         self.middleware.oidc = Mock(return_value=True)
         self.request = SimpleNamespace(session=Mock())
 
@@ -57,6 +58,7 @@ class GuardedSessionMiddlewareTests(unittest.TestCase):
 
     def test_unguarded_stream_never_released_or_saved(self):
         response = StreamingHttpResponse(iter([b"private"]))
+        response.is_async = True
         replacement = HttpResponse(status=503)
         self.middleware.failure = Mock(return_value=replacement)
         with patch.object(SessionMiddleware, "process_response") as save:
