@@ -1,0 +1,8 @@
+{
+  "version": "017_search_fanout",
+  "steps": [{
+    "sql": "CREATE TABLE cf_search_fanout (event_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,index_generation VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,tag_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,tag_revision CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,upper_uid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,after_uid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,next_uid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,batch INT UNSIGNED NOT NULL DEFAULT 0,index_uid VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL,payload LONGTEXT NULL,payload_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,state VARCHAR(16) CHARACTER SET ascii NOT NULL,updated_at DATETIME(6) NOT NULL,PRIMARY KEY(event_id,index_generation)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+    "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_search_fanout')='InnoDB' AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_search_fanout')=14 AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_search_fanout' AND index_name='PRIMARY')='event_id,index_generation',1,0)",
+    "expected": 1
+  }]
+}
