@@ -51,7 +51,7 @@ class NativeMembershipProjector:
             raise ValueError()
         paths = {}
         for group, path in rows:
-            if not isinstance(path, str) or len(path) > 1024:
+            if group in paths or not isinstance(path, str) or len(path) > 1024:
                 raise ValueError()
             tokens = path.split(", ")
             if not 1 <= len(tokens) <= 128 or any(not token.isascii() or not token.isdecimal() or token.startswith("0") for token in tokens):
@@ -63,6 +63,8 @@ class NativeMembershipProjector:
                    groups[value] != (-1 if index == 0 else ids[index-1]) for index, value in enumerate(ids)):
                 raise ValueError()
             paths[group] = set(ids)
+        if set(paths) != departments:
+            raise ValueError()
         return paths
 
     def apply(self, subject, epoch, *, native_username):
@@ -94,8 +96,9 @@ class NativeMembershipProjector:
                         if owned:
                             markers = ",".join(["%s"] * len(owned))
                             cursor.execute("SELECT group_id,parent_group_id FROM " + self.groups + " WHERE group_id IN (" + markers + ") ORDER BY group_id FOR UPDATE", tuple(sorted(owned)))
-                            groups = dict(cursor.fetchall())
-                            if set(groups) != set(owned) or any(
+                            native_groups = cursor.fetchall()
+                            groups = dict(native_groups)
+                            if len(native_groups) != len(owned) or set(groups) != set(owned) or any(
                                     (item["subject_type"] == "group" and groups[group] != 0) or
                                     (item["subject_type"] == "dept" and groups[group] != -1 and groups[group] not in owned)
                                     for group, item in owned.items()):

@@ -113,6 +113,15 @@ class ProjectionTest(DatabaseTestCase):
             self.apply()
         self.assertEqual(self.memberships(), ((4, 0), (5, 0), (6, 1)))
 
+    def test_duplicate_structure_rows_cannot_hide_missing_department(self):
+        with self.admin.cursor() as cursor:
+            cursor.execute("ALTER TABLE " + self.native + ".GroupStructure DROP PRIMARY KEY")
+            cursor.execute("DELETE FROM " + self.native + ".GroupStructure WHERE group_id=2")
+            cursor.execute("INSERT INTO " + self.native + ".GroupStructure VALUES(1,'1')")
+        with self.assertRaises(ContractError):
+            self.apply()
+        self.assertEqual(self.memberships(), ((4, 0), (5, 0), (6, 1)))
+
     def test_owned_staff_delegation_and_native_username_alias_rejected(self):
         with self.admin.cursor() as cursor:
             cursor.execute("UPDATE " + self.native + ".GroupUser SET is_staff=1 WHERE group_id=4")
