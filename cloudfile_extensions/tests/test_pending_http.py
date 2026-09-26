@@ -10,6 +10,7 @@ from django.test import RequestFactory
 
 from cloudfile_extensions.identity.pending import PendingLoginStatus
 from cloudfile_extensions.identity.pending_http import PendingStatusView
+from cloudfile_extensions.identity.browser_binding import BrowserLoginBindings
 
 
 class PendingHTTPTest(unittest.TestCase):
@@ -25,6 +26,7 @@ class PendingHTTPTest(unittest.TestCase):
         self.requests = RequestFactory()
         self.service = Mock(spec=PendingLoginStatus)
         self.service.proofs = Mock()
+        self.service.proofs.browser_bindings = Mock(spec=BrowserLoginBindings)
         self.value = dict(job_id=str(uuid4()), status="queued", retryable=False)
         self.service.status.return_value = self.value
         @contextmanager
@@ -67,6 +69,7 @@ class PendingHTTPTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.service.proofs.read.assert_called_once_with("a" * 43, "browser-binding-" * 3)
         self.service.proofs.revoke.assert_called_once_with("a" * 43)
+        self.service.proofs.browser_bindings.clear.assert_called_once()
 
     def test_unconfigured_or_faulty_service_fails_without_private_output(self):
         self.assertEqual(PendingStatusView.as_view()(self.request()).status_code, 503)
@@ -77,3 +80,18 @@ class PendingHTTPTest(unittest.TestCase):
         self.service.status.side_effect = None
         self.service.status.return_value = {**self.value, "request": "private"}
         self.assertEqual(self.view(self.request()).status_code, 503)
+
+    def test_binding_cookie_flags_and_clear(self):
+        from django.http import HttpResponse
+        from cloudfile_extensions.identity.browser_binding import BINDING_COOKIE
+        redis = Mock()
+        redis.set.return_value = True
+        browser = BrowserLoginBindings(redis)
+        response = HttpResponse()
+        browser.rotate(self.request(), response)
+        cookie = response.cookies[BINDING_COOKIE]
+        self.assertTrue(cookie["secure"])
+        self.assertTrue(cookie["httponly"])
+        self.assertEqual((cookie["path"], cookie["domain"], cookie["samesite"], cookie["max-age"]), ("/", "", "Lax", 600))
+        browser.clear(cookie.value, response)
+        self.assertEqual(response.cookies[BINDING_COOKIE]["max-age"], 0)

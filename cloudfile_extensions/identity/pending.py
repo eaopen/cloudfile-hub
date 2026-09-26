@@ -10,6 +10,7 @@ from redis.exceptions import RedisError
 
 from ..common.errors import ContractError
 from .bindings import IdentityBindings
+from .browser_binding import BrowserLoginBindings
 
 
 def rejected():
@@ -17,8 +18,11 @@ def rejected():
 
 
 class PendingLoginProofs:
-    def __init__(self, redis, *, prefix="cf:oidc:pending:", clock=time.time):
+    def __init__(self, redis, *, prefix="cf:oidc:pending:", clock=time.time, browser_bindings=None):
+        if browser_bindings is not None and (not isinstance(browser_bindings, BrowserLoginBindings) or browser_bindings.redis is not redis):
+            raise ValueError("browser and pending proofs must share Redis")
         self.redis, self.prefix, self.clock = redis, prefix, clock
+        self.browser_bindings = browser_bindings
 
     @staticmethod
     def _binding(binding):
@@ -42,7 +46,15 @@ class PendingLoginProofs:
         value = dict(identity={key: identity[key] for key in ("issuer", "sub", "userId", "expires_at")},
                      job_id=job_id, binding=self._binding(binding), expires_at=self.clock() + ttl)
         try:
-            if not self.redis.set(self._key(token), json.dumps(value), ex=ttl, nx=True):
+            if self.browser_bindings is not None:
+                stored = self.redis.eval('''
+                    if redis.call('GET', KEYS[2]) ~= '1' or redis.call('PTTL', KEYS[2])<=0 then return 0 end
+                    if redis.call('SET', KEYS[1], ARGV[1], 'EX', ARGV[2], 'NX') then return 1 end
+                    return 0
+                ''', 2, self._key(token), self.browser_bindings.key(binding), json.dumps(value), ttl)
+            else:
+                stored = self.redis.set(self._key(token), json.dumps(value), ex=ttl, nx=True)
+            if not stored:
                 raise rejected()
             return token
         except RedisError:
@@ -51,13 +63,15 @@ class PendingLoginProofs:
     def read(self, token, binding):
         try:
             raw = self.redis.eval('''
+                if ARGV[2]=='1' and (redis.call('GET',KEYS[2])~='1' or redis.call('PTTL',KEYS[2])<=0) then return false end
                 if redis.call('PTTL', KEYS[1]) <= 0 then return false end
                 local raw = redis.call('GET', KEYS[1])
                 if not raw or string.len(raw)>16384 then return false end
                 local ok, value = pcall(cjson.decode, raw)
                 if not ok or type(value) ~= 'table' or value.binding ~= ARGV[1] then return false end
                 return raw
-            ''', 1, self._key(token), self._binding(binding))
+            ''', 2, self._key(token), self.browser_bindings.key(binding) if self.browser_bindings else self._key(token),
+                self._binding(binding), int(self.browser_bindings is not None))
             if not raw:
                 raise rejected()
             value = json.loads(raw)

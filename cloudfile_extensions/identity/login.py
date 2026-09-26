@@ -48,9 +48,16 @@ class PreparedOIDCLogin:
         self.pending_proofs = pending_proofs
 
     def begin(self, binding, *, redirect="/"):
+        self._assert_browser(binding)
         return self.flow.begin(binding, redirect=redirect)
 
+    def _assert_browser(self, binding):
+        registry = getattr(self.pending_proofs, "browser_bindings", None)
+        if registry is not None:
+            registry.assert_active(binding)
+
     def complete(self, *, state, code, binding):
+        self._assert_browser(binding)
         # Only OIDCFlow's token/state/nonce/PKCE validation establishes identity.
         identity, redirect = self.flow.complete(state=state, code=code, binding=binding)
         if type(identity.get("expires_at")) is not int or identity["expires_at"] <= time.time():
@@ -77,4 +84,5 @@ class PreparedOIDCLogin:
             raise ContractError("IDENTITY_UNAVAILABLE", "Login identity changed", 503)
         if identity["expires_at"] <= time.time():
             raise ContractError("AUTHENTICATION_REQUIRED", "OIDC authentication expired", 401)
+        self._assert_browser(binding)
         return PreparedLogin(identity["userId"], username, context["context_epoch"], redirect)

@@ -116,6 +116,7 @@ class ContextTest(unittest.TestCase):
         self.redis.persist(key)
         with self.assertRaises(ContractError):
             proofs.read(token, "browser-a" * 4)
+
         # External TTL extension cannot extend the stored issuance deadline.
         clock_value = [1000]
         fixed = PendingLoginProofs(self.redis, prefix=self.prefix + "fixed:", clock=lambda: clock_value[0])
@@ -127,6 +128,38 @@ class ContextTest(unittest.TestCase):
         proofs.revoke(token)
         with self.assertRaises(ContractError):
             proofs.read(token, "browser-a" * 4)
+
+    def test_browser_registry_rotation_and_clear_invalidate_all_proofs(self):
+        import time
+        from unittest.mock import Mock
+        from cloudfile_extensions.identity.browser_binding import BrowserLoginBindings, BINDING_COOKIE
+        from cloudfile_extensions.identity.pending import PendingLoginProofs
+        browser = BrowserLoginBindings(self.redis, prefix=self.prefix + "browser:")
+        proofs = PendingLoginProofs(self.redis, prefix=self.prefix + "proof:", browser_bindings=browser)
+        request, response = Mock(), Mock()
+        request.is_secure.return_value = True
+        request.COOKIES = {}
+        binding = browser.rotate(request, response)
+        browser.assert_active(binding)
+        identity = dict(issuer="https://idp.example.invalid/", sub="stable", userId="u1", expires_at=int(time.time()) + 600)
+        tokens = [proofs.issue(identity, str(uuid4()), binding) for _ in range(2)]
+        for token in tokens:
+            proofs.read(token, binding)
+        request.COOKIES[BINDING_COOKIE] = binding
+        replacement = browser.rotate(request, response)
+        with self.assertRaises(ContractError):
+            browser.assert_active(binding)
+        for token in tokens:
+            with self.assertRaises(ContractError):
+                proofs.read(token, binding)
+        token = proofs.issue(identity, str(uuid4()), replacement)
+        browser.clear(replacement, response)
+        with self.assertRaises(ContractError):
+            browser.assert_active(replacement)
+        with self.assertRaises(ContractError):
+            proofs.read(token, replacement)
+        with self.assertRaises(ContractError):
+            proofs.issue(identity, str(uuid4()), replacement)
 
     def test_fresh_source_outage_is_usable_but_expiry_and_login_fail_closed(self):
         self.contexts.get("u1")

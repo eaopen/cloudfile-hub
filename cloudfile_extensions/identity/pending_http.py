@@ -8,11 +8,12 @@ from django.views import View
 
 from ..common.errors import ContractError
 from .pending import PendingLoginStatus, PendingLoginProofs
+from .browser_binding import BINDING_COOKIE, BrowserLoginBindings
 
 
 class PendingStatusView(View):
     service_factory = None  # Trusted request-scoped context manager, never input.
-    binding_cookie = "__Host-cloudfile-login-binding"
+    binding_cookie = BINDING_COOKIE
     http_method_names = ["get", "post"]
 
     def dispatch(self, request, *args, **kwargs):
@@ -44,10 +45,13 @@ class PendingStatusView(View):
             with self.service_factory(request_id) as service:
                 if not isinstance(service, PendingLoginStatus):
                     raise RuntimeError("invalid pending service assembly")
+                if not isinstance(service.proofs.browser_bindings, BrowserLoginBindings):
+                    raise RuntimeError("browser registry required for HTTP pending status")
                 if request.method == "POST":
                     service.proofs.read(token, binding)
                     service.proofs.revoke(token)
                     response = JsonResponse({"revoked": True})
+                    service.proofs.browser_bindings.clear(binding, response)
                 else:
                     value = service.status(token, binding)
                     if (set(value) != {"job_id", "status", "retryable"} or
