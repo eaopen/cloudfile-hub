@@ -286,3 +286,26 @@ class ContextTest(unittest.TestCase):
         self.assertEqual(caught.exception.status, 503)
         self.assertNotIn("private", caught.exception.message)
         self.assertIsNone(self.contexts.current("u1"))
+
+    def test_projection_time_does_not_extend_source_freshness(self):
+        now = [self.contexts.clock()]
+        self.contexts.clock = lambda: now[0]
+        self.contexts.ttl = 60
+        def slow_projection(subject, epoch):
+            now[0] += 20
+        self.contexts.project = slow_projection
+        result = self.contexts.prepare("u1")
+        key, _ = self.contexts._keys("u1")
+        self.assertEqual(result["expires_at"] - result["fetched_at"], 60)
+        self.assertLessEqual(self.redis.ttl(key), 40)
+        self.assertEqual(self.contexts.current("u1"), result)
+
+        def expired_projection(subject, epoch):
+            now[0] += 60
+        self.contexts.project = expired_projection
+        with self.assertRaises(ContractError) as caught:
+            self.contexts.prepare("u1")
+        self.assertEqual(caught.exception.status, 503)
+        self.assertIsNone(self.contexts.current("u1"))
+        import json
+        self.assertEqual(json.loads(self.redis.get(key))["status"], "unavailable")

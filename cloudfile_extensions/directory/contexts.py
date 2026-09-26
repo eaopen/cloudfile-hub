@@ -186,13 +186,18 @@ class SubjectContexts:
                     self.project(subject, epoch)
                     if subject["status"] == "active" and not self.account_active(user_id):
                         raise ContractError("SUBJECT_DISABLED", "Subject is disabled", 403)
+                    # Waiting for authority/projection must not restart the
+                    # freshness window. Redis TTL only covers remaining time.
+                    remaining = int(value["expires_at"] - self.clock())
+                    if remaining <= 0:
+                        raise unavailable()
                     published = self.redis.eval('''
                         if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
                         local previous = redis.call('GET', KEYS[1])
                         if not previous or cjson.decode(previous).context_epoch ~= ARGV[1] then return 0 end
                         redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
                         return 1
-                    ''', 2, key, lease_key, epoch, json.dumps(value), duration)
+                    ''', 2, key, lease_key, epoch, json.dumps(value), remaining)
                     if published != 1:
                         raise unavailable()
                 if value["status"] == "disabled":
