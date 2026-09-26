@@ -13,18 +13,21 @@ from ..resources.service import ResourceService
 class MigrationJobService:
     operations = {"scan": "migration.scan", "stage": "migration.stage", "verify-copy": "migration.verify-copy"}
 
-    def __init__(self, resources, management, *, source_ids):
+    def __init__(self, resources, management, *, source_ids, enabled_operations=frozenset({"scan"})):
         if (not isinstance(resources, ResourceService) or not isinstance(management, LibraryWideManagementAuthority) or
                 management.state.connection is not resources.store.connection or management.actor != resources.read_authority.actor or
                 not isinstance(source_ids, frozenset) or not 1 <= len(source_ids) <= 64):
             raise ValueError("actual same-connection library management and registered sources required")
         for source in source_ids:
             identifier(source)
+        if not isinstance(enabled_operations, frozenset) or not enabled_operations or not enabled_operations <= self.operations.keys():
+            raise ValueError("explicit implemented migration operations required")
         self.resources, self.management, self.source_ids = resources, management, source_ids
+        self.enabled_operations = enabled_operations
         self.jobs = JobStore(management.state.connection)
 
     def submit(self, operation, value, *, idempotency_key):
-        if operation not in self.operations:
+        if operation not in self.enabled_operations:
             raise ContractError("INVALID_REQUEST", "Import operation is unavailable", 400)
         required = ("repo_id", "stage_job_id") if operation == "verify-copy" else ("repo_id", "source_id")
         object_fields(value, required, ("content_hash",) if operation == "scan" else ())
