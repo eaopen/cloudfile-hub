@@ -63,6 +63,8 @@ class ConditionTest(unittest.TestCase):
 
     def test_sequence_and_time_do_not_coerce_values(self):
         self.assertEqual(sequence("42"), 42)
+        # Java Instant can emit nanoseconds; protocol validation must accept it.
+        self.assertEqual(utc_time("2026-09-26T00:00:00.123456789Z").microsecond, 123456)
         for value in (42, True, "04", "sha256:1"):
             with self.assertRaises(ContractError):
                 sequence(value)

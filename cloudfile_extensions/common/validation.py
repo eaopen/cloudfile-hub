@@ -33,7 +33,7 @@ def sequence(value):
 
 def utc_time(value):
     if not isinstance(value, str) or not re.fullmatch(
-            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,6})?Z", value):
+            r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{1,9})?Z", value):
         raise invalid("Expected UTC timestamp")
     try:
         parsed = datetime.fromisoformat(value[:-1] + "+00:00")

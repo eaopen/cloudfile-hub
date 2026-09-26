@@ -18,7 +18,8 @@ def validate_subject(value, *, requested_user_id, attribute_allowlist,
     attributes = value["attributes"]
     if (not isinstance(attributes, dict) or len(attributes) > 32 or
             set(attributes) - set(attribute_allowlist) or
-            any(not isinstance(key, str) or not (item is None or type(item) in (str, bool))
+            any(not isinstance(key, str) or not (item is None or type(item) in (str, bool)) or
+                (isinstance(item, str) and len(item) > 4096)
                 for key, item in attributes.items())):
         raise invalid("Invalid or unsupported subject attributes")
     sequence(value["revision"])
@@ -31,7 +32,7 @@ def validate_subject(value, *, requested_user_id, attribute_allowlist,
     normalized = {}
     for field in ("organizations", "roles"):
         items = value[field]
-        if not isinstance(items, list):
+        if not isinstance(items, list) or len(items) > 4096:
             raise invalid("Missing subject memberships")
         seen = set()
         normalized[field] = []
