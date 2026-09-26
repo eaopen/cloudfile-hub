@@ -1,5 +1,8 @@
 """Real SQL projection; generation/audit adapters are explicit test fixtures."""
 from datetime import datetime, timezone
+import json
+import os
+import unittest
 from uuid import uuid4
 
 from cloudfile_extensions.common.errors import ContractError
@@ -106,6 +109,43 @@ class ProjectionTest(DatabaseTestCase):
         with self.connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM cf_probe_member_audit")
             self.assertEqual(cursor.fetchone()[0], 0)
+
+    @unittest.skipUnless(os.environ.get("CF_TEST_REDIS_PORT"), "requires isolated Redis")
+    def test_real_redis_generation_loss_rolls_back_native_sql(self):
+        import redis
+        from contextlib import nullcontext
+        from cloudfile_extensions.directory.contexts import SubjectContexts
+        client = redis.Redis(host=os.environ.get("CF_TEST_REDIS_HOST", "127.0.0.1"),
+                             port=int(os.environ["CF_TEST_REDIS_PORT"]))
+        contexts = SubjectContexts(client, provider_id="directory", fetch=lambda user: self.subject,
+                                  attribute_allowlist=(), account_active=lambda user: True,
+                                  barrier_active=lambda provider, user: False,
+                                  refresh_guard=lambda *args, **kwargs: nullcontext(),
+                                  project=lambda *args: None, prefix="cf:test:" + uuid4().hex + ":")
+        key, lease = contexts._keys("u1")
+        pending = dict(userId="u1", status="refreshing", context_epoch=self.epoch,
+                       expires_at=contexts.clock() + 1800)
+        original_audit = self.projector.audit
+        try:
+            client.set(key, json.dumps(pending), ex=1800)
+            client.set(lease, self.epoch, ex=30)
+            self.projector.assert_generation = contexts.assert_generation
+            def lose_lease(cursor, event):
+                original_audit(cursor, event)
+                client.delete(lease)
+            self.projector.audit = lose_lease
+            with self.assertRaises(ContractError):
+                self.apply()
+            self.assertEqual(self.memberships(), ((4, 0), (5, 0), (6, 1)))
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) FROM cf_probe_member_audit")
+                self.assertEqual(cursor.fetchone()[0], 0)
+            client.set(lease, self.epoch, ex=30)
+            self.projector.audit = original_audit
+            self.assertEqual(self.apply().add, (1, 2, 3))
+        finally:
+            client.delete(key, lease)
+            client.close()
 
     def test_native_implicit_ancestor_cannot_add_source_absent_department(self):
         self.subject["organization_ancestors"] = []

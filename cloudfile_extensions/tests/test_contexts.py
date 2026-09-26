@@ -64,6 +64,38 @@ class ContextTest(unittest.TestCase):
         self.assertNotEqual(three["context_epoch"], two["context_epoch"])
         self.assertEqual(self.source_calls, 3)
 
+    def test_atomic_projection_generation_assertion(self):
+        import json
+        epoch = uuid4().hex
+        key, lease = self.contexts._keys("u1")
+        pending = {"userId": "u1", "status": "refreshing", "context_epoch": epoch,
+                   "expires_at": self.contexts.clock() + 1800}
+        self.redis.set(key, json.dumps(pending), ex=1800)
+        self.redis.set(lease, epoch, ex=30)
+        self.contexts.assert_generation("u1", epoch)
+        for changed in ({**pending, "status": "ready"},
+                        {**pending, "userId": "u2"},
+                        {**pending, "context_epoch": uuid4().hex},
+                        {**pending, "expires_at": 0},
+                        {**pending, "expires_at": self.contexts.clock() + 1900}):
+            self.redis.set(key, json.dumps(changed), ex=1800)
+            with self.assertRaises(ContractError):
+                self.contexts.assert_generation("u1", epoch)
+        for raw in ("private-invalid-json", "[]", "null"):
+            self.redis.set(key, raw, ex=1800)
+            with self.assertRaises(ContractError):
+                self.contexts.assert_generation("u1", epoch)
+        self.redis.set(key, json.dumps(pending), ex=1800)
+        self.redis.persist(lease)
+        with self.assertRaises(ContractError):
+            self.contexts.assert_generation("u1", epoch)
+        self.redis.set(lease, uuid4().hex, ex=30)
+        with self.assertRaises(ContractError):
+            self.contexts.assert_generation("u1", epoch)
+        self.redis.delete(lease)
+        with self.assertRaises(ContractError):
+            self.contexts.assert_generation("u1", epoch)
+
     def test_fresh_source_outage_is_usable_but_expiry_and_login_fail_closed(self):
         self.contexts.get("u1")
         def down(user_id):

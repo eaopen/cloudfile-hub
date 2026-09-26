@@ -239,6 +239,38 @@ class SubjectContexts:
         if current != epoch:
             raise unavailable()
 
+    def assert_generation(self, user_id, epoch):
+        """Atomic pending-generation assertion for the native SQL projector.
+
+        Caller must also hold the shared SQL authority scopes through commit.
+        This proves Redis ownership now, not an atomic SQL/Redis commit or a
+        readiness grant; lease expiry still needs final native publication checks.
+        """
+        key, lease_key = self._keys(user_id)
+        if (not isinstance(epoch, str) or len(epoch) != 32 or
+                any(char not in "0123456789abcdef" for char in epoch)):
+            raise unavailable()
+        try:
+            valid = self.redis.eval('''
+                if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
+                if redis.call('PTTL', KEYS[2]) <= 0 or
+                   redis.call('PTTL', KEYS[1]) <= 0 then return 0 end
+                local raw = redis.call('GET', KEYS[1])
+                if not raw then return 0 end
+                local ok, value = pcall(cjson.decode, raw)
+                if not ok or type(value) ~= 'table' then return 0 end
+                if value.userId ~= ARGV[2] or value.context_epoch ~= ARGV[1] or
+                   value.status ~= 'refreshing' or
+                   type(value.expires_at) ~= 'number' or
+                   value.expires_at <= tonumber(ARGV[3]) or
+                   value.expires_at > tonumber(ARGV[3]) + tonumber(ARGV[4]) then return 0 end
+                return 1
+            ''', 2, key, lease_key, epoch, user_id, self.clock(), self.ttl)
+            if valid != 1:
+                raise unavailable()
+        except RedisError:
+            raise unavailable() from None
+
     @staticmethod
     def public_state(value):
         from datetime import datetime, timezone
