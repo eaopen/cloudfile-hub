@@ -8,14 +8,15 @@ from .deployment import configure_policy
 
 
 class PolicyHost:
-    def __init__(self, settings, *, directory_authorization):
+    def __init__(self, settings, *, directory_authorization, resource_secret=None, lifecycle_reader=None):
         # Construct after the server worker fork, never in a preload parent.
         self.pid = os.getpid()
         self.lock = threading.Lock()
         self.active = 0
         self.draining = False
         self.closed = False
-        self.deployment = configure_policy(settings, directory_authorization=directory_authorization)
+        self.deployment = configure_policy(settings, directory_authorization=directory_authorization,
+            resource_secret=resource_secret, lifecycle_reader=lifecycle_reader)
 
     def _process(self):
         # Check before acquiring an inherited lock that may have been held at
@@ -23,15 +24,24 @@ class PolicyHost:
         if os.getpid() != self.pid:
             raise ContractError("POLICY_UNAVAILABLE", "Policy host must be initialized in this worker", 503)
 
-    @contextmanager
     def service(self, request, request_id):
+        return self._service(request, request_id, resource=False)
+
+    def resource_service(self, request, request_id):
+        return self._service(request, request_id, resource=True)
+
+    @contextmanager
+    def _service(self, request, request_id, *, resource):
         self._process()
         with self.lock:
             if self.draining or self.closed:
                 raise ContractError("POLICY_UNAVAILABLE", "Policy host is draining", 503)
             self.active += 1
         try:
-            with self.deployment.factory(request, request_id) as service:
+            factory = self.deployment.resource_factory if resource else self.deployment.factory
+            if factory is None:
+                raise ContractError("RESOURCE_UNAVAILABLE", "Resource runtime is not configured", 503)
+            with factory(request, request_id) as service:
                 yield service
         finally:
             with self.lock:

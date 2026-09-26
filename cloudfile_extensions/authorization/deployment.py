@@ -10,13 +10,14 @@ from .assembly import session_policy_factory
 class PolicyDeployment:
     factory: object
     redis: object
+    resource_factory: object = None
 
     def close(self):
         # The host invokes this only after draining all requests at shutdown.
         self.redis.connection_pool.disconnect()
 
 
-def configure_policy(value, *, directory_authorization):
+def configure_policy(value, *, directory_authorization, resource_secret=None, lifecycle_reader=None):
     """value is trusted host settings, not request JSON or an import path.
 
     Matches the current native authority adapter: private Redis TCP, DB0, password
@@ -42,6 +43,11 @@ def configure_policy(value, *, directory_authorization):
     trusted_https_url(value["directory_url"])
     if not callable(directory_authorization):
         raise ValueError("machine directory credential supplier required")
+    if (resource_secret is None) != (lifecycle_reader is None):
+        raise ValueError("resource secret and lifecycle adapter must be configured together")
+    if resource_secret is not None and (not isinstance(resource_secret, bytes)
+            or len(resource_secret) < 32 or not callable(lifecycle_reader)):
+        raise ValueError("trusted resource secret and lifecycle adapter required")
     environment = {"CLOUDFILE_DB_" + key.upper(): str(item) for key, item in
         dict(host=database["host"], user=database["user"], name=database["name"],
              password=database["password"], port=db_port).items()}
@@ -58,7 +64,14 @@ def configure_policy(value, *, directory_authorization):
             core_library=value["core_library"], cloud_mode=value["cloud_mode"],
             prefix=value.get("subject_prefix", "cf:subjects:"),
             ca_bundle=value.get("directory_ca_bundle"))
-        return PolicyDeployment(factory, client)
+        resource_factory = None
+        if resource_secret is not None:
+            from ..resources.runtime import ResourceServiceFactory
+            resource_factory = ResourceServiceFactory(authenticate=factory.authenticate,
+                preparation_scope=factory.preparation_scope, core=factory.core,
+                cloud_mode=factory.cloud_mode, secret=resource_secret,
+                lifecycle_reader=lifecycle_reader)
+        return PolicyDeployment(factory, client, resource_factory)
     except Exception:
         client.connection_pool.disconnect()
         raise

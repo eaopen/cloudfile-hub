@@ -22,7 +22,9 @@ def post_worker_init(worker):
     _host = None
     authorization = getattr(settings, "CLOUDFILE_DIRECTORY_AUTHORIZATION", None)
     try:
-        _host = PolicyHost(config, directory_authorization=authorization)
+        _host = PolicyHost(config, directory_authorization=authorization,
+            resource_secret=getattr(settings, "CLOUDFILE_RESOURCE_SECRET", None),
+            lifecycle_reader=getattr(settings, "CLOUDFILE_RESOURCE_LIFECYCLE_READER", None))
     except Exception:
         raise RuntimeError("CloudFile policy worker initialization failed; check trusted configuration") from None
 
@@ -32,6 +34,13 @@ def policy_service(request, request_id):
     if _host is None or _host.pid != os.getpid():
         raise ContractError("POLICY_UNAVAILABLE", "Policy worker is unavailable", 503)
     return _host.service(request, request_id)
+
+
+def resource_service(request, request_id):
+    """Owned resource scope; requires the trusted native lifecycle adapter."""
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("RESOURCE_UNAVAILABLE", "Resource worker is unavailable", 503)
+    return _host.resource_service(request, request_id)
 
 
 def worker_exit(server, worker):
