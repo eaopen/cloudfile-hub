@@ -112,7 +112,23 @@ class SubjectContexts:
             return current
         return self.prepare(user_id, reuse_ready=trigger == "request")
 
-    def prepare(self, user_id, *, reuse_ready=False, _retry_after_join=True):
+    def completed_state(self, user_id):
+        """Trusted refresh diagnostics, including disabled; never read authority."""
+        try:
+            if self.barrier_active(self.provider_id, user_id):
+                raise unavailable()
+            value = self._read(user_id)
+            if value is None or value["status"] not in {"ready", "disabled"}:
+                raise unavailable()
+            if value["status"] == "ready" and not self.account_active(user_id):
+                raise ContractError("SUBJECT_DISABLED", "Subject is disabled", 403)
+            return value
+        except RedisError:
+            raise unavailable() from None
+
+    def prepare(self, user_id, *, reuse_ready=False, _retry_after_join=True, allow_disabled=False):
+        if type(allow_disabled) is not bool or (allow_disabled and reuse_ready):
+            raise ValueError("disabled completion is only for explicit trusted refresh")
         key, lease_key = self._keys(user_id)
         epoch = uuid4().hex
         try:
@@ -165,7 +181,8 @@ class SubjectContexts:
                         if owner != joining:
                             if not _retry_after_join:
                                 raise unavailable()
-                            return self.prepare(user_id, reuse_ready=False, _retry_after_join=False)
+                            return self.prepare(user_id, reuse_ready=False, _retry_after_join=False,
+                                allow_disabled=allow_disabled)
                     time.sleep(0.02)
                 raise unavailable()
             try:
@@ -205,7 +222,7 @@ class SubjectContexts:
                     ''', 2, key, lease_key, epoch, json.dumps(value), remaining)
                     if published != 1:
                         raise unavailable()
-                if value["status"] == "disabled":
+                if value["status"] == "disabled" and not allow_disabled:
                     raise ContractError("SUBJECT_DISABLED", "Subject is disabled", 403)
                 return value
             except Exception as error:

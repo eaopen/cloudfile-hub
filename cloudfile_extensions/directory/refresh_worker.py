@@ -77,13 +77,13 @@ class UserRefreshJob:
             preparation.projector.assert_generation = generation
             preparation.contexts.refresh_guard = guard
             try:
-                value = preparation.prepare(user, trigger="force")
+                value = preparation.refresh_for_management(user)
                 scopes = [dict(type="provider", provider=self.provider, external_id=self.provider), scope]
                 with scope_locks(connection, scopes):
                     connection.begin()
                     try:
                         actor, actor_kind = assert_claim()
-                        current = preparation.contexts.current(user)
+                        current = preparation.contexts.completed_state(user)
                         if current is None or current["context_epoch"] != value["context_epoch"]:
                             raise ContractError("SUBJECT_UNAVAILABLE", "Refreshed subject changed", 503)
                         event = dict(event_id=str(uuid5(NAMESPACE_URL, "cf.refresh:" + claim.job_id

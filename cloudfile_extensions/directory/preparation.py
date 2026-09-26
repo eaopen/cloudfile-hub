@@ -55,3 +55,10 @@ class SubjectPreparation:
         if user_id != self.actor:
             raise ContractError("ACCESS_DENIED", "Only the authenticated subject may be prepared", 403)
         return self.contexts.get(user_id, trigger=trigger)
+
+    def refresh_for_management(self, user_id):
+        """Trusted leased worker only; disabled success is not login/read ready."""
+        identifier(user_id, maximum=225)
+        if user_id != self.actor:
+            raise ContractError("ACCESS_DENIED", "Only the prepared subject may be refreshed", 403)
+        return self.contexts.prepare(user_id, reuse_ready=False, allow_disabled=True)
