@@ -105,3 +105,10 @@ class UserDelegationVerifier:
             raise ContractError("AUTHENTICATION_REQUIRED", "User delegation expired", 401)
         self.revocations.assert_active(ServicePrincipal(principal.service_id,
             frozenset({"user.delegation"}), principal.token_id, principal.expires_at))
+
+    def revoke(self, principal):
+        """Trusted operator only; no raw request subject/token ID accepted."""
+        if not isinstance(principal, UserDelegation):
+            raise ValueError("verified user delegation required")
+        return self.revocations.revoke(ServicePrincipal(principal.service_id,
+            frozenset({"user.delegation"}), principal.token_id, principal.expires_at))
