@@ -74,3 +74,26 @@ class SearchTaskStore:
     def record_succeeded(self, claim, *, generation, step):
         # Caller must have checked exact uid/index/type succeeded via task API.
         self._transition(claim, generation, step, "submitted", "succeeded")
+
+    def complete_event(self, claim, *, generation, payload_hashes):
+        """Trusted full event plan, not a caller-selected subset of steps.
+
+        No network inside this transaction. Match every stored step and reject
+        unresolved tasks from any other generation before advancing the stream.
+        """
+        self._key(claim, generation, 0)
+        if (not isinstance(payload_hashes, list) or not 1 <= len(payload_hashes) <= 10001 or
+                any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{64}", value) for value in payload_hashes)):
+            raise ValueError("complete ordered event payload hashes required")
+        with self._owned(claim) as sql:
+            sql.execute("SELECT step,payload_hash,state,task_id FROM cf_search_task WHERE event_id=%s AND index_generation=%s ORDER BY step FOR UPDATE", (claim.event_id, generation))
+            rows = sql.fetchall()
+            if (len(rows) != len(payload_hashes) or any(row[0] != step or row[1] != payload_hashes[step] or
+                    row[2] != "succeeded" or type(row[3]) is not int or not 0 <= row[3] <= 2 ** 63 - 1 for step, row in enumerate(rows))):
+                raise ContractError("SEARCH_TASK_PENDING", "Search event steps are incomplete", 409)
+            sql.execute("SELECT event_id FROM cf_search_task WHERE event_id=%s AND index_generation<>%s AND state<>'succeeded' LIMIT 1 FOR UPDATE", (claim.event_id, generation))
+            if sql.fetchone() is not None:
+                raise ContractError("SEARCH_SUBMISSION_UNKNOWN", "Other index generation requires recovery", 503)
+            sql.execute("UPDATE cf_event_outbox SET search_state='done',search_expiry=NULL,search_error=NULL WHERE event_id=%s AND search_state='running' AND search_owner=%s AND search_epoch=%s AND search_expiry>UTC_TIMESTAMP(6)", (claim.event_id, claim.owner, claim.epoch))
+            if sql.rowcount != 1:
+                raise ContractError("WORKER_LEASE_LOST", "Search event lease expired before completion", 409)
