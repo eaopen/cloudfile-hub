@@ -5,10 +5,11 @@ from ..common.errors import ContractError
 from ..events.outbox import Outbox
 from .event_execution import SearchEventExecution
 from .projection import AttributeSearchProjection
+from .fanout_coordinator import TagFanoutCoordinator
 
 
 class SearchEventConsumer:
-    def __init__(self, outbox, execution, projection, *, owner, generation):
+    def __init__(self, outbox, execution, projection, *, owner, generation, fanout=None):
         if (not isinstance(outbox, Outbox) or not isinstance(execution, SearchEventExecution) or
                 not isinstance(projection, AttributeSearchProjection) or
                 outbox.connection is not execution.store.connection or
@@ -17,12 +18,22 @@ class SearchEventConsumer:
             raise ValueError("owned ordered consumer and pinned index generation required")
         self.outbox, self.execution, self.projection = outbox, execution, projection
         self.owner, self.generation = owner, generation
+        if fanout is not None and (not isinstance(fanout, TagFanoutCoordinator) or
+                fanout.execution.store.connection is not outbox.connection or
+                fanout.execution.client.index != execution.client.index):
+            raise ValueError("fanout must share owned persistence and pinned index")
+        self.fanout = fanout
 
     def run_once(self):
         claim = self.outbox.claim("search", self.owner, lease_seconds=60)
         if claim is None:
             return "idle"
         try:
+            if claim.payload.get("action") == "tags.definition.updated" and self.fanout is not None:
+                if self.fanout.advance(claim, generation=self.generation):
+                    return "completed"
+                self.outbox.retry_later(claim, code="INDEX_TASK_PENDING", delay_seconds=2)
+                return "pending"
             plan = self.execution.store.load(claim, generation=self.generation)
             if plan is None:
                 steps = self.projection.plan(claim)
