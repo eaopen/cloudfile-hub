@@ -126,7 +126,7 @@ class UserRefreshManagement:
             raise ContractError("NOT_FOUND", "Refresh job is not available", 404)
         return previous
 
-    def status(self, job_id):
+    def status(self, job_id, *, with_condition=False):
         previous = self._job(job_id)
         job_id, scope = previous["job_id"], previous["scope"]
         target = identifier(scope["external_id"], maximum=225)
@@ -149,12 +149,17 @@ class UserRefreshManagement:
                             or current["actor"] != previous["actor"] or current["barrier_active"]):
                         raise ContractError("SUBJECT_UNAVAILABLE", "Refresh scope changed", 503)
                     result = self.public_job(current)
+                    if with_condition:
+                        attempt = current["lease_epoch"]
+                        if type(attempt) is not int or not 0 <= attempt <= 2 ** 63 - 1:
+                            raise ContractError("SUBJECT_UNAVAILABLE", "Refresh attempt is unavailable", 503)
+                        result = (result, '"cf-refresh:' + job_id + ':' + str(attempt) + '"')
                 connection.commit()
                 return result
             finally:
                 connection.rollback()
 
-    def retry_failed(self, job_id, *, expected_attempt):
+    def retry_failed(self, job_id, *, expected_attempt, with_condition=False):
         """Internal conditional recovery; never resurrect cancelled work."""
         if type(expected_attempt) is not int or not 0 <= expected_attempt <= 2 ** 63 - 1:
             raise ContractError("INVALID_REQUEST", "Invalid refresh attempt condition", 400)
@@ -179,4 +184,4 @@ class UserRefreshManagement:
         with scope_locks(self.jobs.connection, scopes):
             self.jobs.retry_failed(previous["job_id"], actor=self.actor_id, actor_kind=self.actor_kind,
                 authorize_transaction=authorize)
-        return self.status(previous["job_id"])
+        return self.status(previous["job_id"], with_condition=with_condition)
