@@ -131,7 +131,7 @@ class AuditReader:
         try:
             with self.connection.cursor() as sql:
                 self._storage(sql)
-                sql.execute("SELECT " + ",".join(self.FIELDS) + " FROM cf_audit_event FORCE INDEX (audit_repo_page) WHERE " +
+                sql.execute("SELECT " + ",".join(self.FIELDS) + ",object_type FROM cf_audit_event FORCE INDEX (audit_repo_page) WHERE " +
                             " AND ".join(clauses) + " ORDER BY occurred_at DESC,id DESC LIMIT 1001", values)
                 rows = sql.fetchall()
         except Exception:
@@ -139,10 +139,12 @@ class AuditReader:
         items, consumed = [], 0
         for row in rows[:1000]:
             event = dict(zip(self.FIELDS, row))
+            event["_object_type"] = row[len(self.FIELDS)]
             consumed += 1
             # Both source and target paths remain in this object so native
             # authorization cannot accidentally leak the other side of a move.
             if self.authorize(actor, event) is True:
+                event.pop("_object_type", None)
                 for name in ("occurred_at", "recorded_at"):
                     if event[name] is not None:
                         event[name] = event[name].replace(tzinfo=timezone.utc).isoformat().replace("+00:00", "Z")

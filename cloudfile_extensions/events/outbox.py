@@ -17,7 +17,7 @@ SOURCES = frozenset({"hub", "server", "fileserver", "webdav", "idp", "directory"
 
 def normalize_event(event):
     object_fields(event, ("event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source", "action", "result"),
-                  ("repo_id", "path", "target_path", "resource_uid", "job_id", "delegator", "revision", "content_version", "subject_revision", "policy_revision", "bytes_sent", "target_user_id", "reason"))
+                  ("repo_id", "path", "target_path", "resource_uid", "resource_kind", "job_id", "delegator", "revision", "content_version", "subject_revision", "policy_revision", "bytes_sent", "target_user_id", "reason"))
     value = dict(event)
     try:
         value["event_id"] = str(UUID(value["event_id"]))
@@ -36,11 +36,13 @@ def normalize_event(event):
         raise ContractError("INVALID_REQUEST", "Invalid event origin or result", 400)
     if not isinstance(value["action"], str) or not re.fullmatch(r"[a-z][a-z0-9._-]{0,31}", value["action"]):
         raise ContractError("INVALID_REQUEST", "Invalid event action", 400)
+    if "resource_kind" in value and (value["resource_kind"] not in {"file", "dir"} or not value.get("repo_id")):
+        raise ContractError("INVALID_REQUEST", "Invalid event resource kind", 400)
     for field in ("path", "target_path"):
         if field in value:
             if not value.get("repo_id"):
                 raise ContractError("INVALID_REQUEST", "Event path requires a repository", 400)
-            value[field] = normalize_path(value[field], "dir")
+            value[field] = normalize_path(value[field], value.get("resource_kind", "dir"))
     for field in ("delegator", "revision", "content_version", "subject_revision", "policy_revision"):
         if field in value:
             identifier(value[field])
@@ -90,7 +92,7 @@ class EventWriter:
         cursor.execute("INSERT INTO cf_audit_event(repo_id,object_type,object_id,operation,operator,source,result,occurred_at,"
                        "source_path,target_path,event_id,schema_version,recorded_at,request_id,actor_user_id,actor_kind,delegator,resource_uid,event_payload) "
                        "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s,%s,%s,%s,%s,%s,%s)",
-                       (value.get("repo_id", ""), "resource" if value.get("repo_id") else "identity", value.get("resource_uid", ""), value["action"], value["actor_user_id"], value["source"],
+                       (value.get("repo_id", ""), value.get("resource_kind", "resource" if value.get("repo_id") else "identity"), value.get("resource_uid", ""), value["action"], value["actor_user_id"], value["source"],
                         value["result"], occurred, value.get("path"), value.get("target_path"), value["event_id"],
                         utc_time(value["recorded_at"]).replace(tzinfo=None), value["request_id"],
                         value["actor_user_id"], value["actor_kind"], value.get("delegator"), value.get("resource_uid"), payload))
