@@ -1,4 +1,6 @@
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
+from contextlib import contextmanager
+from types import SimpleNamespace
 
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.schema.runner import SchemaRunner
@@ -31,6 +33,32 @@ class RebuildStoreTest(DatabaseTestCase):
         self.store.start(**self.start)
         with self.assertRaises(ContractError):
             self.store.start(**{**self.start, "commit_id": "b" * 40})
+
+    def test_capture_uses_native_head_and_resumes_saved_boundary(self):
+        held = []
+        @contextmanager
+        def scope(connection, repo):
+            self.assertIs(connection, self.connection)
+            held.append(repo)
+            try:
+                yield
+            finally:
+                held.pop()
+        api = Mock()
+        def repo_read(repo):
+            self.assertEqual(held, [repo])
+            return SimpleNamespace(id=repo, head_cmmt_id="a" * 40)
+        api.get_repo.side_effect = repo_read
+        with patch("cloudfile_extensions.search.rebuild_store._native_api", return_value=api):
+            boundary = self.store.capture_start(**self.identity, capture_scope=scope)
+            self.assertEqual(boundary, dict(commit_id="a" * 40, source_sequence="0", state="scanning"))
+            self.assertEqual(self.store.capture_start(**self.identity, capture_scope=scope), boundary)
+        api.get_repo.assert_called_once()
+        self.assertEqual(held, [])
+
+    def test_capture_without_producer_scope_is_rejected(self):
+        with self.assertRaises(ValueError):
+            self.store.capture_start(**self.identity, capture_scope=None)
 
     def test_frozen_page_is_immutable_and_does_not_advance_directory(self):
         self.store.start(**self.start)

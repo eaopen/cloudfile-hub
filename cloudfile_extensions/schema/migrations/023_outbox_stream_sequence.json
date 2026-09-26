@@ -1,0 +1,8 @@
+{
+  "version": "023_outbox_stream_sequence",
+  "steps": [{
+    "sql": "ALTER TABLE cf_event_outbox ADD INDEX stream_sequence(stream,sequence)",
+    "verify": "SELECT IF((SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_event_outbox' AND index_name='stream_sequence' AND sub_part IS NULL)='stream,sequence',1,0)",
+    "expected": 1
+  }]
+}

@@ -11,6 +11,7 @@ from .documents import document_key
 from .generations import SearchGenerationStore
 from .initialization import SearchInitializationStore
 from .meilisearch import _object
+from .native_directory import _native_api
 
 
 class SearchRebuildStore:
@@ -57,6 +58,44 @@ class SearchRebuildStore:
             if sql.fetchone() != (commit_id, source_sequence, "scanning"):
                 raise ContractError("SEARCH_REBUILD_CONFLICT", "Rebuild snapshot identity changed", 409)
             sql.execute("INSERT INTO cf_search_rebuild_directory(generation,repo_id,path_hash,path,position,state,updated_at) VALUES(%s,%s,%s,'/',0,'ready',UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE generation=generation", (generation, ref["repo_id"], path_hash))
+
+    def capture_start(self, *, generation, index, repo_id, capture_scope):
+        """Actual CE head + committed event boundary under the producer guard.
+
+        The provider must serialize native mutations and their durable event
+        publication, not supply a read-only preflight or historical blob pin.
+        Existing jobs resume their saved boundary instead of recapturing it.
+        """
+        if not callable(capture_scope):
+            raise ValueError("actual native/event producer capture scope required")
+        ref, _ = self._directory(repo_id, "/")
+        with self._owned(generation, index) as sql:
+            sql.execute("SELECT commit_id,source_sequence,state FROM cf_search_rebuild WHERE generation=%s AND repo_id=%s FOR UPDATE", (generation, ref["repo_id"]))
+            existing = sql.fetchone()
+            if existing is not None:
+                if (len(existing) != 3 or not isinstance(existing[0], str) or not re.fullmatch(r"[0-9a-f]{40}", existing[0]) or
+                        existing[2] not in ("scanning", "scanned")):
+                    raise ContractError("SEARCH_REBUILD_CONFLICT", "Saved rebuild boundary is invalid", 409)
+                sequence(existing[1])
+                return dict(commit_id=existing[0], source_sequence=existing[1], state=existing[2])
+        with capture_scope(self.connection, ref["repo_id"]):
+            repo = _native_api().get_repo(ref["repo_id"])
+            commit = getattr(repo, "head_cmmt_id", None)
+            if getattr(repo, "id", None) != ref["repo_id"] or not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+                raise ContractError("SEARCH_REBUILD_PENDING", "Current native library head is unavailable", 503)
+            self.connection.begin()
+            try:
+                with self.connection.cursor() as sql:
+                    sql.execute("SELECT MAX(sequence) FROM cf_event_outbox FORCE INDEX(stream_sequence) WHERE stream=%s", ("repo." + ref["repo_id"],))
+                    row = sql.fetchone()
+                    cutoff = row[0] if row is not None and row[0] is not None else 0
+                    if type(cutoff) is not int or not 0 <= cutoff <= 2 ** 64 - 1:
+                        raise ContractError("SEARCH_REBUILD_PENDING", "Event boundary is invalid", 503)
+            finally:
+                self.connection.rollback()
+            # Native/event producer guard remains held through durable start.
+            self.start(generation=generation, index=index, repo_id=ref["repo_id"], commit_id=commit, source_sequence=str(cutoff))
+            return dict(commit_id=commit, source_sequence=str(cutoff), state="scanning")
 
     def freeze(self, *, generation, index, repo_id, path, offset, next_offset, documents):
         ref, path_hash = self._directory(repo_id, path)
