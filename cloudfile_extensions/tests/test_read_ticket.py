@@ -46,7 +46,9 @@ class ReadTicketTests(unittest.TestCase):
         self.native = SimpleNamespace(seafserv_threaded_rpc=self.rpc, seafile_api=self.api)
 
     def test_resolves_exact_commit_and_captures_server_session(self):
-        with patch.dict(sys.modules, seaserv=self.native):
+        with patch.dict(sys.modules, seaserv=self.native), patch(
+                "cloudfile_extensions.identity.read_ticket.issue_native_ticket",
+                self.rpc.seafile_cloudfile_issue_read_ticket):
             result = self.issuer.issue(self.request, self.ref)
         self.assertEqual(result, dict(ticket=self.token, expires_in=60))
         self.rpc.get_file_id_by_commit_and_path.assert_called_once_with(
@@ -59,6 +61,8 @@ class ReadTicketTests(unittest.TestCase):
 
     def test_missing_file_never_issues_ticket(self):
         self.rpc.get_file_id_by_commit_and_path.return_value = None
-        with patch.dict(sys.modules, seaserv=self.native), self.assertRaises(ContractError):
+        with patch.dict(sys.modules, seaserv=self.native), patch(
+                "cloudfile_extensions.identity.read_ticket.issue_native_ticket",
+                self.rpc.seafile_cloudfile_issue_read_ticket), self.assertRaises(ContractError):
             self.issuer.issue(self.request, self.ref)
         self.rpc.seafile_cloudfile_issue_read_ticket.assert_not_called()

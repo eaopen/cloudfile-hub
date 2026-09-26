@@ -9,6 +9,7 @@ from ..directory.preparation import SubjectPreparation
 from ..resources.paths import resource_ref
 from .native_session import SESSION_REFERENCE_KEY
 from .session_authority import OIDCSessionAuthority
+from .ticket_transport import issue_native_ticket
 
 
 class OIDCReadTicketIssuer:
@@ -61,7 +62,7 @@ class OIDCReadTicketIssuer:
                 ref["repo_id"], head_id, ref["path"])
             if not isinstance(object_id, str) or not re.fullmatch(r"[0-9a-f]{40}", object_id):
                 raise ValueError("native file target unavailable")
-            token = seafserv_threaded_rpc.seafile_cloudfile_issue_read_ticket(
+            token = issue_native_ticket(
                 ref["repo_id"], ref["path"], head_id, object_id, operation, username, encoded)
             if not isinstance(token, str) or str(UUID(token)) != token:
                 raise ValueError("invalid ticket response")
