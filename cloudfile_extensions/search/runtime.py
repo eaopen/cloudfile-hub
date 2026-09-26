@@ -65,14 +65,15 @@ class SearchInitializationFactory:
 
 class SearchRebuildRuntime:
     """Fixed trusted generation; callers cannot select another physical index."""
-    def __init__(self, coordinator, *, generation, capture_scope):
+    def __init__(self, coordinator, *, generation, capture_scope, global_capture_scope):
         if not isinstance(coordinator, SearchRebuildCoordinator):
             raise ValueError("actual rebuild coordinator required")
         SearchGenerationStore._identity(generation, coordinator.execution.client.index)
-        if not callable(capture_scope):
+        if not callable(capture_scope) or not callable(global_capture_scope):
             raise ValueError("actual producer capture scope required")
         self.coordinator, self.generation = coordinator, generation
         self.capture_scope = capture_scope
+        self.global_capture_scope = global_capture_scope
 
     def start(self, *, repo_id):
         return self.coordinator.execution.store.capture_start(generation=self.generation,
@@ -95,18 +96,23 @@ class SearchRebuildRuntime:
         return SearchCatchupInspector(self.coordinator.execution.store).advance_global_checkpoint(
             generation=self.generation, index=self.coordinator.execution.client.index)
 
+    def refresh_global_catchup_target(self):
+        return SearchCatchupInspector(self.coordinator.execution.store).refresh_global_target(
+            generation=self.generation, index=self.coordinator.execution.client.index, producer_scope=self.global_capture_scope)
+
 
 class SearchRebuildFactory(SearchInitializationFactory):
     """Owned rebuild assembly, sharing explicit connection cleanup, not jobs."""
     def __init__(self, *, connection_factory, endpoint, index, write_key, generation,
-                 snapshot_scope, capture_scope, repo_scope, lifecycle_scope, resource_secret):
-        if (not callable(snapshot_scope) or not callable(capture_scope) or not callable(repo_scope) or not callable(lifecycle_scope) or
+                 snapshot_scope, capture_scope, global_capture_scope, repo_scope, lifecycle_scope, resource_secret):
+        if (not callable(snapshot_scope) or not callable(capture_scope) or not callable(global_capture_scope) or not callable(repo_scope) or not callable(lifecycle_scope) or
                 not isinstance(resource_secret, bytes) or len(resource_secret) < 32):
             raise ValueError("actual native snapshot/repo/lifecycle scopes and secret required")
         super().__init__(connection_factory=connection_factory, endpoint=endpoint, index=index,
             write_key=write_key, generation=generation)
         self.snapshot_scope, self.repo_scope, self.lifecycle_scope = snapshot_scope, repo_scope, lifecycle_scope
         self.capture_scope = capture_scope
+        self.global_capture_scope = global_capture_scope
         self.secret = resource_secret
 
     def _assemble(self, connection):
@@ -116,7 +122,8 @@ class SearchRebuildFactory(SearchInitializationFactory):
         execution = SearchRebuildExecution(SearchRebuildStore(connection), client)
         coordinator = SearchRebuildCoordinator(execution,
             NativeCommitDirectoryReader(snapshot_scope=self.snapshot_scope), source)
-        return SearchRebuildRuntime(coordinator, generation=self.generation, capture_scope=self.capture_scope)
+        return SearchRebuildRuntime(coordinator, generation=self.generation, capture_scope=self.capture_scope,
+            global_capture_scope=self.global_capture_scope)
 
 
 class SearchConsumerFactory:

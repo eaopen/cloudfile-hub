@@ -68,6 +68,7 @@ class SearchRuntimeTest(TestCase):
         options = {key: self.options[key] for key in ("connection_factory", "endpoint", "index", "write_key", "generation", "repo_scope", "lifecycle_scope", "resource_secret")}
         options["snapshot_scope"] = lambda repo, commit: nullcontext()
         options["capture_scope"] = lambda connection, repo: nullcontext()
+        options["global_capture_scope"] = lambda connection: nullcontext()
         factory = SearchRebuildFactory(**options)
         with patch("cloudfile_extensions.search.runtime.SchemaRunner"):
             with factory.open() as runtime:

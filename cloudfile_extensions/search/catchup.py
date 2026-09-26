@@ -62,6 +62,12 @@ class SearchCatchupInspector:
         return self._inspect(generation=generation, index=index, repo_id=None, persist=True, global_scope=True)
 
     def refresh_target(self, *, generation, index, repo_id, producer_scope):
+        return self._refresh(generation=generation, index=index, repo_id=repo_id, producer_scope=producer_scope)
+
+    def refresh_global_target(self, *, generation, index, producer_scope):
+        return self._refresh(generation=generation, index=index, repo_id=None, producer_scope=producer_scope, global_scope=True)
+
+    def _refresh(self, *, generation, index, repo_id, producer_scope, global_scope=False):
         """Extend only a fully checked checkpoint under the real producer guard.
 
         No caller cutoff, reset, skipped prefix or publication permission. The
@@ -70,27 +76,38 @@ class SearchCatchupInspector:
         """
         if not callable(producer_scope):
             raise ValueError("actual native/event producer scope required")
-        ref, _ = self.store._directory(repo_id, "/")
-        with producer_scope(self.store.connection, ref["repo_id"]):
+        ref = dict(repo_id=None) if global_scope else self.store._directory(repo_id, "/")[0]
+        table = "cf_search_global_catchup" if global_scope else "cf_search_catchup"
+        where = "generation=%s" if global_scope else "generation=%s AND repo_id=%s"
+        key = (generation,) if global_scope else (generation, ref["repo_id"])
+        scope = producer_scope(self.store.connection) if global_scope else producer_scope(self.store.connection, ref["repo_id"])
+        with scope:
             with self.store._owned(generation, index) as sql:
-                sql.execute("SELECT source_sequence,state FROM cf_search_rebuild WHERE generation=%s AND repo_id=%s FOR UPDATE", (generation, ref["repo_id"]))
-                job = sql.fetchone()
-                if job is None or job[1] != "scanned":
-                    raise ContractError("SEARCH_REBUILD_PENDING", "Library scan is incomplete", 503)
-                baseline = sequence(job[0])
-                sql.execute("SELECT baseline,target_sequence,checked_sequence,state FROM cf_search_catchup WHERE generation=%s AND repo_id=%s FOR UPDATE", (generation, ref["repo_id"]))
+                if global_scope:
+                    sql.execute("SELECT repo_id FROM cf_search_rebuild WHERE generation=%s AND state<>'scanned' LIMIT 1 FOR UPDATE", (generation,))
+                    if sql.fetchone() is not None:
+                        raise ContractError("SEARCH_REBUILD_PENDING", "Global refresh waits for library scans", 503)
+                    baseline = 0
+                else:
+                    sql.execute("SELECT source_sequence,state FROM cf_search_rebuild WHERE generation=%s AND repo_id=%s FOR UPDATE", key)
+                    job = sql.fetchone()
+                    if job is None or job[1] != "scanned":
+                        raise ContractError("SEARCH_REBUILD_PENDING", "Library scan is incomplete", 503)
+                    baseline = sequence(job[0])
+                sql.execute("SELECT baseline,target_sequence,checked_sequence,state FROM " + table + " WHERE " + where + " FOR UPDATE", key)
                 checkpoint = sql.fetchone()
                 if (checkpoint is None or len(checkpoint) != 4 or any(type(value) is not int for value in checkpoint[:3]) or
                         checkpoint[0] != baseline or not baseline <= checkpoint[1] <= 2 ** 64 - 1 or
                         checkpoint[2] != checkpoint[1] or checkpoint[3] != "complete"):
                     raise ContractError("SEARCH_CATCHUP_PENDING", "Saved catch-up target must finish first", 409)
-                sql.execute("SELECT MAX(sequence) FROM cf_event_outbox FORCE INDEX(stream_sequence) WHERE stream=%s", ("repo." + ref["repo_id"],))
+                stream = "security" if global_scope else "repo." + ref["repo_id"]
+                sql.execute("SELECT MAX(sequence) FROM cf_event_outbox FORCE INDEX(stream_sequence) WHERE stream=%s", (stream,))
                 row = sql.fetchone()
                 target = row[0] if row is not None and row[0] is not None else 0
                 if type(target) is not int or not checkpoint[1] <= target <= 2 ** 64 - 1:
                     raise ContractError("SEARCH_PLAN_CONFLICT", "Producer event boundary moved backwards", 409)
                 state = "complete" if target == checkpoint[2] else "pending"
-                sql.execute("UPDATE cf_search_catchup SET target_sequence=%s,state=%s,updated_at=UTC_TIMESTAMP(6) WHERE generation=%s AND repo_id=%s AND target_sequence=%s AND checked_sequence=%s AND state='complete'", (target, state, generation, ref["repo_id"], checkpoint[1], checkpoint[2]))
+                sql.execute("UPDATE " + table + " SET target_sequence=%s,state=%s,updated_at=UTC_TIMESTAMP(6) WHERE " + where + " AND target_sequence=%s AND checked_sequence=%s AND state='complete'", (target, state, *key, checkpoint[1], checkpoint[2]))
                 if sql.rowcount not in (0, 1):
                     raise ContractError("SEARCH_PLAN_CONFLICT", "Catch-up target changed", 409)
                 return dict(state=state, checked_through=str(checkpoint[2]), observed_cutoff=str(target))

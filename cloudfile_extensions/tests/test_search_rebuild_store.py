@@ -185,6 +185,30 @@ class RebuildStoreTest(DatabaseTestCase):
         with self.connection.cursor() as sql:
             sql.execute("SELECT baseline,checked_sequence,state FROM cf_search_global_catchup WHERE generation='g1'")
             self.assertEqual(sql.fetchone(), (0, int(fact["sequence"]), "complete"))
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as sql:
+                newer = EventWriter().append(sql, dict(event_id=str(uuid4()), occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    request_id="binding-next", actor_user_id="manager", actor_kind="user", source="hub", action="identity.bound", result="succeeded", target_user_id="employee-next"))
+            self.connection.commit()
+        finally:
+            self.connection.rollback()
+        held = []
+        @contextmanager
+        def global_scope(connection):
+            self.assertIs(connection, self.connection)
+            held.append(True)
+            try:
+                yield
+            finally:
+                held.pop()
+        refreshed = inspector.refresh_global_target(generation="g1", index="resources_g1", producer_scope=global_scope)
+        self.assertEqual(refreshed, dict(state="pending", checked_through=fact["sequence"], observed_cutoff=newer["sequence"]))
+        with self.assertRaises(ContractError):
+            inspector.refresh_global_target(generation="g1", index="resources_g1", producer_scope=global_scope)
+        resumed = inspector.advance_global_checkpoint(generation="g1", index="resources_g1")
+        self.assertEqual(resumed["checked_through"], newer["sequence"])
+        self.assertEqual(held, [])
 
     def test_persistent_checkpoint_resumes_fixed_target_not_new_events(self):
         self.store.start(**self.start)
