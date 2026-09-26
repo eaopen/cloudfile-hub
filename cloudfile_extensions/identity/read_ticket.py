@@ -18,11 +18,9 @@ class OIDCReadTicketIssuer:
             raise ValueError("actual subject preparation and session authority required")
         self.preparation, self.authority = preparation, authority
 
-    def issue(self, request, reference, *, head_id, object_id, operation="download"):
+    def issue(self, request, reference, *, operation="download"):
         ref = resource_ref(reference)
-        if (ref["kind"] != "file" or operation not in ("view", "download")
-                or any(not isinstance(value, str) or not re.fullmatch(r"[0-9a-f]{40}", value)
-                    for value in (head_id, object_id))):
+        if ref["kind"] != "file" or operation not in ("view", "download"):
             raise ContractError("INVALID_REQUEST", "Exact native file target is required", 400)
         actor = self.preparation.actor
         self.preparation.prepare(actor)  # Directory I/O never under session locks.
@@ -50,7 +48,19 @@ class OIDCReadTicketIssuer:
         if len(encoded.encode("utf-8")) > 16384:
             raise ContractError("INVALID_REQUEST", "Native ticket conditions exceed budget", 400)
         try:
-            from seaserv import seafserv_threaded_rpc
+            from seaserv import seafserv_threaded_rpc, seafile_api
+            repo = seafile_api.get_repo(ref["repo_id"])
+            if repo is None:
+                raise ValueError("native repository unavailable")
+            head_id = repo.head_cmmt_id
+            if not isinstance(head_id, str) or not re.fullmatch(r"[0-9a-f]{40}", head_id):
+                raise ValueError("native head unavailable")
+            # Resolve against that exact commit, not another current-head read.
+            # Native issuance still locks/rechecks master; races fail closed.
+            object_id = seafserv_threaded_rpc.get_file_id_by_commit_and_path(
+                ref["repo_id"], head_id, ref["path"])
+            if not isinstance(object_id, str) or not re.fullmatch(r"[0-9a-f]{40}", object_id):
+                raise ValueError("native file target unavailable")
             token = seafserv_threaded_rpc.seafile_cloudfile_issue_read_ticket(
                 ref["repo_id"], ref["path"], head_id, object_id, operation, username, encoded)
             if not isinstance(token, str) or str(UUID(token)) != token:
