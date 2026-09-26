@@ -17,7 +17,7 @@ SOURCES = frozenset({"hub", "server", "fileserver", "webdav", "idp", "directory"
 
 def normalize_event(event):
     object_fields(event, ("event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source", "action", "result"),
-                  ("repo_id", "path", "target_path", "resource_uid", "resource_kind", "job_id", "delegator", "revision", "content_version", "subject_revision", "policy_revision", "bytes_sent", "target_user_id", "reason"))
+                  ("repo_id", "path", "target_path", "resource_uid", "resource_kind", "job_id", "device_id", "delegator", "revision", "content_version", "subject_revision", "policy_revision", "bytes_sent", "target_user_id", "reason"))
     value = dict(event)
     try:
         value["event_id"] = str(UUID(value["event_id"]))
@@ -27,6 +27,9 @@ def normalize_event(event):
             value["resource_uid"] = str(UUID(value["resource_uid"]))
         if value.get("job_id"):
             value["job_id"] = str(UUID(value["job_id"]))
+        if "device_id" in value:
+            if not isinstance(value["device_id"], str) or str(UUID(value["device_id"])) != value["device_id"]:
+                raise ValueError()
     except (ValueError, TypeError, AttributeError):
         raise ContractError("INVALID_REQUEST", "Invalid event identity", 400) from None
     utc_time(value["occurred_at"])
@@ -77,6 +80,13 @@ def projection_required(value):
         except (ValueError, TypeError, AttributeError):
             pass
     if value["source"] == "hub":
+        device_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source",
+            "action", "result", "device_id", "revision"}
+        if (set(value) == device_fields and value["actor_kind"] == "user" and value["result"] == "succeeded"
+                and value["action"] in {"device.pair.started", "device.paired", "device.revoked"}):
+            revision = value["revision"]
+            if isinstance(revision, str) and re.fullmatch(r"[1-9][0-9]{0,19}", revision) and int(revision) <= 2 ** 64 - 1:
+                return False
         lock_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source",
             "action", "result", "repo_id", "path", "resource_uid", "resource_kind", "revision"}
         lock_fact = (set(value) == lock_fields and value["action"] in {"lock.acquired", "lock.renewed", "lock.released"})

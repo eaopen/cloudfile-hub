@@ -21,6 +21,24 @@ def conflict():
 
 
 class DeviceStore:
+    def pending_for_key(self, sql, *, provider, actor, public_key):
+        sql.execute("SELECT device_id FROM cf_local_device WHERE provider=%s AND owner_user_id=%s AND key_thumbprint=%s FOR UPDATE", (provider, actor, public_key.thumbprint))
+        rows = sql.fetchall()
+        if len(rows) > 1:
+            raise conflict()
+        if not rows:
+            return None
+        self._scope(sql, provider, actor, rows[0][0])
+        key, state, _ = self._load(sql, provider, actor, rows[0][0])
+        if state != "pending" or key != public_key:
+            raise conflict()
+        return rows[0][0]
+
+    def status(self, sql, *, provider, actor, device_id):
+        self._scope(sql, provider, actor, device_id)
+        key, state, revision = self._load(sql, provider, actor, device_id)
+        return dict(device_id=device_id, state=state, revision=str(revision), key_thumbprint=key.thumbprint)
+
     @staticmethod
     def _scope(sql, provider, actor, device_id):
         identifier(provider, maximum=32)
@@ -112,6 +130,22 @@ class DeviceStore:
                 raise conflict()
             revision += 1
         return dict(device_id=challenge.device_id, state="active", revision=str(revision))
+
+    def pairing_challenge(self, sql, *, provider, actor, device_id, nonce):
+        # Caller supplies only the proof selector, not an expected operation,
+        # request digest, origin, revision or timestamp to authenticate against.
+        self._scope(sql, provider, actor, device_id)
+        _, state, _ = self._load(sql, provider, actor, device_id)
+        if state != "pending" or not isinstance(nonce, str) or len(nonce) != 43:
+            raise conflict()
+        digest = hashlib.sha256(nonce.encode("ascii")).hexdigest()
+        sql.execute("SELECT instance,session_id,operation,request_sha256,issued_at,expires_at,consumed_at FROM cf_local_device_challenge WHERE nonce_digest=%s AND device_id=%s FOR UPDATE", (digest, device_id))
+        row = sql.fetchone()
+        if row is None or row[2] != "pair" or row[6] is not None:
+            raise conflict()
+        challenge = DeviceChallenge(row[0], device_id, row[1], row[2], nonce, row[4], row[5], row[3])
+        challenge.message()
+        return challenge
 
     def revoke(self, sql, *, provider, actor, device_id, expected_revision):
         self._scope(sql, provider, actor, device_id)
