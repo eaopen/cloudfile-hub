@@ -89,6 +89,31 @@ class ContextTest(unittest.TestCase):
             self.contexts.get("u1")
         self.assertEqual(caught.exception.status, 403)
 
+    def test_corrupt_cached_ready_never_authorizes_or_exposes_payload(self):
+        import json
+        original = self.contexts.get("u1")
+        key, _ = self.contexts._keys("u1")
+        variants = [
+            {**original, "expires_at": float("inf")},
+            {**original, "fetched_at": True},
+            {**original, "context_epoch": "private-invalid-epoch"},
+            {**original, "status": "unknown"},
+            {**original, "source_etag": "mismatch"},
+            {**original, "subject": {**original["subject"], "userId": "another"}},
+            {**original, "subject": {**original["subject"], "status": "disabled"}},
+            {**original, "expires_at": original["fetched_at"] + 1801},
+        ]
+        missing = dict(original)
+        missing.pop("subject")
+        variants.append(missing)
+        for value in variants:
+            self.redis.set(key, json.dumps(value), ex=1800)
+            with self.assertRaises(ContractError) as caught:
+                self.contexts.current("u1")
+            self.assertEqual(caught.exception.status, 503)
+            self.assertNotIn("private", caught.exception.message)
+        self.assertEqual(self.source_calls, 1)
+
     def test_refresh_without_source_counters_accepts_changed_memberships(self):
         self.contexts.get("u1")
         self.source.pop("revision")

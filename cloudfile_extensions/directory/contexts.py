@@ -6,6 +6,7 @@ There is no stale fallback after expiry, login or a requested force refresh.
 
 import hashlib
 import json
+import math
 import secrets
 import time
 from uuid import uuid4
@@ -61,10 +62,28 @@ class SubjectContexts:
             value = json.loads(raw)
             if not isinstance(value, dict) or value.get("userId") != user_id:
                 raise ValueError()
+            expiry = value["expires_at"]
+            if type(expiry) not in (int, float) or not math.isfinite(expiry):
+                raise ValueError()
+            epoch = value["context_epoch"]
+            if not isinstance(epoch, str) or len(epoch) != 32 or any(c not in "0123456789abcdef" for c in epoch):
+                raise ValueError()
+            if value["status"] not in {"refreshing", "unavailable", "ready", "disabled"}:
+                raise ValueError()
+            if value["status"] in {"ready", "disabled"}:
+                fetched = value["fetched_at"]
+                if (type(fetched) not in (int, float) or not math.isfinite(fetched) or
+                        not 0 < expiry - fetched <= self.ttl or fetched > self.clock() + 60):
+                    raise ValueError()
+                subject = validate_subject(value["subject"], requested_user_id=user_id,
+                                           attribute_allowlist=self.allowlist)
+                if (value["source_etag"] != subject["etag"] or
+                        (value["status"] == "ready") != (subject["status"] == "active")):
+                    raise ValueError()
             if value["expires_at"] <= self.clock():
                 return None
             return value
-        except (ValueError, TypeError, KeyError):
+        except (ValueError, TypeError, KeyError, ContractError):
             raise unavailable() from None
 
     def current(self, user_id):
