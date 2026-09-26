@@ -97,6 +97,19 @@ class LibraryOwnerManagement:
         if current is None or self.epoch is None or current["context_epoch"] != self.epoch:
             raise ContractError("SUBJECT_UNAVAILABLE", "Management subject changed", 503)
 
+    def list_target(self, reference, *, admins=False, limit=50, after=None):
+        if type(admins) is not bool:
+            raise ValueError("explicit policy domain required")
+        self.preparation.prepare(self.actor)
+        self.epoch = None
+        try:
+            store = self.admins if admins else self.rules
+            return store.list_target(reference, limit=limit, after=after)
+        finally:
+            self.epoch = None
+            self.current_subject = None
+            self.is_owner = False
+
     def mutate(self, reference, **arguments):
         # Refresh outside the rule transaction; projection must not start/commit
         # another transaction while mutation effects are pending on this connection.

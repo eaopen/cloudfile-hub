@@ -70,3 +70,32 @@ class ACLRulesTest(DatabaseTestCase):
         self.assertEqual(len(self.rules.candidates(self.ref("/parts/a.prt", "file"))), 2)
         self.assertEqual(len(self.rules.candidates(self.ref("/parts/a.prt", "dir"))), 1)
         self.assertEqual(deny["permission"], "none")
+
+    def test_target_pagination_reauthorizes_and_rejects_foreign_or_deleted_anchor(self):
+        created = []
+        for external in ("one", "two", "three"):
+            value = self.value()
+            value["subject"] = {**value["subject"], "external_id": external}
+            created.append(self.rules.mutate(self.ref(), value=value))
+        ordered = sorted(created, key=lambda item: item["id"])
+        self.rules.mutate(self.ref("/parts/sub"), value=self.value("/parts/sub"))
+        first = self.rules.list_target(self.ref(), limit=2)
+        self.assertEqual(first["items"], ordered[:2])
+        self.assertEqual(first["next_after"], ordered[1]["id"])
+        second = self.rules.list_target(self.ref(), limit=2, after=first["next_after"])
+        self.assertEqual(second, dict(items=ordered[2:], next_after=None))
+        self.authorize.return_value = False
+        with self.assertRaises(ContractError) as caught:
+            self.rules.list_target(self.ref(), after=first["next_after"])
+        self.assertEqual(caught.exception.status, 403)
+        self.authorize.return_value = True
+        with self.assertRaises(ContractError) as caught:
+            self.rules.list_target(self.ref("/parts/sub"), after=first["next_after"])
+        self.assertEqual(caught.exception.status, 410)
+        self.rules.mutate(self.ref(), rule_id=ordered[1]["id"], if_match=ordered[1]["etag"])
+        with self.assertRaises(ContractError) as caught:
+            self.rules.list_target(self.ref(), after=first["next_after"])
+        self.assertEqual(caught.exception.status, 410)
+        for limit in (True, 0, 101):
+            with self.assertRaises(ContractError):
+                self.rules.list_target(self.ref(), limit=limit)

@@ -158,6 +158,68 @@ class ACLRules:
         except Exception:
             raise ContractError("POLICY_UNAVAILABLE", "ACL rules are unavailable", 503) from None
 
+    def list_target(self, reference, *, limit=50, after=None):
+        """Live, exact-target management page; not a recursive policy export.
+
+        Each page reauthorizes against current authority. Cursor is an existing
+        target rule UUID, never a bearer grant or a snapshot guarantee.
+        """
+        ref = resource_ref(reference)
+        if len(ref["path"].encode()) > 4096 or len(ref["path"].split("/")) > 130:
+            raise invalid("ACL path exceeds budget")
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise invalid("Invalid policy page limit")
+        if after is not None:
+            try:
+                if str(UUID(after)) != after:
+                    raise ValueError()
+            except (ValueError, TypeError, AttributeError):
+                raise invalid("Invalid policy cursor") from None
+        scopes = [dict(type="provider", provider=self.provider, external_id=self.provider),
+                  dict(type="user", provider=self.provider, external_id=self.actor),
+                  dict(type="repo", provider="cloudfile", external_id=ref["repo_id"])]
+        try:
+            with scope_locks(self.connection, scopes):
+                self.connection.begin()
+                try:
+                    with self.connection.cursor() as cursor:
+                        if self.authorize(cursor, self.actor, ref) is not True:
+                            raise ContractError("ACCESS_DENIED", "Policy management is not allowed", 403)
+                        cursor.execute("SELECT id FROM " + self.TABLE + " LIMIT 0 FOR UPDATE")
+                        cursor.fetchall()
+                        self._require_storage()
+                        if after is not None:
+                            cursor.execute("SELECT " + self.FIELDS + " FROM " + self.TABLE +
+                                " WHERE repo_id=%s AND id=%s FOR UPDATE", (ref["repo_id"], after))
+                            rows = cursor.fetchall()
+                            if len(rows) != 1:
+                                raise ContractError("CURSOR_EXPIRED", "Restart policy pagination", 410)
+                            anchor = self._decode(rows[0])
+                            if (anchor["path"], anchor["kind"]) != (ref["path"], ref["kind"]):
+                                raise ContractError("CURSOR_EXPIRED", "Restart policy pagination", 410)
+                        query = "SELECT " + self.FIELDS + " FROM " + self.TABLE + " FORCE INDEX (acl_ancestors) WHERE repo_id=%s AND path_hash=%s AND kind=%s"
+                        arguments = [ref["repo_id"], digest(ref["path"]), ref["kind"]]
+                        if after is not None:
+                            query += " AND id>%s"
+                            arguments.append(after)
+                        query += " ORDER BY id LIMIT %s FOR UPDATE"
+                        arguments.append(limit + 1)
+                        cursor.execute(query, tuple(arguments))
+                        values = [self._decode(row) for row in cursor.fetchall()]
+                        if any((value["repo_id"], value["path"], value["kind"]) !=
+                               (ref["repo_id"], ref["path"], ref["kind"]) for value in values):
+                            raise ValueError("policy page identity mismatch")
+                        if self.finalize is not None:
+                            self.finalize(cursor)
+                    self.connection.commit()
+                    return dict(items=values[:limit], next_after=values[limit - 1]["id"] if len(values) > limit else None)
+                finally:
+                    self.connection.rollback()
+        except ContractError:
+            raise
+        except Exception:
+            raise ContractError("POLICY_UNAVAILABLE", "Policy page is unavailable", 503) from None
+
     def mutate(self, reference, *, value=None, rule_id=None, if_match=None):
         """Create, replace or delete one rule; no implicit management bypass.
 
