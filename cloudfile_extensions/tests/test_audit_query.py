@@ -41,6 +41,7 @@ class AuditQueryTests(DatabaseTestCase):
         self.assertEqual(self.reader.list(**self.arguments, actor_user_id="absent")["items"], [])
         self.assertEqual(len(self.reader.list(**self.arguments, path="/last")["items"]), 1)
         self.assertEqual(self.reader.list(**self.arguments, resource_uid=str(uuid4()))["items"], [])
+        self.assertEqual(self.reader.list(**self.arguments, upper_bound=0)["items"], [])
 
     def test_cursor_is_bound_and_current_revocation_overrides_it(self):
         token = self.reader.list(**self.arguments, limit=1)["next_cursor"]
@@ -86,7 +87,8 @@ class AuditQueryTests(DatabaseTestCase):
 
     def test_unbounded_queries_are_rejected(self):
         for change in ({"limit": True}, {"limit": 201}, {"end": "2027-01-01T00:00:00Z"},
-                       {"start": self.arguments["end"]}, {"resource_uid": "not-a-uuid"}):
+                       {"start": self.arguments["end"]}, {"resource_uid": "not-a-uuid"},
+                       {"upper_bound": True}, {"upper_bound": -1}):
             with self.assertRaises(ContractError):
                 self.reader.list(**{**self.arguments, **change})
 

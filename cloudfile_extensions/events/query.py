@@ -34,6 +34,15 @@ class AuditReader:
             raise ValueError("audit reader requires a dedicated autocommit connection")
         self.connection, self.secret, self.authorize, self.clock = connection, secret, authorize, clock
 
+    def upper_bound(self):
+        """Internal insertion cutoff, not a cross-request MVCC snapshot."""
+        try:
+            with self.connection.cursor() as sql:
+                sql.execute("SELECT COALESCE(MAX(id),0) FROM cf_audit_event")
+                return sql.fetchone()[0]
+        except Exception:
+            raise ContractError("AUDIT_UNAVAILABLE", "Audit storage is unavailable", 503) from None
+
     def _cursor(self, value):
         raw = json.dumps(value, sort_keys=True, separators=(",", ":")).encode()
         signature = hmac.new(self.secret, b"cf.audit.v1\n" + raw, hashlib.sha256).digest()
@@ -61,16 +70,19 @@ class AuditReader:
             raise invalid() from None
 
     def list(self, *, actor, repo_id, start, end, limit=100, cursor=None,
-             actor_user_id=None, action=None, result=None, path=None, resource_uid=None):
+             actor_user_id=None, action=None, result=None, path=None, resource_uid=None, upper_bound=None):
         identifier(actor)
         try:
             repo_id = str(UUID(repo_id))
             first, last = utc_time(start), utc_time(end)
             if not 0 < (last - first).total_seconds() <= 31 * 86400 or type(limit) is not int or not 1 <= limit <= 200:
                 raise ValueError()
+            if upper_bound is not None and (type(upper_bound) is not int or not 0 <= upper_bound <= 2 ** 63 - 1):
+                raise ValueError()
             filters = {"actor": actor, "repo_id": repo_id, "start": first.isoformat(), "end": last.isoformat(),
                        "actor_user_id": actor_user_id, "action": action, "result": result, "path": path,
-                       "resource_uid": str(UUID(resource_uid)) if resource_uid is not None else None}
+                       "resource_uid": str(UUID(resource_uid)) if resource_uid is not None else None,
+                       "upper_bound": upper_bound}
             for name in ("actor_user_id", "action", "result"):
                 if filters[name] is not None:
                     identifier(filters[name])
@@ -86,6 +98,9 @@ class AuditReader:
             raise ContractError("FORBIDDEN", "Audit scope is not available", 403)
         clauses = ["repo_id=%s", "occurred_at>=%s", "occurred_at<%s"]
         values = [repo_id, first.replace(tzinfo=None), last.replace(tzinfo=None)]
+        if upper_bound is not None:
+            clauses.append("id<=%s")
+            values.append(upper_bound)
         for name, column in (("actor_user_id", "actor_user_id"), ("action", "operation"),
                              ("result", "result"), ("resource_uid", "resource_uid")):
             if filters[name] is not None:

@@ -15,10 +15,12 @@ from ..jobs.worker import JobResult
 
 
 class AuditExportJob:
-    def __init__(self, exporter, *, result_root, clock=time.monotonic):
-        if not isinstance(result_root, str) or not os.path.isabs(result_root) or not callable(clock):
+    def __init__(self, exporter, *, result_root, clock=time.monotonic, wall_clock=time.time):
+        if (not isinstance(result_root, str) or not os.path.isabs(result_root) or
+                not callable(clock) or not callable(wall_clock)):
             raise ValueError("audit result root must be deployment registered")
         self.exporter, self.root, self.clock = exporter, result_root, clock
+        self.wall_clock = wall_clock
 
     def __call__(self, execution):
         claim = execution.claim
@@ -30,6 +32,7 @@ class AuditExportJob:
         if job["actor_kind"] != "user" or job["barrier_active"]:
             raise ContractError("INVALID_REQUEST", "Audit export requires a user job without a barrier", 400)
         repo = str(UUID(claim.scope["external_id"]))
+        upper_bound = self.exporter.reader.upper_bound()
         name = str(UUID(claim.job_id)) + "." + str(claim.epoch) + ".csv"
         partial = name + "." + uuid4().hex + ".partial"
         directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
@@ -40,7 +43,7 @@ class AuditExportJob:
             created = True
             digest, size, heartbeat = hashlib.sha256(), 0, self.clock()
             with os.fdopen(descriptor, "wb") as output:
-                for chunk in self.exporter.generate(actor=job["actor"], repo_id=repo, **claim.request):
+                for chunk in self.exporter.generate(actor=job["actor"], repo_id=repo, upper_bound=upper_bound, **claim.request):
                     now = self.clock()
                     if now - heartbeat >= min(10, execution.lease_seconds / 3):
                         execution.checkpoint(step="exporting", value={"bytes": size})
@@ -63,7 +66,8 @@ class AuditExportJob:
             os.fsync(directory)
             reference = "audit-export:" + name
             execution.checkpoint(step="export-ready", value={"bytes": size, "sha256": digest.hexdigest(),
-                                 "result_ref": reference})
+                                 "result_ref": reference, "upper_bound": upper_bound,
+                                 "expires_at": self.wall_clock() + 86400})
             return JobResult(reference)
         except Exception:
             # Exact names created by this invocation only; never remove another
