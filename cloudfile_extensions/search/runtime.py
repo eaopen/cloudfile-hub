@@ -22,6 +22,7 @@ from .rebuild_store import SearchRebuildStore
 from .rebuild_execution import SearchRebuildExecution
 from .rebuild_coordinator import SearchRebuildCoordinator
 from .catchup import SearchCatchupInspector
+from .global_fanout_coordinator import GlobalTagFanoutCoordinator
 
 
 class SearchInitializationFactory:
@@ -146,9 +147,10 @@ class SearchConsumerFactory:
             execution = SearchEventExecution(SearchPlanStore(connection), client)
             fanout = TagFanoutCoordinator(SearchFanoutExecution(SearchFanoutStore(connection), client),
                 source_scope=source.scope, snapshot_reader=source.read)
+            global_fanout = GlobalTagFanoutCoordinator(SearchFanoutExecution(SearchFanoutStore(connection), client), source)
             yield SearchEventConsumer(Outbox(connection), execution,
                 AttributeSearchProjection(snapshot_reader=source.read_attribute), owner=self.owner,
-                generation=self.generation, fanout=fanout)
+                generation=self.generation, fanout=fanout, global_fanout=global_fanout)
         finally:
             try:
                 try:

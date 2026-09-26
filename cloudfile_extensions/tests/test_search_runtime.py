@@ -22,6 +22,7 @@ class SearchRuntimeTest(TestCase):
                 self.assertIsInstance(consumer, SearchEventConsumer)
                 self.assertIs(consumer.outbox.connection, consumer.execution.store.connection)
                 self.assertIs(consumer.outbox.connection, consumer.fanout.execution.store.connection)
+                self.assertIs(consumer.outbox.connection, consumer.global_fanout.execution.store.connection)
                 self.connection.begin.assert_not_called()
         self.connection.rollback.assert_called_once()
         self.connection.close.assert_called_once()

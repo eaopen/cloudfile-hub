@@ -71,6 +71,36 @@ class OwnedIndexSource:
             raise ContractError("SEARCH_PROJECTION_PENDING", "Owned source cursor is not active for this repository", 503)
         return entry[2](cursor, ref)
 
+    @contextmanager
+    def global_scope(self, tag_id, revision):
+        """Fresh definition-locked SQL source, not a cross-library user grant."""
+        uuid_value(tag_id)
+        uuid_value(revision)
+        connection = self.connection_factory()
+        with self._lock:
+            if connection is self.worker_connection or id(connection) in self._connections:
+                raise ContractError("SEARCH_PROJECTION_PENDING", "Global source connection is already owned", 503)
+            self._connections.add(id(connection))
+        try:
+            if not connection.get_autocommit():
+                raise ContractError("SEARCH_PROJECTION_PENDING", "Clean global source connection required", 503)
+            SchemaRunner(connection).require_current()
+            connection.begin()
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT revision,kind,scope_repo_id FROM cf_tag WHERE tag_id=%s FOR UPDATE", (tag_id,))
+                    if cursor.fetchone() != (revision, "system", None):
+                        raise ContractError("SEARCH_FANOUT_CHANGED", "Global tag definition changed", 409)
+                    yield cursor
+            finally:
+                connection.rollback()
+        finally:
+            try:
+                connection.close()
+            finally:
+                with self._lock:
+                    self._connections.discard(id(connection))
+
     def read_attribute(self, repo_id, path):
         """Exact existing sparse location, then actual native lifecycle validation.
 

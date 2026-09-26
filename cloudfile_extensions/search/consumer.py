@@ -6,10 +6,11 @@ from ..events.outbox import Outbox
 from .event_execution import SearchEventExecution
 from .projection import AttributeSearchProjection
 from .fanout_coordinator import TagFanoutCoordinator
+from .global_fanout_coordinator import GlobalTagFanoutCoordinator
 
 
 class SearchEventConsumer:
-    def __init__(self, outbox, execution, projection, *, owner, generation, fanout=None):
+    def __init__(self, outbox, execution, projection, *, owner, generation, fanout=None, global_fanout=None):
         if (not isinstance(outbox, Outbox) or not isinstance(execution, SearchEventExecution) or
                 not isinstance(projection, AttributeSearchProjection) or
                 outbox.connection is not execution.store.connection or
@@ -23,12 +24,23 @@ class SearchEventConsumer:
                 fanout.execution.client.index != execution.client.index):
             raise ValueError("fanout must share owned persistence and pinned index")
         self.fanout = fanout
+        if global_fanout is not None and (not isinstance(global_fanout, GlobalTagFanoutCoordinator) or
+                global_fanout.execution.store.connection is not outbox.connection or
+                global_fanout.execution.client.index != execution.client.index):
+            raise ValueError("global fanout must share owned persistence and pinned index")
+        self.global_fanout = global_fanout
 
     def run_once(self):
         claim = self.outbox.claim("search", self.owner, lease_seconds=60)
         if claim is None:
             return "idle"
         try:
+            if (claim.payload.get("action") == "tags.definition.updated" and claim.payload.get("repo_id") is None and
+                    self.global_fanout is not None):
+                if self.global_fanout.advance(claim, generation=self.generation):
+                    return "completed"
+                self.outbox.retry_later(claim, code="INDEX_TASK_PENDING", delay_seconds=2)
+                return "pending"
             if claim.payload.get("action") == "tags.definition.updated" and self.fanout is not None:
                 if self.fanout.advance(claim, generation=self.generation):
                     return "completed"
