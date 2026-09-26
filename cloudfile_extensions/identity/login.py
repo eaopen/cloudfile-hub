@@ -85,4 +85,12 @@ class PreparedOIDCLogin:
         if identity["expires_at"] <= time.time():
             raise ContractError("AUTHENTICATION_REQUIRED", "OIDC authentication expired", 401)
         self._assert_browser(binding)
+        # Source preparation is not a permanent login grant. Binding/browser
+        # rechecks can block long enough for a forced refresh, disable or scope
+        # fence to invalidate the prepared epoch. Never hand a stale epoch to
+        # the native session finalizer; it must still perform its own checks.
+        latest = preparation.contexts.current(identity["userId"])
+        if (latest is None or latest["context_epoch"] != context["context_epoch"]
+                or preparation.state.username(identity["userId"]) != username):
+            raise ContractError("IDENTITY_UNAVAILABLE", "Login subject changed during preparation", 503)
         return PreparedLogin(identity["userId"], username, context["context_epoch"], redirect)

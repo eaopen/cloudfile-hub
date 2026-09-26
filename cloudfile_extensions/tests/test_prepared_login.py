@@ -19,6 +19,10 @@ class PreparedLoginTest(unittest.TestCase):
         self.preparation = Mock(spec=SubjectPreparation)
         self.preparation.actor = "u1"
         self.preparation.prepare.return_value = dict(context_epoch="a" * 32)
+        self.preparation.contexts = Mock()
+        self.preparation.contexts.current.return_value = dict(context_epoch="a" * 32)
+        self.preparation.state = Mock()
+        self.preparation.state.username.return_value = "native@example.invalid"
         self.factory = Mock(return_value=self.preparation)
         self.login = PreparedOIDCLogin(self.flow, self.bindings, preparation_factory=self.factory)
 
@@ -62,6 +66,23 @@ class PreparedLoginTest(unittest.TestCase):
         with self.assertRaises(ContractError):
             self.complete()
         self.preparation.prepare.assert_not_called()
+
+    def test_final_epoch_and_native_identity_changes_reject_prepared_login(self):
+        for latest in (None, dict(context_epoch="b" * 32)):
+            self.preparation.contexts.current.return_value = latest
+            with self.assertRaises(ContractError) as caught:
+                self.complete()
+            self.assertEqual(caught.exception.code, "IDENTITY_UNAVAILABLE")
+        self.preparation.contexts.current.return_value = dict(context_epoch="a" * 32)
+        self.preparation.state.username.return_value = "different@example.invalid"
+        with self.assertRaises(ContractError):
+            self.complete()
+
+    def test_final_disabled_or_fenced_subject_never_returns_login(self):
+        self.preparation.contexts.current.side_effect = ContractError("ACCESS_DENIED", "Disabled", 403)
+        with self.assertRaises(ContractError) as caught:
+            self.complete()
+        self.assertEqual(caught.exception.status, 403)
 
     def test_configured_jit_then_prepare_and_late_expiry(self):
         from cloudfile_extensions.identity.jit import SQLJITProvisioner
