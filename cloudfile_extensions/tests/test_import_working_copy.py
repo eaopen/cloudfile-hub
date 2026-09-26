@@ -7,9 +7,26 @@ from uuid import uuid4
 
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.migration.working_copy import WorkingCopyBuilder
+from cloudfile_extensions.migration.workspace_guard import ImportWorkspaceGuard
 
 
 class ImportWorkingCopyTests(unittest.TestCase):
+    def test_workspace_lock_is_exclusive_and_retained_after_release(self):
+        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as work:
+            result = WorkingCopyBuilder(sources={"registered": source}, work_root=work).build(
+                "registered", attempt_id=str(uuid4()), checkpoint=lambda _: False)
+            guard = ImportWorkspaceGuard(work_root=work)
+            lock = Path(result.folder).parent / ".lock"
+            inode = lock.stat().st_ino
+            with guard.scope(result.workspace_ref):
+                with self.assertRaises(ContractError) as error:
+                    with guard.scope(result.workspace_ref):
+                        self.fail("second lock must not enter")
+                self.assertEqual(error.exception.code, "IMPORT_WORKSPACE_BUSY")
+            with guard.scope(result.workspace_ref) as assert_current:
+                assert_current()
+            self.assertEqual(lock.stat().st_ino, inode)
+
     def test_copy_preserves_source_and_keeps_manifest_outside_data(self):
         with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as work:
             original = Path(source)

@@ -9,6 +9,7 @@ from ..jobs.store import JobStore
 from ..jobs.worker import Execution, JobResult
 from .verify_copy import WorkingCopyVerifier
 from .working_copy import ImportWorkingCopy
+from .workspace_guard import ImportWorkspaceGuard
 
 
 class ImportVerifyStage:
@@ -52,11 +53,13 @@ class ImportVerifyStage:
                 execution.checkpoint(step="copy-verifying", value=dict(base, **counts))
                 last = now
             return False
-        observed = self.verifier.verify(copy, checkpoint=checkpoint)
-        # Re-read the actual job evidence after filesystem waits. Neither a
-        # saved boolean nor this observation authorizes future native sync.
-        if execution.store.get(stage_id) != stage:
-            raise ContractError("IMPORT_STAGE_UNAVAILABLE", "Staging evidence changed during verification", 409)
-        execution.checkpoint(step="copy-verified", value=dict(observed, stage_job_id=stage_id,
-            stage_epoch=stage["lease_epoch"]))
+        with ImportWorkspaceGuard(work_root=self.verifier.work_root).scope(copy.workspace_ref) as assert_current:
+            observed = self.verifier.verify(copy, checkpoint=checkpoint)
+            # Re-read evidence after filesystem waits while coordination remains
+            # held. This observation still does not authorize future native sync.
+            if execution.store.get(stage_id) != stage:
+                raise ContractError("IMPORT_STAGE_UNAVAILABLE", "Staging evidence changed during verification", 409)
+            assert_current()
+            execution.checkpoint(step="copy-verified", value=dict(observed, stage_job_id=stage_id,
+                stage_epoch=stage["lease_epoch"]))
         return JobResult(copy.workspace_ref)

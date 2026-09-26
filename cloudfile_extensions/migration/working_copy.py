@@ -49,6 +49,11 @@ class WorkingCopyBuilder:
             os.mkdir(attempt_id, mode=0o700, dir_fd=root)
             attempt = os.open(attempt_id, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=root)
             descriptors.append(attempt)
+            lock = os.open(".lock", os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600, dir_fd=attempt)
+            try:
+                os.fsync(lock)
+            finally:
+                os.close(lock)
             os.mkdir("data", mode=0o700, dir_fd=attempt)
             target = os.open("data", os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=attempt)
             descriptors.append(target)
