@@ -4,7 +4,7 @@ Native lifecycle reader remains a required trusted data-plane adapter, not a
 request field. Strong revisions do not themselves prove authorization.
 """
 from ..authorization.read import ContentReadAuthority, ContentMetadataWriteAuthority, LibraryTagManagementAuthority
-from ..common.errors import ContractError
+from ..common.errors import ContractError, invalid
 from ..common.validation import object_fields
 from .events import ResourceMutationEvents
 from .paths import resource_ref
@@ -32,6 +32,45 @@ class ResourceService:
         object_fields(request, ("reference",))
         return self.store.resolve_authorized(resource_ref(request["reference"]),
             authority=self.read_authority, lifecycle_reader=self.reader, include_tags=True)
+
+    def batch_resolve(self, request):
+        """Bounded read-only list enrichment, never allocation or tag scanning."""
+        import time
+        from ..jobs.authority import scope_locks
+        object_fields(request, ("references",))
+        values = request["references"]
+        if not isinstance(values, list) or not 1 <= len(values) <= 100:
+            raise invalid("Resource batch requires one to one hundred references")
+        references = [resource_ref(value) for value in values]
+        authority = self.read_authority
+        authority.preparation.prepare(authority.actor)
+        current = authority.preparation.contexts.current(authority.actor)
+        if current is None:
+            raise ContractError("SUBJECT_UNAVAILABLE", "Batch subject is unavailable", 503)
+        epoch = current["context_epoch"]
+        scopes = [dict(type="provider", provider=authority.state.provider, external_id=authority.state.provider),
+            dict(type="user", provider=authority.state.provider, external_id=authority.actor)]
+        scopes.extend(dict(type="repo", provider="cloudfile", external_id=repo)
+            for repo in sorted({ref["repo_id"] for ref in references}))
+        deadline = time.monotonic() + 20
+        items = []
+        with scope_locks(authority.state.connection, scopes):
+            for reference in references:
+                if time.monotonic() >= deadline:
+                    raise ContractError("RESOURCE_UNAVAILABLE", "Resource batch deadline exceeded", 503)
+                try:
+                    snapshot = self.resolve(dict(reference=reference))
+                    items.append(dict(reference=reference, status=200, snapshot=snapshot))
+                except ContractError as error:
+                    if error.status not in (403, 404):
+                        raise
+                    items.append(dict(reference=reference, status=404))
+                current = authority.preparation.contexts.current(authority.actor)
+                if current is None or current["context_epoch"] != epoch:
+                    raise ContractError("SUBJECT_UNAVAILABLE", "Batch subject changed", 503)
+            if time.monotonic() >= deadline:
+                raise ContractError("RESOURCE_UNAVAILABLE", "Resource batch deadline exceeded", 503)
+        return dict(items=items)
 
     def update_attributes(self, request, *, idempotency_key=None):
         object_fields(request, ("reference", "changes", "revision"))

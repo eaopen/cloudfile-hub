@@ -24,7 +24,7 @@ class ResourceResolveView(DirectoryPolicyView):
     def dispatch(self, request, *args, **kwargs):
         request_id = str(uuid4())
         try:
-            methods = {"resolve": "POST", "user_catalog": "GET", "attributes": "POST",
+            methods = {"resolve": "POST", "batch": "POST", "user_catalog": "GET", "attributes": "POST",
                 "tag_ids": "POST", "tag_values": "POST", "tag_definition": "PATCH"}
             if self.operation not in methods:
                 raise ContractError("RESOURCE_UNAVAILABLE", "Resource operation is unavailable", 503)
@@ -72,6 +72,8 @@ class ResourceResolveView(DirectoryPolicyView):
                     result = service.list_user_tag_definitions(body)
                 elif self.operation == "resolve":
                     result = service.resolve({"reference": body})
+                elif self.operation == "batch":
+                    result = service.batch_resolve(body)
                 else:
                     if self.operation == "tag_definition":
                         value, changed = service.update_user_tag_definition(body,
@@ -106,6 +108,10 @@ class UserTagCatalogView(ResourceResolveView):
 
 class ResourceAttributesView(ResourceResolveView):
     operation = "attributes"
+
+
+class ResourceBatchView(ResourceResolveView):
+    operation = "batch"
 
 
 class ResourceUserTagsView(ResourceResolveView):
