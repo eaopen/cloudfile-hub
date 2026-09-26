@@ -117,3 +117,58 @@ class ProvisioningTest(DatabaseTestCase):
         self.assertEqual(self.pipeline.store.retry_failed(job, actor="u1", actor_kind="user")["status"], "cancelled")
         values = [self.redis.get(key) for key in self.redis.scan_iter(match=self.prefix + "*")]
         self.assertFalse(any(b'"status": "ready"' in value for value in values if value))
+
+    def runtime(self, **options):
+        from cloudfile_extensions.identity.runtime import LoginRuntime
+        from cloudfile_extensions.identity.oidc import OIDCConfig
+        oidc = OIDCConfig(issuer=self.claims["issuer"], client_id="cloudfile",
+            client_secret="fixture-secret", redirect_uri="https://files.example.invalid/callback",
+            authorization_url=self.claims["issuer"] + "authorize",
+            token_url=self.claims["issuer"] + "token", userinfo_url=self.claims["issuer"] + "userinfo",
+            jwks_url=self.claims["issuer"] + "jwks")
+        return LoginRuntime(self.connection, self.redis, oidc=oidc, directory=self.directory,
+            provider_id="directory", native_schema=self.native, identity_schema=self.identity,
+            request_id="runtime-test", prefix=self.prefix, **options)
+
+    def test_runtime_worker_real_adapters_prepare_and_proof_status(self):
+        from django.conf import settings
+        if not settings.configured:
+            settings.configure(DEFAULT_CHARSET="utf-8")
+        from django.http import HttpResponse
+        import time
+        runtime = self.runtime(jit_enabled=True)
+        request = Mock()
+        request.is_secure.return_value = True
+        request.COOKIES = {}
+        response = HttpResponse()
+        binding = runtime.browser.rotate(request, response)
+        url = runtime.login.begin(binding, redirect="/files/")
+        self.assertIn("code_challenge=", url)
+        self.assertIn("state=", url)
+        job = runtime.provisioning.request_for_login(self.claims, unbound=True)
+        identity = {**self.claims, "expires_at": int(time.time()) + 300}
+        token = runtime.proofs.issue(identity, job, binding)
+        self.assertEqual(runtime.pending.status(token, binding)["status"], "queued")
+        worker = JobWorker(runtime.store, owner="runtime-worker",
+            handlers={runtime.provisioning.KIND: runtime.provisioning.handler})
+        self.assertEqual(worker.run_once(), job)
+        self.assertEqual(runtime.pending.status(token, binding)["status"], "succeeded")
+        context = runtime.preparation("u1").prepare("u1")
+        self.assertEqual(context["status"], "ready")
+        self.assertIs(runtime.jit.bindings.connection, runtime.store.connection)
+        self.assertIs(runtime.proofs.redis, runtime.browser.redis)
+        runtime.browser.clear(binding, response)
+        from cloudfile_extensions.common.errors import ContractError
+        with self.assertRaises(ContractError):
+            runtime.pending.status(token, binding)
+
+    def test_runtime_defaults_deny_jit_management_and_invalid_flag(self):
+        from cloudfile_extensions.common.errors import ContractError
+        runtime = self.runtime()
+        with self.assertRaises(ContractError) as caught:
+            runtime.provisioning.request_for_login(self.claims, unbound=True)
+        self.assertEqual(caught.exception.status, 403)
+        with self.assertRaises(ContractError):
+            runtime.bindings.authorize(None, "u1", "u1", "native")
+        with self.assertRaises(ValueError):
+            self.runtime(jit_enabled="true")
