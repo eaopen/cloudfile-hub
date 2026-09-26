@@ -1,7 +1,8 @@
-"""Read-only resource HTTP adapters; no registration or readiness assertion.
+"""Controlled resource HTTP adapters; no registration or readiness assertion.
 
 Deployment supplies resource_service as the authenticated owned factory. These
-views never expose writes while durable mutation idempotency is unfinished.
+Write adapters require durable idempotency. Native lifecycle and release gates
+must be completed before deployment registers any of these views.
 """
 import re
 from uuid import uuid4
@@ -22,7 +23,11 @@ class ResourceResolveView(DirectoryPolicyView):
     def dispatch(self, request, *args, **kwargs):
         request_id = str(uuid4())
         try:
-            expected = "GET" if self.operation == "user_catalog" else "POST"
+            methods = {"resolve": "POST", "user_catalog": "GET", "attributes": "POST",
+                "tag_ids": "POST", "tag_values": "POST", "tag_definition": "PATCH"}
+            if self.operation not in methods:
+                raise ContractError("RESOURCE_UNAVAILABLE", "Resource operation is unavailable", 503)
+            expected = methods[self.operation]
             if request.method != expected or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed for this resource target", 405)
             if not request.is_secure():
@@ -39,7 +44,7 @@ class ResourceResolveView(DirectoryPolicyView):
                 body = dict(repo_id=request.GET["repo_id"], limit=int(limit))
                 if "after" in request.GET:
                     body["after"] = request.GET["after"]
-            elif self.operation == "resolve":
+            else:
                 if request.GET:
                     raise invalid("Resource resolution takes no query parameters")
                 csrf = CsrfViewMiddleware(lambda _: None)
@@ -47,14 +52,35 @@ class ResourceResolveView(DirectoryPolicyView):
                 if csrf.process_view(request, lambda *_: None, (), {}) is not None:
                     raise ContractError("ACCESS_DENIED", "CSRF verification failed", 403)
                 body = self._body(request)
-            else:
-                raise ContractError("RESOURCE_UNAVAILABLE", "Resource operation is unavailable", 503)
+            writes = {"attributes", "tag_ids", "tag_values", "tag_definition"}
+            key = None
+            if self.operation in writes:
+                key = request.headers.get("Idempotency-Key")
+                if key is None:
+                    raise ContractError("PRECONDITION_REQUIRED", "Idempotency-Key is required", 428)
+                if not re.fullmatch(r"[\x21-\x7e]{1,128}", key):
+                    raise invalid("Invalid resource idempotency key")
+                if self.operation == "tag_definition" and request.headers.get("If-Match") is None:
+                    raise ContractError("PRECONDITION_REQUIRED", "If-Match is required", 428)
             if not callable(self.service_factory):
                 raise ContractError("RESOURCE_UNAVAILABLE", "Resource service is unavailable", 503)
             with self.service_factory(request, request_id) as service:
                 if not isinstance(service, ResourceService):
                     raise RuntimeError("invalid resource service assembly")
-                result = service.list_user_tag_definitions(body) if self.operation == "user_catalog" else service.resolve(body)
+                if self.operation == "user_catalog":
+                    result = service.list_user_tag_definitions(body)
+                elif self.operation == "resolve":
+                    result = service.resolve(body)
+                else:
+                    if self.operation == "tag_definition":
+                        value, changed = service.update_user_tag_definition(body,
+                            if_match=request.headers.get("If-Match"), idempotency_key=key)
+                    else:
+                        method = {"attributes": service.update_attributes,
+                            "tag_ids": service.replace_user_tags,
+                            "tag_values": service.replace_user_tag_values}[self.operation]
+                        value, changed = method(body, idempotency_key=key)
+                    result = {"value": value}
                 response = JsonResponse(result)
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)
@@ -71,3 +97,20 @@ class ResourceResolveView(DirectoryPolicyView):
 class UserTagCatalogView(ResourceResolveView):
     operation = "user_catalog"
     http_method_names = ["get"]
+
+
+class ResourceAttributesView(ResourceResolveView):
+    operation = "attributes"
+
+
+class ResourceUserTagsView(ResourceResolveView):
+    operation = "tag_ids"
+
+
+class ResourceUserTagValuesView(ResourceResolveView):
+    operation = "tag_values"
+
+
+class UserTagDefinitionView(ResourceResolveView):
+    operation = "tag_definition"
+    http_method_names = ["patch"]

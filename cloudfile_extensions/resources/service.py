@@ -79,7 +79,7 @@ class ResourceService:
             lifecycle_reader=self.reader, request_id=self.request_id, tag_values=request["values"],
             idempotency_key=idempotency_key)
 
-    def update_user_tag_definition(self, request, *, if_match):
+    def update_user_tag_definition(self, request, *, if_match, idempotency_key=None):
         """Library-wide definition patch, not a resource tag binding write."""
         from ..tags.definitions import uuid_value, definition_changes
         from ..tags.write import patch_user
@@ -89,9 +89,19 @@ class ResourceService:
         changes = definition_changes(request["changes"])
         reference = {"repo_id": repo_id, "path": "/", "kind": "dir"}
         def update(cursor, ref):
-            return patch_user(cursor, repo_id=ref["repo_id"], tag_id=tag_id,
+            def mutate():
+                return patch_user(cursor, repo_id=ref["repo_id"], tag_id=tag_id,
                 changes=changes, if_match=if_match, actor=self.tag_management.actor,
                 request_id=self.request_id)
+            if idempotency_key is None:
+                return mutate()
+            from .requests import execute
+            evidence = self.store._validate_evidence(self.reader(cursor, ref))
+            return execute(cursor, provider=self.tag_management.state.provider,
+                actor=self.tag_management.actor, operation="tags.definition.update",
+                key=idempotency_key, request=dict(repo_id=repo_id, tag_id=tag_id,
+                    changes=changes, if_match=if_match), lifecycle=evidence.lifecycle_ref,
+                secret=self.store.secret, mutate=mutate)
         return self.tag_management.consume(reference, update)
 
     def list_user_tag_definitions(self, request):
