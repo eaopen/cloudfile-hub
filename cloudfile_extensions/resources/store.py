@@ -144,7 +144,7 @@ class ResourceStore:
         return authority.consume(reference, read)
 
     def replace_user_tags_authorized(self, reference, tag_ids, *, expected_revision,
-                                    authority, lifecycle_reader, request_id, tag_values=None):
+                                    authority, lifecycle_reader, request_id, tag_values=None, idempotency_key=None):
         from ..authorization.read import ContentMetadataWriteAuthority
         from ..tags.bindings import replace_user_tags
         from ..tags.definitions import uuid_value
@@ -169,6 +169,17 @@ class ResourceStore:
                 raise ContractError("INVALID_REQUEST", "Duplicate resource tag labels", 400)
         def write(cursor, ref):
             evidence = self._validate_evidence(lifecycle_reader(cursor, ref))
+            if idempotency_key is not None:
+                from .requests import execute
+                self._row(ref, evidence, locking=True)
+                values = [{"label": value["label"], "color": value["color"]} for value in definitions] if definitions is not None else None
+                return execute(cursor, provider=authority.state.provider, actor=authority.actor,
+                    operation="tags.values.replace" if definitions is not None else "tags.ids.replace",
+                    key=idempotency_key, request=dict(reference=ref, revision=expected_revision,
+                        values=values, tag_ids=ids), lifecycle=evidence.lifecycle_ref,
+                    secret=self.secret, mutate=lambda: apply(cursor, ref, evidence))
+            return apply(cursor, ref, evidence)
+        def apply(cursor, ref, evidence):
             row = self._row(ref, evidence, locking=True)
             old = self._snapshot(ref, evidence, row)
             compare_revision(expected_revision, old["revision"])
@@ -272,6 +283,7 @@ class ResourceStore:
             evidence = self._validate_evidence(lifecycle_reader(cursor, reference))
             if idempotency_key is not None:
                 from .requests import execute
+                self._row(reference, evidence, locking=True)
                 return execute(cursor, provider=authority.state.provider, actor=authority.actor,
                     operation="attributes.update", key=idempotency_key,
                     request=dict(reference=reference, changes=changes, revision=expected_revision),

@@ -40,11 +40,11 @@ class ResourceService:
             idempotency_key=idempotency_key)
         return value, created
 
-    def replace_user_tags(self, request):
+    def replace_user_tags(self, request, *, idempotency_key=None):
         object_fields(request, ("reference", "tag_ids", "revision"))
         return self.store.replace_user_tags_authorized(resource_ref(request["reference"]), request["tag_ids"],
             expected_revision=request["revision"], authority=self.write_authority,
-            lifecycle_reader=self.reader, request_id=self.request_id)
+            lifecycle_reader=self.reader, request_id=self.request_id, idempotency_key=idempotency_key)
 
     def create_user_tag(self, request):
         """Create/reuse a library tag through an actual writable resource.
@@ -71,12 +71,13 @@ class ResourceService:
                 actor=self.write_authority.actor, request_id=self.request_id)
         return self.write_authority.consume(reference, create)
 
-    def replace_user_tag_values(self, request):
+    def replace_user_tag_values(self, request, *, idempotency_key=None):
         """Replace user labels atomically without a global dictionary query."""
         object_fields(request, ("reference", "values", "revision"))
         return self.store.replace_user_tags_authorized(resource_ref(request["reference"]), [],
             expected_revision=request["revision"], authority=self.write_authority,
-            lifecycle_reader=self.reader, request_id=self.request_id, tag_values=request["values"])
+            lifecycle_reader=self.reader, request_id=self.request_id, tag_values=request["values"],
+            idempotency_key=idempotency_key)
 
     def update_user_tag_definition(self, request, *, if_match):
         """Library-wide definition patch, not a resource tag binding write."""
