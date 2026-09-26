@@ -9,7 +9,7 @@ from uuid import uuid4
 from ..common.conditions import compare_if_match
 from ..common.errors import ContractError
 from ..events.outbox import EventWriter
-from .definitions import user_definition, definition_changes, decode, uuid_value
+from .definitions import user_definition, system_definition, definition_changes, decode, uuid_value
 from .read import FIELDS
 
 
@@ -25,10 +25,10 @@ def _storage(cursor):
             raise ContractError("TAGS_UNAVAILABLE", "Tag indexes require reconciliation", 503)
 
 
-def _event(cursor, value, actor, request_id, action):
+def _event(cursor, value, actor, request_id, action, *, actor_kind="user"):
     EventWriter().append(cursor, dict(event_id=str(uuid4()), request_id=request_id,
         occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-        actor_user_id=actor, actor_kind="user", source="hub", action=action,
+        actor_user_id=actor, actor_kind=actor_kind, source="hub", action=action,
         result="succeeded", repo_id=value["scope_repo_id"], revision=value["revision"],
         reason="tag_id:" + value["tag_id"]))
 
@@ -54,6 +54,59 @@ def create_user(cursor, *, repo_id, value, actor, request_id):
     cursor.execute("INSERT INTO cf_tag(" + FIELDS + ",updated_at) VALUES(" + ",".join(["%s"] * 11) + ",UTC_TIMESTAMP(6))", row)
     result = decode(row)
     _event(cursor, result, actor, request_id, "tags.definition.created")
+    return result, True
+
+
+def create_system(cursor, *, provider, namespace, code, value, scope_repo_id,
+                  actor, request_id, authorize_namespace):
+    candidate = system_definition(str(uuid4()), provider=provider, namespace=namespace,
+        code=code, value=value, scope_repo_id=scope_repo_id)
+    if not callable(authorize_namespace) or authorize_namespace(cursor, actor, provider, namespace, scope_repo_id) is not True:
+        raise ContractError("ACCESS_DENIED", "System tag definition scope is not allowed", 403)
+    _storage(cursor)
+    cursor.execute("SELECT " + FIELDS + " FROM cf_tag FORCE INDEX (tag_identity) WHERE namespace=%s AND code=%s LIMIT 2 FOR UPDATE", (namespace, code))
+    rows = cursor.fetchall()
+    if len(rows) > 1:
+        raise ContractError("TAGS_UNAVAILABLE", "Tag identity requires reconciliation", 503)
+    if rows:
+        existing = decode(rows[0])
+        if existing["kind"] != "system" or existing["provider"] != provider or existing["scope_repo_id"] != scope_repo_id:
+            raise ContractError("TAG_SOURCE_CONFLICT", "Tag identity belongs to another source scope", 409)
+        return existing, False
+    revision = str(uuid4())
+    row = (candidate["tag_id"], "system", provider, namespace, code, candidate["label"],
+        None, candidate["color"], int(candidate["enabled"]), scope_repo_id, revision)
+    cursor.execute("INSERT INTO cf_tag(" + FIELDS + ",updated_at) VALUES(" + ",".join(["%s"] * 11) + ",UTC_TIMESTAMP(6))", row)
+    result = decode(row)
+    _event(cursor, result, actor, request_id, "tags.definition.created", actor_kind="service")
+    return result, True
+
+
+def patch_system(cursor, *, tag_id, provider, namespace, scope_repo_id, changes,
+                 if_match, actor, request_id, authorize_namespace):
+    uuid_value(tag_id)
+    changes = definition_changes(changes)
+    if not callable(authorize_namespace) or authorize_namespace(cursor, actor, provider, namespace, scope_repo_id) is not True:
+        raise ContractError("ACCESS_DENIED", "System tag definition scope is not allowed", 403)
+    _storage(cursor)
+    cursor.execute("SELECT " + FIELDS + " FROM cf_tag WHERE tag_id=%s FOR UPDATE", (tag_id,))
+    rows = cursor.fetchall()
+    if len(rows) != 1:
+        raise ContractError("NOT_FOUND", "Tag is not available", 404)
+    old = decode(rows[0])
+    if (old["kind"], old["provider"], old["namespace"], old["scope_repo_id"]) != ("system", provider, namespace, scope_repo_id):
+        raise ContractError("NOT_FOUND", "Tag is not available", 404)
+    compare_if_match(if_match, old["etag"])
+    target = {**old, **changes}
+    if all(target[key] == old[key] for key in ("label", "color", "enabled")):
+        return old, False
+    revision = str(uuid4())
+    cursor.execute("UPDATE cf_tag SET label=%s,color=%s,enabled=%s,revision=%s,updated_at=UTC_TIMESTAMP(6) WHERE tag_id=%s AND revision=%s",
+        (target["label"], target["color"], int(target["enabled"]), revision, tag_id, old["revision"]))
+    if cursor.rowcount != 1:
+        raise ContractError("PRECONDITION_FAILED", "Tag has changed", 412)
+    result = {**target, "revision": revision, "etag": '"' + revision + '"'}
+    _event(cursor, result, actor, request_id, "tags.definition.updated", actor_kind="service")
     return result, True
 
 
