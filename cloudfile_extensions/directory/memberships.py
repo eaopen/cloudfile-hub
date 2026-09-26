@@ -29,8 +29,10 @@ def plan_memberships(subject, *, user_id, provider_id, mappings, current_groups,
                      attribute_allowlist):
     """Reconcile only this provider's registered groups, never manual groups.
 
-    Organizations already contain the source's effective ancestors; no primary
-    department priority, display-name matching or project-specific logic here.
+    This plans the snapshot's direct organizations and roles. Effective ancestor
+    expansion needs a coherent organization tree in the trusted preparer before
+    native readiness; this function does not infer parents or primary priority.
+    There is no display-name matching or project-specific logic here.
     Missing desired mappings fail closed, rather than silently dropping roles.
     """
     identifier(provider_id)
