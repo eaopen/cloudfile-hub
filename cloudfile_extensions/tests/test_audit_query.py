@@ -1,9 +1,12 @@
 """Real SQL reader tests; current authorization remains a trusted test adapter."""
 
 from uuid import uuid4
+import csv
+import io
 
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.events.outbox import EventWriter
+from cloudfile_extensions.events.export import AuditCSV
 from cloudfile_extensions.events.query import AuditReader
 from cloudfile_extensions.schema.runner import SchemaRunner
 from cloudfile_extensions.tests.test_schema import DatabaseTestCase
@@ -86,3 +89,15 @@ class AuditQueryTests(DatabaseTestCase):
                        {"start": self.arguments["end"]}, {"resource_uid": "not-a-uuid"}):
             with self.assertRaises(ContractError):
                 self.reader.list(**{**self.arguments, **change})
+
+    def test_export_with_real_reader_filters_and_redacts(self):
+        def redact(actor, row):
+            row["operator"] = "[redacted]"
+            row["actor_user_id"] = "[redacted]"
+            return row
+        exporter = AuditCSV(self.reader, authorize_export=lambda actor, repo: self.visible, redact=redact)
+        content = b"".join(exporter.generate(**self.arguments)).decode()
+        rows = list(csv.DictReader(io.StringIO(content)))
+        self.assertEqual([row["source_path"] for row in rows], ["/last", "/first"])
+        self.assertNotIn("/hidden", content)
+        self.assertNotIn("writer", content)
