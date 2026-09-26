@@ -42,7 +42,11 @@ class ServicePrincipal:
 
 
 class ServiceTokenVerifier:
-    def __init__(self, credentials, *, clock=time.time, clock_skew=30):
+    def __init__(self, credentials, *, clock=time.time, clock_skew=30, revocations=None):
+        from .service_revocations import ServiceRevocations
+        if revocations is not None and not isinstance(revocations, ServiceRevocations):
+            raise ValueError("actual service revocation store required")
+        self.revocations = revocations
         if (not isinstance(credentials, dict) or not credentials or
                 any(not isinstance(value, ServiceCredential) for value in credentials.values()) or
                 type(clock_skew) is not int or not 0 <= clock_skew <= 30):
@@ -86,7 +90,15 @@ class ServiceTokenVerifier:
             scopes = frozenset(scopes)
             if not scopes <= credential.scopes:
                 raise ValueError()
-            return ServicePrincipal(credential.service_id, scopes, claims["jti"], expires)
+            principal = ServicePrincipal(credential.service_id, scopes, claims["jti"], expires)
         except (jwt.PyJWTError, ValueError, TypeError, KeyError, ContractError):
             # Never return the underlying exception, JWT or signing material.
             raise ContractError("AUTHENTICATION_REQUIRED", "Invalid service credential", 401) from None
+        self.assert_active(principal)
+        return principal
+
+    def assert_active(self, principal):
+        if not isinstance(principal, ServicePrincipal) or principal.expires_at <= self.clock():
+            raise ContractError("AUTHENTICATION_REQUIRED", "Service credential expired", 401)
+        if self.revocations is not None:
+            self.revocations.assert_active(principal)

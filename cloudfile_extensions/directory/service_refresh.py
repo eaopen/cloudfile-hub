@@ -12,7 +12,8 @@ from .refresh_worker import UserRefreshJob
 
 class ServiceRefreshFactory:
     def __init__(self, *, verifier, resources, provider_grants):
-        if (not isinstance(verifier, ServiceTokenVerifier) or not isinstance(resources, PolicyResources)
+        if (not isinstance(verifier, ServiceTokenVerifier) or verifier.revocations is None
+                or not isinstance(resources, PolicyResources)
                 or not isinstance(provider_grants, dict) or not provider_grants):
             raise ValueError("actual verifier, owned policy resources and fixed grants required")
         grants = {}
@@ -37,4 +38,4 @@ class ServiceRefreshFactory:
         with self.resources.connection() as connection:
             yield UserRefreshManagement(connection, actor=principal, provider=self.resources.provider,
                 native_schema=self.resources.native_schema, identity_schema=self.resources.identity_schema,
-                service_providers=providers)
+                service_providers=providers, service_verifier=self.verifier)

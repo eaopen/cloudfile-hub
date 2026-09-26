@@ -10,14 +10,16 @@ from .refresh_worker import UserRefreshJob
 from uuid import UUID
 import re
 import time
-from ..identity.service_tokens import ServicePrincipal
+from ..identity.service_tokens import ServicePrincipal, ServiceTokenVerifier
 
 
 class UserRefreshManagement:
     def __init__(self, connection, *, actor, provider, native_schema, identity_schema,
-                 service_providers=None):
+                 service_providers=None, service_verifier=None):
         self.machine = isinstance(actor, ServicePrincipal)
         if self.machine:
+            if not isinstance(service_verifier, ServiceTokenVerifier) or service_verifier.revocations is None:
+                raise ValueError("revocation-aware actual service verifier required")
             if not isinstance(service_providers, frozenset) or provider not in service_providers:
                 raise ContractError("ACCESS_DENIED", "Service refresh provider is not allowed", 403)
             actor.require(UserRefreshJob.KIND)
@@ -25,6 +27,7 @@ class UserRefreshManagement:
             raise ValueError("actually authenticated native administrator required")
         SchemaRunner(connection).require_current()
         self.actor = actor
+        self.service_verifier = service_verifier
         self.actor_id = actor.service_id if self.machine else actor.user_id
         self.actor_kind = "service" if self.machine else "user"
         self.state = NativeSubjectState(connection, native_schema=native_schema,
@@ -40,6 +43,7 @@ class UserRefreshManagement:
                 raise ContractError("SUBJECT_UNAVAILABLE", "Refresh identity storage is unavailable", 503)
         if self.machine:
             self.actor.require(UserRefreshJob.KIND)
+            self.service_verifier.assert_active(self.actor)
             if self.actor.expires_at <= time.time():
                 raise ContractError("AUTHENTICATION_REQUIRED", "Service refresh credential expired", 401)
         else:
