@@ -91,3 +91,13 @@ class ResourceService:
                 changes=changes, if_match=if_match, actor=self.tag_management.actor,
                 request_id=self.request_id)
         return self.tag_management.consume(reference, update)
+
+    def list_user_tag_definitions(self, request):
+        from ..tags.catalog import list_user_definitions
+        from ..tags.definitions import uuid_value
+        object_fields(request, ("repo_id",), ("limit", "after"))
+        reference = dict(repo_id=uuid_value(request["repo_id"]), path="/", kind="dir")
+        def read(cursor, ref):
+            return list_user_definitions(cursor, repo_id=ref["repo_id"],
+                limit=request.get("limit", 50), after=request.get("after"))
+        return self.tag_management.consume(reference, read)
