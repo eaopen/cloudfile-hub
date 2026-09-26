@@ -17,6 +17,10 @@ from .source import OwnedIndexSource
 from .tasks import MeilisearchTasks
 from .initialization import SearchInitialization, SearchInitializationStore
 from .generations import SearchGenerationStore
+from .native_directory import NativeCommitDirectoryReader
+from .rebuild_store import SearchRebuildStore
+from .rebuild_execution import SearchRebuildExecution
+from .rebuild_coordinator import SearchRebuildCoordinator
 
 
 class SearchInitializationFactory:
@@ -41,8 +45,7 @@ class SearchInitializationFactory:
             if not connection.get_autocommit():
                 raise ContractError("SEARCH_UNAVAILABLE", "Clean initialization connection required", 503)
             SchemaRunner(connection).require_current()
-            yield SearchInitialization(SearchInitializationStore(connection),
-                MeilisearchTasks(endpoint=self.endpoint, index=self.index, key=self.key), generation=self.generation)
+            yield self._assemble(connection)
         finally:
             try:
                 try:
@@ -52,6 +55,49 @@ class SearchInitializationFactory:
             finally:
                 with self._lock:
                     self._active.discard(id(connection))
+
+    def _assemble(self, connection):
+        return SearchInitialization(SearchInitializationStore(connection),
+            MeilisearchTasks(endpoint=self.endpoint, index=self.index, key=self.key), generation=self.generation)
+
+
+class SearchRebuildRuntime:
+    """Fixed trusted generation; callers cannot select another physical index."""
+    def __init__(self, coordinator, *, generation):
+        if not isinstance(coordinator, SearchRebuildCoordinator):
+            raise ValueError("actual rebuild coordinator required")
+        SearchGenerationStore._identity(generation, coordinator.execution.client.index)
+        self.coordinator, self.generation = coordinator, generation
+
+    def start(self, *, repo_id, commit_id, source_sequence):
+        return self.coordinator.execution.store.start(generation=self.generation,
+            index=self.coordinator.execution.client.index, repo_id=repo_id,
+            commit_id=commit_id, source_sequence=source_sequence)
+
+    def advance(self, *, repo_id):
+        return self.coordinator.advance(generation=self.generation, repo_id=repo_id)
+
+
+class SearchRebuildFactory(SearchInitializationFactory):
+    """Owned rebuild assembly, sharing explicit connection cleanup, not jobs."""
+    def __init__(self, *, connection_factory, endpoint, index, write_key, generation,
+                 snapshot_scope, repo_scope, lifecycle_scope, resource_secret):
+        if (not callable(snapshot_scope) or not callable(repo_scope) or not callable(lifecycle_scope) or
+                not isinstance(resource_secret, bytes) or len(resource_secret) < 32):
+            raise ValueError("actual native snapshot/repo/lifecycle scopes and secret required")
+        super().__init__(connection_factory=connection_factory, endpoint=endpoint, index=index,
+            write_key=write_key, generation=generation)
+        self.snapshot_scope, self.repo_scope, self.lifecycle_scope = snapshot_scope, repo_scope, lifecycle_scope
+        self.secret = resource_secret
+
+    def _assemble(self, connection):
+        client = MeilisearchTasks(endpoint=self.endpoint, index=self.index, key=self.key)
+        source = OwnedIndexSource(connection_factory=self.connection_factory, worker_connection=connection,
+            repo_scope=self.repo_scope, lifecycle_scope=self.lifecycle_scope, secret=self.secret)
+        execution = SearchRebuildExecution(SearchRebuildStore(connection), client)
+        coordinator = SearchRebuildCoordinator(execution,
+            NativeCommitDirectoryReader(snapshot_scope=self.snapshot_scope), source)
+        return SearchRebuildRuntime(coordinator, generation=self.generation)
 
 
 class SearchConsumerFactory:

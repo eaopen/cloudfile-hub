@@ -4,7 +4,7 @@ from unittest.mock import Mock, patch
 
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.search.consumer import SearchEventConsumer
-from cloudfile_extensions.search.runtime import SearchConsumerFactory, SearchInitializationFactory
+from cloudfile_extensions.search.runtime import SearchConsumerFactory, SearchInitializationFactory, SearchRebuildFactory, SearchRebuildRuntime
 from cloudfile_extensions.search.initialization import SearchInitialization
 
 
@@ -62,3 +62,19 @@ class SearchRuntimeTest(TestCase):
                 self.connection.close.assert_not_called()
         self.connection.rollback.assert_called_once()
         self.connection.close.assert_called_once()
+
+    def test_rebuild_factory_assembles_actual_owned_sources_without_running(self):
+        options = {key: self.options[key] for key in ("connection_factory", "endpoint", "index", "write_key", "generation", "repo_scope", "lifecycle_scope", "resource_secret")}
+        options["snapshot_scope"] = lambda repo, commit: nullcontext()
+        factory = SearchRebuildFactory(**options)
+        with patch("cloudfile_extensions.search.runtime.SchemaRunner"):
+            with factory.open() as runtime:
+                self.assertIsInstance(runtime, SearchRebuildRuntime)
+                self.assertEqual(runtime.generation, self.options["generation"])
+                self.assertIs(runtime.coordinator.execution.store.connection, self.connection)
+                self.assertIs(runtime.coordinator.source.worker_connection, self.connection)
+                self.connection.begin.assert_not_called()
+        self.connection.rollback.assert_called_once()
+        self.connection.close.assert_called_once()
+        with self.assertRaises(ValueError):
+            SearchRebuildFactory(**{**options, "snapshot_scope": None})
