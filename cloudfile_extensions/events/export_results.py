@@ -33,6 +33,13 @@ class AuditExportResults:
         self.store, self.exporter, self.root, self.clock = store, exporter, result_root, clock
 
     def verify(self, job_id, *, actor):
+        return self._verify(job_id, actor=actor, include_content=False)
+
+    def read(self, job_id, *, actor):
+        """Return verified bounded bytes from the SAME descriptor, not a path."""
+        return self._verify(job_id, actor=actor, include_content=True)
+
+    def _verify(self, job_id, *, actor, include_content):
         try:
             job_id = str(UUID(job_id))
         except (ValueError, TypeError, AttributeError):
@@ -77,6 +84,7 @@ class AuditExportResults:
         if size != metadata["bytes"] or digest.hexdigest() != metadata["sha256"]:
             raise ContractError("EXPORT_REGENERATE", "Audit visibility changed; create a new export", 409)
         directory, descriptor = None, None
+        chunks = []
         try:
             directory = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
             descriptor = os.open(name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=directory)
@@ -94,6 +102,8 @@ class AuditExportResults:
                 if read_size > size:
                     raise ValueError()
                 actual.update(chunk)
+                if include_content:
+                    chunks.append(chunk)
             if read_size != size or actual.hexdigest() != digest.hexdigest():
                 raise ValueError()
         except (OSError, ValueError):
@@ -105,4 +115,5 @@ class AuditExportResults:
                 os.close(directory)
         if self.exporter.authorize(actor, repo) is not True:
             raise ContractError("FORBIDDEN", "Audit export scope is not available", 403)
-        return VerifiedExport(job_id, reference, size, digest.hexdigest())
+        verified = VerifiedExport(job_id, reference, size, digest.hexdigest())
+        return (verified, b"".join(chunks)) if include_content else verified

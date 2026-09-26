@@ -26,7 +26,8 @@ def post_worker_init(worker):
             resource_secret=getattr(settings, "CLOUDFILE_RESOURCE_SECRET", None),
             lifecycle_reader=getattr(settings, "CLOUDFILE_RESOURCE_LIFECYCLE_READER", None),
             audit_secret=getattr(settings, "CLOUDFILE_AUDIT_CURSOR_SECRET", None),
-            audit_redact=getattr(settings, "CLOUDFILE_AUDIT_REDACT", None))
+            audit_redact=getattr(settings, "CLOUDFILE_AUDIT_REDACT", None),
+            audit_result_root=getattr(settings, "CLOUDFILE_AUDIT_RESULT_ROOT", None))
     except Exception:
         raise RuntimeError("CloudFile policy worker initialization failed; check trusted configuration") from None
 

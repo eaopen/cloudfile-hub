@@ -19,7 +19,7 @@ class PolicyDeployment:
 
 
 def configure_policy(value, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
-                     audit_secret=None, audit_redact=None):
+                     audit_secret=None, audit_redact=None, audit_result_root=None):
     """value is trusted host settings, not request JSON or an import path.
 
     Matches the current native authority adapter: private Redis TCP, DB0, password
@@ -45,7 +45,7 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
     trusted_https_url(value["directory_url"])
     if not callable(directory_authorization):
         raise ValueError("machine directory credential supplier required")
-    if audit_secret is None and audit_redact is not None:
+    if audit_secret is None and (audit_redact is not None or audit_result_root is not None):
         raise ValueError("audit redaction requires an audit cursor secret")
     if audit_secret is not None and (not isinstance(audit_secret, bytes)
             or len(audit_secret) < 32 or (audit_redact is not None and not callable(audit_redact))):
@@ -83,7 +83,8 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
             from ..events.runtime import AuditQueryFactory
             audit_factory = AuditQueryFactory(authenticate=factory.authenticate,
                 preparation_scope=factory.preparation_scope, core=factory.core,
-                cloud_mode=factory.cloud_mode, secret=audit_secret, redact=audit_redact)
+                cloud_mode=factory.cloud_mode, secret=audit_secret, redact=audit_redact,
+                result_root=audit_result_root)
         return PolicyDeployment(factory, client, resource_factory, audit_factory)
     except Exception:
         client.connection_pool.disconnect()

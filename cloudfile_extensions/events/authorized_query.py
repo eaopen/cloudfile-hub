@@ -15,7 +15,11 @@ from ..jobs.authority import scope_locks
 
 
 class AuthorizedAuditQuery:
-    def __init__(self, preparation, core, *, cloud_mode, request_id, secret, redact):
+    def __init__(self, preparation, core, *, cloud_mode, request_id, secret, redact, result_root=None):
+        import os
+        if result_root is not None and (not isinstance(result_root, str) or not os.path.isabs(result_root)):
+            raise ValueError("trusted absolute audit result root required")
+        self.result_root, self.request_id = result_root, request_id
         self.authority = ContentReadAuthority(preparation, core,
             cloud_mode=cloud_mode, request_id=request_id)
         self.management = LibraryWideManagementAuthority(preparation, core,
@@ -73,6 +77,37 @@ class AuthorizedAuditQuery:
             return AuditService._dto(jobs.cancel(current["job_id"],
                 actor=self.authority.actor, actor_kind="user"))
         return self._consume(job["scope"]["external_id"], cancel, export=True)
+
+    def download_export(self, job_id):
+        if self.result_root is None:
+            raise ContractError("AUDIT_UNAVAILABLE", "Audit result delivery is unavailable", 503)
+        from .authorized_export import AuthorizedAuditCSV
+        from .export_results import AuditExportResults
+        from .outbox import EventWriter
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        job = self._owned_export(job_id)
+        repo = job["scope"]["external_id"]
+        with self.export_scope(repo):
+            exporter = AuthorizedAuditCSV(self, repo_id=repo)
+            results = AuditExportResults(JobStore(self.authority.state.connection), exporter,
+                result_root=self.result_root)
+            verified, content = results.read(job["job_id"], actor=self.authority.actor)
+            def release():
+                current = self._owned_export(job["job_id"])
+                if (current["scope"] != job["scope"] or current["status"] != "succeeded"
+                        or current["result_ref"] != verified.result_ref
+                        or self.epoch != exporter.epoch):
+                    raise ContractError("EXPORT_REGENERATE", "Audit result authority changed", 409)
+                # An authorized HTTP payload release is not evidence that a
+                # remote client received every byte. Do not emit completed.
+                EventWriter().append(self.cursor, dict(event_id=str(uuid4()),
+                    occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    request_id=self.request_id, actor_user_id=self.authority.actor,
+                    actor_kind="user", source="hub", action="audit.export.download",
+                    result="attempted", repo_id=repo, job_id=job["job_id"]))
+                return content
+            return self._consume(repo, release, export=True)
 
     def _authorize(self, actor, event):
         if self.cursor is None or actor != self.authority.actor or event.get("repo_id") != self.repo_id:

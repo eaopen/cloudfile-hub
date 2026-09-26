@@ -2,7 +2,7 @@
 import re
 from uuid import uuid4
 
-from django.http import JsonResponse
+from django.http import JsonResponse, HttpResponse
 from django.urls import path
 from django.views import View
 from django.middleware.csrf import CsrfViewMiddleware
@@ -68,9 +68,9 @@ class AuditExportView(DirectoryPolicyView):
     def dispatch(self, request, *args, **kwargs):
         request_id = str(uuid4())
         try:
-            expected = "GET" if self.operation == "status" else "POST"
+            expected = "GET" if self.operation in {"status", "result"} else "POST"
             wanted = set() if self.operation == "create" else {"job_id"}
-            if (self.operation not in {"create", "status", "cancel"}
+            if (self.operation not in {"create", "status", "cancel", "result"}
                     or request.method != expected or args or set(kwargs) != wanted):
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed for this export target", 405)
             if not request.is_secure():
@@ -103,9 +103,16 @@ class AuditExportView(DirectoryPolicyView):
                     status = 202 if created else 200
                 elif self.operation == "status":
                     result = service.export_status(str(kwargs["job_id"]))
+                elif self.operation == "result":
+                    result = service.download_export(str(kwargs["job_id"]))
                 else:
                     result = service.cancel_export(str(kwargs["job_id"]))
-                response = JsonResponse(result, status=status)
+                if self.operation == "result":
+                    response = HttpResponse(result, content_type="text/csv; charset=utf-8")
+                    response["Content-Disposition"] = 'attachment; filename="audit-export.csv"'
+                    response["X-Content-Type-Options"] = "nosniff"
+                else:
+                    response = JsonResponse(result, status=status)
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)
         except Exception:
@@ -127,12 +134,18 @@ class AuditExportCancelView(AuditExportView):
     operation = "cancel"
 
 
+class AuditExportResultView(AuditExportView):
+    operation = "result"
+    http_method_names = ["get"]
+
+
 def audit_export_routes(*, service_factory):
-    """Explicit job-control routes only; no download or automatic enablement."""
+    """Explicit job/result routes; no automatic enablement or static files."""
     if not callable(service_factory):
         raise ValueError("trusted owned audit service factory required")
     return [
         path("v1/exports/", AuditExportView.as_view(service_factory=service_factory), name="audit-export-create"),
         path("v1/exports/<uuid:job_id>/", AuditExportStatusView.as_view(service_factory=service_factory), name="audit-export-status"),
         path("v1/exports/<uuid:job_id>/cancel/", AuditExportCancelView.as_view(service_factory=service_factory), name="audit-export-cancel"),
+        path("v1/exports/<uuid:job_id>/result/", AuditExportResultView.as_view(service_factory=service_factory), name="audit-export-result"),
     ]

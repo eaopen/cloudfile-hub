@@ -9,7 +9,7 @@ from .deployment import configure_policy
 
 class PolicyHost:
     def __init__(self, settings, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
-                 audit_secret=None, audit_redact=None):
+                 audit_secret=None, audit_redact=None, audit_result_root=None):
         # Construct after the server worker fork, never in a preload parent.
         self.pid = os.getpid()
         self.lock = threading.Lock()
@@ -18,7 +18,7 @@ class PolicyHost:
         self.closed = False
         self.deployment = configure_policy(settings, directory_authorization=directory_authorization,
             resource_secret=resource_secret, lifecycle_reader=lifecycle_reader,
-            audit_secret=audit_secret, audit_redact=audit_redact)
+            audit_secret=audit_secret, audit_redact=audit_redact, audit_result_root=audit_result_root)
 
     def _process(self):
         # Check before acquiring an inherited lock that may have been held at
