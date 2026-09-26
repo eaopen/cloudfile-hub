@@ -1,5 +1,5 @@
 """Actual same-transaction CE/C audit page consumer; no HTTP/export enablement."""
-from ..authorization.read import ContentReadAuthority
+from ..authorization.read import ContentReadAuthority, LibraryWideManagementAuthority
 from ..common.errors import ContractError
 from ..resources.paths import resource_ref
 from ..resources.store import ResourceStore
@@ -12,6 +12,9 @@ class AuthorizedAuditQuery:
     def __init__(self, preparation, core, *, cloud_mode, request_id, secret, redact):
         self.authority = ContentReadAuthority(preparation, core,
             cloud_mode=cloud_mode, request_id=request_id)
+        self.management = LibraryWideManagementAuthority(preparation, core,
+            cloud_mode=cloud_mode, request_id=request_id)
+        self.managed = False
         self.cursor = None
         self.repo_id = None
         self.epoch = None
@@ -28,7 +31,7 @@ class AuthorizedAuditQuery:
         paths = [event.get(name) for name in ("source_path", "target_path") if event.get(name) is not None]
         if not paths:
             # Library/security facts require a separate audit-management scope.
-            return False
+            return self.managed
         kind = event.get("_object_type")
         if kind not in {"file", "dir"}:
             uid = event.get("resource_uid")
@@ -56,8 +59,14 @@ class AuthorizedAuditQuery:
         def read(sql, ref):
             self.cursor, self.repo_id, self.epoch = sql, ref["repo_id"], self.authority.epoch
             try:
+                self.managed = self.management.authorize(sql, self.authority.actor, ref) is True
+                if self.management.epoch != self.epoch:
+                    raise ContractError("SUBJECT_UNAVAILABLE", "Audit management subject changed", 503)
                 return self.service.events(actor=self.authority.actor, filters=filters,
                     limit=limit, cursor=cursor)
             finally:
                 self.cursor = self.repo_id = self.epoch = None
+                self.managed = False
+                self.management.epoch = self.management.current_subject = self.management.effective_access = None
+                self.management.is_owner = False
         return self.authority.consume(root, read)

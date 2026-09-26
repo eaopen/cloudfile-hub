@@ -78,8 +78,8 @@ class ContentMetadataWriteAuthority(ContentReadAuthority):
         return decision["visible"] and decision["write"]
 
 
-class LibraryTagManagementAuthority(ContentReadAuthority):
-    """Shared definitions affect the whole library, never just a subdirectory."""
+class LibraryWideManagementAuthority(ContentReadAuthority):
+    """Whole-library management, not an exact root or subdirectory grant."""
     def scope_allowed(self, reference):
         from .admins import DirectoryAdmins
         if reference["kind"] != "dir" or reference["path"] != "/":
@@ -88,3 +88,7 @@ class LibraryTagManagementAuthority(ContentReadAuthority):
         # subdirectory grant cannot change labels shared by other resources.
         return self.is_owner or DirectoryAdmins.permits(
             self._scopes(reference), reference, inherit=True)
+
+
+class LibraryTagManagementAuthority(LibraryWideManagementAuthority):
+    """Shared tag definitions use the whole-library management boundary."""

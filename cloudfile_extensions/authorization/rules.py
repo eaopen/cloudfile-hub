@@ -318,7 +318,7 @@ class ACLRules:
                             occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                             actor_user_id=self.actor, actor_kind="user", source="hub",
                             action=self.ACTION_PREFIX + (".deleted" if value is None else ".updated" if previous else ".created"),
-                            result="succeeded", repo_id=ref["repo_id"], path=ref["path"], policy_revision=revision))
+                            result="succeeded", repo_id=ref["repo_id"], path=ref["path"], resource_kind=ref["kind"], policy_revision=revision))
                         if request_key is not None:
                             cursor.execute("INSERT INTO cf_policy_request(request_key,request_digest,result_json,inherited_effect,created_at) VALUES(%s,%s,%s,%s,UTC_TIMESTAMP(6))",
                                 (request_key, request_digest, json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
