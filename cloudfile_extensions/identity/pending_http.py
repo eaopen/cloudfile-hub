@@ -8,7 +8,7 @@ from django.views import View
 
 from ..common.errors import ContractError
 from .pending import PendingLoginStatus, PendingLoginProofs
-from .browser_binding import BINDING_COOKIE, BrowserLoginBindings
+from .browser_binding import BINDING_COOKIE, BrowserLoginBindings, request_binding
 
 
 class PendingStatusView(View):
@@ -19,17 +19,19 @@ class PendingStatusView(View):
     def dispatch(self, request, *args, **kwargs):
         request_id = str(uuid4())
         try:
-            if request.method not in {"GET", "POST"}:
+            if request.method not in {"GET", "POST"} or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed", 405)
             if not request.is_secure():
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure pending login is required", 401)
             if request.GET:
                 raise ContractError("INVALID_REQUEST", "Pending proof must not be sent in a URL", 400)
+            if request.read(1):
+                raise ContractError("INVALID_REQUEST", "Pending status and revoke take no body", 400)
             header = request.headers.get("Authorization", "")
             if not header.startswith("CloudFilePending "):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Pending proof is required", 401)
             token = header[len("CloudFilePending "):]
-            binding = request.COOKIES.get(self.binding_cookie, "")
+            binding = request_binding(request)
             PendingLoginProofs._binding(binding)
             if not re.fullmatch(r"[A-Za-z0-9_-]{43}", token):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Pending proof is invalid", 401)
@@ -38,8 +40,6 @@ class PendingStatusView(View):
                 csrf.process_request(request)
                 if csrf.process_view(request, lambda *_: None, (), {}) is not None:
                     raise ContractError("ACCESS_DENIED", "CSRF verification failed", 403)
-                if request.body:
-                    raise ContractError("INVALID_REQUEST", "Pending revoke takes no body", 400)
             if not callable(self.service_factory):
                 raise ContractError("IDENTITY_UNAVAILABLE", "Pending status service is unavailable", 503)
             with self.service_factory(request_id) as service:

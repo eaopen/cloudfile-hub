@@ -7,7 +7,7 @@ from django.urls import path
 from django.views import View
 
 from ..common.errors import ContractError
-from .browser_binding import BINDING_COOKIE
+from .browser_binding import request_binding
 from .login import PendingLogin
 from .native_session import NativeOIDCSession
 from .resources import LoginResources
@@ -33,18 +33,12 @@ class LoginCallbackView(View):
             if (not re.fullmatch(r"[A-Za-z0-9_-]{43}", state) or not code or len(code) > 4096
                     or any(ord(char) < 32 for char in code)):
                 raise ContractError("INVALID_REQUEST", "Invalid callback parameters", 400)
-            raw_cookie = request.headers.get("Cookie", "")
-            bindings = [part.strip().split("=", 1)[1] for part in raw_cookie.split(";")
-                if "=" in part and part.strip().split("=", 1)[0] == BINDING_COOKIE]
-            if (len(raw_cookie) > 8192 or len(bindings) != 1
-                    or not re.fullmatch(r"[A-Za-z0-9_-]{43}", bindings[0])
-                    or request.COOKIES.get(BINDING_COOKIE) != bindings[0]):
-                raise ContractError("AUTHENTICATION_REQUIRED", "Exact browser login binding required", 401)
+            binding = request_binding(request)
             if not isinstance(self.resources, LoginResources):
                 raise ContractError("IDENTITY_UNAVAILABLE", "Login runtime is unavailable", 503)
             with self.resources.runtime(request_id) as runtime:
                 value = NativeOIDCSession().complete(request, runtime,
-                    state=state, code=code, binding=bindings[0])
+                    state=state, code=code, binding=binding)
                 if isinstance(value, PendingLogin):
                     if (not isinstance(value.status_token, str)
                             or not re.fullmatch(r"[A-Za-z0-9_-]{43}", value.status_token)):
