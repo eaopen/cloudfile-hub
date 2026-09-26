@@ -14,6 +14,7 @@ import os
 import secrets
 from threading import Lock
 import time
+from urllib.parse import urlsplit
 
 import jwt
 from requests_oauthlib import OAuth2Session
@@ -71,6 +72,8 @@ class OIDCConfig:
     jwks_url: str
     user_id_claim: str = "userId"
     ca_bundle: str = None
+    end_session_url: str = None
+    post_logout_redirect_uri: str = None
 
     def __post_init__(self):
         for url in (self.issuer, self.redirect_uri, self.authorization_url,
@@ -82,6 +85,15 @@ class OIDCConfig:
             raise ValueError("OIDC client secret is required")
         if self.ca_bundle is not None and (not isinstance(self.ca_bundle, str) or not os.path.isfile(self.ca_bundle)):
             raise ValueError("OIDC CA bundle must be a trusted deployment file")
+        if (self.end_session_url is None) != (self.post_logout_redirect_uri is None):
+            raise ValueError("OIDC logout endpoint and fixed return URI must be configured together")
+        if self.end_session_url is not None:
+            trusted_https_url(self.end_session_url)
+            trusted_https_url(self.post_logout_redirect_uri)
+            login_return = urlsplit(self.redirect_uri)
+            logout_return = urlsplit(self.post_logout_redirect_uri)
+            if (login_return.scheme, login_return.netloc) != (logout_return.scheme, logout_return.netloc):
+                raise ValueError("OIDC logout return must use the fixed login application origin")
 
 
 class SigningKeys:
