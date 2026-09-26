@@ -198,6 +198,46 @@ class ResourceStore:
             with self.connection.cursor() as cursor:
                 cursor.execute("SELECT RELEASE_LOCK(%s)", (name,))
 
+    def write_authorized(self, reference, changes, *, expected_revision, authority, lifecycle_reader):
+        """Description/open hint mutation in the actual C-authorized transaction.
+
+        Lifecycle reader must use authoritative native evidence on this cursor.
+        No earlier RPC or content hash can substitute for object-lifecycle state.
+        """
+        from ..authorization.read import ContentMetadataWriteAuthority
+        if (not isinstance(authority, ContentMetadataWriteAuthority) or
+                authority.state.connection is not self.connection or not callable(lifecycle_reader)):
+            raise ValueError("same-connection write authority and lifecycle reader required")
+        ref = resource_ref(reference)
+        changes = annotation_changes(changes, kind=ref["kind"])
+        def write(cursor, reference):
+            evidence = self._validate_evidence(lifecycle_reader(cursor, reference))
+            row = self._row(reference, evidence, locking=True)
+            old = self._snapshot(reference, evidence, row)
+            compare_revision(expected_revision, old["revision"])
+            target = {key: changes.get(key, old[key]) for key in ("description", "local_open_type")}
+            if all(target[key] == old[key] for key in target):
+                return old, False
+            created = row is None
+            if created:
+                row = dict(uid=str(uuid4()), path=reference["path"], lifecycle_ref=evidence.lifecycle_ref,
+                    revision=1, **target)
+                cursor.execute("INSERT INTO cf_resource(uid,repo_id,kind,path,path_hash,lifecycle_ref,revision,description,local_open_type,state,updated_at) VALUES(%s,%s,%s,%s,%s,%s,1,%s,%s,'active',UTC_TIMESTAMP(6))",
+                    (row["uid"], reference["repo_id"], reference["kind"], reference["path"], self._hash(reference["path"]),
+                     evidence.lifecycle_ref, target["description"] or None, target["local_open_type"] or None))
+            else:
+                if type(row["revision"]) is not int or not 1 <= row["revision"] < 2 ** 64 - 1:
+                    raise ContractError("PATH_STATE_PENDING", "Resource revision requires reconciliation", 503)
+                cursor.execute("UPDATE cf_resource SET description=%s,local_open_type=%s,revision=revision+1,updated_at=UTC_TIMESTAMP(6) WHERE uid=%s AND revision=%s",
+                    (target["description"] or None, target["local_open_type"] or None, row["uid"], row["revision"]))
+                if cursor.rowcount != 1:
+                    raise ContractError("RESOURCE_REVISION_CONFLICT", "Resource has changed", 409)
+                row = {**row, **target, "revision": row["revision"] + 1}
+            self.mutation_hook(cursor, dict(action="resource.attributes.updated", actor_user_id=authority.actor,
+                resource_uid=row["uid"], repo_id=reference["repo_id"], path=reference["path"], revision=str(row["revision"])))
+            return self._snapshot(reference, evidence, row), created
+        return authority.consume(ref, write)
+
     def write(self, reference, changes, *, expected_revision, actor):
         reference = resource_ref(reference)
         changes = annotation_changes(changes, kind=reference["kind"])
