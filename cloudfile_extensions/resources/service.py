@@ -33,10 +33,11 @@ class ResourceService:
         return self.store.resolve_authorized(resource_ref(request["reference"]),
             authority=self.read_authority, lifecycle_reader=self.reader, include_tags=True)
 
-    def update_attributes(self, request):
+    def update_attributes(self, request, *, idempotency_key=None):
         object_fields(request, ("reference", "changes", "revision"))
         value, created = self.store.write_authorized(resource_ref(request["reference"]), request["changes"],
-            expected_revision=request["revision"], authority=self.write_authority, lifecycle_reader=self.reader)
+            expected_revision=request["revision"], authority=self.write_authority, lifecycle_reader=self.reader,
+            idempotency_key=idempotency_key)
         return value, created
 
     def replace_user_tags(self, request):

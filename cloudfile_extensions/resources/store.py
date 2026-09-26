@@ -256,7 +256,7 @@ class ResourceStore:
             with self.connection.cursor() as cursor:
                 cursor.execute("SELECT RELEASE_LOCK(%s)", (name,))
 
-    def write_authorized(self, reference, changes, *, expected_revision, authority, lifecycle_reader):
+    def write_authorized(self, reference, changes, *, expected_revision, authority, lifecycle_reader, idempotency_key=None):
         """Description/open hint mutation in the actual C-authorized transaction.
 
         Lifecycle reader must use authoritative native evidence on this cursor.
@@ -270,6 +270,15 @@ class ResourceStore:
         changes = annotation_changes(changes, kind=ref["kind"])
         def write(cursor, reference):
             evidence = self._validate_evidence(lifecycle_reader(cursor, reference))
+            if idempotency_key is not None:
+                from .requests import execute
+                return execute(cursor, provider=authority.state.provider, actor=authority.actor,
+                    operation="attributes.update", key=idempotency_key,
+                    request=dict(reference=reference, changes=changes, revision=expected_revision),
+                    lifecycle=evidence.lifecycle_ref, secret=self.secret,
+                    mutate=lambda: apply(cursor, reference, evidence))
+            return apply(cursor, reference, evidence)
+        def apply(cursor, reference, evidence):
             row = self._row(reference, evidence, locking=True)
             old = self._snapshot(reference, evidence, row)
             compare_revision(expected_revision, old["revision"])
