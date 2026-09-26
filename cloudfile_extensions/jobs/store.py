@@ -85,9 +85,11 @@ class JobStore:
                 cursor.execute("SELECT RELEASE_LOCK(%s)", (name,))
 
     def submit(self, *, actor, actor_kind, kind, scope, request, idempotency_key, barrier=False,
-               authorize_transaction=None):
+               authorize_transaction=None, finalize_transaction=None):
         if authorize_transaction is not None and not callable(authorize_transaction):
             raise ValueError("trusted transaction authorization required")
+        if finalize_transaction is not None and not callable(finalize_transaction):
+            raise ValueError("trusted final transaction assertion required")
         identifier(actor)
         if actor_kind not in {"user", "service"} or type(barrier) is not bool:
             raise ContractError("INVALID_REQUEST", "Invalid job actor or barrier", 400)
@@ -115,6 +117,8 @@ class JobStore:
                 if existing:
                     if existing[1] != digest:
                         raise ContractError("IDEMPOTENCY_CONFLICT", "Idempotency key has a different request", 409)
+                    if finalize_transaction is not None:
+                        finalize_transaction(cursor)
                     return existing[0], False
                 job_id = str(uuid4())
                 cursor.execute("INSERT INTO cf_background_job(job_id,kind,actor,actor_kind,scope_type,scope_id,scope_hash,"
@@ -124,6 +128,8 @@ class JobStore:
                                 hashlib.sha256(scope_json.encode()).hexdigest(), digest, idempotency_key, request_json, int(barrier)))
                 self._record(cursor, {"job_id": job_id, "actor": actor, "actor_kind": actor_kind, "scope": scope},
                              action="job.accepted", result="attempted")
+                if finalize_transaction is not None:
+                    finalize_transaction(cursor)
                 return job_id, True
 
     def active_barrier(self, scope):
