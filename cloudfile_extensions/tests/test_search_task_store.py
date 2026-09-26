@@ -119,6 +119,11 @@ class SearchTaskStoreTest(DatabaseTestCase):
             sql.execute("DELETE FROM cf_search_fanout_page WHERE event_id=%s", (self.claim.event_id,))
             self.assertFalse(fanout_pages_complete(sql, event_id=self.claim.event_id, generation="index", index="resources", batches=1))
 
+    def test_repo_event_cannot_be_reinterpreted_as_global_tag_scan(self):
+        with self.assertRaises(ContractError) as caught:
+            SearchFanoutStore(self.connection).start(self.claim, generation="index", repo_id=None, tag_id=str(uuid4()), revision=str(uuid4()), upper_uid=None)
+        self.assertEqual(caught.exception.code, "SEARCH_PLAN_CONFLICT")
+
     def test_exact_successful_plan_acknowledges_without_resource_ack(self):
         self.succeeded(0, "a" * 64)
         self.store.complete_event(self.claim, generation="index", payload_hashes=["a" * 64])

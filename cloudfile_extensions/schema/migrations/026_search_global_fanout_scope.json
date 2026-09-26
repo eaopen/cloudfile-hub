@@ -1,0 +1,8 @@
+{
+  "version": "026_search_global_fanout_scope",
+  "steps": [{
+    "sql": "ALTER TABLE cf_search_fanout MODIFY repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL",
+    "verify": "SELECT IF((SELECT is_nullable FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_search_fanout' AND column_name='repo_id')='YES',1,0)",
+    "expected": 1
+  }]
+}

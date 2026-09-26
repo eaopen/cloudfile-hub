@@ -8,6 +8,7 @@ from .execution import step_hash
 from .meilisearch import _object
 from .task_store import SearchTaskStore
 from .fanout_receipts import fanout_pages_complete
+from ..events.outbox import normalize_event
 
 
 class SearchFanoutStore(SearchTaskStore):
@@ -19,7 +20,9 @@ class SearchFanoutStore(SearchTaskStore):
             if len(row) != len(cls.FIELDS.split(",")):
                 raise ValueError()
             value = dict(zip(cls.FIELDS.split(","), row))
-            for name in ("repo_id", "tag_id", "tag_revision"):
+            if value["repo_id"] is not None:
+                uuid_value(value["repo_id"])
+            for name in ("tag_id", "tag_revision"):
                 uuid_value(value[name])
             for name in ("upper_uid", "after_uid", "next_uid"):
                 if value[name] is not None:
@@ -54,12 +57,19 @@ class SearchFanoutStore(SearchTaskStore):
 
     def start(self, claim, *, generation, repo_id, tag_id, revision, upper_uid):
         key = self._key(claim, generation, 0)[:2]
-        for value in (repo_id, tag_id, revision):
+        if repo_id is not None:
+            uuid_value(repo_id)
+        for value in (tag_id, revision):
             uuid_value(value)
         if upper_uid is not None:
             uuid_value(upper_uid)
         with self._owned(claim) as sql:
             self._planning_gate(sql, claim, generation)
+            if repo_id is None:
+                self._global_event(sql, claim, tag_id, revision)
+                sql.execute("SELECT revision,kind,scope_repo_id FROM cf_tag WHERE tag_id=%s FOR UPDATE", (tag_id,))
+                if sql.fetchone() != (revision, "system", None):
+                    raise ContractError("SEARCH_FANOUT_CHANGED", "Global tag definition changed", 409)
             sql.execute("SELECT repo_id,tag_id,tag_revision,upper_uid FROM cf_search_fanout WHERE event_id=%s AND index_generation=%s FOR UPDATE", key)
             row = sql.fetchone()
             identity = (repo_id, tag_id, revision, upper_uid)
@@ -68,6 +78,25 @@ class SearchFanoutStore(SearchTaskStore):
                     raise ContractError("SEARCH_FANOUT_CHANGED", "Frozen tag scan changed", 409)
                 return
             sql.execute("INSERT INTO cf_search_fanout(event_id,index_generation,repo_id,tag_id,tag_revision,upper_uid,state,updated_at) VALUES(%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(6))", (*key, *identity, "ready" if upper_uid else "scanned"))
+
+    @staticmethod
+    def _global_event(sql, claim, tag_id, revision):
+        sql.execute("SELECT payload FROM cf_event_outbox WHERE event_id=%s FOR UPDATE", (claim.event_id,))
+        row = sql.fetchone()
+        try:
+            if row is None or not isinstance(row[0], str) or len(row[0].encode("utf-8")) > 65536:
+                raise ValueError()
+            payload = json.loads(row[0], object_pairs_hook=_object)
+            if (type(payload.get("schema_version")) is not int or payload["schema_version"] != 1 or
+                    payload.get("event_id") != claim.event_id or payload.get("stream") != "security"):
+                raise ValueError()
+            fact = normalize_event({key: value for key, value in payload.items() if key not in {"schema_version", "stream", "sequence", "recorded_at"}})
+            if (fact["source"] != "hub" or fact["action"] != "tags.definition.updated" or fact["result"] != "succeeded" or
+                    fact.get("repo_id") is not None or fact.get("reason") != "tag_id:" + tag_id or fact.get("revision") != revision or
+                    any(fact.get(key) for key in ("path", "target_path", "resource_uid", "resource_kind"))):
+                raise ValueError()
+        except Exception:
+            raise ContractError("SEARCH_PLAN_CONFLICT", "Global tag scan requires its exact durable event", 409) from None
 
     def load(self, claim, *, generation):
         key = self._key(claim, generation, 0)[:2]
@@ -141,9 +170,12 @@ class SearchFanoutStore(SearchTaskStore):
             index = sql.fetchone()[0]
             if not fanout_pages_complete(sql, event_id=claim.event_id, generation=generation, index=index, batches=value["batch"], locking=True):
                 raise ContractError("SEARCH_TASK_PENDING", "Tag page receipts are incomplete", 409)
-            sql.execute("SELECT revision,scope_repo_id FROM cf_tag WHERE tag_id=%s FOR UPDATE", (value["tag_id"],))
+            if value["repo_id"] is None:
+                self._global_event(sql, claim, value["tag_id"], value["tag_revision"])
+            sql.execute("SELECT revision,scope_repo_id,kind FROM cf_tag WHERE tag_id=%s FOR UPDATE", (value["tag_id"],))
             definition = sql.fetchone()
-            if definition is None or definition[0] != value["tag_revision"] or definition[1] not in (None, value["repo_id"]):
+            if (definition is None or definition[0] != value["tag_revision"] or definition[1] not in (None, value["repo_id"]) or
+                    (value["repo_id"] is None and definition[2] != "system")):
                 raise ContractError("SEARCH_FANOUT_CHANGED", "Tag definition changed before completion", 409)
             # Other generations may contain an uncertain dispatch. Never unblock
             # the stream while it could still publish stale index content.

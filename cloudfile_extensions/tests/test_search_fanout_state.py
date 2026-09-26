@@ -21,6 +21,13 @@ class FanoutStateTest(TestCase):
         with self.assertRaises(ContractError):
             self.decode()
 
+    def test_explicit_global_scope_reuses_frozen_page_contract(self):
+        self.value["repo_id"] = None
+        self.assertIsNone(self.decode()["repo_id"])
+        self.value["repo_id"] = "global"
+        with self.assertRaises(ContractError):
+            self.decode()
+
     def test_corrupt_cursor_or_page_is_rejected(self):
         for name, value in (("batch", True), ("payload", "[NaN]"), ("after_uid", "99999999-9999-9999-9999-999999999999")):
             original = self.value[name]
