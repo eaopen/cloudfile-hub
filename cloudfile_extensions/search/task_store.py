@@ -47,6 +47,10 @@ class SearchTaskStore:
             if row is not None:
                 if row[0] != payload_hash:
                     raise ContractError("SEARCH_TASK_CONFLICT", "Search task payload changed", 409)
+                if (row[1] not in ("prepared", "submitting", "submitted", "succeeded") or
+                        (row[1] in ("prepared", "submitting") and row[2] is not None) or
+                        (row[1] in ("submitted", "succeeded") and (type(row[2]) is not int or not 0 <= row[2] <= 2 ** 63 - 1))):
+                    raise ContractError("SEARCH_TASK_CONFLICT", "Stored search task is invalid", 409)
                 return dict(state=row[1], task_id=row[2])
             sql.execute("INSERT INTO cf_search_task(event_id,index_generation,step,payload_hash,state,created_at,updated_at) VALUES(%s,%s,%s,%s,'prepared',UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))", (*key, payload_hash))
             return dict(state="prepared", task_id=None)
