@@ -33,6 +33,7 @@ class SearchPlanStore(SearchTaskStore):
         self._key(claim, generation, 0)
         raw, digest = encode_plan(index, steps)
         with self._owned(claim) as sql:
+            self._planning_gate(sql, claim, generation, index)
             sql.execute("SELECT plan_hash,payload FROM cf_search_plan WHERE event_id=%s AND index_generation=%s FOR UPDATE", (claim.event_id, generation))
             previous = sql.fetchone()
             if previous is not None:

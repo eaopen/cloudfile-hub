@@ -1,0 +1,15 @@
+{
+  "version": "022_search_plan_generation_indexes",
+  "steps": [
+    {
+      "sql": "ALTER TABLE cf_search_plan ADD INDEX generation_events(index_generation,event_id)",
+      "verify": "SELECT IF((SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_search_plan' AND index_name='generation_events' AND sub_part IS NULL)='index_generation,event_id',1,0)",
+      "expected": 1
+    },
+    {
+      "sql": "ALTER TABLE cf_search_fanout ADD INDEX generation_events(index_generation,event_id)",
+      "verify": "SELECT IF((SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_search_fanout' AND index_name='generation_events' AND sub_part IS NULL)='index_generation,event_id',1,0)",
+      "expected": 1
+    }
+  ]
+}

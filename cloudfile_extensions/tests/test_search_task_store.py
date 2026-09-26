@@ -10,6 +10,7 @@ from cloudfile_extensions.search.task_store import SearchTaskStore
 from cloudfile_extensions.search.generations import SearchGenerationStore
 from cloudfile_extensions.search.initialization import SearchInitializationStore
 from cloudfile_extensions.search.rebuild_store import SearchRebuildStore
+from cloudfile_extensions.search.plans import SearchPlanStore
 from cloudfile_extensions.search.fanout_store import SearchFanoutStore
 from cloudfile_extensions.search.fanout_execution import SearchFanoutExecution
 from cloudfile_extensions.search.documents import resource_document
@@ -93,6 +94,18 @@ class SearchTaskStoreTest(DatabaseTestCase):
         with self.assertRaises(ContractError) as caught:
             SearchRebuildStore(self.connection).start(generation="index", index="resources", repo_id="11111111-1111-4111-8111-111111111111", commit_id="a" * 40, source_sequence="0")
         self.assertEqual(caught.exception.code, "SEARCH_TASK_PENDING")
+
+    def test_frozen_plan_without_dispatch_prevents_rebuild_start(self):
+        SearchPlanStore(self.connection).freeze(self.claim, generation="index", index="resources", steps=[dict(operation="delete", payload=["a" * 64])])
+        with self.assertRaises(ContractError) as caught:
+            SearchRebuildStore(self.connection).start(generation="index", index="resources", repo_id="11111111-1111-4111-8111-111111111111", commit_id="a" * 40, source_sequence="0")
+        self.assertEqual(caught.exception.code, "SEARCH_PLAN_PENDING")
+
+    def test_scanning_rejects_new_frozen_incremental_plan(self):
+        SearchRebuildStore(self.connection).start(generation="index", index="resources", repo_id="11111111-1111-4111-8111-111111111111", commit_id="a" * 40, source_sequence="0")
+        with self.assertRaises(ContractError) as caught:
+            SearchPlanStore(self.connection).freeze(self.claim, generation="index", index="resources", steps=[dict(operation="delete", payload=["a" * 64])])
+        self.assertEqual(caught.exception.code, "SEARCH_REBUILD_PENDING")
 
     def test_exact_successful_plan_acknowledges_without_resource_ack(self):
         self.succeeded(0, "a" * 64)

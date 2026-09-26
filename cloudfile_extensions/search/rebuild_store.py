@@ -45,6 +45,13 @@ class SearchRebuildStore:
             sql.execute("SELECT event_id FROM cf_search_task FORCE INDEX(generation_pending) WHERE index_generation=%s AND state IN ('submitting','submitted') LIMIT 1 FOR UPDATE", (generation,))
             if sql.fetchone() is not None:
                 raise ContractError("SEARCH_TASK_PENDING", "Existing index writes must finish before rebuilding", 409)
+            # No outbox lock here: retain outbox→generation order used by workers.
+            # Plan creation holds the generation lock too. This first consistent
+            # read sees all plan commits preceding our acquisition of that lock.
+            for table in ("cf_search_plan", "cf_search_fanout"):
+                sql.execute("SELECT p.event_id FROM " + table + " p FORCE INDEX(generation_events) LEFT JOIN cf_event_outbox o ON o.event_id=p.event_id WHERE p.index_generation=%s AND (o.event_id IS NULL OR o.search_state<>'done') LIMIT 1", (generation,))
+                if sql.fetchone() is not None:
+                    raise ContractError("SEARCH_PLAN_PENDING", "Existing frozen search plans must finish before rebuilding", 409)
             sql.execute("INSERT INTO cf_search_rebuild(generation,repo_id,commit_id,source_sequence,state,updated_at) VALUES(%s,%s,%s,%s,'scanning',UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE generation=generation", (generation, ref["repo_id"], commit_id, source_sequence))
             sql.execute("SELECT commit_id,source_sequence,state FROM cf_search_rebuild WHERE generation=%s AND repo_id=%s FOR UPDATE", (generation, ref["repo_id"]))
             if sql.fetchone() != (commit_id, source_sequence, "scanning"):

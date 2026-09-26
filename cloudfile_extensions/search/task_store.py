@@ -99,6 +99,15 @@ class SearchTaskStore:
             if sql.rowcount != 1:
                 raise ContractError("SEARCH_TASK_CONFLICT", "Search dispatch intent is not current", 409)
 
+    def _planning_gate(self, sql, claim, generation, index=None):
+        sql.execute("SELECT index_uid,state FROM cf_search_generation WHERE generation=%s FOR UPDATE", (generation,))
+        row = sql.fetchone()
+        if row is None or row[1] != "building" or (index is not None and row[0] != index):
+            raise ContractError("SEARCH_GENERATION_RETIRED", "Search generation cannot prepare plans", 409)
+        SearchGenerationStore._identity(generation, row[0])
+        SearchInitializationStore(self.connection).require_complete(sql, generation, row[0])
+        self._incremental_gate(sql, claim, generation)
+
     def record_task(self, claim, *, generation, step, task_id):
         if type(task_id) is not int or not 0 <= task_id <= 2 ** 63 - 1:
             raise ValueError("exact accepted task id required")

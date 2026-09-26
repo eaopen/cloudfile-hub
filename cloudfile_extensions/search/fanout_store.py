@@ -58,6 +58,7 @@ class SearchFanoutStore(SearchTaskStore):
         if upper_uid is not None:
             uuid_value(upper_uid)
         with self._owned(claim) as sql:
+            self._planning_gate(sql, claim, generation)
             sql.execute("SELECT repo_id,tag_id,tag_revision,upper_uid FROM cf_search_fanout WHERE event_id=%s AND index_generation=%s FOR UPDATE", key)
             row = sql.fetchone()
             identity = (repo_id, tag_id, revision, upper_uid)
@@ -88,6 +89,7 @@ class SearchFanoutStore(SearchTaskStore):
             raise ValueError("tag batch exceeds byte budget")
         digest = step_hash(index, "replace", raw)
         with self._owned(claim) as sql:
+            self._planning_gate(sql, claim, generation, index)
             sql.execute("SELECT " + self.FIELDS + " FROM cf_search_fanout WHERE event_id=%s AND index_generation=%s FOR UPDATE", key)
             row = sql.fetchone()
             value = None if row is None else self.decode(row)
