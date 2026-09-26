@@ -4,11 +4,13 @@ Does not create a browser session, JIT account or authorization ticket. The
 native login adapter may consume the result only after its own final checks.
 """
 from dataclasses import dataclass
+import time
 
 from ..common.errors import ContractError
 from ..directory.preparation import SubjectPreparation
 from .oidc import OIDCFlow
 from .sql_bindings import SQLIdentityBindings
+from .jit import SQLJITProvisioner
 
 
 @dataclass(frozen=True)
@@ -20,10 +22,13 @@ class PreparedLogin:
 
 
 class PreparedOIDCLogin:
-    def __init__(self, flow, bindings, *, preparation_factory):
+    def __init__(self, flow, bindings, *, preparation_factory, jit=None):
         if not isinstance(flow, OIDCFlow) or not isinstance(bindings, SQLIdentityBindings) or not callable(preparation_factory):
             raise ValueError("native OIDC flow, bindings and preparation factory required")
         self.flow, self.bindings, self.preparation_factory = flow, bindings, preparation_factory
+        if jit is not None and (not isinstance(jit, SQLJITProvisioner) or jit.bindings is not bindings):
+            raise ValueError("JIT must share the exact native binding adapter")
+        self.jit = jit
 
     def begin(self, binding, *, redirect="/"):
         return self.flow.begin(binding, redirect=redirect)
@@ -31,10 +36,14 @@ class PreparedOIDCLogin:
     def complete(self, *, state, code, binding):
         # Only OIDCFlow's token/state/nonce/PKCE validation establishes identity.
         identity, redirect = self.flow.complete(state=state, code=code, binding=binding)
+        if type(identity.get("expires_at")) is not int or identity["expires_at"] <= time.time():
+            raise ContractError("AUTHENTICATION_REQUIRED", "OIDC authentication expired", 401)
         username = self.bindings.resolve(issuer=identity["issuer"], subject=identity["sub"],
                                          user_id=identity["userId"])
         if username is None:
-            raise ContractError("IDENTITY_NOT_FOUND", "Business identity has not been bound", 409)
+            if self.jit is None:
+                raise ContractError("IDENTITY_NOT_FOUND", "Business identity has not been bound", 409)
+            username = self.jit.ensure(identity)
         preparation = self.preparation_factory(identity["userId"])
         if not isinstance(preparation, SubjectPreparation) or preparation.actor != identity["userId"]:
             raise ContractError("IDENTITY_UNAVAILABLE", "Login preparation is unavailable", 503)
@@ -44,4 +53,6 @@ class PreparedOIDCLogin:
                                         user_id=identity["userId"])
         if current != username:
             raise ContractError("IDENTITY_UNAVAILABLE", "Login identity changed", 503)
+        if identity["expires_at"] <= time.time():
+            raise ContractError("AUTHENTICATION_REQUIRED", "OIDC authentication expired", 401)
         return PreparedLogin(identity["userId"], username, context["context_epoch"], redirect)

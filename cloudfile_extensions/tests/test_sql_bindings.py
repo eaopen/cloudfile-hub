@@ -148,8 +148,59 @@ class SQLBindingsTest(DatabaseTestCase):
             cursor.execute("UPDATE " + self.native + ".EmailUser SET is_active=1,email='Actor@example.invalid' WHERE email='actor@example.invalid'")
         with self.assertRaises(ContractError):
             self.binding.prebind(**self.request)
+
         with self.admin.cursor() as cursor:
             cursor.execute("UPDATE " + self.native + ".EmailUser SET email='actor@example.invalid' WHERE email='Actor@example.invalid'")
             cursor.execute("ALTER TABLE " + self.identity + ".social_auth_usersocialauth DROP INDEX binding")
         with self.assertRaises(ContractError):
             self.binding.prebind(**self.request)
+
+    def test_jit_new_identity_atomic_retry_disabled_and_barrier(self):
+        from datetime import datetime, timezone
+        from unittest.mock import Mock, patch
+        from cloudfile_extensions.identity.jit import SQLJITProvisioner
+        from cloudfile_extensions.directory.provider import DirectoryProvider
+        from cloudfile_extensions.schema.runner import SchemaRunner
+        SchemaRunner(self.connection).apply()
+        with self.admin.cursor() as cursor:
+            cursor.execute("ALTER TABLE " + self.native + ".EmailUser ADD passwd VARCHAR(256),ADD is_staff INT NOT NULL DEFAULT 0,ADD ctime BIGINT")
+            cursor.execute("ALTER TABLE " + self.identity + ".profile_profile ADD nickname VARCHAR(64) NOT NULL DEFAULT '',ADD intro TEXT,ADD lang_code TEXT,ADD contact_email VARCHAR(225) UNIQUE,ADD is_manually_set_contact_email TINYINT DEFAULT 0,ADD institution VARCHAR(225),ADD list_in_address_book TINYINT NOT NULL DEFAULT 0")
+        transport = Mock()
+        transport.get.return_value = dict(userId="new-user", status="active", attributes={}, organizations=[], roles=[],
+            etag="fresh", generated_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+        directory = DirectoryProvider("https://directory.example.invalid/v2", authorization=lambda: "Bearer fixture",
+                                      attribute_allowlist=(), client=transport)
+        jit = SQLJITProvisioner(self.binding, issuer=self.request["issuer"], directory=directory,
+                               enabled=True, request_id="jit-test")
+        identity = dict(issuer=self.request["issuer"], sub="new-sub", userId="new-user")
+        # Every native row rolls back if transactional audit fails.
+        with patch("cloudfile_extensions.identity.jit.EventWriter.append", side_effect=RuntimeError("audit down")):
+            with self.assertRaises(ContractError):
+                jit.ensure(identity)
+        self.assertIsNone(self.binding.resolve(issuer=identity["issuer"], subject=identity["sub"], user_id=identity["userId"]))
+        committed = self.connection.commit
+        def response_lost():
+            committed()
+            raise RuntimeError("commit acknowledgement lost")
+        with patch.object(self.connection, "commit", side_effect=response_lost):
+            with self.assertRaises(ContractError):
+                jit.ensure(identity)
+        username = jit.ensure(identity)
+        self.assertTrue(username.endswith("@auth.local"))
+        self.assertEqual(jit.ensure(identity), username)
+        with self.admin.cursor() as cursor:
+            cursor.execute("SELECT passwd,is_staff,is_active FROM " + self.native + ".EmailUser WHERE email=%s", (username,))
+            self.assertEqual(cursor.fetchone(), ("!", 0, 1))
+            cursor.execute("UPDATE " + self.native + ".EmailUser SET is_active=0 WHERE email=%s", (username,))
+        with self.assertRaises(ContractError) as caught:
+            jit.ensure(identity)
+        self.assertEqual(caught.exception.status, 403)
+        transport.get.return_value = {**transport.get.return_value, "userId": "blocked-user"}
+        jit.state.jobs.submit(actor="admin", actor_kind="user", kind="subject.refresh",
+            scope=dict(type="user", provider="directory", external_id="blocked-user"),
+            request={}, idempotency_key=uuid4().hex, barrier=True)
+        with self.assertRaises(ContractError):
+            jit.ensure({**identity, "userId": "blocked-user", "sub": "blocked-sub"})
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM cf_audit_event WHERE operation='identity.created'")
+            self.assertEqual(cursor.fetchone()[0], 1)

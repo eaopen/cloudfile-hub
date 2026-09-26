@@ -1,5 +1,6 @@
 """Login orchestration fixtures; not IdP or browser-session verification."""
 import unittest
+import time
 from unittest.mock import Mock
 
 from cloudfile_extensions.common.errors import ContractError
@@ -12,7 +13,7 @@ from cloudfile_extensions.identity.sql_bindings import SQLIdentityBindings
 class PreparedLoginTest(unittest.TestCase):
     def setUp(self):
         self.flow = Mock(spec=OIDCFlow)
-        self.flow.complete.return_value = (dict(issuer="https://idp.example.invalid/", sub="sub", userId="u1"), "/files/")
+        self.flow.complete.return_value = (dict(issuer="https://idp.example.invalid/", sub="sub", userId="u1", expires_at=int(time.time()) + 600), "/files/")
         self.bindings = Mock(spec=SQLIdentityBindings)
         self.bindings.resolve.return_value = "native@example.invalid"
         self.preparation = Mock(spec=SubjectPreparation)
@@ -61,3 +62,21 @@ class PreparedLoginTest(unittest.TestCase):
         with self.assertRaises(ContractError):
             self.complete()
         self.preparation.prepare.assert_not_called()
+
+    def test_configured_jit_then_prepare_and_late_expiry(self):
+        from cloudfile_extensions.identity.jit import SQLJITProvisioner
+        jit = Mock(spec=SQLJITProvisioner)
+        jit.bindings = self.bindings
+        jit.ensure.return_value = "native@example.invalid"
+        self.bindings.resolve.side_effect = [None, "native@example.invalid"]
+        login = PreparedOIDCLogin(self.flow, self.bindings, preparation_factory=self.factory, jit=jit)
+        self.assertEqual(login.complete(state="state", code="code", binding="browser").username, "native@example.invalid")
+        jit.ensure.assert_called_once_with(self.flow.complete.return_value[0])
+        self.bindings.resolve.side_effect = None
+        def expire(*args, **kwargs):
+            self.flow.complete.return_value[0]["expires_at"] = 1
+            return dict(context_epoch="a" * 32)
+        self.preparation.prepare.side_effect = expire
+        with self.assertRaises(ContractError) as caught:
+            self.complete()
+        self.assertEqual(caught.exception.status, 401)
