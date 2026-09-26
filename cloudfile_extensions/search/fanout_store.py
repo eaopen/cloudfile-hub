@@ -116,3 +116,29 @@ class SearchFanoutStore(SearchTaskStore):
                     raise ContractError("SEARCH_TASK_PENDING", "Tag page index task is incomplete", 409)
             sql.execute("UPDATE cf_search_fanout SET after_uid=COALESCE(next_uid,upper_uid),next_uid=NULL,batch=batch+1,state=%s,index_uid=NULL,payload=NULL,payload_hash=NULL,updated_at=UTC_TIMESTAMP(6) WHERE event_id=%s AND index_generation=%s", ("ready" if value["next_uid"] is not None else "scanned", *key))
             return value["next_uid"] is None
+
+    def complete_fanout(self, claim, *, generation):
+        """Confirm scanned pages and current definition in one lease-fenced SQL tx.
+
+        Index generation publication fencing remains the runtime's responsibility.
+        This does not turn a superseded tag revision into a successful update.
+        """
+        key = self._key(claim, generation, 0)[:2]
+        with self._owned(claim) as sql:
+            sql.execute("SELECT " + self.FIELDS + " FROM cf_search_fanout WHERE event_id=%s AND index_generation=%s FOR UPDATE", key)
+            row = sql.fetchone()
+            value = None if row is None else self.decode(row)
+            if value is None or value["state"] != "scanned":
+                raise ContractError("SEARCH_TASK_PENDING", "Tag scan is incomplete", 409)
+            sql.execute("SELECT revision,scope_repo_id FROM cf_tag WHERE tag_id=%s FOR UPDATE", (value["tag_id"],))
+            definition = sql.fetchone()
+            if definition is None or definition[0] != value["tag_revision"] or definition[1] not in (None, value["repo_id"]):
+                raise ContractError("SEARCH_FANOUT_CHANGED", "Tag definition changed before completion", 409)
+            # Other generations may contain an uncertain dispatch. Never unblock
+            # the stream while it could still publish stale index content.
+            sql.execute("SELECT step FROM cf_search_task WHERE event_id=%s AND (state<>'succeeded' OR task_id IS NULL OR task_id>9223372036854775807 OR (index_generation=%s AND step>=%s)) LIMIT 1 FOR UPDATE", (*key, value["batch"]))
+            if sql.fetchone() is not None:
+                raise ContractError("SEARCH_SUBMISSION_UNKNOWN", "Tag index tasks require reconciliation", 503)
+            sql.execute("UPDATE cf_event_outbox SET search_state='done',search_expiry=NULL,search_error=NULL WHERE event_id=%s AND search_state='running' AND search_owner=%s AND search_epoch=%s AND search_expiry>UTC_TIMESTAMP(6)", (claim.event_id, claim.owner, claim.epoch))
+            if sql.rowcount != 1:
+                raise ContractError("WORKER_LEASE_LOST", "Tag event lease expired before completion", 409)

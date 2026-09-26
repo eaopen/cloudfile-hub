@@ -95,3 +95,43 @@ class SearchTaskStoreTest(DatabaseTestCase):
         self.assertEqual(SearchFanoutExecution(store, client).advance_pending(self.claim, generation="index"), "scanned")
         self.assertEqual(self.state(), "running")
         client.replace_documents.assert_not_called()
+
+    def fanout_definition(self):
+        from cloudfile_extensions.tags.write import create_user
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as sql:
+                tag, _ = create_user(sql, repo_id="11111111-1111-4111-8111-111111111111", value=dict(label="图纸"), actor="employee", request_id="request")
+            self.connection.commit()
+        finally:
+            self.connection.rollback()
+        return tag
+
+    def test_scanned_empty_fanout_confirms_actual_definition_atomically(self):
+        tag = self.fanout_definition()
+        store = SearchFanoutStore(self.connection)
+        store.start(self.claim, generation="index", repo_id=tag["scope_repo_id"], tag_id=tag["tag_id"], revision=tag["revision"], upper_uid=None)
+        store.complete_fanout(self.claim, generation="index")
+        self.assertEqual(self.state(), "done")
+
+    def test_definition_change_after_scan_preserves_unacknowledged_event(self):
+        tag = self.fanout_definition()
+        store = SearchFanoutStore(self.connection)
+        store.start(self.claim, generation="index", repo_id=tag["scope_repo_id"], tag_id=tag["tag_id"], revision=tag["revision"], upper_uid=None)
+        with self.connection.cursor() as sql:
+            sql.execute("UPDATE cf_tag SET revision=%s WHERE tag_id=%s", (str(uuid4()), tag["tag_id"]))
+        with self.assertRaises(ContractError) as caught:
+            store.complete_fanout(self.claim, generation="index")
+        self.assertEqual(caught.exception.code, "SEARCH_FANOUT_CHANGED")
+        self.assertEqual(self.state(), "running")
+
+    def test_unknown_task_from_other_generation_blocks_fanout_completion(self):
+        tag = self.fanout_definition()
+        store = SearchFanoutStore(self.connection)
+        store.start(self.claim, generation="index", repo_id=tag["scope_repo_id"], tag_id=tag["tag_id"], revision=tag["revision"], upper_uid=None)
+        store.prepare(self.claim, generation="old", step=0, payload_hash="a" * 64)
+        store.mark_submitting(self.claim, generation="old", step=0)
+        with self.assertRaises(ContractError) as caught:
+            store.complete_fanout(self.claim, generation="index")
+        self.assertEqual(caught.exception.code, "SEARCH_SUBMISSION_UNKNOWN")
+        self.assertEqual(self.state(), "running")
