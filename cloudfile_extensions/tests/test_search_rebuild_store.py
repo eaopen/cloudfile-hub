@@ -10,6 +10,7 @@ from cloudfile_extensions.search.initialization import SearchInitializationStore
 from cloudfile_extensions.search.rebuild_store import SearchRebuildStore
 from cloudfile_extensions.search.rebuild_execution import SearchRebuildExecution
 from cloudfile_extensions.search.tasks import MeilisearchTasks
+from cloudfile_extensions.search.catchup import SearchCatchupInspector
 from cloudfile_extensions.tests.test_schema import DatabaseTestCase
 
 
@@ -141,3 +142,18 @@ class RebuildStoreTest(DatabaseTestCase):
         digest = self.store.freeze(**self.identity, path="/", offset=0, next_offset=None, documents=[document])
         self.store.mark_submitting(**self.identity, path="/", payload_hash=digest)
         self.assertEqual(self.store.next_directory(**self.identity)["state"], "submitting")
+
+    def test_catchup_diagnostics_require_scan_and_do_not_publish(self):
+        self.store.start(**self.start)
+        inspector = SearchCatchupInspector(self.store)
+        with self.assertRaises(ContractError):
+            inspector.check_batch(**self.identity)
+        self.store.freeze(**self.identity, path="/", offset=0, next_offset=None, documents=[])
+        client = Mock(spec=MeilisearchTasks)
+        client.index = "resources_g1"
+        SearchRebuildExecution(self.store, client).advance_page(generation="g1", repo_id=self.identity["repo_id"], path="/")
+        self.store.next_directory(**self.identity)
+        self.assertEqual(inspector.check_batch(**self.identity), dict(state="observed_cutoff_checked", checked_through="0", observed_cutoff="0", pending_event_id=None))
+        with self.connection.cursor() as sql:
+            sql.execute("SELECT state FROM cf_search_generation WHERE generation='g1'")
+            self.assertEqual(sql.fetchone(), ("building",))

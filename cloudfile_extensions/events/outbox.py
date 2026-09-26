@@ -57,6 +57,21 @@ def normalize_event(event):
     return value
 
 
+def projection_required(value):
+    """Shared disposition of a normalized immutable audit fact."""
+    if (value["source"] == "fileserver" and value["action"] in {"file.view", "file.download"} and
+            value.get("resource_kind") == "file"):
+        return False
+    if (value["source"] == "hub" and value["action"] == "tags.definition.created" and value["result"] == "succeeded" and
+            isinstance(value.get("reason"), str) and value["reason"].startswith("tag_id:") and
+            not value.get("path") and not value.get("target_path")):
+        try:
+            return str(UUID(value["reason"][7:])) != value["reason"][7:]
+        except (ValueError, AttributeError):
+            pass
+    return True
+
+
 class EventWriter:
     def append(self, cursor, event):
         # Caller owns commit/rollback. A hook on a different connection is forbidden.
@@ -81,21 +96,10 @@ class EventWriter:
             return prior
         # Managed reads are audit facts, not resource/search mutations. Preserve
         # their stream sequence but do not spend worker capacity projecting them.
-        projection_state = "done" if (value["source"] == "fileserver"
-            and value["action"] in {"file.view", "file.download"}
-            and value.get("resource_kind") == "file") else "queued"
+        projection_state = "queued" if projection_required(value) else "done"
         # Definition creation has no prior bindings to reproject. The same
         # transaction's later resource binding emits its own attributes event.
         # Definition updates still require bounded fanout and remain queued.
-        if (value["source"] == "hub" and value["action"] == "tags.definition.created" and
-                value["result"] == "succeeded" and isinstance(value.get("reason"), str) and
-                value["reason"].startswith("tag_id:") and not value.get("path") and not value.get("target_path")):
-            try:
-                tag_id = value["reason"][7:]
-                if str(UUID(tag_id)) == tag_id:
-                    projection_state = "done"
-            except (ValueError, AttributeError):
-                pass
         cursor.execute("INSERT INTO cf_event_outbox(event_id,stream,schema_version,payload,created_at,audit_state,"
                        "resource_state,resource_next_at,search_state,search_next_at) VALUES(%s,%s,1,'{}',UTC_TIMESTAMP(6),"
                        "'done',%s,UTC_TIMESTAMP(6),%s,UTC_TIMESTAMP(6))", (value["event_id"], stream, projection_state, projection_state))
