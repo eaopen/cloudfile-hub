@@ -12,6 +12,7 @@ from django.middleware.csrf import CsrfViewMiddleware
 
 from ..authorization.http import DirectoryPolicyView
 from ..common.errors import ContractError, invalid
+from ..common.validation import object_fields
 from .service import ResourceService
 
 
@@ -70,18 +71,22 @@ class ResourceResolveView(DirectoryPolicyView):
                 if self.operation == "user_catalog":
                     result = service.list_user_tag_definitions(body)
                 elif self.operation == "resolve":
-                    result = service.resolve(body)
+                    result = service.resolve({"reference": body})
                 else:
                     if self.operation == "tag_definition":
                         value, changed = service.update_user_tag_definition(body,
                             if_match=request.headers.get("If-Match"), idempotency_key=key)
                     else:
+                        if self.operation == "attributes":
+                            object_fields(body, ("resource", "expected_revision", "changes"))
+                            body = dict(reference=body["resource"], revision=body["expected_revision"], changes=body["changes"])
                         method = {"attributes": service.update_attributes,
                             "tag_ids": service.replace_user_tags,
                             "tag_values": service.replace_user_tag_values}[self.operation]
                         value, changed = method(body, idempotency_key=key)
-                    result = {"value": value}
-                response = JsonResponse(result)
+                    result = value
+                status = 201 if self.operation == "attributes" and changed else 200
+                response = JsonResponse(result, status=status)
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)
         except Exception:
