@@ -12,6 +12,7 @@ class PolicyDeployment:
     redis: object
     resource_factory: object = None
     audit_factory: object = None
+    context_factory: object = None
 
     def close(self):
         # The host invokes this only after draining all requests at shutdown.
@@ -85,7 +86,11 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
                 preparation_scope=factory.preparation_scope, core=factory.core,
                 cloud_mode=factory.cloud_mode, secret=audit_secret, redact=audit_redact,
                 result_root=audit_result_root)
-        return PolicyDeployment(factory, client, resource_factory, audit_factory)
+        from ..directory.self_context import OwnContextFactory
+        context_factory = OwnContextFactory(authenticate=factory.authenticate,
+            preparation_scope=factory.preparation_scope, core=factory.core,
+            cloud_mode=factory.cloud_mode)
+        return PolicyDeployment(factory, client, resource_factory, audit_factory, context_factory)
     except Exception:
         client.connection_pool.disconnect()
         raise

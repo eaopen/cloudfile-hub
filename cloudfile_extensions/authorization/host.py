@@ -35,16 +35,20 @@ class PolicyHost:
     def audit_service(self, request, request_id):
         return self._service(request, request_id, resource=False, audit=True)
 
+    def context_service(self, request, request_id):
+        return self._service(request, request_id, resource=False, context=True)
+
     @contextmanager
-    def _service(self, request, request_id, *, resource, audit=False):
+    def _service(self, request, request_id, *, resource, audit=False, context=False):
         self._process()
         with self.lock:
             if self.draining or self.closed:
                 raise ContractError("POLICY_UNAVAILABLE", "Policy host is draining", 503)
             self.active += 1
         try:
-            factory = self.deployment.audit_factory if audit else (
+            factory = self.deployment.context_factory if context else (self.deployment.audit_factory if audit else (
                 self.deployment.resource_factory if resource else self.deployment.factory)
+            )
             if factory is None:
                 raise ContractError("RESOURCE_UNAVAILABLE", "Resource runtime is not configured", 503)
             with factory(request, request_id) as service:
