@@ -4,6 +4,22 @@ from cloudfile_extensions.events.outbox import projection_required
 
 
 class SearchEventDispositionTest(TestCase):
+    def test_exact_acl_and_admin_facts_are_authorization_only(self):
+        fact = dict(event_id="11111111-1111-4111-8111-111111111111", occurred_at="2026-09-27T00:00:00Z",
+            request_id="request", actor_user_id="employee", actor_kind="user", source="hub",
+            action="acl.updated", result="succeeded", repo_id="22222222-2222-4222-8222-222222222222",
+            path="/drawing", resource_kind="dir", policy_revision="33333333-3333-4333-8333-333333333333")
+        for prefix in ("acl", "admin"):
+            for suffix in ("created", "updated", "deleted"):
+                self.assertFalse(projection_required({**fact, "action": prefix + "." + suffix}))
+        for change in (dict(policy_revision="invalid"), dict(result="failed"), dict(source="server"),
+                dict(resource_uid="44444444-4444-4444-8444-444444444444"), dict(target_path="/other"),
+                dict(actor_kind="service"), dict(action="acl.unknown")):
+            self.assertTrue(projection_required({**fact, **change}))
+        incomplete = dict(fact)
+        del incomplete["policy_revision"]
+        self.assertTrue(projection_required(incomplete))
+
     def test_managed_reads_and_new_unbound_definition_do_not_need_indexing(self):
         self.assertFalse(projection_required(dict(source="fileserver", action="file.download", resource_kind="file")))
         self.assertFalse(projection_required(dict(source="hub", action="tags.definition.created", result="succeeded", reason="tag_id:11111111-1111-4111-8111-111111111111")))

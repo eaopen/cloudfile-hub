@@ -60,6 +60,20 @@ def normalize_event(event):
 def projection_required(value):
     """Shared disposition of a normalized immutable audit fact."""
     if value["source"] == "hub":
+        # These exact producer facts change authorization only. Query-time CE/C
+        # guards still enforce the new rules; stream watermarks invalidate old
+        # cursors. No file metadata or index ACL is materialized from this fact.
+        policy_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind",
+            "source", "action", "result", "repo_id", "path", "resource_kind", "policy_revision"}
+        if (value["action"] in {"acl.created", "acl.updated", "acl.deleted", "admin.created", "admin.updated", "admin.deleted"}
+                and set(value) == policy_fields and value["actor_kind"] == "user"
+                and value["result"] == "succeeded" and value.get("repo_id") and value.get("path")
+                and value.get("resource_kind") in {"file", "dir"}):
+            try:
+                if str(UUID(value["policy_revision"])) == value["policy_revision"]:
+                    return False
+            except (ValueError, TypeError, AttributeError):
+                pass
         if (value["action"] == "identity.logout.sessions" and value.get("result") == "succeeded" and
                 value.get("actor_kind") == "service" and value.get("job_id") and
                 not any(value.get(key) for key in ("repo_id", "path", "target_path", "resource_uid", "resource_kind"))):
