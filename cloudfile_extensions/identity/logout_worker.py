@@ -59,7 +59,7 @@ class BackchannelWorker:
                     if targets:
                         store._record(cursor, dict(job_id=claim.job_id, actor=self.jobs.actor,
                             actor_kind="service", scope=index.scope), action="identity.logout.sessions",
-                            result="success")
+                            result="succeeded")
             # No session identifiers or raw notification claims enter checkpoints.
             # Retry reconciles the actual remaining rows, not historical counts.
             execution.checkpoint(step="sessions_removed" if targets else "sessions_drained",

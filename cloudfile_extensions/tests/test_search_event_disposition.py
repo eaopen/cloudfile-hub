@@ -14,6 +14,7 @@ class SearchEventDispositionTest(TestCase):
 
     def test_known_identity_delegation_and_audit_delivery_facts_are_not_mutations(self):
         facts = [dict(source="hub", action="identity.bound", result="succeeded", target_user_id="employee"),
+                 dict(source="hub", action="identity.logout.sessions", result="succeeded", actor_kind="service", job_id="job"),
                  dict(source="hub", action="user.delegation.issue", result="succeeded", target_user_id="employee", subject_revision="epoch", repo_id="repo", path="/x", resource_kind="file"),
                  dict(source="hub", action="audit.export.download", result="attempted", repo_id="repo", job_id="job")]
         for fact in facts:
