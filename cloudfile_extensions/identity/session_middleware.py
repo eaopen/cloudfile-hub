@@ -14,6 +14,7 @@ from ..common.errors import ContractError
 from .resources import LoginResources
 from .native_session import BACKEND
 from .session_authority import OIDCSessionAuthority
+from .session_stream import OIDCSessionStream
 
 
 class CloudFileSessionMiddleware(SessionMiddleware):
@@ -64,7 +65,13 @@ class CloudFileSessionMiddleware(SessionMiddleware):
             if not self.oidc(request):
                 return super().process_response(request, response)
             if response.streaming:
-                raise ContractError("IDENTITY_UNAVAILABLE", "Guarded streaming response is unavailable", 503)
+                if getattr(response, "is_async", False):
+                    raise ContractError("IDENTITY_UNAVAILABLE", "Guarded asynchronous stream is unavailable", 503)
+                response.streaming_content = OIDCSessionStream(response.streaming_content, self.authority, request)
+                # FileResponse's server file-wrapper would bypass the guarded
+                # iterator. Preserve resource closers but disable that shortcut.
+                if hasattr(response, "file_to_stream"):
+                    response.file_to_stream = None
             # Enclose the actual Django save, not just a pre-save check. Logout
             # intake/deletion uses this same provider lock, so a stale request
             # cannot save its session after notification acceptance.
