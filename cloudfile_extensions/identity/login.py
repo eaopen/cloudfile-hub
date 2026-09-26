@@ -23,6 +23,9 @@ class PreparedLogin:
     redirect: str
     expires_at: int
     id_token_hint: str = field(default=None, repr=False)
+    subject: str = field(default=None, repr=False)
+    session_id: str = field(default=None, repr=False)
+    issued_at: int = None
 
 
 @dataclass(frozen=True)
@@ -96,4 +99,5 @@ class PreparedOIDCLogin:
                 or preparation.state.username(identity["userId"]) != username):
             raise ContractError("IDENTITY_UNAVAILABLE", "Login subject changed during preparation", 503)
         return PreparedLogin(identity["userId"], username, context["context_epoch"], redirect,
-            identity["expires_at"], identity.get("_id_token_hint"))
+            identity["expires_at"], identity.get("_id_token_hint"), identity["sub"],
+            identity.get("sid"), identity.get("issued_at"))

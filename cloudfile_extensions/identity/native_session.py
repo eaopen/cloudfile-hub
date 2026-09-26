@@ -7,6 +7,8 @@ from .login import PendingLogin, PreparedLogin
 from .native_backend import CloudFileOIDCBackend
 from .runtime import LoginRuntime
 from .session_guard import prepared_session_guard
+from .session_index import OIDCSessionIndex
+from ..jobs.authority import scope_locks
 
 
 BACKEND = "cloudfile_extensions.identity.native_backend.CloudFileOIDCBackend"
@@ -31,8 +33,9 @@ class NativeOIDCSession:
             raise ContractError("IDENTITY_UNAVAILABLE", "OIDC login preparation is unavailable", 503)
         config = runtime.flow.config
         retain_hint = config.end_session_url is not None
-        if retain_hint and (settings.SESSION_ENGINE not in SERVER_SESSION_ENGINES
-                or not isinstance(prepared.id_token_hint, str)
+        if settings.SESSION_ENGINE not in SERVER_SESSION_ENGINES:
+            raise ContractError("IDENTITY_UNAVAILABLE", "Native OIDC requires server-side sessions", 503)
+        if retain_hint and (not isinstance(prepared.id_token_hint, str)
                 or not 1 <= len(prepared.id_token_hint) <= 32768):
             raise ContractError("IDENTITY_UNAVAILABLE", "Server-side logout hint storage is unavailable", 503)
         from seahub.auth import login as auth_login
@@ -46,9 +49,13 @@ class NativeOIDCSession:
         if two_factor_auth_enabled(user):
             raise ContractError("MFA_REQUIRED", "Native second-factor completion is required", 403)
         preparation = runtime.preparation(prepared.user_id)
+        index = OIDCSessionIndex(runtime.connection, issuer=config.issuer, client_id=config.client_id)
+        scopes = [index.scope,
+            dict(type="provider", provider=preparation.state.provider, external_id=preparation.state.provider),
+            dict(type="user", provider=preparation.state.provider, external_id=prepared.user_id)]
         attempted = False
         try:
-            with prepared_session_guard(preparation, prepared):
+            with scope_locks(runtime.connection, scopes), prepared_session_guard(preparation, prepared) as cursor:
                 runtime.browser.assert_active(binding)
                 attempted = True
                 request.session.flush()
@@ -59,6 +66,12 @@ class NativeOIDCSession:
                     request.session[LOGOUT_HINT_KEY] = dict(issuer=config.issuer,
                         client_id=config.client_id, id_token=prepared.id_token_hint)
                 request.session.save()
+                from django.utils import timezone
+                expiry = request.session.get_expiry_date()
+                if timezone.is_naive(expiry):
+                    expiry = timezone.make_aware(expiry, timezone.get_default_timezone())
+                index.register(cursor, session_key=request.session.session_key, subject=prepared.subject,
+                    session_id=prepared.session_id, authenticated_at=prepared.issued_at, expires_at=expiry)
                 response = HttpResponseRedirect(prepared.redirect)
                 runtime.browser.clear(binding, response)
             return response

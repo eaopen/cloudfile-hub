@@ -48,7 +48,7 @@ def prepared_session_guard(preparation, prepared):
         try:
             with connection.cursor() as cursor:
                 check(cursor)
-                yield
+                yield cursor
                 # The host must not emit session cookies until this exits;
                 # Redis expiry can change without taking SQL row locks.
                 check(cursor)

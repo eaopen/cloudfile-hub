@@ -187,7 +187,8 @@ class IDTokenValidator:
                     raise ValueError()
             # Only claims verified here can identify the business subject.
             return {"issuer": claims["iss"], "sub": claims["sub"], "userId": user_id,
-                    "sid": claims.get("sid"), "expires_at": claims["exp"], "userinfo": userinfo}
+                    "sid": claims.get("sid"), "issued_at": claims["iat"],
+                    "expires_at": claims["exp"], "userinfo": userinfo}
         except (jwt.PyJWTError, ValueError, TypeError, AttributeError, ContractError):
             raise rejected() from None
 
