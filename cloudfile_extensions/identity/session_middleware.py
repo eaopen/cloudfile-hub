@@ -39,11 +39,13 @@ class CloudFileSessionMiddleware(SessionMiddleware):
                 request.session.flush()
             except Exception:
                 error = ContractError("IDENTITY_UNAVAILABLE", "Session cleanup is unavailable", 503)
-        response = JsonResponse(error.response(str(uuid4())), status=error.status)
+        request_id = str(uuid4())
+        response = JsonResponse(error.response(request_id), status=error.status)
+        response["X-Request-ID"] = request_id
         response["Cache-Control"] = "no-store, max-age=0"
         response["Referrer-Policy"] = "no-referrer"
         # Never save a stale in-memory authenticated session after failure.
-        if error.status >= 500:
+        if error.status != 401:
             return response
         return super().process_response(request, response)
 
