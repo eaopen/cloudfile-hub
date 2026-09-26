@@ -68,3 +68,10 @@ class ResourceService:
             return create_user(cursor, repo_id=ref["repo_id"], value=value,
                 actor=self.write_authority.actor, request_id=self.request_id)
         return self.write_authority.consume(reference, create)
+
+    def replace_user_tag_values(self, request):
+        """Replace user labels atomically without a global dictionary query."""
+        object_fields(request, ("reference", "values", "revision"))
+        return self.store.replace_user_tags_authorized(resource_ref(request["reference"]), [],
+            expected_revision=request["revision"], authority=self.write_authority,
+            lifecycle_reader=self.reader, request_id=self.request_id, tag_values=request["values"])

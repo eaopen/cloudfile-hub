@@ -144,7 +144,7 @@ class ResourceStore:
         return authority.consume(reference, read)
 
     def replace_user_tags_authorized(self, reference, tag_ids, *, expected_revision,
-                                    authority, lifecycle_reader, request_id):
+                                    authority, lifecycle_reader, request_id, tag_values=None):
         from ..authorization.read import ContentMetadataWriteAuthority
         from ..tags.bindings import replace_user_tags
         from ..tags.definitions import uuid_value
@@ -158,12 +158,29 @@ class ResourceStore:
         ids = [uuid_value(value) for value in tag_ids]
         if len(ids) != len(set(ids)):
             raise ContractError("INVALID_REQUEST", "Duplicate resource tags", 400)
+        reference = resource_ref(reference)
+        definitions = None
+        if tag_values is not None:
+            from ..tags.definitions import user_definition
+            if ids or not isinstance(tag_values, list) or len(tag_values) > 128:
+                raise ContractError("INVALID_REQUEST", "Invalid resource tag definitions", 400)
+            definitions = [user_definition(reference["repo_id"], str(uuid4()), value) for value in tag_values]
+            if len({value["normalized_label"] for value in definitions}) != len(definitions):
+                raise ContractError("INVALID_REQUEST", "Duplicate resource tag labels", 400)
         def write(cursor, ref):
             evidence = self._validate_evidence(lifecycle_reader(cursor, ref))
             row = self._row(ref, evidence, locking=True)
             old = self._snapshot(ref, evidence, row)
             compare_revision(expected_revision, old["revision"])
-            if row is None and not ids:
+            target_ids = ids
+            if definitions is not None:
+                from ..tags.write import create_user
+                # Definition creation and binding share the same authority,
+                # lifecycle/condition, audit, final epoch check and rollback.
+                target_ids = [create_user(cursor, repo_id=ref["repo_id"],
+                    value={"label": value["label"], "color": value["color"]},
+                    actor=authority.actor, request_id=request_id)[0]["tag_id"] for value in definitions]
+            if row is None and not target_ids:
                 return {**old, "tags": []}, False
             if row is None:
                 row = dict(uid=str(uuid4()), path=ref["path"], lifecycle_ref=evidence.lifecycle_ref,
@@ -172,7 +189,7 @@ class ResourceStore:
                     (row["uid"], ref["repo_id"], ref["kind"], ref["path"], self._hash(ref["path"]), evidence.lifecycle_ref))
             revision, changed = replace_user_tags(cursor, reference=ref, resource_uid=row["uid"],
                 lifecycle_ref=evidence.lifecycle_ref, expected_revision=row["revision"],
-                tag_ids=ids, actor=authority.actor, request_id=request_id)
+                tag_ids=target_ids, actor=authority.actor, request_id=request_id)
             result = {**self._snapshot(ref, evidence, {**row, "revision": revision}),
                 "tags": bound_tags(cursor, resource_uid=row["uid"], repo_id=ref["repo_id"])}
             return result, changed
