@@ -6,6 +6,7 @@ from ..resources.store import ResourceStore
 from ..tags.definitions import uuid_value
 from .query import AuditReader
 from .service import AuditService
+from .privacy import redact_event
 
 
 class AuthorizedAuditQuery:
@@ -55,15 +56,42 @@ class AuthorizedAuditQuery:
 
     def events(self, filters, *, limit=100, cursor=None):
         filters = AuditService._filters(filters)
-        root = dict(repo_id=filters["repo_id"], path="/", kind="dir")
+        return self._consume(filters["repo_id"], lambda: self.service.events(
+            actor=self.authority.actor, filters=filters, limit=limit, cursor=cursor))
+
+    def export_page(self, filters, *, limit=200, cursor=None, upper_bound=None):
+        """Internal export page; the cutoff is never accepted by query HTTP."""
+        filters = AuditService._filters(filters)
+        if type(upper_bound) is not int or not 0 <= upper_bound <= 2 ** 63 - 1:
+            raise ContractError("INVALID_REQUEST", "Invalid audit export cutoff", 400)
+        def page():
+            value = self.service.reader.list(actor=self.authority.actor, **filters,
+                limit=limit, cursor=cursor, upper_bound=upper_bound)
+            return {"items": [redact_event(self.service.redact, self.authority.actor, event)
+                    for event in value["items"]], "next_cursor": value["next_cursor"]}
+        return self._consume(filters["repo_id"], page, export=True)
+
+    def export_upper_bound(self, repo_id):
+        root = resource_ref(dict(repo_id=repo_id, path="/", kind="dir"))
+        return self._consume(root["repo_id"], self.service.reader.upper_bound, export=True)
+
+    def authorize_export(self, actor, repo_id):
+        if actor != self.authority.actor:
+            return False
+        root = resource_ref(dict(repo_id=repo_id, path="/", kind="dir"))
+        return self._consume(root["repo_id"], lambda: True, export=True)
+
+    def _consume(self, repo_id, operation, *, export=False):
+        root = dict(repo_id=repo_id, path="/", kind="dir")
         def read(sql, ref):
             self.cursor, self.repo_id, self.epoch = sql, ref["repo_id"], self.authority.epoch
             try:
                 self.managed = self.management.authorize(sql, self.authority.actor, ref) is True
                 if self.management.epoch != self.epoch:
                     raise ContractError("SUBJECT_UNAVAILABLE", "Audit management subject changed", 503)
-                return self.service.events(actor=self.authority.actor, filters=filters,
-                    limit=limit, cursor=cursor)
+                if export and not self.managed:
+                    raise ContractError("ACCESS_DENIED", "Whole-library audit export is not allowed", 403)
+                return operation()
             finally:
                 self.cursor = self.repo_id = self.epoch = None
                 self.managed = False
