@@ -85,7 +85,7 @@ class NativeDBSessionDelete:
             if fences and (len(fences) != 1 or type(fences[0][0]) is not int or fences[0][0] >= issued):
                 raise ContractError("AUTHENTICATION_REQUIRED", "OIDC session was invalidated", 401)
         cursor.execute("SELECT session_data FROM " + self.table +
-            " WHERE session_key=%s AND expire_date>UTC_TIMESTAMP(6) FOR UPDATE", (session_key,))
+            " WHERE session_key=%s AND expire_date>UTC_TIMESTAMP(6)", (session_key,))
         sessions = cursor.fetchall()
         if len(sessions) != 1:
             raise ContractError("AUTHENTICATION_REQUIRED", "Native session has expired or ended", 401)
