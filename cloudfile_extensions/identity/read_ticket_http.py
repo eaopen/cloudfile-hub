@@ -98,3 +98,11 @@ class OIDCReadTicketView(DirectoryPolicyView):
         response["Vary"] = "Cookie"
         response["X-Request-ID"] = request_id
         return response
+
+
+def oidc_read_ticket_routes(*, resources):
+    """For explicit trusted URL inclusion only; never installs itself."""
+    from django.urls import path
+    factory = OIDCReadTicketFactory(resources)
+    return [path("read-tickets/", OIDCReadTicketView.as_view(service_factory=factory),
+        name="cloudfile-oidc-read-ticket")]
