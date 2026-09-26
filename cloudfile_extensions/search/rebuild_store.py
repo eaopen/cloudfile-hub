@@ -10,9 +10,11 @@ from ..resources.paths import resource_ref
 from .documents import document_key
 from .generations import SearchGenerationStore
 from .initialization import SearchInitializationStore
+from .meilisearch import _object
 
 
 class SearchRebuildStore:
+    FIELDS = "path,position,next_position,payload,payload_hash,state,task_id"
     def __init__(self, connection):
         self.connection = connection
         self.registry = SearchGenerationStore(connection)
@@ -78,3 +80,85 @@ class SearchRebuildStore:
                 raise ContractError("SEARCH_REBUILD_CONFLICT", "Rebuild directory is not ready", 409)
             sql.execute("UPDATE cf_search_rebuild_directory SET next_position=%s,payload=%s,payload_hash=%s,state='pending',updated_at=UTC_TIMESTAMP(6) WHERE generation=%s AND repo_id=%s AND path_hash=%s", (next_offset, raw, digest, generation, ref["repo_id"], path_hash))
             return digest
+
+    def _page(self, sql, generation, index, ref, path_hash):
+        sql.execute("SELECT " + self.FIELDS + " FROM cf_search_rebuild_directory WHERE generation=%s AND repo_id=%s AND path_hash=%s FOR UPDATE", (generation, ref["repo_id"], path_hash))
+        row = sql.fetchone()
+        try:
+            if row is None or len(row) != 7 or row[0] != ref["path"] or type(row[1]) is not int or not 0 <= row[1] <= 2 ** 31 - 102:
+                raise ValueError()
+            value = dict(zip(self.FIELDS.split(","), row))
+            if value["state"] not in ("pending", "submitting", "submitted"):
+                raise ValueError()
+            if not isinstance(value["payload"], str) or len(value["payload"].encode("utf-8")) > 1048576:
+                raise ValueError()
+            documents = json.loads(value["payload"], object_pairs_hook=_object)
+            raw = json.dumps(documents, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":"))
+            digest = hashlib.sha256(b"cf.search.rebuild.page.v1\n" + index.encode("ascii") + b"\n" + raw.encode("utf-8")).hexdigest()
+            if not isinstance(documents, list) or len(documents) > 100 or raw != value["payload"] or digest != value["payload_hash"]:
+                raise ValueError()
+            if value["next_position"] is not None and (type(value["next_position"]) is not int or not documents or value["next_position"] != value["position"] + len(documents)):
+                raise ValueError()
+            seen = set()
+            for document in documents:
+                child = resource_ref({key: document[key] for key in ("repo_id", "path", "kind")})
+                if (child["repo_id"] != ref["repo_id"] or (child["path"].rsplit("/", 1)[0] or "/") != ref["path"] or
+                        child["path"] in seen or document["id"] != document_key(child)):
+                    raise ValueError()
+                seen.add(child["path"])
+            task = value["task_id"]
+            if ((value["state"] == "submitted" and (type(task) is not int or not 0 <= task <= 2 ** 63 - 1)) or
+                    (value["state"] != "submitted" and task is not None)):
+                raise ValueError()
+            value["documents"] = documents
+            return value
+        except Exception:
+            raise ContractError("SEARCH_REBUILD_CONFLICT", "Frozen rebuild page is invalid", 409) from None
+
+    def load_page(self, *, generation, index, repo_id, path):
+        ref, path_hash = self._directory(repo_id, path)
+        with self._owned(generation, index) as sql:
+            return self._page(sql, generation, index, ref, path_hash)
+
+    def mark_submitting(self, *, generation, index, repo_id, path, payload_hash):
+        ref, path_hash = self._directory(repo_id, path)
+        with self._owned(generation, index) as sql:
+            page = self._page(sql, generation, index, ref, path_hash)
+            if page["state"] != "pending" or page["payload_hash"] != payload_hash or not page["documents"]:
+                raise ContractError("SEARCH_REBUILD_CONFLICT", "Rebuild page intent is not current", 409)
+            sql.execute("UPDATE cf_search_rebuild_directory SET state='submitting',updated_at=UTC_TIMESTAMP(6) WHERE generation=%s AND repo_id=%s AND path_hash=%s", (generation, ref["repo_id"], path_hash))
+
+    def dispatch(self, *, generation, index, repo_id, path, payload_hash, send):
+        ref, path_hash = self._directory(repo_id, path)
+        if not callable(send):
+            raise ValueError("bounded private rebuild dispatch required")
+        with self._owned(generation, index) as sql:
+            page = self._page(sql, generation, index, ref, path_hash)
+            if page["state"] != "submitting" or page["payload_hash"] != payload_hash:
+                raise ContractError("SEARCH_REBUILD_CONFLICT", "Rebuild intent is not current", 409)
+            task = send(page["documents"])
+            if type(task) is not int or not 0 <= task <= 2 ** 63 - 1:
+                raise ContractError("SEARCH_SUBMISSION_UNKNOWN", "Rebuild receipt is uncertain", 503)
+            sql.execute("UPDATE cf_search_rebuild_directory SET state='submitted',task_id=%s,updated_at=UTC_TIMESTAMP(6) WHERE generation=%s AND repo_id=%s AND path_hash=%s", (task, generation, ref["repo_id"], path_hash))
+            return task
+
+    def complete_page(self, *, generation, index, repo_id, path, payload_hash, task_id):
+        """Trusted executor has checked this exact remote task succeeded."""
+        ref, path_hash = self._directory(repo_id, path)
+        with self._owned(generation, index) as sql:
+            page = self._page(sql, generation, index, ref, path_hash)
+            empty = not page["documents"]
+            if (page["payload_hash"] != payload_hash or
+                    (empty and (page["state"] != "pending" or task_id is not None)) or
+                    (not empty and (page["state"] != "submitted" or type(task_id) is not int or page["task_id"] != task_id))):
+                raise ContractError("SEARCH_TASK_PENDING", "Rebuild page has not succeeded", 409)
+            for document in page["documents"]:
+                if document["kind"] != "dir":
+                    continue
+                child, child_hash = self._directory(repo_id, document["path"])
+                sql.execute("INSERT INTO cf_search_rebuild_directory(generation,repo_id,path_hash,path,position,state,updated_at) VALUES(%s,%s,%s,%s,0,'ready',UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE generation=generation", (generation, ref["repo_id"], child_hash, child["path"]))
+                sql.execute("SELECT path FROM cf_search_rebuild_directory WHERE generation=%s AND repo_id=%s AND path_hash=%s FOR UPDATE", (generation, ref["repo_id"], child_hash))
+                if sql.fetchone() != (child["path"],):
+                    raise ContractError("SEARCH_REBUILD_CONFLICT", "Rebuild directory hash collision", 409)
+            next_position = page["next_position"]
+            sql.execute("UPDATE cf_search_rebuild_directory SET position=%s,next_position=NULL,payload=NULL,payload_hash=NULL,task_id=NULL,state=%s,updated_at=UTC_TIMESTAMP(6) WHERE generation=%s AND repo_id=%s AND path_hash=%s", (next_position if next_position is not None else page["position"], "ready" if next_position is not None else "done", generation, ref["repo_id"], path_hash))
