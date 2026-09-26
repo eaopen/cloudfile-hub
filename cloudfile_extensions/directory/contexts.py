@@ -119,7 +119,12 @@ class SubjectContexts:
                        "expires_at": self.clock() + self.ttl}
             # Cache recheck, lease acquisition and generation publication are one
             # Redis operation; a completed concurrent refresh cannot cause a gap.
-            started = self.redis.eval('''
+            # Starting a generation must use the same authority coordinator as
+            # projection/publication. Redis lease expiry alone must not let a
+            # successor invalidate an in-flight native projection under its guard.
+            # Source I/O and join waits remain outside this bounded guard.
+            with self.refresh_guard(user_id, epoch):
+                started = self.redis.eval('''
                 local raw = redis.call('GET', KEYS[1])
                 local old = nil
                 if raw then old = cjson.decode(raw) end
@@ -131,7 +136,7 @@ class SubjectContexts:
                 redis.call('SET', KEYS[2], ARGV[1], 'EX', 30)
                 redis.call('SET', KEYS[1], cjson.encode(pending), 'EX', ARGV[3])
                 return {1, raw or '', ''}
-            ''', 2, key, lease_key, epoch, json.dumps(pending), self.ttl, self.clock(), int(reuse_ready))
+                ''', 2, key, lease_key, epoch, json.dumps(pending), self.ttl, self.clock(), int(reuse_ready))
             if started[0] == 2:
                 value = self.current(user_id)
                 if value is None:
@@ -195,7 +200,10 @@ class SubjectContexts:
                 return value
             except Exception as error:
                 pending["status"] = "unavailable"
-                self.redis.eval('''
+                # Failure is also a current-generation state transition. It
+                # cannot race a final consumer holding the authority guard.
+                with self.refresh_guard(user_id, epoch):
+                    self.redis.eval('''
                     if redis.call('GET', KEYS[2]) == ARGV[1] then
                         local value = redis.call('GET', KEYS[1])
                         if value and cjson.decode(value).context_epoch == ARGV[1] and
@@ -203,7 +211,7 @@ class SubjectContexts:
                             redis.call('SET', KEYS[1], ARGV[2], 'EX', ARGV[3])
                         end
                     end
-                ''', 2, key, lease_key, epoch, json.dumps(pending), self.ttl)
+                    ''', 2, key, lease_key, epoch, json.dumps(pending), self.ttl)
                 if isinstance(error, ContractError):
                     raise
                 raise unavailable() from None

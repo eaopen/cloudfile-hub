@@ -3,7 +3,7 @@ from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import datetime, timezone
 import os
-from threading import Event
+from threading import Event, Lock
 import unittest
 from unittest.mock import patch
 from uuid import uuid4
@@ -164,6 +164,60 @@ class ContextTest(unittest.TestCase):
         key, lease_key = self.contexts._keys("u1")
         self.assertEqual(self.redis.get(lease_key), b"new-generation")
         self.assertEqual(json.loads(self.redis.get(key))["context_epoch"], "new-generation")
+
+    def test_generation_start_waits_for_projection_guard_after_lease_expiry(self):
+        # This lock is an explicit coordinator fixture, not proof of a deployed
+        # SQL/native adapter. Real Redis demonstrates generation mutation order.
+        entered, finish, contender = Event(), Event(), Event()
+        coordinator = Lock()
+        @contextmanager
+        def guard(user_id, epoch):
+            if entered.is_set() and not finish.is_set():
+                contender.set()
+            with coordinator:
+                yield
+        self.contexts.refresh_guard = guard
+        def project(subject, epoch):
+            self.projections.append(epoch)
+            if len(self.projections) == 1:
+                entered.set()
+                self.assertTrue(finish.wait(timeout=5))
+        self.contexts.project = project
+        key, lease_key = self.contexts._keys("u1")
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(self.contexts.prepare, "u1")
+            self.assertTrue(entered.wait(timeout=2))
+            import json
+            old_epoch = json.loads(self.redis.get(key))["context_epoch"]
+            self.redis.delete(lease_key)  # deterministic expired lease
+            second = executor.submit(self.contexts.prepare, "u1")
+            try:
+                self.assertTrue(contender.wait(timeout=2))
+                self.assertEqual(json.loads(self.redis.get(key))["context_epoch"], old_epoch)
+                self.assertFalse(second.done())
+            finally:
+                finish.set()
+            with self.assertRaises(ContractError):
+                first.result(timeout=5)
+            latest = second.result(timeout=5)
+        self.assertNotEqual(latest["context_epoch"], old_epoch)
+        self.assertEqual(self.contexts.current("u1"), latest)
+        self.assertEqual(len(self.projections), 2)
+
+    def test_start_guard_failure_preserves_generation_without_source_or_projection(self):
+        original = self.contexts.get("u1")
+        @contextmanager
+        def refused(user_id, epoch):
+            raise ContractError("SUBJECT_UNAVAILABLE", "Subject authorization is unavailable", 503)
+            yield
+        self.contexts.refresh_guard = refused
+        with self.assertRaises(ContractError):
+            self.contexts.prepare("u1")
+        self.assertEqual(self.contexts.current("u1"), original)
+        self.assertEqual(self.source_calls, 1)
+        self.assertEqual(len(self.projections), 1)
+        _, lease_key = self.contexts._keys("u1")
+        self.assertIsNone(self.redis.get(lease_key))
 
     def test_force_does_not_reuse_snapshot_started_before_permission_change(self):
         started, finish, joined = Event(), Event(), Event()
