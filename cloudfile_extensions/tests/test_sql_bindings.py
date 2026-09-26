@@ -42,6 +42,8 @@ class SQLBindingsTest(DatabaseTestCase):
 
     def test_atomic_binding_resolve_and_retry(self):
         self.assertIsNone(self.resolve())
+        self.assertEqual(self.binding.prebind(**self.request, dry_run=True), (self.request["username"], True))
+        self.assertIsNone(self.resolve())
         self.assertEqual(self.binding.prebind(**self.request), (self.request["username"], True))
         self.assertEqual(self.resolve(), self.request["username"])
         self.assertEqual(self.binding.prebind(**self.request), (self.request["username"], False))

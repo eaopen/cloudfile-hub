@@ -90,11 +90,13 @@ class SQLIdentityBindings:
                 raise conflict() from None
             raise ContractError("IDENTITY_UNAVAILABLE", "Identity binding is unavailable", 503) from None
 
-    def prebind(self, *, issuer, subject, user_id, username, actor, reason):
+    def prebind(self, *, issuer, subject, user_id, username, actor, reason, dry_run=False):
+        if type(dry_run) is not bool:
+            raise ValueError("invalid binding check mode")
         provider, metadata = IdentityBindings._identity(issuer, subject, user_id)
         identifier(username)
         identifier(actor, maximum=225)
-        if not isinstance(reason, str) or not reason.strip() or len(reason) > 512:
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 512 or any(ord(char) < 32 for char in reason):
             raise ContractError("INVALID_REQUEST", "A bounded binding reason is required", 400)
         scopes = [dict(type="provider", provider=self.provider, external_id=self.provider),
                   dict(type="user", provider=self.provider, external_id=user_id),
@@ -118,6 +120,8 @@ class SQLIdentityBindings:
                         existing = self._social_match(cursor.fetchall(), provider, subject, metadata, username)
                         if existing is not None and rows[0][1] == user_id:
                             return username, False
+                        if dry_run:
+                            return username, True
                         cursor.execute("UPDATE " + self.profiles + " SET login_id=%s WHERE user=%s", (user_id, username))
                         if existing is None:
                             cursor.execute("INSERT INTO " + self.social + "(username,provider,uid,extra_data) VALUES(%s,%s,%s,%s)",

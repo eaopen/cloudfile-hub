@@ -43,6 +43,6 @@ class IdentityManagement:
             identity_schema=identity_schema, directory_provider=directory_provider,
             authorize=authorize, audit=audit)
 
-    def prebind(self, *, issuer, subject, user_id, username, reason):
+    def prebind(self, *, issuer, subject, user_id, username, reason, dry_run=False):
         return self.bindings.prebind(issuer=issuer, subject=subject, user_id=user_id,
-                                    username=username, actor=self.actor, reason=reason)
+                                    username=username, actor=self.actor, reason=reason, dry_run=dry_run)
