@@ -10,6 +10,8 @@ from .privacy import redact_event
 from .job_service import AuditTransactionJobs
 from ..jobs.store import JobStore
 from uuid import UUID
+from contextlib import contextmanager
+from ..jobs.authority import scope_locks
 
 
 class AuthorizedAuditQuery:
@@ -107,12 +109,14 @@ class AuthorizedAuditQuery:
         return self._consume(filters["repo_id"], lambda: self.service.events(
             actor=self.authority.actor, filters=filters, limit=limit, cursor=cursor))
 
-    def export_page(self, filters, *, limit=200, cursor=None, upper_bound=None):
+    def export_page(self, filters, *, limit=200, cursor=None, upper_bound=None, expected_epoch=None):
         """Internal export page; the cutoff is never accepted by query HTTP."""
         filters = AuditService._filters(filters)
         if type(upper_bound) is not int or not 0 <= upper_bound <= 2 ** 63 - 1:
             raise ContractError("INVALID_REQUEST", "Invalid audit export cutoff", 400)
         def page():
+            if expected_epoch is not None and self.epoch != expected_epoch:
+                raise ContractError("SUBJECT_UNAVAILABLE", "Audit export subject changed", 503)
             value = self.service.reader.list(actor=self.authority.actor, **filters,
                 limit=limit, cursor=cursor, upper_bound=upper_bound)
             return {"items": [redact_event(self.service.redact, self.authority.actor, event)
@@ -128,6 +132,29 @@ class AuthorizedAuditQuery:
             return False
         root = resource_ref(dict(repo_id=repo_id, path="/", kind="dir"))
         return self._consume(root["repo_id"], lambda: True, export=True)
+
+    def export_epoch(self, actor, repo_id):
+        if actor != self.authority.actor:
+            raise ContractError("ACCESS_DENIED", "Audit export identity is inconsistent", 403)
+        root = resource_ref(dict(repo_id=repo_id, path="/", kind="dir"))
+        return self._consume(root["repo_id"], lambda: self.epoch, export=True)
+
+    @contextmanager
+    def export_scope(self, repo_id):
+        """Hold actual scope locks across bounded pages, without a long SQL txn.
+
+        Each nested page reenters these connection-owned locks and still owns
+        its transaction. Policy writers cannot interleave between the pages.
+        Redis subject refresh is separately detected by the pinned epoch.
+        """
+        root = resource_ref(dict(repo_id=repo_id, path="/", kind="dir"))
+        scopes = [dict(type="provider", provider=self.authority.state.provider,
+                       external_id=self.authority.state.provider),
+                  dict(type="user", provider=self.authority.state.provider,
+                       external_id=self.authority.actor),
+                  dict(type="repo", provider="cloudfile", external_id=root["repo_id"])]
+        with scope_locks(self.authority.state.connection, scopes):
+            yield
 
     def _consume(self, repo_id, operation, *, export=False):
         root = dict(repo_id=repo_id, path="/", kind="dir")

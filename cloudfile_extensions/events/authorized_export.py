@@ -10,8 +10,9 @@ from .export import AuditCSV
 
 
 class _ExportPages:
-    def __init__(self, query, repo_id):
-        self.query, self.repo_id = query, repo_id
+    def __init__(self, exporter):
+        self.exporter = exporter
+        self.query, self.repo_id = exporter.query, exporter.repo_id
 
     def upper_bound(self):
         return self.query.export_upper_bound(self.repo_id)
@@ -20,7 +21,8 @@ class _ExportPages:
         if actor != self.query.authority.actor or repo_id != self.repo_id:
             raise ContractError("ACCESS_DENIED", "Audit export identity is inconsistent", 403)
         return self.query.export_page(dict(repo_id=repo_id, **filters),
-            upper_bound=upper_bound, limit=limit, cursor=cursor)
+            upper_bound=upper_bound, limit=limit, cursor=cursor,
+            expected_epoch=self.exporter.epoch)
 
 
 class AuthorizedAuditCSV(AuditCSV):
@@ -29,14 +31,37 @@ class AuthorizedAuditCSV(AuditCSV):
         if not isinstance(query, AuthorizedAuditQuery):
             raise ValueError("owned actual audit query required")
         self.query = query
+        self.epoch = None
+        self.generating = False
         self.repo_id = resource_ref(dict(repo_id=repo_id, path="/", kind="dir"))["repo_id"]
         # Pages are already deployment-redacted inside their authorization
         # transaction. Do not invoke a stateful redactor again outside it.
-        super().__init__(_ExportPages(query, self.repo_id),
+        super().__init__(_ExportPages(self),
             authorize_export=self._authorize, redact=lambda actor, event: event,
             max_rows=max_rows, max_bytes=max_bytes, max_pages=max_pages)
 
     def _authorize(self, actor, repo_id):
         if repo_id != self.repo_id:
             return False
-        return self.query.authorize_export(actor, repo_id)
+        current = self.query.export_epoch(actor, repo_id)
+        if not isinstance(current, str) or not current:
+            raise ContractError("AUDIT_UNAVAILABLE", "Audit export generation is unavailable", 503)
+        if self.epoch is None:
+            self.epoch = current
+        elif self.epoch != current:
+            raise ContractError("SUBJECT_UNAVAILABLE", "Audit export subject changed", 503)
+        return True
+
+    def generate(self, **query):
+        if self.generating:
+            raise ContractError("AUDIT_UNAVAILABLE", "Audit export is already running", 503)
+        self.generating = True
+        self.epoch = None
+        try:
+            with self.query.export_scope(self.repo_id):
+                yield from super().generate(**query)
+                # Recheck after the final page, including empty exports. Keep
+                # this epoch for the handler's later pre-publication check.
+                self._authorize(query.get("actor"), query.get("repo_id"))
+        finally:
+            self.generating = False
