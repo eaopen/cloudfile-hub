@@ -47,13 +47,13 @@ class ReadTicketTests(unittest.TestCase):
 
     def test_resolves_exact_commit_and_captures_server_session(self):
         with patch.dict(sys.modules, seaserv=self.native), patch(
-                "cloudfile_extensions.identity.read_ticket.issue_native_ticket",
-                self.rpc.seafile_cloudfile_issue_read_ticket):
+                "cloudfile_extensions.identity.ticket_transport._call", side_effect=[
+                    {"head_cmmt_id": "f" * 40}, "e" * 40, self.token]) as calls:
             result = self.issuer.issue(self.request, self.ref)
         self.assertEqual(result, dict(ticket=self.token, expires_in=60))
-        self.rpc.get_file_id_by_commit_and_path.assert_called_once_with(
-            self.ref["repo_id"], "f" * 40, "/file")
-        args = self.rpc.seafile_cloudfile_issue_read_ticket.call_args.args
+        self.assertEqual(calls.call_args_list[1].args[1], (self.ref["repo_id"], "f" * 40, "/file"))
+        self.assertEqual(len({call.args[2] for call in calls.call_args_list}), 1)
+        args = calls.call_args_list[2].args[1]
         conditions = json.loads(args[-1])
         self.assertEqual(conditions["oidc_session"]["session_key"], "b" * 32)
         self.assertEqual(conditions["context"]["userId"], "user-1")
@@ -62,7 +62,7 @@ class ReadTicketTests(unittest.TestCase):
     def test_missing_file_never_issues_ticket(self):
         self.rpc.get_file_id_by_commit_and_path.return_value = None
         with patch.dict(sys.modules, seaserv=self.native), patch(
-                "cloudfile_extensions.identity.read_ticket.issue_native_ticket",
-                self.rpc.seafile_cloudfile_issue_read_ticket), self.assertRaises(ContractError):
+                "cloudfile_extensions.identity.ticket_transport._call", side_effect=[
+                    {"head_cmmt_id": "f" * 40}, None]) as calls, self.assertRaises(ContractError):
             self.issuer.issue(self.request, self.ref)
-        self.rpc.seafile_cloudfile_issue_read_ticket.assert_not_called()
+        self.assertEqual(calls.call_count, 2)

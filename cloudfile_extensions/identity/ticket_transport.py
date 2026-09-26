@@ -3,19 +3,21 @@ import json
 import socket
 import struct
 import time
+import re
 
 
-def issue_native_ticket(*arguments):
+def _call(function, arguments, deadline):
     from seaserv.service import seafile_pipe_path
-    if len(arguments) != 7 or any(not isinstance(value, str) for value in arguments):
+    counts = {"seafile_get_repo": 1, "seafile_get_file_id_by_commit_and_path": 3,
+        "seafile_cloudfile_issue_read_ticket": 7}
+    if function not in counts or len(arguments) != counts[function] or any(not isinstance(value, str) for value in arguments):
         raise ValueError("fixed native ticket arguments required")
     message = json.dumps(dict(service="seafserv-threaded-rpcserver",
-        request=json.dumps(["seafile_cloudfile_issue_read_ticket", *arguments],
+        request=json.dumps([function, *arguments],
             ensure_ascii=False, separators=(",", ":"))),
         ensure_ascii=False, separators=(",", ":")).encode("utf-8")
     if len(message) > 131072:
         raise ValueError("native ticket request exceeds budget")
-    deadline = time.monotonic() + 5
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
         def budget():
             remaining = deadline - time.monotonic()
@@ -52,3 +54,24 @@ def issue_native_ticket(*arguments):
         if not isinstance(response, dict) or "err_code" in response or "ret" not in response:
             raise ValueError("native ticket response rejected")
         return response["ret"]
+
+
+def resolve_and_issue_native_ticket(repo_id, path, operation, username, conditions):
+    """All native target I/O shares one absolute five-second budget."""
+    deadline = time.monotonic() + 5
+    repo = _call("seafile_get_repo", (repo_id,), deadline)
+    if not isinstance(repo, dict):
+        raise ValueError("native repository unavailable")
+    # GObject serializers may expose canonical hyphenated property names;
+    # reject ambiguous responses rather than choosing between conflicting heads.
+    names = [name for name in ("head_cmmt_id", "head-cmmt-id") if name in repo]
+    if len(names) != 1:
+        raise ValueError("native head unavailable")
+    head = repo[names[0]]
+    if not isinstance(head, str) or not re.fullmatch(r"[0-9a-f]{40}", head):
+        raise ValueError("native head unavailable")
+    obj = _call("seafile_get_file_id_by_commit_and_path", (repo_id, head, path), deadline)
+    if not isinstance(obj, str) or not re.fullmatch(r"[0-9a-f]{40}", obj):
+        raise ValueError("native file unavailable")
+    return _call("seafile_cloudfile_issue_read_ticket",
+        (repo_id, path, head, obj, operation, username, conditions), deadline)

@@ -1,7 +1,6 @@
 """Trusted OIDC native read-ticket issuer; no public route or legacy fallback."""
 from copy import deepcopy
 import json
-import re
 from uuid import UUID
 
 from ..common.errors import ContractError
@@ -9,7 +8,7 @@ from ..directory.preparation import SubjectPreparation
 from ..resources.paths import resource_ref
 from .native_session import SESSION_REFERENCE_KEY
 from .session_authority import OIDCSessionAuthority
-from .ticket_transport import issue_native_ticket
+from .ticket_transport import resolve_and_issue_native_ticket
 
 
 class OIDCReadTicketIssuer:
@@ -49,21 +48,8 @@ class OIDCReadTicketIssuer:
         if len(encoded.encode("utf-8")) > 16384:
             raise ContractError("INVALID_REQUEST", "Native ticket conditions exceed budget", 400)
         try:
-            from seaserv import seafserv_threaded_rpc, seafile_api
-            repo = seafile_api.get_repo(ref["repo_id"])
-            if repo is None:
-                raise ValueError("native repository unavailable")
-            head_id = repo.head_cmmt_id
-            if not isinstance(head_id, str) or not re.fullmatch(r"[0-9a-f]{40}", head_id):
-                raise ValueError("native head unavailable")
-            # Resolve against that exact commit, not another current-head read.
-            # Native issuance still locks/rechecks master; races fail closed.
-            object_id = seafserv_threaded_rpc.get_file_id_by_commit_and_path(
-                ref["repo_id"], head_id, ref["path"])
-            if not isinstance(object_id, str) or not re.fullmatch(r"[0-9a-f]{40}", object_id):
-                raise ValueError("native file target unavailable")
-            token = issue_native_ticket(
-                ref["repo_id"], ref["path"], head_id, object_id, operation, username, encoded)
+            token = resolve_and_issue_native_ticket(
+                ref["repo_id"], ref["path"], operation, username, encoded)
             if not isinstance(token, str) or str(UUID(token)) != token:
                 raise ValueError("invalid ticket response")
         except Exception:
