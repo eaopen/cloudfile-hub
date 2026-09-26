@@ -7,6 +7,7 @@ from ..tags.definitions import uuid_value
 from .execution import step_hash
 from .meilisearch import _object
 from .task_store import SearchTaskStore
+from .fanout_receipts import fanout_pages_complete
 
 
 class SearchFanoutStore(SearchTaskStore):
@@ -111,11 +112,14 @@ class SearchFanoutStore(SearchTaskStore):
             value = None if row is None else self.decode(row)
             if value is None or value["batch"] != batch or value["state"] != "pending":
                 raise ContractError("SEARCH_FANOUT_CHANGED", "Tag page is not current", 409)
+            task_id = None
             if value["payload"] != "[]":
                 sql.execute("SELECT state,payload_hash,task_id FROM cf_search_task WHERE event_id=%s AND index_generation=%s AND step=%s FOR UPDATE", (*key, batch))
                 task = sql.fetchone()
                 if task is None or task[0] != "succeeded" or task[1] != value["payload_hash"] or type(task[2]) is not int or not 0 <= task[2] <= 2 ** 63 - 1:
                     raise ContractError("SEARCH_TASK_PENDING", "Tag page index task is incomplete", 409)
+                task_id = task[2]
+            sql.execute("INSERT INTO cf_search_fanout_page(event_id,index_generation,batch,index_uid,payload_hash,empty_page,task_id,completed_at) VALUES(%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(6))", (*key, batch, value["index_uid"], value["payload_hash"], int(value["payload"] == "[]"), task_id))
             sql.execute("UPDATE cf_search_fanout SET after_uid=COALESCE(next_uid,upper_uid),next_uid=NULL,batch=batch+1,state=%s,index_uid=NULL,payload=NULL,payload_hash=NULL,updated_at=UTC_TIMESTAMP(6) WHERE event_id=%s AND index_generation=%s", ("ready" if value["next_uid"] is not None else "scanned", *key))
             return value["next_uid"] is None
 
@@ -132,6 +136,11 @@ class SearchFanoutStore(SearchTaskStore):
             value = None if row is None else self.decode(row)
             if value is None or value["state"] != "scanned":
                 raise ContractError("SEARCH_TASK_PENDING", "Tag scan is incomplete", 409)
+            self._planning_gate(sql, claim, generation)
+            sql.execute("SELECT index_uid FROM cf_search_generation WHERE generation=%s FOR UPDATE", (generation,))
+            index = sql.fetchone()[0]
+            if not fanout_pages_complete(sql, event_id=claim.event_id, generation=generation, index=index, batches=value["batch"], locking=True):
+                raise ContractError("SEARCH_TASK_PENDING", "Tag page receipts are incomplete", 409)
             sql.execute("SELECT revision,scope_repo_id FROM cf_tag WHERE tag_id=%s FOR UPDATE", (value["tag_id"],))
             definition = sql.fetchone()
             if definition is None or definition[0] != value["tag_revision"] or definition[1] not in (None, value["repo_id"]):

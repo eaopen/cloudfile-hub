@@ -1,0 +1,8 @@
+{
+  "version": "024_search_fanout_pages",
+  "steps": [{
+    "sql": "CREATE TABLE cf_search_fanout_page (event_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,index_generation VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,batch INT UNSIGNED NOT NULL,index_uid VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,payload_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,empty_page TINYINT UNSIGNED NOT NULL,task_id BIGINT UNSIGNED NULL,completed_at DATETIME(6) NOT NULL,PRIMARY KEY(event_id,index_generation,batch)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+    "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_search_fanout_page')='InnoDB' AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_search_fanout_page')=8 AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_search_fanout_page' AND index_name='PRIMARY')='event_id,index_generation,batch',1,0)",
+    "expected": 1
+  }]
+}

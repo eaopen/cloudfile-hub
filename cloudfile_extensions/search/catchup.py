@@ -14,6 +14,8 @@ from .meilisearch import _object
 from .rebuild_store import SearchRebuildStore
 from .plans import encode_plan
 from .execution import step_hash
+from .fanout_store import SearchFanoutStore
+from .fanout_receipts import fanout_pages_complete
 
 
 def plan_receipts_complete(index, row, receipts):
@@ -91,7 +93,7 @@ class SearchCatchupInspector:
                 if qualified and projection_required(fact):
                     sql.execute("SELECT plan_hash,payload FROM cf_search_plan WHERE event_id=%s AND index_generation=%s", (event_id, generation))
                     plan = sql.fetchone()
-                    sql.execute("SELECT state FROM cf_search_fanout WHERE event_id=%s AND index_generation=%s", (event_id, generation))
+                    sql.execute("SELECT " + SearchFanoutStore.FIELDS + " FROM cf_search_fanout WHERE event_id=%s AND index_generation=%s", (event_id, generation))
                     fanout = sql.fetchone()
                     if plan is not None:
                         if fanout is not None:
@@ -102,7 +104,10 @@ class SearchCatchupInspector:
                         sql.execute("SELECT step,payload_hash,state,task_id FROM cf_search_task WHERE event_id=%s AND index_generation=%s ORDER BY step LIMIT 10002", (event_id, generation))
                         qualified = plan_receipts_complete(index, plan, sql.fetchall())
                     else:
-                        qualified = fanout == ("scanned",)
+                        value = None if fanout is None else SearchFanoutStore.decode(fanout)
+                        qualified = value is not None and value["state"] == "scanned" and value["repo_id"] == ref["repo_id"]
+                        if qualified:
+                            qualified = fanout_pages_complete(sql, event_id=event_id, generation=generation, index=index, batches=value["batch"])
                     sql.execute("SELECT event_id FROM cf_search_task WHERE event_id=%s AND index_generation=%s AND (state<>'succeeded' OR task_id IS NULL OR task_id>9223372036854775807) LIMIT 1", (event_id, generation))
                     qualified = qualified and sql.fetchone() is None
                     sql.execute("SELECT event_id FROM cf_search_task WHERE event_id=%s AND index_generation<>%s AND state<>'succeeded' LIMIT 1", (event_id, generation))

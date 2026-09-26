@@ -11,6 +11,7 @@ from cloudfile_extensions.search.generations import SearchGenerationStore
 from cloudfile_extensions.search.initialization import SearchInitializationStore
 from cloudfile_extensions.search.rebuild_store import SearchRebuildStore
 from cloudfile_extensions.search.plans import SearchPlanStore
+from cloudfile_extensions.search.fanout_receipts import fanout_pages_complete
 from cloudfile_extensions.search.fanout_store import SearchFanoutStore
 from cloudfile_extensions.search.fanout_execution import SearchFanoutExecution
 from cloudfile_extensions.search.documents import resource_document
@@ -106,6 +107,17 @@ class SearchTaskStoreTest(DatabaseTestCase):
         with self.assertRaises(ContractError) as caught:
             SearchPlanStore(self.connection).freeze(self.claim, generation="index", index="resources", steps=[dict(operation="delete", payload=["a" * 64])])
         self.assertEqual(caught.exception.code, "SEARCH_REBUILD_PENDING")
+
+    def test_empty_fanout_page_has_durable_manifest_before_cursor_advances(self):
+        store = SearchFanoutStore(self.connection)
+        uid = str(uuid4())
+        store.start(self.claim, generation="index", repo_id="11111111-1111-4111-8111-111111111111", tag_id=str(uuid4()), revision=str(uuid4()), upper_uid=uid)
+        store.freeze_page(self.claim, generation="index", batch=0, after_uid=None, next_uid=None, index="resources", documents=[])
+        store.advance_page(self.claim, generation="index", batch=0)
+        with self.connection.cursor() as sql:
+            self.assertTrue(fanout_pages_complete(sql, event_id=self.claim.event_id, generation="index", index="resources", batches=1))
+            sql.execute("DELETE FROM cf_search_fanout_page WHERE event_id=%s", (self.claim.event_id,))
+            self.assertFalse(fanout_pages_complete(sql, event_id=self.claim.event_id, generation="index", index="resources", batches=1))
 
     def test_exact_successful_plan_acknowledges_without_resource_ack(self):
         self.succeeded(0, "a" * 64)
