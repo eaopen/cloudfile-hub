@@ -31,7 +31,7 @@ class DirectoryPolicyView(View):
         length = request.META.get("CONTENT_LENGTH", "")
         if length and (not re.fullmatch(r"[0-9]{1,10}", length) or int(length) > 16384):
             raise ContractError("REQUEST_TOO_LARGE", "Policy request exceeds the limit", 413)
-        body = request.body
+        body = request.read(16385)
         if len(body) > 16384:
             raise ContractError("REQUEST_TOO_LARGE", "Policy request exceeds the limit", 413)
         try:
@@ -58,7 +58,7 @@ class DirectoryPolicyView(View):
                 allowed = {"repo_id", "path", "kind", "limit", "after"}
                 if set(request.GET) - allowed or any(len(request.GET.getlist(key)) != 1 for key in request.GET):
                     raise invalid("Invalid policy query")
-                if not {"repo_id", "path", "kind"} <= set(request.GET) or request.body:
+                if not {"repo_id", "path", "kind"} <= set(request.GET) or request.read(1):
                     raise invalid("Policy target is required")
                 limit = request.GET.get("limit", "50")
                 if not re.fullmatch(r"[1-9][0-9]{0,2}", limit):
