@@ -53,13 +53,17 @@ class LoginRuntime:
         self.proofs = PendingLoginProofs(redis, prefix=prefix + "oidc:pending:",
             browser_bindings=self.browser)
         self.pending = PendingLoginStatus(self.proofs, self.provisioning)
-        keys = SigningKeys(oidc.jwks_url, client=HttpsJsonClient(
-            maximum_bytes=65536, ca_bundle=oidc.ca_bundle))
+        self.keys_client = HttpsJsonClient(maximum_bytes=65536, ca_bundle=oidc.ca_bundle)
+        keys = SigningKeys(oidc.jwks_url, client=self.keys_client)
         self.flow = OIDCFlow(oidc, RedisLoginFlows(redis, prefix=prefix + "oidc:flow:"),
             IDTokenValidator(oidc, keys))
         self.login = PreparedOIDCLogin(self.flow, self.bindings,
             preparation_factory=self.preparation, provisioning=self.provisioning,
             pending_proofs=self.proofs)
+
+    def close(self):
+        """Release owned JWKS transport, not caller-owned SQL/Redis/directory."""
+        self.keys_client.session.close()
 
     def preparation(self, user_id):
         return SubjectPreparation(self.connection, self.redis, provider_id=self.provider,
