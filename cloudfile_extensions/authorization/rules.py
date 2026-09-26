@@ -16,6 +16,7 @@ from ..events.outbox import EventWriter
 from ..jobs.authority import scope_locks
 from ..resources.paths import resource_ref, normalize_path
 from ..schema.runner import SchemaRunner
+from .requests import require_storage as require_request_storage, response as saved_response
 
 
 def digest(value):
@@ -260,10 +261,10 @@ class ACLRules:
                         if self.authorize(cursor, self.actor, ref) is not True:
                             raise ContractError("ACCESS_DENIED", "ACL management is not allowed", 403)
                         if request_key is not None:
+                            require_request_storage(cursor)
                             cursor.execute("SELECT request_digest,result_json,inherited_effect FROM cf_policy_request WHERE request_key=%s FOR UPDATE", (request_key,))
                             records = cursor.fetchall()
-                            cursor.execute("SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_policy_request'")
-                            if cursor.fetchall() != (("InnoDB",),) or len(records) > 1:
+                            if len(records) > 1:
                                 raise ValueError("unsafe policy request storage")
                             if records:
                                 saved_digest, saved_result, inherited = records[0]
@@ -274,18 +275,8 @@ class ACLRules:
                                 if self.authorize_change is not None and self.authorize_change(cursor, self.actor, ref,
                                         {"inherit": bool(inherited)}, value) is not True:
                                     raise ContractError("ACCESS_DENIED", "Policy replay exceeds management scope", 403)
-                                if not isinstance(saved_result, str) or len(saved_result.encode()) > 16384:
-                                    raise ValueError("invalid saved policy response")
-                                result = json.loads(saved_result)
-                                if not isinstance(result, dict):
-                                    raise ValueError("invalid saved policy response")
-                                if value is None:
-                                    if result != dict(id=rule_id, deleted=True):
-                                        raise ValueError("invalid saved deletion")
-                                elif (result.get("repo_id"), result.get("path"), result.get("kind"), result.get("subject"),
-                                      result.get("permission"), result.get("inherit")) != (ref["repo_id"], value["path"],
-                                      value["kind"], value["subject"], value["permission"], value["inherit"]):
-                                    raise ValueError("invalid saved mutation")
+                                result = saved_response(saved_result, reference=ref, value=value,
+                                    rule_id=rule_id, validate=self.validate)
                                 if self.finalize is not None:
                                     self.finalize(cursor)
                                 self.connection.commit()
