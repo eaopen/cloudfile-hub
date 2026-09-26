@@ -1,0 +1,8 @@
+{
+  "version": "025_search_catchup",
+  "steps": [{
+    "sql": "CREATE TABLE cf_search_catchup (generation VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,baseline BIGINT UNSIGNED NOT NULL,target_sequence BIGINT UNSIGNED NOT NULL,checked_sequence BIGINT UNSIGNED NOT NULL,state VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,updated_at DATETIME(6) NOT NULL,PRIMARY KEY(generation,repo_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+    "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_search_catchup')='InnoDB' AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_search_catchup')=7 AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_search_catchup' AND index_name='PRIMARY')='generation,repo_id',1,0)",
+    "expected": 1
+  }]
+}

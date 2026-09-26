@@ -21,6 +21,7 @@ from .native_directory import NativeCommitDirectoryReader
 from .rebuild_store import SearchRebuildStore
 from .rebuild_execution import SearchRebuildExecution
 from .rebuild_coordinator import SearchRebuildCoordinator
+from .catchup import SearchCatchupInspector
 
 
 class SearchInitializationFactory:
@@ -79,6 +80,10 @@ class SearchRebuildRuntime:
 
     def advance(self, *, repo_id):
         return self.coordinator.advance(generation=self.generation, repo_id=repo_id)
+
+    def advance_catchup(self, *, repo_id):
+        return SearchCatchupInspector(self.coordinator.execution.store).advance_checkpoint(
+            generation=self.generation, index=self.coordinator.execution.client.index, repo_id=repo_id)
 
 
 class SearchRebuildFactory(SearchInitializationFactory):

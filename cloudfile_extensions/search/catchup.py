@@ -50,6 +50,13 @@ class SearchCatchupInspector:
         self.store, self.clock = store, clock
 
     def check_batch(self, *, generation, index, repo_id, after=None):
+        return self._inspect(generation=generation, index=index, repo_id=repo_id, after=after, persist=False)
+
+    def advance_checkpoint(self, *, generation, index, repo_id):
+        # No caller position/target; resume only the durable database checkpoint.
+        return self._inspect(generation=generation, index=index, repo_id=repo_id, persist=True)
+
+    def _inspect(self, *, generation, index, repo_id, after=None, persist=False):
         ref, _ = self.store._directory(repo_id, "/")
         deadline = self.clock() + 20
         with self.store._owned(generation, index) as sql:
@@ -67,9 +74,28 @@ class SearchCatchupInspector:
             target = row[0] if row is not None and row[0] is not None else 0
             if type(target) is not int or not baseline <= target <= 2 ** 64 - 1 or position > target:
                 raise ContractError("SEARCH_PLAN_CONFLICT", "Catch-up event boundary is invalid", 409)
+            if persist:
+                sql.execute("SELECT baseline,target_sequence,checked_sequence,state FROM cf_search_catchup WHERE generation=%s AND repo_id=%s FOR UPDATE", (generation, ref["repo_id"]))
+                checkpoint = sql.fetchone()
+                if checkpoint is None:
+                    sql.execute("INSERT INTO cf_search_catchup(generation,repo_id,baseline,target_sequence,checked_sequence,state,updated_at) VALUES(%s,%s,%s,%s,%s,'pending',UTC_TIMESTAMP(6))", (generation, ref["repo_id"], baseline, target, baseline))
+                else:
+                    if (len(checkpoint) != 4 or any(type(value) is not int for value in checkpoint[:3]) or
+                            checkpoint[0] != baseline or not baseline <= checkpoint[2] <= checkpoint[1] <= target or
+                            checkpoint[3] not in ("pending", "complete") or
+                            (checkpoint[3] == "complete" and checkpoint[2] != checkpoint[1])):
+                        raise ContractError("SEARCH_PLAN_CONFLICT", "Catch-up checkpoint is invalid", 409)
+                    target, position = checkpoint[1], checkpoint[2]
+            def finish(state, checked, pending=None):
+                if persist:
+                    sql.execute("UPDATE cf_search_catchup SET checked_sequence=%s,state=%s,updated_at=UTC_TIMESTAMP(6) WHERE generation=%s AND repo_id=%s AND baseline=%s AND target_sequence=%s AND checked_sequence=%s", (checked, "complete" if checked == target else "pending", generation, ref["repo_id"], baseline, target, position))
+                    # MySQL may report zero for an unchanged idempotent result.
+                    if sql.rowcount not in (0, 1):
+                        raise ContractError("SEARCH_PLAN_CONFLICT", "Catch-up checkpoint changed", 409)
+                return dict(state=state, checked_through=str(checked), observed_cutoff=str(target), pending_event_id=pending)
             sql.execute("SELECT sequence,event_id,payload,search_state FROM cf_event_outbox FORCE INDEX(stream_sequence) WHERE stream=%s AND sequence>%s AND sequence<=%s ORDER BY sequence LIMIT 100", (stream, position, target))
             events = sql.fetchall()
-            budget, checked = 0, position
+            budget, plan_budget, checked = 0, 0, position
             for event_sequence, event_id, raw, state in events:
                 if self.clock() >= deadline:
                     raise ContractError("SEARCH_UNAVAILABLE", "Catch-up check deadline exceeded", 503)
@@ -77,9 +103,11 @@ class SearchCatchupInspector:
                     if type(event_sequence) is not int or not checked < event_sequence <= target or not isinstance(raw, str):
                         raise ValueError()
                     size = len(raw.encode("utf-8"))
-                    budget += size
-                    if size > 65536 or budget > 1048576:
+                    if size > 65536:
                         raise ValueError()
+                    if budget + size > 1048576:
+                        return finish("batch_checked", checked)
+                    budget += size
                     payload = json.loads(raw, object_pairs_hook=_object)
                     if (type(payload.get("schema_version")) is not int or payload["schema_version"] != 1 or
                             payload.get("event_id") != event_id or payload.get("stream") != stream or payload.get("sequence") != str(event_sequence)):
@@ -98,9 +126,12 @@ class SearchCatchupInspector:
                     if plan is not None:
                         if fanout is not None:
                             raise ContractError("SEARCH_PLAN_CONFLICT", "Event has conflicting projection plans", 409)
-                        budget += len(plan[1].encode("utf-8")) if isinstance(plan[1], str) else 1048577
-                        if budget > 1048576:
-                            raise ContractError("SEARCH_UNAVAILABLE", "Catch-up plan budget exceeded", 503)
+                        size = len(plan[1].encode("utf-8")) if isinstance(plan[1], str) else 1048577
+                        if size > 1048576:
+                            raise ContractError("SEARCH_PLAN_CONFLICT", "Catch-up plan is unbounded", 409)
+                        if plan_budget + size > 1048576:
+                            return finish("batch_checked", checked)
+                        plan_budget += size
                         sql.execute("SELECT step,payload_hash,state,task_id FROM cf_search_task WHERE event_id=%s AND index_generation=%s ORDER BY step LIMIT 10002", (event_id, generation))
                         qualified = plan_receipts_complete(index, plan, sql.fetchall())
                     else:
@@ -113,9 +144,10 @@ class SearchCatchupInspector:
                     sql.execute("SELECT event_id FROM cf_search_task WHERE event_id=%s AND index_generation<>%s AND state<>'succeeded' LIMIT 1", (event_id, generation))
                     qualified = qualified and sql.fetchone() is None
                 if not qualified:
-                    return dict(state="event_pending", checked_through=str(checked), observed_cutoff=str(target), pending_event_id=event_id)
+                    return finish("event_pending", checked, event_id)
                 checked = event_sequence
             if self.clock() >= deadline:
                 raise ContractError("SEARCH_UNAVAILABLE", "Catch-up check deadline exceeded", 503)
-            return dict(state="batch_checked" if checked < target else "observed_cutoff_checked",
-                checked_through=str(checked), observed_cutoff=str(target), pending_event_id=None)
+            if not events and checked < target:
+                raise ContractError("SEARCH_PLAN_CONFLICT", "Catch-up events disappeared", 409)
+            return finish("batch_checked" if checked < target else "observed_cutoff_checked", checked)
