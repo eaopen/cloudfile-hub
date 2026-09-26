@@ -101,3 +101,18 @@ class LockLeaseStore:
         row = self._load(sql, resource_uid, repo_id)
         return self._result(row) if row is not None else dict(fencing="0", active=False,
             owner_user_id=None, holder_id=None, base_version=None, expires_at=None)
+
+    def force_release(self, sql, *, resource_uid, repo_id, fencing):
+        self._key(sql, resource_uid, repo_id)
+        if type(fencing) is not int or not 1 <= fencing < 2 ** 64 - 1:
+            raise ValueError("bounded management fencing required")
+        row = self._load(sql, resource_uid, repo_id)
+        if row is None or row[1] != fencing or row[4] is None:
+            raise ContractError("LOCK_CONFLICT", "Lease changed before management recovery", 409)
+        # Invalidate the administrative target even if already expired. Retain
+        # its UID and strictly increase fencing; never delete/reset the row.
+        sql.execute("UPDATE cf_lock_lease SET fencing=fencing+1,owner_user_id=NULL,holder_id=NULL,token_digest=NULL,base_version=NULL,expires_at=NULL WHERE resource_uid=%s AND fencing=%s", (resource_uid, fencing))
+        if sql.rowcount != 1:
+            raise ContractError("LOCK_CONFLICT", "Lease changed", 409)
+        self._bump(sql, repo_id)
+        return self._result(self._load(sql, resource_uid, repo_id))

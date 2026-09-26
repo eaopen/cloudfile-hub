@@ -12,15 +12,21 @@ from ..resources.paths import resource_ref
 from ..resources.service import ResourceService
 from ..resources.requests import execute
 from .store import LockLeaseStore
+from .authority import LockManagementAuthority
 
 
 class FileLockService:
-    def __init__(self, resources, *, holder, version_reader):
+    def __init__(self, resources, *, holder, version_reader, management=None):
         if not isinstance(resources, ResourceService) or not callable(version_reader):
             raise ValueError("actual resource service and protected native version reader required")
         identifier(holder, maximum=128)
         self.resources, self.holder, self.version_reader = resources, holder, version_reader
         self.leases, self.events = LockLeaseStore(), EventWriter()
+        if management is not None and (not isinstance(management, LockManagementAuthority) or
+                management.state.connection is not resources.store.connection or
+                management.actor != resources.write_authority.actor):
+            raise ValueError("same-connection current lock management authority required")
+        self.management = management
 
     @staticmethod
     def _reference(value):
@@ -48,7 +54,8 @@ class FileLockService:
         protected = {name: value for name, value in request.items() if name != "token"}
         protected["reference"] = ref
         protected["holder"] = self.holder
-        protected["token_digest"] = hashlib.sha256(request["token"].encode("ascii")).hexdigest()
+        if "token" in request:
+            protected["token_digest"] = hashlib.sha256(request["token"].encode("ascii")).hexdigest()
         receipt, _ = execute(sql, provider=self.resources.write_authority.state.provider,
             actor=self.resources.write_authority.actor, operation=operation, key=key,
             request=protected, lifecycle=evidence.lifecycle_ref, secret=self.resources.store.secret,
@@ -131,3 +138,30 @@ class FileLockService:
                     holder_id=None, base_version=None, expires_at=None)
             return dict(resource_uid=row["uid"], **self.leases.status(sql, resource_uid=row["uid"], repo_id=reference["repo_id"]))
         return self.resources.read_authority.consume(ref, read)
+
+    def force_release(self, request, *, idempotency_key):
+        object_fields(request, ("reference", "resource_uid", "fencing", "reason"))
+        ref = self._reference(request["reference"])
+        reason = request["reason"]
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 512 or any(ord(c) < 32 for c in reason):
+            raise invalid("Management release requires a bounded reason")
+        fence = sequence(request["fencing"])
+        if not 1 <= fence < 2 ** 64 - 1:
+            raise invalid("Bounded management fencing required")
+        if self.management is None:
+            raise ContractError("LOCK_UNAVAILABLE", "Lock management authority is unavailable", 503)
+        def apply(sql, reference):
+            evidence, row = self._resource(sql, reference)
+            if row is None or row["uid"] != request["resource_uid"]:
+                raise ContractError("LOCK_CONFLICT", "Resource lifecycle changed", 409)
+            def mutate():
+                lease = self.leases.force_release(sql, resource_uid=row["uid"], repo_id=reference["repo_id"], fencing=fence)
+                self.events.append(sql, dict(event_id=str(uuid4()), request_id=self.resources.request_id,
+                    occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    actor_user_id=self.management.actor, actor_kind="user", source="hub", action="lock.force-released",
+                    result="succeeded", repo_id=reference["repo_id"], path=reference["path"], resource_uid=row["uid"],
+                    resource_kind="file", revision=lease["fencing"], reason=reason))
+                return dict(resource_uid=row["uid"], resource=reference, **lease)
+            return self._retry(sql, reference, evidence, request=request, key=idempotency_key,
+                operation="locks.force-release", mutate=mutate)
+        return self.management.consume(ref, apply)

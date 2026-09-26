@@ -1,5 +1,7 @@
 """Explicit lease service assembly; no routes or capability enablement."""
 from contextlib import contextmanager
+import hmac
+import json
 
 from ..common.validation import identifier
 from ..resources.runtime import ResourceServiceFactory
@@ -20,5 +22,11 @@ class FileLockFactory:
             # it must not return a browser body/header holder or only userId.
             # Two sessions of one employee are distinct holders.
             holder = self.holder_reader(request, resources)
-            identifier(holder, maximum=128)
+            identifier(holder, maximum=512)
+            # Never expose a native session key or device credential as a public
+            # holder ID. Domain-separated HMAC retains stable session isolation.
+            holder = hmac.digest(resources.store.secret, json.dumps([
+                "cf.lock.holder.v1", resources.write_authority.state.provider,
+                resources.write_authority.actor, holder], ensure_ascii=False,
+                separators=(",", ":")).encode("utf-8"), "sha256").hex()
             yield FileLockService(resources, holder=holder, version_reader=self.version_reader)
