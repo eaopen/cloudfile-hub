@@ -79,6 +79,43 @@ class ProjectionTest(DatabaseTestCase):
         self.assertEqual((plan.add, plan.remove), ((), ()))
         self.assertEqual(self.calls, 4)
 
+    def test_refresh_guard_lost_scope_cannot_supply_owner_proof(self):
+        from cloudfile_extensions.directory.coordinator import SQLRefreshGuard
+        from cloudfile_extensions.jobs.authority import canonical_scope, lock_name
+        guard = SQLRefreshGuard(self.connection, provider="directory")
+        scope = dict(type="user", provider="directory", external_id="u1")
+        with self.assertRaises(ContractError):
+            with guard("u1", self.epoch, phase="publish") as proof:
+                with self.connection.cursor() as cursor:
+                    cursor.execute("SELECT RELEASE_LOCK(%s)", (lock_name(self.database, canonical_scope(scope)),))
+                    self.assertEqual(cursor.fetchone()[0], 1)
+                proof()
+        self.assertFalse(self.connection.open)
+
+    def test_refresh_guard_serializes_competing_generations(self):
+        import pymysql
+        from concurrent.futures import ThreadPoolExecutor
+        from threading import Event
+        from cloudfile_extensions.directory.coordinator import SQLRefreshGuard
+        attempting, entered = Event(), Event()
+        def successor():
+            connection = pymysql.connect(**self.options, database=self.database)
+            try:
+                attempting.set()
+                with SQLRefreshGuard(connection, provider="directory")("u1", uuid4().hex, phase="begin") as proof:
+                    proof()
+                    entered.set()
+            finally:
+                connection.close()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            with SQLRefreshGuard(self.connection, provider="directory")("u1", self.epoch, phase="publish") as proof:
+                future = executor.submit(successor)
+                self.assertTrue(attempting.wait(1))
+                self.assertFalse(entered.wait(0.1))
+                proof()
+            future.result(timeout=5)
+        self.assertTrue(entered.is_set())
+
     def test_disabled_snapshot_removes_owned_members_without_adding(self):
         self.subject.update(status="disabled", organizations=[], organization_ancestors=[], roles=[])
         self.assertEqual(self.apply().remove, (4,))
@@ -109,6 +146,40 @@ class ProjectionTest(DatabaseTestCase):
         with self.connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM cf_probe_member_audit")
             self.assertEqual(cursor.fetchone()[0], 0)
+
+    @unittest.skipUnless(os.environ.get("CF_TEST_REDIS_PORT"), "requires isolated Redis")
+    def test_real_refresh_guard_projection_and_ready(self):
+        import redis
+        from cloudfile_extensions.directory.contexts import SubjectContexts
+        from cloudfile_extensions.directory.coordinator import SQLRefreshGuard
+        from cloudfile_extensions.jobs.authority import canonical_scope, lock_name
+        client = redis.Redis(host=os.environ.get("CF_TEST_REDIS_HOST", "127.0.0.1"),
+                             port=int(os.environ["CF_TEST_REDIS_PORT"]))
+        scope = dict(type="user", provider="directory", external_id="u1")
+        def fetch(user):
+            # Source I/O must not hold the SQL authority lock.
+            with self.admin.cursor() as cursor:
+                cursor.execute("SELECT IS_USED_LOCK(%s)", (lock_name(self.database, canonical_scope(scope)),))
+                self.assertIsNone(cursor.fetchone()[0])
+            return self.subject
+        contexts = SubjectContexts(client, provider_id="directory", fetch=fetch,
+                attribute_allowlist=(), account_active=lambda user: True,
+                barrier_active=lambda provider, user: False,
+                refresh_guard=SQLRefreshGuard(self.connection, provider="directory"),
+                project=lambda subject, epoch: self.projector.apply(subject, epoch, native_username=self.username),
+                prefix="cf:test:" + uuid4().hex + ":", jitter=lambda: 0)
+        self.projector.assert_generation = contexts.assert_generation
+        try:
+            value = contexts.get("u1", trigger="login")
+            self.assertEqual(value["status"], "ready")
+            self.assertEqual(self.memberships(), ((1, 0), (2, 0), (3, 0), (5, 0), (6, 1)))
+            self.assertEqual(contexts.get("u1"), value)
+            with self.admin.cursor() as cursor:
+                cursor.execute("SELECT IS_USED_LOCK(%s)", (lock_name(self.database, canonical_scope(scope)),))
+                self.assertIsNone(cursor.fetchone()[0])
+        finally:
+            client.delete(*contexts._keys("u1"))
+            client.close()
 
     @unittest.skipUnless(os.environ.get("CF_TEST_REDIS_PORT"), "requires isolated Redis")
     def test_real_redis_generation_loss_rolls_back_native_sql(self):
