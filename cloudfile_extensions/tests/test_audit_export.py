@@ -5,13 +5,15 @@ from unittest.mock import Mock
 
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.events.export import AuditCSV, csv_cell
+from cloudfile_extensions.events.query import AuditReader
 
 
 class AuditExportTests(unittest.TestCase):
     def setUp(self):
         self.reader = Mock()
-        self.reader.list.return_value = {"items": [{"id": "1", "operator": "private@example.invalid",
-            "source_path": "=CMD()", "schema_version": 0}], "next_cursor": None}
+        event = dict.fromkeys(AuditReader.FIELDS)
+        event.update(id=1, operator="private@example.invalid", source_path="=CMD()", schema_version=0)
+        self.reader.list.return_value = {"items": [event], "next_cursor": None}
         self.authorize = Mock(return_value=True)
         def redact(actor, row):
             row["operator"] = "[redacted]"
@@ -79,3 +81,19 @@ class AuditExportTests(unittest.TestCase):
             list(self.export.generate(**self.query))
         with self.assertRaises(ContractError):
             next(self.export.generate(**self.query, cursor="old"))
+
+    def test_export_cannot_change_facts_or_infer_legacy_identity(self):
+        for changes in ({"id": 2}, {"result": "invented"}, {"actor_user_id": "guessed"},
+                        {"actor_kind": "user"}):
+            self.export.redact = lambda actor, row: {**row, **changes}
+            with self.assertRaises(ContractError) as caught:
+                list(self.export.generate(**self.query))
+            self.assertEqual(caught.exception.status, 503)
+
+    def test_redaction_exception_does_not_expose_internal_details(self):
+        def failing(actor, row):
+            raise RuntimeError("private deployment details")
+        self.export.redact = failing
+        with self.assertRaises(ContractError) as caught:
+            list(self.export.generate(**self.query))
+        self.assertNotIn("private", caught.exception.message)

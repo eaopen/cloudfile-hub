@@ -4,6 +4,26 @@ Never resolves a legacy operator/email into a business identity. Stored facts
 remain unchanged; this function is not an authorization decision.
 """
 from ..common.validation import identifier
+from ..common.errors import ContractError
+from .query import AuditReader
+
+
+def redact_event(redact, actor, event):
+    """Apply the same fact-preserving presentation contract to JSON and CSV."""
+    try:
+        value = redact(actor, dict(event))
+        if not isinstance(value, dict) or not set(AuditReader.FIELDS) <= value.keys():
+            raise ValueError()
+        for field in ("id", "event_id", "schema_version", "occurred_at", "recorded_at",
+                      "repo_id", "resource_uid", "source", "operation", "result"):
+            if value[field] != event[field]:
+                raise ValueError()
+        if event["schema_version"] == 0 and any(
+                value[field] is not None for field in ("actor_user_id", "actor_kind")):
+            raise ValueError()
+        return {field: value[field] for field in AuditReader.FIELDS}
+    except Exception:
+        raise ContractError("AUDIT_UNAVAILABLE", "Audit redaction is unavailable", 503) from None
 
 
 def default_redact(actor, event):

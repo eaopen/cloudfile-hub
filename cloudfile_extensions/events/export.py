@@ -9,6 +9,7 @@ import io
 
 from ..common.errors import ContractError
 from .query import AuditReader
+from .privacy import redact_event
 
 
 def csv_cell(value):
@@ -63,10 +64,8 @@ class AuditCSV:
             for event in page["items"]:
                 # Redact a copy, then serialize only known fields; a redactor
                 # cannot introduce secret/raw payload columns into the CSV.
-                value = self.redact(actor, dict(event))
-                if not isinstance(value, dict):
-                    raise ContractError("AUDIT_UNAVAILABLE", "Audit export redaction is unavailable", 503)
-                row = self._row(csv_cell(value.get(field)) for field in AuditReader.FIELDS)
+                value = redact_event(self.redact, actor, event)
+                row = self._row(csv_cell(value[field]) for field in AuditReader.FIELDS)
                 count += 1
                 size += len(row)
                 if count > self.max_rows or size > self.max_bytes:

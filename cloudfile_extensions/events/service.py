@@ -13,6 +13,7 @@ from ..common.errors import ContractError
 from ..common.validation import identifier, object_fields, utc_time
 from ..resources.paths import normalize_path
 from .query import AuditReader
+from .privacy import redact_event
 
 
 def safe_errors(method):
@@ -60,16 +61,7 @@ class AuditService:
         page = self.reader.list(actor=actor, **self._filters(filters), limit=limit, cursor=cursor)
         items = []
         for event in page["items"]:
-            redacted = self.redact(actor, dict(event))
-            if not isinstance(redacted, dict) or not set(AuditReader.FIELDS) <= redacted.keys():
-                raise ContractError("AUDIT_UNAVAILABLE", "Audit redaction is unavailable", 503)
-            for field in ("id", "event_id", "schema_version", "occurred_at", "recorded_at", "repo_id", "resource_uid", "source", "operation", "result"):
-                if redacted[field] != event[field]:
-                    raise ContractError("AUDIT_UNAVAILABLE", "Audit redaction changed a fact identity", 503)
-            if event["schema_version"] == 0 and any(redacted[field] is not None for field in ("actor_user_id", "actor_kind")):
-                raise ContractError("AUDIT_UNAVAILABLE", "Legacy audit identity cannot be inferred", 503)
-            # Deployment redaction cannot append arbitrary internal fields.
-            items.append({field: redacted[field] for field in AuditReader.FIELDS})
+            items.append(redact_event(self.redact, actor, event))
         return {"items": items, "next_cursor": page["next_cursor"]}
 
     @safe_errors
