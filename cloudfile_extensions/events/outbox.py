@@ -263,6 +263,20 @@ class Outbox:
         acknowledging only this consumer. Caller must explicitly invoke this;
         no scheduler, bulk SQL update or automatic search bypass is installed.
         """
+        return self._reconcile_audit_only(claim)
+
+    def reconcile_parked_audit_only(self, claim, *, code):
+        """Explicit reconciliation of one exact parked audit-only fact.
+
+        Requires its captured claim epoch/payload and observed safe error code.
+        Never resumes, deletes or acknowledges resource/index work. No public
+        endpoint is registered; trusted operators supply the exact saved claim.
+        """
+        if not isinstance(code, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code):
+            raise ValueError("exact safe parked error code required")
+        return self._reconcile_audit_only(claim, recovery_code=code)
+
+    def _reconcile_audit_only(self, claim, *, recovery_code=None):
         if (not isinstance(claim, EventClaim) or claim.consumer not in self.CONSUMERS or
                 type(claim.epoch) is not int or claim.epoch < 1):
             raise ValueError("actual owned event claim required")
@@ -270,9 +284,14 @@ class Outbox:
         self.connection.begin()
         try:
             with self.connection.cursor() as sql:
+                if recovery_code is None:
+                    predicate = name + "_state='running' AND " + name + "_owner=%s AND " + name + "_epoch=%s AND " + name + "_expiry>UTC_TIMESTAMP(6)"
+                    parameters = (claim.event_id, claim.owner, claim.epoch)
+                else:
+                    predicate = name + "_state='recovery' AND " + name + "_owner IS NULL AND " + name + "_expiry IS NULL AND " + name + "_epoch=%s AND " + name + "_error=%s"
+                    parameters = (claim.event_id, claim.epoch, recovery_code)
                 sql.execute("SELECT payload,stream,sequence,schema_version,audit_state FROM cf_event_outbox WHERE event_id=%s AND " +
-                    name + "_state='running' AND " + name + "_owner=%s AND " + name +
-                    "_epoch=%s AND " + name + "_expiry>UTC_TIMESTAMP(6) FOR UPDATE", (claim.event_id, claim.owner, claim.epoch))
+                    predicate + " FOR UPDATE", parameters)
                 row = sql.fetchone()
                 if row is None:
                     raise ContractError("WORKER_LEASE_LOST", "Event lease is no longer current", 409)
@@ -293,7 +312,12 @@ class Outbox:
                     sql.execute("SELECT event_id FROM " + table + " WHERE event_id=%s LIMIT 1 FOR UPDATE", (claim.event_id,))
                     if sql.fetchone() is not None:
                         raise ContractError("EVENT_RECOVERY_REQUIRED", "Frozen index work requires separate recovery", 409)
-                self._update(claim, name + "_state='done'," + name + "_expiry=NULL," + name + "_error=NULL", ())
+                if recovery_code is None:
+                    self._update(claim, name + "_state='done'," + name + "_expiry=NULL," + name + "_error=NULL", ())
+                else:
+                    sql.execute("UPDATE cf_event_outbox SET " + name + "_state='done'," + name + "_error=NULL WHERE event_id=%s AND " + predicate, parameters)
+                    if sql.rowcount != 1:
+                        raise ContractError("EVENT_RECOVERY_CONFLICT", "Parked event state changed", 409)
             self.connection.commit()
         finally:
             self.connection.rollback()

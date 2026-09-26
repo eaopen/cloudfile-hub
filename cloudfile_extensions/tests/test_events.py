@@ -11,6 +11,41 @@ from cloudfile_extensions.tests.test_schema import DatabaseTestCase
 
 
 class EventStoreTest(DatabaseTestCase):
+    def test_parked_mutation_blocks_its_stream_but_not_another_library(self):
+        self.append()
+        claim = self.outbox.claim("search", "worker")
+        self.outbox.require_recovery(claim, code="SEARCH_SUBMISSION_UNKNOWN")
+        self.append(dict(self.event, event_id=str(uuid4()), request_id="later", revision="2"))
+        self.assertIsNone(self.outbox.claim("search", "worker-2"))
+        other = dict(self.event, event_id=str(uuid4()), repo_id="22222222-2222-4222-8222-222222222222")
+        self.append(other)
+        self.assertEqual(self.outbox.claim("search", "worker-2").event_id, other["event_id"])
+        with self.assertRaises(ContractError):
+            self.outbox.reconcile_parked_audit_only(claim, code="SEARCH_SUBMISSION_UNKNOWN")
+        with self.assertRaises(ContractError):
+            self.outbox.acknowledge(claim)
+
+    def test_parked_audit_recovery_requires_exact_state_and_preserves_fact(self):
+        fact = dict(event_id=str(uuid4()), occurred_at="2026-09-27T00:00:00Z", request_id="recovery",
+            actor_user_id="u1", actor_kind="user", source="hub", action="acl.updated", result="succeeded",
+            repo_id="11111111-1111-4111-8111-111111111111", path="/parts", resource_kind="dir", policy_revision=str(uuid4()))
+        saved = self.append(fact)
+        with self.connection.cursor() as sql:
+            sql.execute("UPDATE cf_event_outbox SET search_state='queued' WHERE event_id=%s", (fact["event_id"],))
+        claim = self.outbox.claim("search", "worker")
+        self.outbox.require_recovery(claim, code="SEARCH_PROJECTION_PENDING")
+        with self.assertRaises(ContractError):
+            self.outbox.reconcile_parked_audit_only(claim, code="SEARCH_PLAN_CONFLICT")
+        self.outbox.reconcile_parked_audit_only(claim, code="SEARCH_PROJECTION_PENDING")
+        with self.connection.cursor() as sql:
+            sql.execute("SELECT payload,search_state FROM cf_event_outbox WHERE event_id=%s", (fact["event_id"],))
+            row = sql.fetchone()
+        import json
+        self.assertEqual(json.loads(row[0]), saved)
+        self.assertEqual(row[1], "done")
+        with self.assertRaises(ContractError):
+            self.outbox.reconcile_parked_audit_only(claim, code="SEARCH_PROJECTION_PENDING")
+
     def test_explicit_historical_audit_recovery_preserves_fact_and_other_consumer(self):
         fact = dict(event_id=str(uuid4()), occurred_at="2026-09-27T00:00:00Z", request_id="recovery",
             actor_user_id="u1", actor_kind="user", source="hub", action="acl.updated", result="succeeded",
