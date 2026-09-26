@@ -55,6 +55,45 @@ class NativeDBSessionDelete:
         self.table = qualified(identity_schema, self.table_name)
         self.decoder = SessionStore()
 
+    def assert_current(self, cursor, session_key, reference):
+        """Check persisted signed session and accepted logout fences now.
+
+        Hosts must call at request entry AND immediately before an effect or
+        response release; a successful past check is not an enduring grant.
+        """
+        from seahub.auth import BACKEND_SESSION_KEY
+        self.index._transaction(cursor)
+        if (not isinstance(reference, dict) or set(reference) != {
+                "scope_hash", "subject_hash", "sid_hash", "authenticated_at"}
+                or reference.get("scope_hash") != self.index.scope_hash):
+            raise ContractError("AUTHENTICATION_REQUIRED", "OIDC session reference is unavailable", 401)
+        cursor.execute("SELECT subject_hash,sid_hash,authenticated_at,expires_at>UTC_TIMESTAMP(6) "
+            "FROM cf_oidc_session WHERE scope_hash=%s AND session_key=%s FOR UPDATE",
+            (self.index.scope_hash, session_key))
+        rows = cursor.fetchall()
+        if (len(rows) != 1 or rows[0][3] != 1 or reference != dict(
+                scope_hash=self.index.scope_hash, subject_hash=rows[0][0],
+                sid_hash=rows[0][1], authenticated_at=rows[0][2])):
+            raise ContractError("AUTHENTICATION_REQUIRED", "OIDC session is no longer current", 401)
+        subject, sid, issued, _ = rows[0]
+        for kind, target in (("subject", subject), ("sid", sid)):
+            if target is None:
+                continue
+            cursor.execute("SELECT cutoff_at FROM cf_oidc_logout_fence WHERE scope_hash=%s "
+                "AND target_type=%s AND target_hash=%s FOR UPDATE", (self.index.scope_hash, kind, target))
+            fences = cursor.fetchall()
+            if fences and (len(fences) != 1 or type(fences[0][0]) is not int or fences[0][0] >= issued):
+                raise ContractError("AUTHENTICATION_REQUIRED", "OIDC session was invalidated", 401)
+        cursor.execute("SELECT session_data FROM " + self.table +
+            " WHERE session_key=%s AND expire_date>UTC_TIMESTAMP(6) FOR UPDATE", (session_key,))
+        sessions = cursor.fetchall()
+        if len(sessions) != 1:
+            raise ContractError("AUTHENTICATION_REQUIRED", "Native session has expired or ended", 401)
+        data = self.decoder.decode(sessions[0][0])
+        if (not isinstance(data, dict) or data.get(BACKEND_SESSION_KEY) != BACKEND
+                or data.get(SESSION_REFERENCE_KEY) != reference):
+            raise ContractError("AUTHENTICATION_REQUIRED", "Signed native session changed", 401)
+
     def delete(self, cursor, session_key, notification):
         from seahub.auth import BACKEND_SESSION_KEY
         self.index._transaction(cursor)
