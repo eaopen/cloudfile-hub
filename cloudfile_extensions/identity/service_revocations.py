@@ -31,14 +31,17 @@ class ServiceRevocations:
         if value is not None:
             raise ContractError("AUTHENTICATION_REQUIRED", "Service credential was revoked", 401)
 
-    def revoke(self, principal):
+    def revoke(self, principal, *, retention=0):
         """Trusted operator receives a verified principal; never raw HTTP IDs."""
         from .service_tokens import ServicePrincipal
         if not isinstance(principal, ServicePrincipal):
             raise ValueError("verified service principal required")
+        if type(retention) is not int or not 0 <= retention <= 300:
+            raise ValueError("bounded native transfer retention required")
         remaining = principal.expires_at - self.clock()
         if not math.isfinite(remaining) or remaining > 330:
             raise ValueError("invalid revocation lifetime")
+        remaining += retention
         if remaining <= 0:
             return False
         ttl = math.ceil(remaining) + 1

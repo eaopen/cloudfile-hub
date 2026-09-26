@@ -66,7 +66,13 @@ class UserDelegationTests(unittest.TestCase):
         principal = self.verifier.verify(self.token())
         self.assertTrue(self.verifier.revoke(principal))
         arguments = self.redis.eval.call_args.args
-        self.assertEqual(arguments[-1], 61)
+        self.assertEqual(arguments[-1], 361)
         self.assertTrue(arguments[-2].startswith("cf:service-revocations:"))
         with self.assertRaises(ValueError):
             self.verifier.revoke(dict(token_id="token-1"))
+
+    def test_expired_verified_delegation_can_revoke_existing_transfer(self):
+        principal = self.verifier.verify(self.token())
+        self.now = principal.expires_at + 10
+        self.assertTrue(self.verifier.revoke(principal))
+        self.assertEqual(self.redis.eval.call_args.args[-1], 291)

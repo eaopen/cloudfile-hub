@@ -112,4 +112,4 @@ class UserDelegationVerifier:
         if not isinstance(principal, UserDelegation):
             raise ValueError("verified user delegation required")
         return self.revocations.revoke(ServicePrincipal(principal.service_id,
-            frozenset({"user.delegation"}), principal.token_id, principal.expires_at))
+            frozenset({"user.delegation"}), principal.token_id, principal.expires_at), retention=300)
