@@ -102,6 +102,41 @@ class ResourceStore:
             return result
         return authority.consume(reference, read)
 
+    def replace_user_tags_authorized(self, reference, tag_ids, *, expected_revision,
+                                    authority, lifecycle_reader, request_id):
+        from ..authorization.read import ContentMetadataWriteAuthority
+        from ..tags.bindings import replace_user_tags
+        from ..tags.definitions import uuid_value
+        from ..tags.read import bound_tags
+        if (not isinstance(authority, ContentMetadataWriteAuthority) or
+                authority.state.connection is not self.connection or not callable(lifecycle_reader)):
+            raise ValueError("same-connection native write authority and lifecycle reader required")
+        identifier(request_id)
+        if not isinstance(tag_ids, list) or len(tag_ids) > 128:
+            raise ContractError("INVALID_REQUEST", "Too many resource tags", 400)
+        ids = [uuid_value(value) for value in tag_ids]
+        if len(ids) != len(set(ids)):
+            raise ContractError("INVALID_REQUEST", "Duplicate resource tags", 400)
+        def write(cursor, ref):
+            evidence = self._validate_evidence(lifecycle_reader(cursor, ref))
+            row = self._row(ref, evidence, locking=True)
+            old = self._snapshot(ref, evidence, row)
+            compare_revision(expected_revision, old["revision"])
+            if row is None and not ids:
+                return {**old, "tags": []}, False
+            if row is None:
+                row = dict(uid=str(uuid4()), path=ref["path"], lifecycle_ref=evidence.lifecycle_ref,
+                    revision=1, description=None, local_open_type=None)
+                cursor.execute("INSERT INTO cf_resource(uid,repo_id,kind,path,path_hash,lifecycle_ref,revision,state,updated_at) VALUES(%s,%s,%s,%s,%s,%s,1,'active',UTC_TIMESTAMP(6))",
+                    (row["uid"], ref["repo_id"], ref["kind"], ref["path"], self._hash(ref["path"]), evidence.lifecycle_ref))
+            revision, changed = replace_user_tags(cursor, reference=ref, resource_uid=row["uid"],
+                lifecycle_ref=evidence.lifecycle_ref, expected_revision=row["revision"],
+                tag_ids=ids, actor=authority.actor, request_id=request_id)
+            result = {**self._snapshot(ref, evidence, {**row, "revision": revision}),
+                "tags": bound_tags(cursor, resource_uid=row["uid"], repo_id=ref["repo_id"])}
+            return result, changed
+        return authority.consume(resource_ref(reference), write)
+
     def replace_user_tags(self, reference, tag_ids, *, expected_revision, actor, request_id):
         """Strong resource condition and first-use UID inside lifecycle guard.
 
