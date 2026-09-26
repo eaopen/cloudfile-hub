@@ -11,13 +11,15 @@ class PolicyDeployment:
     factory: object
     redis: object
     resource_factory: object = None
+    audit_factory: object = None
 
     def close(self):
         # The host invokes this only after draining all requests at shutdown.
         self.redis.connection_pool.disconnect()
 
 
-def configure_policy(value, *, directory_authorization, resource_secret=None, lifecycle_reader=None):
+def configure_policy(value, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
+                     audit_secret=None, audit_redact=None):
     """value is trusted host settings, not request JSON or an import path.
 
     Matches the current native authority adapter: private Redis TCP, DB0, password
@@ -43,6 +45,11 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
     trusted_https_url(value["directory_url"])
     if not callable(directory_authorization):
         raise ValueError("machine directory credential supplier required")
+    if (audit_secret is None) != (audit_redact is None):
+        raise ValueError("audit secret and redaction must be configured together")
+    if audit_secret is not None and (not isinstance(audit_secret, bytes)
+            or len(audit_secret) < 32 or not callable(audit_redact)):
+        raise ValueError("trusted audit cursor secret and redaction required")
     if (resource_secret is None) != (lifecycle_reader is None):
         raise ValueError("resource secret and lifecycle adapter must be configured together")
     if resource_secret is not None and (not isinstance(resource_secret, bytes)
@@ -71,7 +78,13 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
                 preparation_scope=factory.preparation_scope, core=factory.core,
                 cloud_mode=factory.cloud_mode, secret=resource_secret,
                 lifecycle_reader=lifecycle_reader)
-        return PolicyDeployment(factory, client, resource_factory)
+        audit_factory = None
+        if audit_secret is not None:
+            from ..events.runtime import AuditQueryFactory
+            audit_factory = AuditQueryFactory(authenticate=factory.authenticate,
+                preparation_scope=factory.preparation_scope, core=factory.core,
+                cloud_mode=factory.cloud_mode, secret=audit_secret, redact=audit_redact)
+        return PolicyDeployment(factory, client, resource_factory, audit_factory)
     except Exception:
         client.connection_pool.disconnect()
         raise

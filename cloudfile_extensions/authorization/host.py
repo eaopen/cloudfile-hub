@@ -8,7 +8,8 @@ from .deployment import configure_policy
 
 
 class PolicyHost:
-    def __init__(self, settings, *, directory_authorization, resource_secret=None, lifecycle_reader=None):
+    def __init__(self, settings, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
+                 audit_secret=None, audit_redact=None):
         # Construct after the server worker fork, never in a preload parent.
         self.pid = os.getpid()
         self.lock = threading.Lock()
@@ -16,7 +17,8 @@ class PolicyHost:
         self.draining = False
         self.closed = False
         self.deployment = configure_policy(settings, directory_authorization=directory_authorization,
-            resource_secret=resource_secret, lifecycle_reader=lifecycle_reader)
+            resource_secret=resource_secret, lifecycle_reader=lifecycle_reader,
+            audit_secret=audit_secret, audit_redact=audit_redact)
 
     def _process(self):
         # Check before acquiring an inherited lock that may have been held at
@@ -30,15 +32,19 @@ class PolicyHost:
     def resource_service(self, request, request_id):
         return self._service(request, request_id, resource=True)
 
+    def audit_service(self, request, request_id):
+        return self._service(request, request_id, resource=False, audit=True)
+
     @contextmanager
-    def _service(self, request, request_id, *, resource):
+    def _service(self, request, request_id, *, resource, audit=False):
         self._process()
         with self.lock:
             if self.draining or self.closed:
                 raise ContractError("POLICY_UNAVAILABLE", "Policy host is draining", 503)
             self.active += 1
         try:
-            factory = self.deployment.resource_factory if resource else self.deployment.factory
+            factory = self.deployment.audit_factory if audit else (
+                self.deployment.resource_factory if resource else self.deployment.factory)
             if factory is None:
                 raise ContractError("RESOURCE_UNAVAILABLE", "Resource runtime is not configured", 503)
             with factory(request, request_id) as service:

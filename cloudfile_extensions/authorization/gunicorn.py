@@ -24,7 +24,9 @@ def post_worker_init(worker):
     try:
         _host = PolicyHost(config, directory_authorization=authorization,
             resource_secret=getattr(settings, "CLOUDFILE_RESOURCE_SECRET", None),
-            lifecycle_reader=getattr(settings, "CLOUDFILE_RESOURCE_LIFECYCLE_READER", None))
+            lifecycle_reader=getattr(settings, "CLOUDFILE_RESOURCE_LIFECYCLE_READER", None),
+            audit_secret=getattr(settings, "CLOUDFILE_AUDIT_CURSOR_SECRET", None),
+            audit_redact=getattr(settings, "CLOUDFILE_AUDIT_REDACT", None))
     except Exception:
         raise RuntimeError("CloudFile policy worker initialization failed; check trusted configuration") from None
 
@@ -41,6 +43,12 @@ def resource_service(request, request_id):
     if _host is None or _host.pid != os.getpid():
         raise ContractError("RESOURCE_UNAVAILABLE", "Resource worker is unavailable", 503)
     return _host.resource_service(request, request_id)
+
+
+def audit_service(request, request_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("AUDIT_UNAVAILABLE", "Audit worker is unavailable", 503)
+    return _host.audit_service(request, request_id)
 
 
 def worker_exit(server, worker):
