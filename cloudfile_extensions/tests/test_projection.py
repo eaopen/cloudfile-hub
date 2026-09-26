@@ -116,6 +116,33 @@ class ProjectionTest(DatabaseTestCase):
             future.result(timeout=5)
         self.assertTrue(entered.is_set())
 
+    def test_current_sql_subject_state_and_durable_barriers(self):
+        from cloudfile_extensions.directory.native_state import NativeSubjectState
+        state = NativeSubjectState(self.connection, native_schema=self.native,
+                                   identity_schema=self.identity, provider="directory")
+        self.assertEqual(state.username("u1"), self.username)
+        self.assertTrue(state.account_active("u1"))
+        self.assertFalse(state.account_active("unbound"))
+        self.assertFalse(state.barrier_active("directory", "u1"))
+        scope = dict(type="provider", provider="directory", external_id="directory")
+        job, _ = state.jobs.submit(actor="admin", actor_kind="user", kind="subject.refresh",
+                                   scope=scope, request={}, idempotency_key=uuid4().hex, barrier=True)
+        self.assertTrue(state.barrier_active("directory", "u1"))
+        with self.assertRaises(ContractError):
+            with state.refresh_guard("u1", self.epoch, phase="publish"):
+                self.fail("fenced refresh entered")
+        # Failure transition is permitted, but never clears the durable barrier.
+        with state.refresh_guard("u1", self.epoch, phase="fail") as proof:
+            proof()
+        self.assertTrue(state.barrier_active("directory", "u1"))
+        with self.admin.cursor() as cursor:
+            cursor.execute("UPDATE " + self.native + ".EmailUser SET is_active=0")
+        self.assertFalse(state.account_active("u1"))
+        with self.admin.cursor() as cursor:
+            cursor.execute("UPDATE " + self.identity + ".profile_profile SET login_id='U1'")
+        with self.assertRaises(ContractError):
+            state.username("u1")
+
     def test_disabled_snapshot_removes_owned_members_without_adding(self):
         self.subject.update(status="disabled", organizations=[], organization_ancestors=[], roles=[])
         self.assertEqual(self.apply().remove, (4,))
@@ -148,10 +175,62 @@ class ProjectionTest(DatabaseTestCase):
             self.assertEqual(cursor.fetchone()[0], 0)
 
     @unittest.skipUnless(os.environ.get("CF_TEST_REDIS_PORT"), "requires isolated Redis")
+    def test_preparation_assembly_real_account_barrier_members_and_audit(self):
+        import redis
+        from cloudfile_extensions.directory.preparation import SubjectPreparation
+        from cloudfile_extensions.directory.provider import DirectoryProvider
+        from unittest.mock import Mock
+        client = redis.Redis(host=os.environ.get("CF_TEST_REDIS_HOST", "127.0.0.1"),
+                             port=int(os.environ["CF_TEST_REDIS_PORT"]))
+        transport = Mock()
+        transport.get.return_value = self.subject
+        directory = DirectoryProvider("https://directory.example.invalid/context/v2",
+            authorization=lambda: "Bearer fixture", attribute_allowlist=(), client=transport,
+            require_organization_ancestors=True)
+        runtime = SubjectPreparation(self.connection, client, provider_id="directory", directory=directory,
+            native_schema=self.native, identity_schema=self.identity, actor_user_id="u1",
+            request_id="test-request", prefix="cf:test:" + uuid4().hex + ":")
+        try:
+            with self.assertRaises(ContractError) as caught:
+                runtime.prepare("u2", trigger="login")
+            self.assertEqual(caught.exception.status, 403)
+            self.assertEqual(transport.get.call_count, 0)
+            value = runtime.prepare("u1", trigger="login")
+            self.assertEqual(value["status"], "ready")
+            self.assertEqual(self.memberships(), ((1, 0), (2, 0), (3, 0), (5, 0), (6, 1)))
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT actor_user_id,operation,source,event_payload FROM cf_audit_event")
+                rows = cursor.fetchall()
+                self.assertEqual(len(rows), 1)
+                self.assertEqual(rows[0][:3], ("u1", "subject.memberships", "directory"))
+                self.assertEqual(json.loads(rows[0][3])["subject_revision"], value["context_epoch"])
+                cursor.execute("SELECT COUNT(*) FROM cf_event_outbox")
+                self.assertEqual(cursor.fetchone()[0], 1)
+            runtime.prepare("u1", trigger="login")
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT COUNT(*) FROM cf_audit_event")
+                self.assertEqual(cursor.fetchone()[0], 1)
+            # Source read remains a transport fixture. Add a real barrier during
+            # that read: publication guard must reject before native mutation.
+            def fenced_fetch(*args, **kwargs):
+                runtime.state.jobs.submit(actor="admin", actor_kind="user", kind="subject.refresh",
+                    scope=dict(type="user", provider="directory", external_id="u1"),
+                    request={}, idempotency_key=uuid4().hex, barrier=True)
+                return {**self.subject, "roles": []}
+            transport.get.side_effect = fenced_fetch
+            with self.assertRaises(ContractError):
+                runtime.prepare("u1", trigger="force")
+            self.assertEqual(self.memberships(), ((1, 0), (2, 0), (3, 0), (5, 0), (6, 1)))
+            self.assertTrue(runtime.state.barrier_active("directory", "u1"))
+        finally:
+            client.delete(*runtime.contexts._keys("u1"))
+            client.close()
+
+    @unittest.skipUnless(os.environ.get("CF_TEST_REDIS_PORT"), "requires isolated Redis")
     def test_real_refresh_guard_projection_and_ready(self):
         import redis
         from cloudfile_extensions.directory.contexts import SubjectContexts
-        from cloudfile_extensions.directory.coordinator import SQLRefreshGuard
+        from cloudfile_extensions.directory.native_state import NativeSubjectState
         from cloudfile_extensions.jobs.authority import canonical_scope, lock_name
         client = redis.Redis(host=os.environ.get("CF_TEST_REDIS_HOST", "127.0.0.1"),
                              port=int(os.environ["CF_TEST_REDIS_PORT"]))
@@ -162,11 +241,13 @@ class ProjectionTest(DatabaseTestCase):
                 cursor.execute("SELECT IS_USED_LOCK(%s)", (lock_name(self.database, canonical_scope(scope)),))
                 self.assertIsNone(cursor.fetchone()[0])
             return self.subject
+        state = NativeSubjectState(self.connection, native_schema=self.native,
+                                   identity_schema=self.identity, provider="directory")
         contexts = SubjectContexts(client, provider_id="directory", fetch=fetch,
-                attribute_allowlist=(), account_active=lambda user: True,
-                barrier_active=lambda provider, user: False,
-                refresh_guard=SQLRefreshGuard(self.connection, provider="directory"),
-                project=lambda subject, epoch: self.projector.apply(subject, epoch, native_username=self.username),
+                attribute_allowlist=(), account_active=state.account_active,
+                barrier_active=state.barrier_active,
+                refresh_guard=state.refresh_guard,
+                project=lambda subject, epoch: self.projector.apply(subject, epoch, native_username=state.username(subject["userId"])),
                 prefix="cf:test:" + uuid4().hex + ":", jitter=lambda: 0)
         self.projector.assert_generation = contexts.assert_generation
         try:
