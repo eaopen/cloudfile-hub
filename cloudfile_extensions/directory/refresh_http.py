@@ -5,6 +5,8 @@ from uuid import uuid4
 from django.http import JsonResponse
 from django.middleware.csrf import CsrfViewMiddleware
 from django.urls import path
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
 
 from ..authorization.http import DirectoryPolicyView
 from ..common.errors import ContractError, invalid
@@ -33,6 +35,8 @@ class UserRefreshView(DirectoryPolicyView):
                 raise RuntimeError("invalid fixed refresh authentication mode")
             if self.authentication_mode == "service" and request.headers.get("Cookie"):
                 raise invalid("Machine refresh does not accept browser cookies")
+            if self.authentication_mode == "service" and not request.headers.get("Authorization", "").startswith("Bearer "):
+                raise ContractError("AUTHENTICATION_REQUIRED", "Machine Bearer authentication is required", 401)
             if self.operation == "submit":
                 if self.authentication_mode == "session":
                     csrf = CsrfViewMiddleware(lambda _: None)
@@ -91,6 +95,7 @@ def user_refresh_routes(*, service_factory):
     ]
 
 
+@method_decorator(csrf_exempt, name="dispatch")
 class MachineUserRefreshView(UserRefreshView):
     authentication_mode = "service"
 
