@@ -59,3 +59,14 @@ class ContentReadAuthority(DirectoryManagement):
             self.epoch = None
             self.current_subject = None
             self.is_owner = False
+
+
+class ContentMetadataWriteAuthority(ContentReadAuthority):
+    """Same-cursor metadata mutation authority, never native bytes publication.
+
+    Uses the identical C policy result, including CE qualification, explicit
+    denial and hard native read-only state. Caller must additionally resolve
+    actual UID/lifecycle in the consumed transaction. No management bypass.
+    """
+    def decision_allowed(self, decision):
+        return decision["visible"] and decision["write"]

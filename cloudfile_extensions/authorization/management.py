@@ -76,6 +76,9 @@ class LibraryOwnerManagement:
             subject=current["subject"], rules=self.rules.candidates(reference, locking=True),
             ce_permission=permission, attribute_allowlist=self.preparation.contexts.allowlist)
         # Manage is separate but cannot reveal/override explicit content denial.
+        return self.decision_allowed(decision)
+
+    def decision_allowed(self, decision):
         return decision["visible"] and decision["read"]
 
     def qualification(self, cursor, reference, username, owner):
