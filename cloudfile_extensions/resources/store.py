@@ -5,7 +5,7 @@ from dataclasses import dataclass
 import hashlib
 import hmac
 import json
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from ..common.conditions import compare_revision
 from ..common.errors import ContractError
@@ -63,7 +63,32 @@ class ResourceStore:
             raise ContractError("PATH_STATE_PENDING", "Resource lifecycle requires reconciliation", 503)
         if not rows:
             return None
-        return dict(zip(("uid", "path", "lifecycle_ref", "revision", "description", "local_open_type"), rows[0]))
+        return self._decode_row(reference, rows[0])
+
+    @staticmethod
+    def _decode_row(reference, row):
+        """Stored values must satisfy the public contract, not just SQL types."""
+        try:
+            if len(row) != 6:
+                raise ValueError("invalid row shape")
+            uid, path, lifecycle, revision, description, hint = row
+            if not isinstance(uid, str) or str(UUID(uid)) != uid:
+                raise ValueError("invalid resource identity")
+            if type(revision) is not int or not 1 <= revision <= 18446744073709551615:
+                raise ValueError("invalid resource revision")
+            identifier(lifecycle, maximum=512)
+            if path != reference["path"]:
+                raise ValueError("invalid resource path")
+            attributes = {}
+            if description is not None:
+                attributes["description"] = description
+            if hint is not None:
+                attributes["local_open_type"] = hint
+            if attributes:
+                annotation_changes(attributes, kind=reference["kind"])
+            return dict(zip(("uid", "path", "lifecycle_ref", "revision", "description", "local_open_type"), row))
+        except (ValueError, TypeError, AttributeError, ContractError):
+            raise ContractError("RESOURCE_UNAVAILABLE", "Resource state requires reconciliation", 503) from None
 
     def _snapshot(self, reference, evidence, row):
         payload = json.dumps([reference, evidence.lifecycle_ref,
