@@ -13,6 +13,8 @@ import threading
 from uuid import uuid4
 
 from ..migration.dry_run import ImportDryRun
+from ..migration.stage import ImportStage
+from ..migration.working_copy import WorkingCopyBuilder
 from ..schema.runner import SchemaRunner
 from .store import JobStore
 from .worker import Handler, JobWorker
@@ -36,8 +38,13 @@ def configured_handlers(environment):
         raise ValueError("registered source configuration is required")
     # No import string, shell command or handler path is accepted from the job or
     # environment. Native mutations remain unavailable until their guard exists.
-    return {"migration.scan": Handler(ImportDryRun(
+    handlers = {"migration.scan": Handler(ImportDryRun(
         sources=sources, report_root=environment.get("CLOUDFILE_IMPORT_REPORT_ROOT", "")))}
+    work_root = environment.get("CLOUDFILE_IMPORT_WORK_ROOT")
+    if work_root is not None:
+        handlers["migration.stage"] = Handler(ImportStage(builder=WorkingCopyBuilder(
+            sources=sources, work_root=work_root)))
+    return handlers
 
 
 def connect_database(environment):

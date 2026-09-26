@@ -12,11 +12,31 @@ import tempfile
 from cloudfile_extensions.jobs.store import JobStore
 from cloudfile_extensions.jobs.worker import Handler, JobWorker
 from cloudfile_extensions.migration.dry_run import ImportDryRun
+from cloudfile_extensions.migration.stage import ImportStage
+from cloudfile_extensions.migration.working_copy import WorkingCopyBuilder
 from cloudfile_extensions.schema.runner import SchemaRunner
 from cloudfile_extensions.tests.test_schema import DatabaseTestCase
 
 
 class ImportDryRunTests(DatabaseTestCase):
+    def test_stage_worker_records_ready_copy_without_import_success(self):
+        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as work:
+            (Path(source) / "file.prt").write_bytes(b"drawing")
+            job_id = self.store.submit(actor="admin", actor_kind="user", kind="migration.stage",
+                scope={"type": "repo", "provider": "directory", "external_id": "00000000-0000-0000-0000-000000000001"},
+                request={"source_id": "registered"}, idempotency_key="stage", barrier=False)[0]
+            handler = ImportStage(builder=WorkingCopyBuilder(sources={"registered": source}, work_root=work))
+            JobWorker(self.store, owner="stage-worker", handlers={"migration.stage": Handler(handler)}).run_once()
+            state = self.store.get(job_id)
+            self.assertEqual(state["status"], "succeeded")
+            self.assertFalse(state["checkpoint"]["import_verified"])
+            self.assertEqual(state["checkpoint"]["files"], 1)
+            self.assertEqual(state["checkpoint"]["bytes"], 7)
+            attempt = state["result_ref"].split(":", 1)[1]
+            self.assertEqual(Path(work, attempt, "data", "file.prt").read_bytes(), b"drawing")
+            self.assertEqual((Path(source) / "file.prt").read_bytes(), b"drawing")
+            self.assertNotIn(work, repr(state["checkpoint"]))
+
     def setUp(self):
         super().setUp()
         SchemaRunner(self.connection).apply()

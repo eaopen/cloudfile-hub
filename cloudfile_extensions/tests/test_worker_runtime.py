@@ -76,6 +76,16 @@ class WorkerRuntimeTests(unittest.TestCase):
         connection.close.assert_called_once()
         self.assertNotIn("secret", output.getvalue())
 
+    def test_staging_requires_explicit_separate_registered_work_volume(self):
+        environment = dict(CLOUDFILE_IMPORT_SOURCES='{"one":"/registered/source"}',
+            CLOUDFILE_IMPORT_REPORT_ROOT="/registered/reports", CLOUDFILE_IMPORT_WORK_ROOT="/registered/work")
+        handlers = configured_handlers(environment)
+        self.assertEqual(set(handlers), {"migration.scan", "migration.stage"})
+        self.assertNotIn("migration.import", handlers)
+        for root in ("", "relative", "/registered/source", "/registered/source/work", "/registered"):
+            with self.assertRaises(ValueError):
+                configured_handlers(dict(environment, CLOUDFILE_IMPORT_WORK_ROOT=root))
+
     def test_invalid_limits_fail_before_configuration_or_connection(self):
         with patch("cloudfile_extensions.jobs.runtime.connect_database") as connect, \
                 contextlib.redirect_stderr(io.StringIO()):
