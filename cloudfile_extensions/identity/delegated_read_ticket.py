@@ -19,7 +19,7 @@ class DelegatedReadTicketIssuer:
         self.preparation, self.verifier = preparation, verifier
 
     def issue(self, request, reference, *, operation="download"):
-        if (not request.is_secure() or request.headers.get("Cookie")
+        if (not request.is_secure() or "Cookie" in request.headers
                 or request.GET):
             raise ContractError("AUTHENTICATION_REQUIRED", "Secure cookie-free delegation is required", 401)
         principal = self.verifier.verify(request.headers.get("Authorization"))
@@ -68,7 +68,7 @@ class DelegatedReadTicketFactory:
 
     @contextmanager
     def __call__(self, request, request_id):
-        if not request.is_secure() or request.headers.get("Cookie") or request.GET:
+        if not request.is_secure() or "Cookie" in request.headers or request.GET:
             raise ContractError("AUTHENTICATION_REQUIRED", "Secure cookie-free delegation is required", 401)
         principal = self.verifier.verify(request.headers.get("Authorization"))
         if principal.provider != self.resources.provider:
