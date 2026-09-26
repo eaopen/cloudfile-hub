@@ -55,6 +55,31 @@ class NativeSubjectState:
         except Exception:
             raise ContractError("IDENTITY_UNAVAILABLE", "Native identity is unavailable", 503) from None
 
+    def user_id(self, native_username):
+        """Reverse a native session account through the same business binding.
+
+        Contact email, login form text and external employee number are not keys.
+        The effect transaction still rechecks the two-axis binding and account.
+        """
+        identifier(native_username)
+        try:
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT user,login_id FROM " + self.profiles + " WHERE user=%s LIMIT 2", (native_username,))
+                rows = cursor.fetchall()
+            if not rows:
+                raise ContractError("IDENTITY_NOT_FOUND", "Business identity has not been bound", 404)
+            if len(rows) != 1 or rows[0][0] != native_username:
+                raise ValueError()
+            user_id = rows[0][1]
+            identifier(user_id, maximum=225)
+            if self.username(user_id) != native_username:
+                raise ValueError()
+            return user_id
+        except ContractError:
+            raise
+        except Exception:
+            raise ContractError("IDENTITY_UNAVAILABLE", "Native identity is unavailable", 503) from None
+
     def account_active(self, user_id):
         try:
             username = self.username(user_id)
