@@ -7,12 +7,15 @@ from ..common.validation import identifier
 from ..directory.preparation import SubjectPreparation
 from ..resources.runtime import expected_subject
 from .authorized_query import AuthorizedAuditQuery
+from .privacy import default_redact
 
 
 class AuditQueryFactory(PolicyServiceFactory):
-    def __init__(self, *, authenticate, preparation_scope, core, cloud_mode, secret, redact):
+    def __init__(self, *, authenticate, preparation_scope, core, cloud_mode, secret, redact=None):
         super().__init__(authenticate=authenticate, preparation_scope=preparation_scope,
             core=core, cloud_mode=cloud_mode)
+        if redact is None:
+            redact = default_redact
         if not isinstance(secret, bytes) or len(secret) < 32 or not callable(redact):
             raise ValueError("fixed audit cursor secret and deployment redaction required")
         self.secret, self.redact = secret, redact

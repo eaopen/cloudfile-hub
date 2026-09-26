@@ -45,10 +45,10 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
     trusted_https_url(value["directory_url"])
     if not callable(directory_authorization):
         raise ValueError("machine directory credential supplier required")
-    if (audit_secret is None) != (audit_redact is None):
-        raise ValueError("audit secret and redaction must be configured together")
+    if audit_secret is None and audit_redact is not None:
+        raise ValueError("audit redaction requires an audit cursor secret")
     if audit_secret is not None and (not isinstance(audit_secret, bytes)
-            or len(audit_secret) < 32 or not callable(audit_redact)):
+            or len(audit_secret) < 32 or (audit_redact is not None and not callable(audit_redact))):
         raise ValueError("trusted audit cursor secret and redaction required")
     if (resource_secret is None) != (lifecycle_reader is None):
         raise ValueError("resource secret and lifecycle adapter must be configured together")
