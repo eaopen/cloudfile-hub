@@ -3,9 +3,26 @@ import subprocess
 import sys
 import textwrap
 import unittest
+from unittest.mock import Mock
 
 
 class IdentityBindingTests(unittest.TestCase):
+    def test_unique_lookup_rejects_duplicates_and_sanitizes_database_errors(self):
+        from django.core.exceptions import MultipleObjectsReturned, ObjectDoesNotExist
+        from django.db import OperationalError
+        from cloudfile_extensions.identity.bindings import unique_binding
+        from cloudfile_extensions.common.errors import ContractError
+        query = Mock()
+        query.get.side_effect = ObjectDoesNotExist()
+        self.assertIsNone(unique_binding(query, uid="subject"))
+        for error, status in ((MultipleObjectsReturned("private accounts"), 409),
+                              (OperationalError("private database address"), 503)):
+            query.get.side_effect = error
+            with self.assertRaises(ContractError) as caught:
+                unique_binding(query, uid="subject")
+            self.assertEqual(caught.exception.status, status)
+            self.assertNotIn("private", caught.exception.message)
+
     def test_binding_conflicts_disabled_accounts_and_audit_rollback(self):
         script = textwrap.dedent('''
             from contextlib import nullcontext
@@ -62,6 +79,20 @@ class IdentityBindingTests(unittest.TestCase):
             else: raise AssertionError("audit failure ignored")
             assert Profile.objects.get(user="native-two").login_id is None
             assert Social.objects.count() == 1
+            # Actual ORM database failure, not an adapter mock: unavailable
+            # identity storage cannot be confused with an unbound/new user.
+            with connection.schema_editor() as editor:
+                editor.delete_model(Social)
+            for operation in (
+                lambda: bindings.resolve(issuer=args["issuer"], subject="s1", user_id="u1"),
+                lambda: bindings.prebind(**{**args, "subject": "s2", "user_id": "u2", "username": "native-two"}),
+            ):
+                try: operation()
+                except ContractError as error:
+                    assert error.status == 503
+                    assert "fixture_social" not in error.message
+                else: raise AssertionError("unavailable identity storage accepted")
+            assert Profile.objects.get(user="native-two").login_id is None
         ''')
         result = subprocess.run([sys.executable, "-c", script], capture_output=True, text=True)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)

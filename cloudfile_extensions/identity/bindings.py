@@ -7,7 +7,8 @@ durable audit adapter. This is not a public login/JIT endpoint or a new table.
 import hashlib
 import json
 
-from django.db import IntegrityError, transaction
+from django.core.exceptions import ObjectDoesNotExist, MultipleObjectsReturned
+from django.db import DatabaseError, IntegrityError, transaction
 
 from ..common.errors import ContractError
 from ..common.http import trusted_https_url
@@ -16,6 +17,18 @@ from ..common.validation import identifier
 
 def conflict():
     return ContractError("IDENTITY_CONFLICT", "Identity binding conflicts with an existing account", 409)
+
+
+def unique_binding(queryset, **lookup):
+    """Reject ambiguous legacy data; never expose SQL or account details."""
+    try:
+        return queryset.get(**lookup)
+    except ObjectDoesNotExist:
+        return None
+    except MultipleObjectsReturned:
+        raise conflict() from None
+    except DatabaseError:
+        raise ContractError("IDENTITY_UNAVAILABLE", "Identity binding is unavailable", 503) from None
 
 
 class IdentityBindings:
@@ -57,11 +70,11 @@ class IdentityBindings:
 
     def resolve(self, *, issuer, subject, user_id):
         provider, metadata = self._identity(issuer, subject, user_id)
-        binding = self.social._default_manager.filter(provider=provider, uid=subject).first()
+        binding = unique_binding(self.social._default_manager, provider=provider, uid=subject)
         if binding is None:
             return None
         self._check_binding(binding, provider, subject, metadata)
-        profile = self.profiles._default_manager.filter(user=binding.username).first()
+        profile = unique_binding(self.profiles._default_manager, user=binding.username)
         if profile is None or profile.user != binding.username or profile.login_id != user_id:
             raise conflict()
         if not self.account_active(binding.username):
@@ -90,14 +103,14 @@ class IdentityBindings:
                 if not self.account_active(username):
                     raise ContractError("SUBJECT_DISABLED", "Account is disabled", 403)
                 profiles = self.profiles._default_manager.select_for_update()
-                profile = profiles.filter(user=username).first()
-                other = profiles.filter(login_id=user_id).first()
+                profile = unique_binding(profiles, user=username)
+                other = unique_binding(profiles, login_id=user_id)
                 if (profile is None or profile.user != username or
                         profile.login_id not in (None, "", user_id) or
                         (other is not None and (other.user != username or other.login_id != user_id))):
                     raise conflict()
                 bindings = self.social._default_manager.select_for_update()
-                existing = bindings.filter(provider=provider, uid=subject).first()
+                existing = unique_binding(bindings, provider=provider, uid=subject)
                 if existing is not None:
                     self._check_binding(existing, provider, subject, metadata)
                     if existing.username != username:
@@ -116,3 +129,5 @@ class IdentityBindings:
                 return username, True
         except IntegrityError:
             raise conflict() from None
+        except DatabaseError:
+            raise ContractError("IDENTITY_UNAVAILABLE", "Identity binding is unavailable", 503) from None
