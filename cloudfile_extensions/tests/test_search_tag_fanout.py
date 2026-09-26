@@ -2,7 +2,7 @@ from unittest import TestCase
 from unittest.mock import Mock
 
 from cloudfile_extensions.common.errors import ContractError
-from cloudfile_extensions.search.tag_fanout import binding_page, binding_cutoff
+from cloudfile_extensions.search.tag_fanout import binding_page, binding_cutoff, global_binding_page
 
 
 class TagFanoutTest(TestCase):
@@ -43,3 +43,18 @@ class TagFanoutTest(TestCase):
         with self.assertRaises(ValueError):
             binding_page(self.cursor, repo_id=self.repo, tag_id=self.tag, revision=self.revision, upper_uid=self.revision, after=self.uid)
         self.cursor.execute.assert_not_called()
+
+    def test_global_system_tag_scans_multiple_libraries_once(self):
+        definition = (self.tag, "system", "cloudfile", "system", "drawings", "图纸", None, None, 1, None, self.revision)
+        other_repo = "55555555-5555-5555-5555-555555555555"
+        other_uid = "66666666-6666-6666-6666-666666666666"
+        rows = ((self.uid, self.uid, self.repo, "/x", "file", "active"), (other_uid, other_uid, other_repo, "/y", "file", "active"))
+        self.cursor.fetchall.side_effect = [(definition,), (("tag_id", None), ("resource_uid", None)), rows]
+        page = global_binding_page(self.cursor, tag_id=self.tag, revision=self.revision, upper_uid=other_uid)
+        self.assertEqual([item["reference"]["repo_id"] for item in page["items"]], [self.repo, other_repo])
+        self.assertEqual(self.cursor.execute.call_count, 3)
+
+    def test_global_scan_rejects_user_or_library_scoped_tag(self):
+        self.cursor.fetchall.return_value = (self.definition,)
+        with self.assertRaises(ContractError):
+            global_binding_page(self.cursor, tag_id=self.tag, revision=self.revision, upper_uid=self.uid)

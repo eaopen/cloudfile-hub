@@ -28,6 +28,15 @@ def binding_cutoff(cursor, *, tag_id):
 
 def binding_page(cursor, *, repo_id, tag_id, revision, upper_uid, after=None, limit=100):
     uuid_value(repo_id)
+    return _binding_page(cursor, repo_id=repo_id, tag_id=tag_id, revision=revision, upper_uid=upper_uid, after=after, limit=limit)
+
+
+def global_binding_page(cursor, *, tag_id, revision, upper_uid, after=None, limit=100):
+    """One indexed scan across libraries, only for an unscoped system tag."""
+    return _binding_page(cursor, repo_id=None, tag_id=tag_id, revision=revision, upper_uid=upper_uid, after=after, limit=limit)
+
+
+def _binding_page(cursor, *, repo_id, tag_id, revision, upper_uid, after, limit):
     uuid_value(tag_id)
     uuid_value(revision)
     uuid_value(upper_uid)
@@ -45,6 +54,8 @@ def binding_page(cursor, *, repo_id, tag_id, revision, upper_uid, after=None, li
         definition = decode(rows[0])
         if definition["revision"] != revision or definition["scope_repo_id"] not in (None, repo_id):
             raise ContractError("SEARCH_FANOUT_CHANGED", "Tag fanout source changed", 409)
+        if repo_id is None and (definition["kind"] != "system" or definition["scope_repo_id"] is not None):
+            raise ContractError("SEARCH_FANOUT_CHANGED", "Global scan requires an unscoped system tag", 409)
         cursor.execute("SELECT column_name,sub_part FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_tag_binding' AND index_name='tag_resources' ORDER BY seq_in_index")
         if tuple(cursor.fetchall()) != (("tag_id", None), ("resource_uid", None)):
             raise ValueError()
@@ -63,7 +74,7 @@ def binding_page(cursor, *, repo_id, tag_id, revision, upper_uid, after=None, li
             ref = resource_ref(dict(repo_id=row[2], path=row[3], kind=row[4]))
             if len(ref["path"].encode("utf-8")) > 4096:
                 raise ValueError()
-            if ref["repo_id"] != repo_id:
+            if repo_id is not None and ref["repo_id"] != repo_id:
                 if definition["scope_repo_id"] is not None:
                     raise ValueError()
                 continue
