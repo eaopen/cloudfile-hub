@@ -1,0 +1,15 @@
+{
+  "version": "011_tags",
+  "steps": [
+    {
+      "sql": "CREATE TABLE cf_tag (tag_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,kind VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,provider VARCHAR(32) COLLATE utf8mb4_bin NOT NULL,namespace VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,code VARCHAR(128) COLLATE utf8mb4_bin NOT NULL,label VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,normalized_label VARCHAR(255) COLLATE utf8mb4_bin NULL,color CHAR(7) CHARACTER SET ascii COLLATE ascii_bin NULL,enabled TINYINT NOT NULL DEFAULT 1,scope_repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,revision CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,updated_at DATETIME(6) NOT NULL,UNIQUE KEY tag_identity(namespace,code),UNIQUE KEY tag_user_label(scope_repo_id,normalized_label),KEY tag_scope(scope_repo_id,kind,tag_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+      "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_tag')='InnoDB' AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_tag' AND column_name IN ('tag_id','kind','provider','namespace','code','label','normalized_label','color','enabled','scope_repo_id','revision','updated_at'))=12 AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_tag' AND index_name='tag_identity' AND non_unique=0)='namespace,code' AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_tag' AND index_name='tag_user_label' AND non_unique=0)='scope_repo_id,normalized_label',1,0)",
+      "expected": 1
+    },
+    {
+      "sql": "CREATE TABLE cf_tag_binding (resource_uid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,tag_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,PRIMARY KEY(resource_uid,tag_id),KEY tag_resources(tag_id,resource_uid)) ENGINE=InnoDB",
+      "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_tag_binding')='InnoDB' AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_tag_binding' AND index_name='PRIMARY' AND non_unique=0)='resource_uid,tag_id' AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_tag_binding' AND index_name='tag_resources')='tag_id,resource_uid',1,0)",
+      "expected": 1
+    }
+  ]
+}
