@@ -4,7 +4,8 @@ from unittest.mock import Mock, patch
 
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.search.consumer import SearchEventConsumer
-from cloudfile_extensions.search.runtime import SearchConsumerFactory
+from cloudfile_extensions.search.runtime import SearchConsumerFactory, SearchInitializationFactory
+from cloudfile_extensions.search.initialization import SearchInitialization
 
 
 class SearchRuntimeTest(TestCase):
@@ -45,4 +46,19 @@ class SearchRuntimeTest(TestCase):
                     with factory.open():
                         pass
                 self.connection.close.assert_not_called()
+        self.connection.close.assert_called_once()
+
+    def test_initialization_factory_assembles_without_registration_or_network(self):
+        options = {key: self.options[key] for key in ("connection_factory", "endpoint", "index", "write_key", "generation")}
+        factory = SearchInitializationFactory(**options)
+        with patch("cloudfile_extensions.search.runtime.SchemaRunner"):
+            with factory.open() as execution:
+                self.assertIsInstance(execution, SearchInitialization)
+                self.assertIs(execution.store.connection, self.connection)
+                self.connection.begin.assert_not_called()
+                with self.assertRaises(ContractError):
+                    with factory.open():
+                        pass
+                self.connection.close.assert_not_called()
+        self.connection.rollback.assert_called_once()
         self.connection.close.assert_called_once()

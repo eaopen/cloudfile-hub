@@ -15,6 +15,43 @@ from .plans import SearchPlanStore
 from .projection import AttributeSearchProjection
 from .source import OwnedIndexSource
 from .tasks import MeilisearchTasks
+from .initialization import SearchInitialization, SearchInitializationStore
+from .generations import SearchGenerationStore
+
+
+class SearchInitializationFactory:
+    """Explicit private initialization assembly; no automatic registration/run."""
+    def __init__(self, *, connection_factory, endpoint, index, write_key, generation):
+        if not callable(connection_factory):
+            raise ValueError("dedicated connection factory required")
+        SearchGenerationStore._identity(generation, index)
+        MeilisearchTasks(endpoint=endpoint, index=index, key=write_key)
+        self.connection_factory = connection_factory
+        self.endpoint, self.index, self.key, self.generation = endpoint, index, write_key, generation
+        self._active, self._lock = set(), Lock()
+
+    @contextmanager
+    def open(self):
+        connection = self.connection_factory()
+        with self._lock:
+            if id(connection) in self._active:
+                raise ContractError("SEARCH_UNAVAILABLE", "Initialization connection is already owned", 503)
+            self._active.add(id(connection))
+        try:
+            if not connection.get_autocommit():
+                raise ContractError("SEARCH_UNAVAILABLE", "Clean initialization connection required", 503)
+            SchemaRunner(connection).require_current()
+            yield SearchInitialization(SearchInitializationStore(connection),
+                MeilisearchTasks(endpoint=self.endpoint, index=self.index, key=self.key), generation=self.generation)
+        finally:
+            try:
+                try:
+                    connection.rollback()
+                finally:
+                    connection.close()
+            finally:
+                with self._lock:
+                    self._active.discard(id(connection))
 
 
 class SearchConsumerFactory:

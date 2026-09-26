@@ -9,6 +9,7 @@ from contextlib import contextmanager
 from ..common.errors import ContractError
 from ..events.outbox import EventClaim
 from .generations import SearchGenerationStore
+from .initialization import SearchInitializationStore
 
 
 class SearchTaskStore:
@@ -86,6 +87,7 @@ class SearchTaskStore:
         registry = SearchGenerationStore(self.connection)
         with self._owned(claim) as sql:
             registry.require_dispatch(sql, generation, index)
+            SearchInitializationStore(self.connection).require_complete(sql, generation, index)
             sql.execute("SELECT state,task_id FROM cf_search_task WHERE event_id=%s AND index_generation=%s AND step=%s FOR UPDATE", key)
             if sql.fetchone() != ("submitting", None):
                 raise ContractError("SEARCH_TASK_CONFLICT", "Search dispatch intent is not current", 409)
@@ -96,6 +98,13 @@ class SearchTaskStore:
             if sql.rowcount != 1:
                 raise ContractError("SEARCH_SUBMISSION_UNKNOWN", "Search receipt could not be stored", 503)
             return task_id
+
+    def require_initialized(self, claim, *, generation, index):
+        # Early check avoids poisoning intent for a known incomplete index.
+        # Dispatch rechecks under its retained locks; this is not the final gate.
+        with self._owned(claim) as sql:
+            SearchGenerationStore(self.connection).require_dispatch(sql, generation, index)
+            SearchInitializationStore(self.connection).require_complete(sql, generation, index)
 
     def record_succeeded(self, claim, *, generation, step):
         # Caller must have checked exact uid/index/type succeeded via task API.

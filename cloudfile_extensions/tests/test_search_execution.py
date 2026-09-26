@@ -25,6 +25,14 @@ class SearchExecutionTest(TestCase):
         self.assertEqual(caught.exception.code, "SEARCH_SUBMISSION_UNKNOWN")
         self.client.delete_documents.assert_not_called()
 
+    def test_initialization_gate_fails_before_intent_or_dispatch(self):
+        self.store.require_initialized.side_effect = ContractError("SEARCH_INITIALIZATION_PENDING", "Pending", 503)
+        with self.assertRaises(ContractError):
+            self.execution.advance(self.claim, **self.options)
+        self.store.prepare.assert_not_called()
+        self.store.mark_submitting.assert_not_called()
+        self.store.dispatch.assert_not_called()
+
     def test_existing_task_is_polled_not_dispatched_again(self):
         self.store.prepare.return_value = dict(state="submitted", task_id=7)
         self.client.task_status.return_value = "processing"

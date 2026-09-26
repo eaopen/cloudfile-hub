@@ -48,6 +48,16 @@ class InitializationSQLTest(DatabaseTestCase):
         SearchGenerationStore(self.connection).register("g1", "resources_g1")
         self.store = SearchInitializationStore(self.connection)
 
+    def test_incomplete_initialization_blocks_document_dispatch_before_intent(self):
+        with self.store._owned("g1", "resources_g1") as sql:
+            with self.assertRaises(ContractError) as caught:
+                self.store.require_complete(sql, "g1", "resources_g1")
+            self.assertEqual(caught.exception.code, "SEARCH_INITIALIZATION_PENDING")
+        self.store.prepare("g1", "resources_g1", "create")
+        with self.store._owned("g1", "resources_g1") as sql:
+            with self.assertRaises(ContractError):
+                self.store.require_complete(sql, "g1", "resources_g1")
+
     def test_stage_order_and_unknown_dispatch_are_durable(self):
         with self.assertRaises(ContractError):
             self.store.prepare("g1", "resources_g1", "settings")

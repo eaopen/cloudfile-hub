@@ -48,6 +48,18 @@ class SearchInitializationStore:
             sql.execute("SELECT payload_hash,state,task_id FROM cf_search_initialization WHERE generation=%s AND stage=%s FOR UPDATE", (generation, stage))
             return self._receipt(sql.fetchone(), digest)
 
+    def require_complete(self, sql, generation, index):
+        """Caller retains generation lock and SQL transaction through dispatch."""
+        if sql.connection is not self.connection:
+            raise ValueError("owned initialization transaction required")
+        for stage in ("create", "settings"):
+            sql.execute("SELECT payload_hash,state,task_id FROM cf_search_initialization WHERE generation=%s AND stage=%s FOR UPDATE", (generation, stage))
+            row = sql.fetchone()
+            if row is None:
+                raise ContractError("SEARCH_INITIALIZATION_PENDING", "Index initialization is incomplete", 503)
+            if self._receipt(row, initialization_hash(index, stage))["state"] != "succeeded":
+                raise ContractError("SEARCH_INITIALIZATION_PENDING", "Index initialization is incomplete", 503)
+
     def transition(self, generation, index, stage, previous, state, task_id=None):
         if (previous, state) not in (("prepared", "submitting"), ("submitted", "succeeded")) or task_id is not None:
             raise ValueError("fixed initialization transition required")

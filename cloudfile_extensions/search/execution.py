@@ -29,6 +29,7 @@ class SearchStepExecution:
             raise ValueError("bounded search batch required")
         digest = step_hash(self.client.index, operation, raw)
         identity = dict(generation=generation, step=step)
+        self.store.require_initialized(claim, generation=generation, index=self.client.index)
         receipt = self.store.prepare(claim, payload_hash=digest, **identity)
         state, task_id = receipt["state"], receipt["task_id"]
         if state == "succeeded":

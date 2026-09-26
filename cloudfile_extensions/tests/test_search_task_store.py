@@ -8,6 +8,7 @@ from cloudfile_extensions.events.outbox import EventWriter, Outbox
 from cloudfile_extensions.schema.runner import SchemaRunner
 from cloudfile_extensions.search.task_store import SearchTaskStore
 from cloudfile_extensions.search.generations import SearchGenerationStore
+from cloudfile_extensions.search.initialization import SearchInitializationStore
 from cloudfile_extensions.search.fanout_store import SearchFanoutStore
 from cloudfile_extensions.search.fanout_execution import SearchFanoutExecution
 from cloudfile_extensions.search.documents import resource_document
@@ -20,6 +21,12 @@ class SearchTaskStoreTest(DatabaseTestCase):
         super().setUp()
         SchemaRunner(self.connection).apply()
         SearchGenerationStore(self.connection).register("index", "resources")
+        initialization = SearchInitializationStore(self.connection)
+        for stage, task in (("create", 700), ("settings", 701)):
+            initialization.prepare("index", "resources", stage)
+            initialization.transition("index", "resources", stage, "prepared", "submitting")
+            initialization.dispatch("index", "resources", stage, Mock(return_value=task))
+            initialization.transition("index", "resources", stage, "submitted", "succeeded")
         self.connection.begin()
         try:
             with self.connection.cursor() as sql:
