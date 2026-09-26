@@ -90,3 +90,26 @@ class RebuildStoreTest(DatabaseTestCase):
         self.assertTrue(SearchRebuildExecution(self.store, client).advance_page(generation="g1", repo_id=self.identity["repo_id"], path="/"))
         client.replace_documents.assert_not_called()
         client.task_status.assert_not_called()
+
+    def test_frontier_requires_finished_root_and_keeps_scanned_idempotent(self):
+        self.store.start(**self.start)
+        value = self.store.next_directory(**self.identity)
+        self.assertEqual(value["state"], "ready")
+        self.assertEqual(value["reference"]["path"], "/")
+        self.assertEqual(value["commit_id"], "a" * 40)
+        self.store.freeze(**self.identity, path="/", offset=0, next_offset=None, documents=[])
+        client = Mock(spec=MeilisearchTasks)
+        client.index = "resources_g1"
+        execution = SearchRebuildExecution(self.store, client)
+        options = dict(generation="g1", repo_id=self.identity["repo_id"])
+        self.assertEqual(execution.advance_next(**options)["state"], "page_completed")
+        self.assertEqual(execution.advance_next(**options)["state"], "scanned")
+        self.assertEqual(execution.advance_next(**options)["state"], "scanned")
+        client.replace_documents.assert_not_called()
+
+    def test_unknown_frontier_is_not_skipped(self):
+        self.store.start(**self.start)
+        document = resource_document(dict(repo_id=self.identity["repo_id"], path="/x", kind="file"), source_sequence="0")
+        digest = self.store.freeze(**self.identity, path="/", offset=0, next_offset=None, documents=[document])
+        self.store.mark_submitting(**self.identity, path="/", payload_hash=digest)
+        self.assertEqual(self.store.next_directory(**self.identity)["state"], "submitting")

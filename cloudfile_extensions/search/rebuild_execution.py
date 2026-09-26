@@ -10,6 +10,16 @@ class SearchRebuildExecution:
             raise ValueError("actual rebuild store and private task client required")
         self.store, self.client = store, client
 
+    def advance_next(self, *, generation, repo_id):
+        value = self.store.next_directory(generation=generation, index=self.client.index, repo_id=repo_id)
+        if value["state"] == "scanned":
+            return value
+        if value["state"] == "ready":
+            # Caller must freeze actual protected native projections first.
+            return {**value, "state": "needs_page"}
+        completed = self.advance_page(generation=generation, repo_id=repo_id, path=value["reference"]["path"])
+        return {**value, "state": "page_completed" if completed else "task_pending"}
+
     def advance_page(self, *, generation, repo_id, path):
         identity = dict(generation=generation, index=self.client.index, repo_id=repo_id, path=path)
         page = self.store.load_page(**identity)

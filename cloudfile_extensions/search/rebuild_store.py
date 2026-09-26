@@ -120,6 +120,46 @@ class SearchRebuildStore:
         with self._owned(generation, index) as sql:
             return self._page(sql, generation, index, ref, path_hash)
 
+    def next_directory(self, *, generation, index, repo_id):
+        """Bounded frontier lookup; scanned is not caught-up or published."""
+        root, root_hash = self._directory(repo_id, "/")
+        with self._owned(generation, index) as sql:
+            sql.execute("SELECT commit_id,source_sequence,state FROM cf_search_rebuild WHERE generation=%s AND repo_id=%s FOR UPDATE", (generation, root["repo_id"]))
+            job = sql.fetchone()
+            if (job is None or len(job) != 3 or not isinstance(job[0], str) or not re.fullmatch(r"[0-9a-f]{40}", job[0]) or
+                    job[2] not in ("scanning", "scanned")):
+                raise ContractError("SEARCH_REBUILD_CONFLICT", "Rebuild snapshot is unavailable", 409)
+            sequence(job[1])
+            identity = dict(commit_id=job[0], source_sequence=job[1])
+            # Equality on the existing composite index, one row per state.
+            # Unknown dispatch stops this library rather than skipping to ready.
+            for state in ("submitting", "submitted", "pending", "ready"):
+                sql.execute("SELECT path_hash," + self.FIELDS + " FROM cf_search_rebuild_directory FORCE INDEX(pending_directories) WHERE generation=%s AND repo_id=%s AND state=%s ORDER BY path_hash LIMIT 1 FOR UPDATE", (generation, root["repo_id"], state))
+                row = sql.fetchone()
+                if row is None:
+                    continue
+                if job[2] != "scanning":
+                    raise ContractError("SEARCH_REBUILD_CONFLICT", "Scanned rebuild has unfinished directories", 409)
+                ref, path_hash = self._directory(repo_id, row[1])
+                if path_hash != row[0]:
+                    raise ContractError("SEARCH_REBUILD_CONFLICT", "Rebuild directory identity changed", 409)
+                if state == "ready":
+                    if (row[6] != "ready" or type(row[2]) is not int or not 0 <= row[2] <= 2 ** 31 - 102 or
+                            any(row[position] is not None for position in (3, 4, 5, 7))):
+                        raise ContractError("SEARCH_REBUILD_CONFLICT", "Ready rebuild directory is invalid", 409)
+                    return dict(**identity, reference=ref, state="ready", offset=row[2])
+                page = self._page(sql, generation, index, ref, path_hash)
+                return dict(**identity, reference=ref, state=page["state"], offset=page["position"])
+            sql.execute("SELECT path_hash FROM cf_search_rebuild_directory WHERE generation=%s AND repo_id=%s AND state<>'done' LIMIT 1 FOR UPDATE", (generation, root["repo_id"]))
+            if sql.fetchone() is not None:
+                raise ContractError("SEARCH_REBUILD_CONFLICT", "Rebuild directory state is invalid", 409)
+            sql.execute("SELECT path,state,next_position,payload,payload_hash,task_id FROM cf_search_rebuild_directory WHERE generation=%s AND repo_id=%s AND path_hash=%s FOR UPDATE", (generation, root["repo_id"], root_hash))
+            if sql.fetchone() != ("/", "done", None, None, None, None):
+                raise ContractError("SEARCH_REBUILD_CONFLICT", "Rebuild root is not complete", 409)
+            if job[2] == "scanning":
+                sql.execute("UPDATE cf_search_rebuild SET state='scanned',updated_at=UTC_TIMESTAMP(6) WHERE generation=%s AND repo_id=%s AND state='scanning'", (generation, root["repo_id"]))
+            return dict(**identity, reference=None, state="scanned", offset=None)
+
     def mark_submitting(self, *, generation, index, repo_id, path, payload_hash):
         ref, path_hash = self._directory(repo_id, path)
         with self._owned(generation, index) as sql:
