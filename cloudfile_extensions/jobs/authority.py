@@ -8,6 +8,7 @@ Native branch transactions use the same database/scopes/name encoding.
 from contextlib import contextmanager
 import hashlib
 import json
+import time
 
 from ..common.errors import ContractError
 from ..common.validation import identifier, object_fields
@@ -43,6 +44,7 @@ def scope_locks(connection, scopes, *, timeout=5):
     acquired = []
     owner = None
     uncertain = False
+    deadline = time.monotonic() + timeout
     try:
         try:
             with connection.cursor() as cursor:
@@ -50,7 +52,11 @@ def scope_locks(connection, scopes, *, timeout=5):
                 database, owner = cursor.fetchone()
                 for value in values:
                     name = lock_name(database, value)
-                    cursor.execute("SELECT GET_LOCK(%s,%s),CONNECTION_ID()", (name, timeout))
+                    # One bounded acquisition budget, not timeout per scope.
+                    # Sixteen contended scopes must not hold earlier locks for
+                    # eighty seconds and outlive the subject refresh lease.
+                    remaining = max(0, int(deadline - time.monotonic()))
+                    cursor.execute("SELECT GET_LOCK(%s,%s),CONNECTION_ID()", (name, remaining))
                     locked, actual = cursor.fetchone()
                     if actual != owner:
                         uncertain = True

@@ -1,5 +1,8 @@
 """Actual SQL scope ownership; these are not native permission proofs."""
 
+import time
+from unittest.mock import patch
+
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.jobs.authority import canonical_scope, lock_name, scope_locks
 from cloudfile_extensions.tests.test_schema import DatabaseTestCase
@@ -42,6 +45,20 @@ class AuthorityTest(DatabaseTestCase):
                 with scope_locks(self.connection, [self.repo, self.user], timeout=0):
                     self.fail("repository contention was ignored")
             # User is ordered before repo and was released after repo failure.
+            with scope_locks(self.other, [self.user], timeout=0):
+                pass
+
+    def test_scope_acquisition_shares_one_deadline(self):
+        with scope_locks(self.other, [self.repo], timeout=0):
+            started = time.monotonic()
+            # Simulate elapsed time between scope acquisitions. The real SQL
+            # repo lock remains held: exhausted budget must be nonblocking.
+            with patch("cloudfile_extensions.jobs.authority.time.monotonic", side_effect=[100, 104, 106]):
+                with self.assertRaises(ContractError) as caught:
+                    with scope_locks(self.connection, [self.user, self.repo], timeout=5):
+                        self.fail("contended scope acquired")
+            self.assertEqual(caught.exception.code, "AUTHORITY_BUSY")
+            self.assertLess(time.monotonic() - started, 1)
             with scope_locks(self.other, [self.user], timeout=0):
                 pass
 
