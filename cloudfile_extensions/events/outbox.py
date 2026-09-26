@@ -77,6 +77,14 @@ def projection_required(value):
         except (ValueError, TypeError, AttributeError):
             pass
     if value["source"] == "hub":
+        lock_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source",
+            "action", "result", "repo_id", "path", "resource_uid", "resource_kind", "revision"}
+        if (set(value) == lock_fields and value["action"] in {"lock.acquired", "lock.renewed", "lock.released"}
+                and value["actor_kind"] == "user" and value["result"] == "succeeded" and
+                value["resource_kind"] == "file" and value.get("repo_id") and value.get("path") and value.get("resource_uid")):
+            revision = value.get("revision")
+            if isinstance(revision, str) and re.fullmatch(r"[1-9][0-9]{0,19}", revision) and int(revision) <= 2 ** 64 - 1:
+                return False
         # These exact producer facts change authorization only. Query-time CE/C
         # guards still enforce the new rules; stream watermarks invalidate old
         # cursors. No file metadata or index ACL is materialized from this fact.
