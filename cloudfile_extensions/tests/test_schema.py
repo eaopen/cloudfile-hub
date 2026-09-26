@@ -11,7 +11,7 @@ from cloudfile_extensions.schema.runner import Migration, MigrationError, Schema
 class DatabaseTestCase(unittest.TestCase):
     def setUp(self):
         import pymysql
-        self.options = dict(host="127.0.0.1", port=int(os.environ["CF_TEST_DB_PORT"]),
+        self.options = dict(host=os.environ.get("CF_TEST_DB_HOST", "127.0.0.1"), port=int(os.environ["CF_TEST_DB_PORT"]),
                             user="root", password="", autocommit=True, charset="utf8mb4")
         self.admin = pymysql.connect(**self.options)
         self.database = "cf_test_" + uuid4().hex
@@ -53,7 +53,7 @@ class SchemaRunnerTest(DatabaseTestCase):
         runner.apply()
         changed = Migration(runner.migrations[0].version, ({"sql": "SELECT 1", "verify": "SELECT 1", "expected": 1},))
         with self.assertRaises(MigrationError):
-            SchemaRunner(self.connection, (changed,)).apply()
+            SchemaRunner(self.connection, (changed, *runner.migrations[1:])).apply()
 
     def test_structure_drift_is_rejected(self):
         runner = SchemaRunner(self.connection)

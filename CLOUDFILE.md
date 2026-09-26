@@ -37,7 +37,17 @@ python -m cloudfile_extensions.schema status
 python -m cloudfile_extensions.schema check
 ```
 
-当前 migration 只建立公共资源表和升级账本，不一次建未来域表。DDL 按实际结构验证和步骤记录恢复；校验和/结构漂移拒绝继续。原 v0.1 业务表数据转换、备份恢复演练、镜像内 CLI 与启动接入仍须后续验收，不能用通用升级测试替代。
+当前 migration 建立公共资源、任务及 outbox，并在原 `cf_audit_event` 表上增量扩展；不一次建未来域表。旧审计保留 source/操作人/时间，新增 schema_version=0，不伪造 business userId/event_id/recorded_at。DDL 按实际结构验证和步骤记录恢复；校验和/结构漂移拒绝继续。其余 v0.1 业务表转换、备份恢复演练与启动接入仍须后续验收。
+
+## 身份、上下文与事件内核
+
+`identity/service_tokens.py` 校验已登记的 HS256 机器凭据（kid/issuer/audience/service/scope/短 TTL），支持受控轮换。`identity/oidc.py` 使用已有 requests-oauthlib/PyJWT 完成授权码、PKCE、固定 JWKS/RS256、issuer/audience/azp/nonce/UserInfo sub 和可信 userId 校验；state 在专用 Redis 中一次消费并绑定浏览器。HTTPS JSON 通道限制大小、拒绝重定向和重复 JSON 字段，不读取环境代理/netrc；私有 CA 只能由部署配置可信文件。
+
+这些模块返回已认证事实，不授予库资格；尚未挂到 CE 登录/退出回调、身份预绑定/JIT 和 WebDAV 凭据流程，不能声明完整 auth.oidc。
+
+`directory/provider.py` 按精确 userId 读取固定目录地址。`contexts.py` 只保存 CF 专属 Redis 的最小主体，固定 TTL/向下 jitter、单次源读取、单调版本/etag 校验和随机 epoch CAS。登录、到期或强刷取最新；账号状态/活动屏障优先于缓存 ready。投影与持久协调保护区必须由 CF 原生适配器提供，当前没有生产适配器，不能用空 callback 开放入口。
+
+`jobs/store.py` 持久保存幂等、作用域屏障和 worker 代次；取消/失败不解除屏障，完成必须有可信协调器核对证明。`events/outbox.py` 要求调用方已开启同一 SQL 事务，同时追加审计和 outbox；resource/search 消费者分别领取/确认，不共享 delivered 位。既有自有资源写入可使用真实事件钩子；Server 文件提交/访问来源、消费者领域处理器、审计查询 API 和常驻 worker 接入尚未完成。
 
 CloudFile 不修改桌面端、移动端及同步协议；项目 UI 与业务逻辑应保留在对应项目仓库，通过此扩展边界接入。
 
