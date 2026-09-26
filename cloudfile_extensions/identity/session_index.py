@@ -4,6 +4,7 @@ import hashlib
 import re
 
 from ..common.validation import identifier
+from ..common.errors import ContractError
 from ..jobs.store import canonical
 from ..schema.runner import SchemaRunner
 from .logout_token import LogoutNotification
@@ -38,10 +39,31 @@ class OIDCSessionIndex:
                 or not isinstance(expires_at, datetime) or expires_at.tzinfo is None
                 or expires_at.timestamp() <= authenticated_at):
             raise ValueError("valid native session reference required")
+        targets = [("subject", self._hash(subject))]
+        if session_id is not None:
+            targets.append(("sid", self._hash(session_id)))
+        for target_type, target_hash in sorted(targets):
+            cursor.execute("SELECT cutoff_at FROM cf_oidc_logout_fence WHERE scope_hash=%s "
+                "AND target_type=%s AND target_hash=%s FOR UPDATE", (self.scope_hash, target_type, target_hash))
+            rows = cursor.fetchall()
+            if rows and (len(rows) != 1 or type(rows[0][0]) is not int or rows[0][0] >= authenticated_at):
+                raise ContractError("AUTHENTICATION_REQUIRED", "OIDC authentication was invalidated by logout", 401)
         cursor.execute("INSERT INTO cf_oidc_session(scope_hash,session_key,subject_hash,sid_hash,authenticated_at,expires_at) "
             "VALUES(%s,%s,%s,%s,%s,%s)", (self.scope_hash, session_key, self._hash(subject),
                 None if session_id is None else self._hash(session_id), authenticated_at,
                 expires_at.astimezone(timezone.utc).replace(tzinfo=None)))
+
+    def fence(self, cursor, notification):
+        self._transaction(cursor)
+        if (not isinstance(notification, LogoutNotification)
+                or (notification.issuer, notification.client_id) != (self.issuer, self.client_id)):
+            raise ValueError("verified fixed-scope logout notification required")
+        target_type = "sid" if notification.session_id is not None else "subject"
+        value = notification.session_id if notification.session_id is not None else notification.subject
+        cursor.execute("INSERT INTO cf_oidc_logout_fence(scope_hash,target_type,target_hash,cutoff_at,updated_at) "
+            "VALUES(%s,%s,%s,%s,UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE "
+            "cutoff_at=GREATEST(cutoff_at,VALUES(cutoff_at)),updated_at=UTC_TIMESTAMP(6)",
+            (self.scope_hash, target_type, self._hash(value), notification.issued_at))
 
     def targets(self, cursor, notification, *, limit=100):
         self._transaction(cursor)
