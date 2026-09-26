@@ -1,0 +1,8 @@
+{
+  "version": "015_search_tasks",
+  "steps": [{
+    "sql": "CREATE TABLE cf_search_task (event_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,index_generation VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,step INT UNSIGNED NOT NULL,payload_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,state VARCHAR(16) CHARACTER SET ascii NOT NULL,task_id BIGINT UNSIGNED NULL,created_at DATETIME(6) NOT NULL,updated_at DATETIME(6) NOT NULL,PRIMARY KEY(event_id,index_generation,step)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+    "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_search_task')='InnoDB' AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_search_task')=8 AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_search_task' AND index_name='PRIMARY')='event_id,index_generation,step',1,0)",
+    "expected": 1
+  }]
+}
