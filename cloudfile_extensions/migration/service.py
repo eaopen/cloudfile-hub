@@ -3,7 +3,7 @@ from uuid import UUID
 
 from ..authorization.read import LibraryWideManagementAuthority
 from ..common.errors import ContractError
-from ..common.validation import identifier, object_fields
+from ..common.validation import identifier, object_fields, sequence
 from ..jobs.authority import scope_locks
 from ..jobs.store import JobStore
 from ..resources.paths import resource_ref
@@ -62,18 +62,45 @@ class MigrationJobService:
                 authorize_transaction=authorize, finalize_transaction=authority.finalize)
         return dict(job_id=job_id, operation=operation, created=created, import_verified=False)
 
-    def status(self, value):
-        object_fields(value, ("job_id",))
-        job_id = value["job_id"]
+    def _job(self, job_id):
         if not isinstance(job_id, str) or str(UUID(job_id)) != job_id:
             raise ContractError("INVALID_REQUEST", "Canonical migration job required", 400)
         job = self.jobs.get(job_id)
         if (job["kind"] not in self.operations.values() or job["scope"].get("type") != "repo" or
                 job["scope"].get("provider") != "cloudfile" or job["actor"] != self.management.actor or job["actor_kind"] != "user"):
             raise ContractError("ACCESS_DENIED", "Migration job is not available", 403)
+        return job
+
+    def status(self, value):
+        object_fields(value, ("job_id",))
+        job_id = value["job_id"]
+        job = self._job(job_id)
         reference = dict(repo_id=job["scope"]["external_id"], path="/", kind="dir")
         def read(sql, ref):
             current = self.jobs.get(job_id)
             return dict(job_id=job_id, status=current["status"], step=current["step"],
-                attempts=current["attempts"], error_code=current["error_code"], import_verified=False)
+                attempts=current["attempts"], lease_epoch=str(current["lease_epoch"]),
+                error_code=current["error_code"], import_verified=False)
         return self.management.consume(reference, read)
+
+    def transition(self, operation, value):
+        if operation not in {"cancel", "retry"}:
+            raise ContractError("INVALID_REQUEST", "Migration transition is unavailable", 400)
+        object_fields(value, ("job_id", "lease_epoch"))
+        epoch = sequence(value["lease_epoch"])
+        job = self._job(value["job_id"])
+        if operation == "retry" and job["kind"] not in {self.operations[key] for key in self.enabled_operations}:
+            raise ContractError("MIGRATION_UNAVAILABLE", "Preparation worker is unavailable", 503)
+        authority = self.management
+        reference = dict(repo_id=job["scope"]["external_id"], path="/", kind="dir")
+        authority.preparation.prepare(authority.actor)
+        with scope_locks(authority.state.connection, authority._scopes(reference)):
+            def authorize(sql):
+                latest = self._job(job["job_id"])
+                if latest["scope"] != job["scope"] or latest["kind"] != job["kind"]:
+                    raise ContractError("JOB_VERSION_CONFLICT", "Migration job changed", 409)
+                return authority.authorize(sql, authority.actor, reference)
+            change = self.jobs.cancel if operation == "cancel" else self.jobs.retry_failed
+            result = change(job["job_id"], actor=authority.actor, actor_kind="user",
+                authorize_transaction=authorize, finalize_transaction=authority.finalize, expected_epoch=epoch)
+        return dict(job_id=job["job_id"], status=result["status"], lease_epoch=str(result["lease_epoch"]), import_verified=False)

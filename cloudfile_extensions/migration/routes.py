@@ -10,4 +10,4 @@ def migration_routes(*, service_factory):
         raise ValueError("actual owned migration job factory required")
     return [path("v1/" + operation + "/", MigrationJobView.as_view(
         service_factory=service_factory, operation=operation), name="migration-" + operation)
-        for operation in sorted(service_factory.operations | {"status"})]
+        for operation in sorted(service_factory.operations | {"status", "cancel", "retry"})]

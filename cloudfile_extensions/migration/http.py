@@ -29,10 +29,10 @@ class MigrationJobView(DirectoryPolicyView):
             if csrf.process_view(request, lambda *_: None, (), {}) is not None:
                 raise ContractError("ACCESS_DENIED", "CSRF verification failed", 403)
             body = self._body(request)
-            if self.operation not in {"scan", "stage", "verify-copy", "status"}:
+            if self.operation not in {"scan", "stage", "verify-copy", "status", "cancel", "retry"}:
                 raise invalid("Migration operation is unavailable")
             key = request.headers.get("Idempotency-Key")
-            if self.operation != "status":
+            if self.operation in {"scan", "stage", "verify-copy"}:
                 if key is None:
                     raise ContractError("PRECONDITION_REQUIRED", "Idempotency-Key is required", 428)
                 if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", key):
@@ -42,8 +42,12 @@ class MigrationJobView(DirectoryPolicyView):
             with self.service_factory(request, request_id) as service:
                 if not isinstance(service, MigrationJobService):
                     raise RuntimeError("actual authenticated migration service required")
-                result = service.status(body) if self.operation == "status" else service.submit(
-                    self.operation, body, idempotency_key=key)
+                if self.operation == "status":
+                    result = service.status(body)
+                elif self.operation in {"cancel", "retry"}:
+                    result = service.transition(self.operation, body)
+                else:
+                    result = service.submit(self.operation, body, idempotency_key=key)
                 response = JsonResponse(result, status=202 if result.get("created") is True else 200)
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)

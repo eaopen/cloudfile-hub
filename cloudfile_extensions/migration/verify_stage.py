@@ -29,7 +29,7 @@ class ImportVerifyStage:
             raise ContractError("INVALID_REQUEST", "Exact library stage verification required", 400)
         stage = execution.store.get(stage_id)
         current = execution.store.get(claim.job_id)
-        if (stage["kind"] != "migration.stage" or stage["status"] != "succeeded" or stage["step"] != "copy-ready" or
+        if (stage["kind"] != "migration.stage" or stage["status"] != "succeeded" or stage["step"] != "finished" or
                 stage["scope"] != claim.scope or (stage["actor"], stage["actor_kind"]) != (current["actor"], current["actor_kind"]) or
                 type(stage["lease_epoch"]) is not int or stage["lease_epoch"] < 1):
             raise ContractError("IMPORT_STAGE_UNAVAILABLE", "Matching successful staging evidence required", 409)

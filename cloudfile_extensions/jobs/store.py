@@ -201,41 +201,51 @@ class JobStore:
                 self._record(cursor, self.get(claim.job_id), action="job.failed", result="failed",
                              actor=claim.owner, actor_kind="service", source="worker")
 
-    def cancel(self, job_id, *, actor, actor_kind, authorize_transaction=None):
+    def cancel(self, job_id, *, actor, actor_kind, authorize_transaction=None, finalize_transaction=None, expected_epoch=None):
         # The management caller must authorize the exact job scope before calling.
         return self._management_transition(job_id, status="cancelled", allowed=("queued", "running", "failed"),
                                            actor=actor, actor_kind=actor_kind, action="job.cancelled",
-                                           authorize_transaction=authorize_transaction)
+                                           authorize_transaction=authorize_transaction,
+                                           finalize_transaction=finalize_transaction, expected_epoch=expected_epoch)
 
     def retry(self, job_id, *, actor, actor_kind):
         return self._management_transition(job_id, status="queued", allowed=("failed", "cancelled"),
                                            actor=actor, actor_kind=actor_kind, action="job.retried")
 
-    def retry_failed(self, job_id, *, actor, actor_kind, authorize_transaction=None):
+    def retry_failed(self, job_id, *, actor, actor_kind, authorize_transaction=None, finalize_transaction=None, expected_epoch=None):
         # A fresh authenticated recovery request must not undo a concurrent
         # administrator cancellation between its read and this row lock.
         return self._management_transition(job_id, status="queued", allowed=("failed",),
                                            actor=actor, actor_kind=actor_kind, action="job.retried",
-                                           authorize_transaction=authorize_transaction)
+                                           authorize_transaction=authorize_transaction,
+                                           finalize_transaction=finalize_transaction, expected_epoch=expected_epoch)
 
     def _management_transition(self, job_id, *, status, allowed, actor, actor_kind, action,
-                               authorize_transaction=None):
+                               authorize_transaction=None, finalize_transaction=None, expected_epoch=None):
         if authorize_transaction is not None and not callable(authorize_transaction):
             raise ValueError("trusted transaction authorization required")
+        if finalize_transaction is not None and not callable(finalize_transaction):
+            raise ValueError("trusted final transaction assertion required")
+        if expected_epoch is not None and (type(expected_epoch) is not int or not 0 <= expected_epoch <= 2 ** 64 - 1):
+            raise ValueError("exact job epoch required")
         identifier(actor)
         if actor_kind not in {"user", "service"}:
             raise ContractError("INVALID_REQUEST", "Invalid management actor", 400)
         with self._transaction(), self.connection.cursor() as cursor:
             if authorize_transaction is not None and authorize_transaction(cursor) is not True:
                 raise ContractError("ACCESS_DENIED", "Job transition is not authorized", 403)
-            cursor.execute("SELECT status FROM cf_background_job WHERE job_id=%s FOR UPDATE", (job_id,))
+            cursor.execute("SELECT status,lease_epoch FROM cf_background_job WHERE job_id=%s FOR UPDATE", (job_id,))
             row = cursor.fetchone()
             if row is None:
                 raise ContractError("NOT_FOUND", "Job does not exist", 404)
+            if expected_epoch is not None and row[1] != expected_epoch:
+                raise ContractError("JOB_VERSION_CONFLICT", "Job attempt changed", 409)
             if row[0] in allowed:
                 cursor.execute("UPDATE cf_background_job SET status=%s,lease_expiry=NULL,next_attempt_at=UTC_TIMESTAMP(6),"
                                "updated_at=UTC_TIMESTAMP(6) WHERE job_id=%s", (status, job_id))
                 self._record(cursor, self.get(job_id), action=action, result="succeeded", actor=actor, actor_kind=actor_kind)
+            if finalize_transaction is not None:
+                finalize_transaction(cursor)
         return self.get(job_id)
 
     def complete(self, claim, *, result_ref=None, barrier_guard=None):
