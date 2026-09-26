@@ -97,3 +97,12 @@ class PreparedLoginTest(unittest.TestCase):
         self.factory.assert_not_called()
         provisioning.request_for_login.return_value = None
         self.assertEqual(login.complete(state="state", code="code", binding="browser").username, "native@example.invalid")
+        from cloudfile_extensions.identity.pending import PendingLoginProofs
+        proofs = Mock(spec=PendingLoginProofs)
+        proofs.issue.return_value = "opaque-status-proof"
+        provisioning.request_for_login.return_value = "job-id"
+        login = PreparedOIDCLogin(self.flow, self.bindings, preparation_factory=self.factory,
+                                  provisioning=provisioning, pending_proofs=proofs)
+        result = login.complete(state="state", code="code", binding="browser")
+        self.assertEqual(result.status_token, "opaque-status-proof")
+        proofs.issue.assert_called_once_with(self.flow.complete.return_value[0], "job-id", "browser")

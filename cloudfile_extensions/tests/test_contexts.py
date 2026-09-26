@@ -96,6 +96,30 @@ class ContextTest(unittest.TestCase):
         with self.assertRaises(ContractError):
             self.contexts.assert_generation("u1", epoch)
 
+    def test_browser_bound_pending_proof_is_fixed_ttl_and_revocable(self):
+        import time
+        from cloudfile_extensions.identity.pending import PendingLoginProofs
+        proofs = PendingLoginProofs(self.redis, prefix=self.prefix)
+        identity = dict(issuer="https://idp.example.invalid/", sub="stable", userId="u1",
+                        expires_at=int(time.time()) + 600, userinfo={"private": "must-not-save"})
+        job = str(uuid4())
+        token = proofs.issue(identity, job, "browser-a" * 4)
+        key = proofs._key(token)
+        self.redis.expire(key, 100)
+        stored, actual = proofs.read(token, "browser-a" * 4)
+        self.assertEqual(actual, job)
+        self.assertNotIn("userinfo", stored)
+        self.assertLessEqual(self.redis.ttl(key), 100)
+        with self.assertRaises(ContractError):
+            proofs.read(token, "browser-b" * 4)
+        self.assertEqual(proofs.read(token, "browser-a" * 4)[1], job)
+        self.redis.persist(key)
+        with self.assertRaises(ContractError):
+            proofs.read(token, "browser-a" * 4)
+        proofs.revoke(token)
+        with self.assertRaises(ContractError):
+            proofs.read(token, "browser-a" * 4)
+
     def test_fresh_source_outage_is_usable_but_expiry_and_login_fail_closed(self):
         self.contexts.get("u1")
         def down(user_id):

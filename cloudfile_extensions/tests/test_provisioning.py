@@ -65,9 +65,24 @@ class ProvisioningTest(DatabaseTestCase):
     def test_resume_identity_created_failure_without_second_account(self):
         job, created = self.pipeline.submit(self.claims)
         self.assertTrue(created)
+        import time
+        from cloudfile_extensions.common.errors import ContractError
+        status_identity = {**self.claims, "expires_at": int(time.time()) + 300}
+        self.assertEqual(self.pipeline.status_for_login(status_identity, job),
+                         dict(job_id=job, status="queued", retryable=False))
+        from cloudfile_extensions.identity.pending import PendingLoginProofs, PendingLoginStatus
+        proofs = PendingLoginProofs(self.redis, prefix=self.prefix)
+        token = proofs.issue(status_identity, job, "browser-binding-" * 3)
+        self.assertEqual(PendingLoginStatus(proofs, self.pipeline).status(token, "browser-binding-" * 3),
+                         dict(job_id=job, status="queued", retryable=False))
+        with self.assertRaises(ContractError) as caught:
+            self.pipeline.status_for_login({**status_identity, "sub": "other-sub"}, job)
+        self.assertEqual(caught.exception.status, 404)
         self.fail_preparation = True
         self.assertEqual(self.worker.run_once(), job)
         self.assertEqual(self.pipeline.store.get(job)["status"], "failed")
+        self.assertEqual(self.pipeline.status_for_login(status_identity, job),
+                         dict(job_id=job, status="failed", retryable=True))
         self.assertEqual(self.pipeline.submit(self.claims), (job, False))
         # Fresh verified identity fixture, not an anonymous retry endpoint.
         self.assertEqual(self.pipeline.request_for_login(self.claims, unbound=False), job)

@@ -1,6 +1,8 @@
 """Durable JIT-to-subject preparation recovery; never creates a login session."""
 import hashlib
 import json
+import time
+from uuid import UUID
 from contextlib import contextmanager
 
 from ..common.errors import ContractError
@@ -77,6 +79,34 @@ class ProvisioningJobs:
         if job["status"] not in {"queued", "running"}:
             raise ContractError("IDENTITY_UNAVAILABLE", "Provisioning state is unavailable", 503)
         return job_id
+
+    def status_for_login(self, identity, job_id):
+        """Verified, unexpired OIDC identity; fixed safe DTO, never authority."""
+        if (identity.get("issuer") != self.jit.issuer or type(identity.get("expires_at")) is not int or
+                identity["expires_at"] <= time.time()):
+            raise ContractError("AUTHENTICATION_REQUIRED", "Pending login authentication expired", 401)
+        try:
+            if str(UUID(job_id)) != job_id:
+                raise ValueError()
+        except (ValueError, TypeError, AttributeError):
+            raise ContractError("INVALID_REQUEST", "Invalid provisioning job", 400) from None
+        request = {key: identity[key] for key in ("issuer", "sub", "userId")}
+        IdentityBindings._identity(request["issuer"], request["sub"], request["userId"])
+        job = self.store.get(job_id)
+        expected = dict(type="user", provider=self.jit.bindings.provider, external_id=request["userId"])
+        with self.store.connection.cursor() as cursor:
+            cursor.execute("SELECT request_json FROM cf_background_job WHERE job_id=%s", (job_id,))
+            stored = cursor.fetchall()
+        if (job["kind"] != self.KIND or job["actor"] != request["userId"] or job["actor_kind"] != "user" or
+                job["scope"] != expected or len(stored) != 1 or json.loads(stored[0][0]) != request):
+            raise ContractError("NOT_FOUND", "Provisioning job does not exist", 404)
+        # If an account already exists, current native suspension overrides the
+        # short-lived pending proof. Missing binding before creation is normal.
+        self.jit.bindings.resolve(issuer=request["issuer"], subject=request["sub"], user_id=request["userId"])
+        if job["status"] not in {"queued", "running", "failed", "cancelled", "succeeded"}:
+            raise ContractError("IDENTITY_UNAVAILABLE", "Provisioning state is unavailable", 503)
+        return dict(job_id=job_id, status=job["status"],
+                    retryable=job["status"] == "failed" and self.jit.enabled)
 
     def execute(self, execution):
         claim = execution.claim

@@ -12,6 +12,7 @@ from .oidc import OIDCFlow
 from .sql_bindings import SQLIdentityBindings
 from .jit import SQLJITProvisioner
 from .provisioning import ProvisioningJobs
+from .pending import PendingLoginProofs
 
 
 @dataclass(frozen=True)
@@ -25,10 +26,11 @@ class PreparedLogin:
 @dataclass(frozen=True)
 class PendingLogin:
     job_id: str
+    status_token: str = None
 
 
 class PreparedOIDCLogin:
-    def __init__(self, flow, bindings, *, preparation_factory, jit=None, provisioning=None):
+    def __init__(self, flow, bindings, *, preparation_factory, jit=None, provisioning=None, pending_proofs=None):
         if not isinstance(flow, OIDCFlow) or not isinstance(bindings, SQLIdentityBindings) or not callable(preparation_factory):
             raise ValueError("native OIDC flow, bindings and preparation factory required")
         self.flow, self.bindings, self.preparation_factory = flow, bindings, preparation_factory
@@ -41,6 +43,9 @@ class PreparedOIDCLogin:
         if jit is not None and provisioning is not None:
             raise ValueError("choose durable provisioning or synchronous JIT, not both")
         self.provisioning = provisioning
+        if pending_proofs is not None and (not isinstance(pending_proofs, PendingLoginProofs) or provisioning is None):
+            raise ValueError("pending proofs require durable provisioning")
+        self.pending_proofs = pending_proofs
 
     def begin(self, binding, *, redirect="/"):
         return self.flow.begin(binding, redirect=redirect)
@@ -55,7 +60,8 @@ class PreparedOIDCLogin:
         if self.provisioning is not None:
             job_id = self.provisioning.request_for_login(identity, unbound=username is None)
             if job_id is not None:
-                return PendingLogin(job_id)
+                token = self.pending_proofs.issue(identity, job_id, binding) if self.pending_proofs is not None else None
+                return PendingLogin(job_id, token)
         if username is None:
             if self.jit is None:
                 raise ContractError("IDENTITY_NOT_FOUND", "Business identity has not been bound", 409)
