@@ -24,9 +24,10 @@ class NativeImportAccount:
 def read_import_account(path):
     """Read fixed local account file for trusted import orchestration only.
 
-    No fallback password/login/environment credential is accepted. The future
-    launcher must use an FD-pinned private config, not re-open an unchecked path,
-    and independently authorize the current native user/library before effects.
+    No fallback password/login/environment credential is accepted. The launcher
+    must use account_config.import_account_config's sealed inherited input, not
+    re-open an unchecked path, and independently authorize the current native
+    user/library before effects. This reader alone is not launch authority.
     """
     if not isinstance(path, str) or not os.path.isabs(path) or "\0" in path:
         raise ValueError("fixed absolute deployment account file required")
