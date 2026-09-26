@@ -38,6 +38,12 @@ class PreparedLoginTest(unittest.TestCase):
         self.preparation.prepare.assert_called_once_with("u1", trigger="login")
         self.assertEqual(self.bindings.resolve.call_count, 2)
 
+    def test_logout_hint_is_internal_and_not_in_prepared_repr(self):
+        self.flow.complete.return_value[0]["_id_token_hint"] = "fixture-private-id-token"
+        value = self.complete()
+        self.assertEqual(value.id_token_hint, "fixture-private-id-token")
+        self.assertNotIn("fixture-private-id-token", repr(value))
+
     def test_failed_authentication_never_prepares(self):
         self.flow.complete.side_effect = ContractError("AUTHENTICATION_REQUIRED", "Rejected", 401)
         with self.assertRaises(ContractError):

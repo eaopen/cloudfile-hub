@@ -271,6 +271,11 @@ class OIDCFlow:
                                                       allow_redirects=False, stream=True), maximum_bytes=65536)
             identity = self.validator.validate(token.get("id_token"), nonce=transaction["nonce"],
                                                access_token=token["access_token"], userinfo=userinfo)
+            if self.config.end_session_url is not None:
+                # Retain only the ID token already verified above, never the
+                # access/refresh token. Provisioning persists an explicit
+                # issuer/sub/userId allowlist and cannot store this hint.
+                identity["_id_token_hint"] = token["id_token"]
             return identity, transaction["redirect"]
         except ContractError:
             raise

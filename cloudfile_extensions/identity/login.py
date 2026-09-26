@@ -3,7 +3,7 @@
 Does not create a browser session, JIT account or authorization ticket. The
 native login adapter may consume the result only after its own final checks.
 """
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import time
 
 from ..common.errors import ContractError
@@ -22,6 +22,7 @@ class PreparedLogin:
     context_epoch: str
     redirect: str
     expires_at: int
+    id_token_hint: str = field(default=None, repr=False)
 
 
 @dataclass(frozen=True)
@@ -94,4 +95,5 @@ class PreparedOIDCLogin:
         if (latest is None or latest["context_epoch"] != context["context_epoch"]
                 or preparation.state.username(identity["userId"]) != username):
             raise ContractError("IDENTITY_UNAVAILABLE", "Login subject changed during preparation", 503)
-        return PreparedLogin(identity["userId"], username, context["context_epoch"], redirect, identity["expires_at"])
+        return PreparedLogin(identity["userId"], username, context["context_epoch"], redirect,
+            identity["expires_at"], identity.get("_id_token_hint"))

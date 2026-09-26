@@ -10,6 +10,10 @@ from .session_guard import prepared_session_guard
 
 
 BACKEND = "cloudfile_extensions.identity.native_backend.CloudFileOIDCBackend"
+LOGOUT_HINT_KEY = "cf_oidc_logout_hint"
+SERVER_SESSION_ENGINES = frozenset({"django.contrib.sessions.backends.db",
+    "django.contrib.sessions.backends.cached_db", "django.contrib.sessions.backends.cache",
+    "django.contrib.sessions.backends.file"})
 
 
 class NativeOIDCSession:
@@ -25,6 +29,12 @@ class NativeOIDCSession:
             return prepared
         if not isinstance(prepared, PreparedLogin):
             raise ContractError("IDENTITY_UNAVAILABLE", "OIDC login preparation is unavailable", 503)
+        config = runtime.flow.config
+        retain_hint = config.end_session_url is not None
+        if retain_hint and (settings.SESSION_ENGINE not in SERVER_SESSION_ENGINES
+                or not isinstance(prepared.id_token_hint, str)
+                or not 1 <= len(prepared.id_token_hint) <= 32768):
+            raise ContractError("IDENTITY_UNAVAILABLE", "Server-side logout hint storage is unavailable", 503)
         from seahub.auth import login as auth_login
         from seahub.auth.models import AnonymousUser
         from seahub.utils.two_factor_auth import two_factor_auth_enabled
@@ -45,6 +55,9 @@ class NativeOIDCSession:
                 request.session["remember_me"] = False
                 user.backend = BACKEND
                 auth_login(request, user)
+                if retain_hint:
+                    request.session[LOGOUT_HINT_KEY] = dict(issuer=config.issuer,
+                        client_id=config.client_id, id_token=prepared.id_token_hint)
                 request.session.save()
                 response = HttpResponseRedirect(prepared.redirect)
                 runtime.browser.clear(binding, response)
