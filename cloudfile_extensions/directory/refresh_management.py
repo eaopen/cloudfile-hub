@@ -9,14 +9,24 @@ from .native_state import NativeSubjectState
 from .refresh_worker import UserRefreshJob
 from uuid import UUID
 import re
+import time
+from ..identity.service_tokens import ServicePrincipal
 
 
 class UserRefreshManagement:
-    def __init__(self, connection, *, actor, provider, native_schema, identity_schema):
-        if not isinstance(actor, AuthenticatedPolicyActor):
+    def __init__(self, connection, *, actor, provider, native_schema, identity_schema,
+                 service_providers=None):
+        self.machine = isinstance(actor, ServicePrincipal)
+        if self.machine:
+            if not isinstance(service_providers, frozenset) or provider not in service_providers:
+                raise ContractError("ACCESS_DENIED", "Service refresh provider is not allowed", 403)
+            actor.require(UserRefreshJob.KIND)
+        elif not isinstance(actor, AuthenticatedPolicyActor):
             raise ValueError("actually authenticated native administrator required")
         SchemaRunner(connection).require_current()
         self.actor = actor
+        self.actor_id = actor.service_id if self.machine else actor.user_id
+        self.actor_kind = "service" if self.machine else "user"
         self.state = NativeSubjectState(connection, native_schema=native_schema,
             identity_schema=identity_schema, provider=provider)
         self.jobs = JobStore(connection)
@@ -28,13 +38,18 @@ class UserRefreshManagement:
                 (schema, table))
             if cursor.fetchall() != (("InnoDB",),):
                 raise ContractError("SUBJECT_UNAVAILABLE", "Refresh identity storage is unavailable", 503)
-        manager = self.state.username(self.actor.user_id)
-        if manager != self.actor.native_username:
-            return False
-        cursor.execute("SELECT email,is_active,is_staff FROM " + self.state.accounts + " WHERE email=%s FOR UPDATE", (manager,))
-        if cursor.fetchall() != ((manager, 1, 1),):
-            return False
-        for user in sorted({self.actor.user_id, target}):
+        if self.machine:
+            self.actor.require(UserRefreshJob.KIND)
+            if self.actor.expires_at <= time.time():
+                raise ContractError("AUTHENTICATION_REQUIRED", "Service refresh credential expired", 401)
+        else:
+            manager = self.state.username(self.actor.user_id)
+            if manager != self.actor.native_username:
+                return False
+            cursor.execute("SELECT email,is_active,is_staff FROM " + self.state.accounts + " WHERE email=%s FOR UPDATE", (manager,))
+            if cursor.fetchall() != ((manager, 1, 1),):
+                return False
+        for user in self._users(target):
             username = self.state.username(user)
             cursor.execute("SELECT user,login_id FROM " + self.state.profiles + " WHERE user=%s OR login_id=%s FOR UPDATE",
                 (username, user))
@@ -46,6 +61,9 @@ class UserRefreshManagement:
             if self.state.barrier_active(self.state.provider, user):
                 raise ContractError("SUBJECT_UNAVAILABLE", "Refresh scope is fenced", 503)
         return True
+
+    def _users(self, target):
+        return [target] if self.machine else sorted({self.actor.user_id, target})
 
     def submit(self, request, *, idempotency_key):
         object_fields(request, ("scope", "refresh_subject", "reason"))
@@ -61,9 +79,9 @@ class UserRefreshManagement:
             raise ContractError("INVALID_REQUEST", "Invalid refresh reason", 400)
         scopes = [dict(type="provider", provider=self.state.provider, external_id=self.state.provider)]
         scopes.extend(dict(type="user", provider=self.state.provider, external_id=user)
-            for user in sorted({self.actor.user_id, target}))
+            for user in self._users(target))
         with scope_locks(self.jobs.connection, scopes):
-            return self.jobs.submit(actor=self.actor.user_id, actor_kind="user", kind=UserRefreshJob.KIND,
+            return self.jobs.submit(actor=self.actor_id, actor_kind=self.actor_kind, kind=UserRefreshJob.KIND,
                 scope=scope, request=dict(userId=target, reason=reason), idempotency_key=idempotency_key,
                 authorize_transaction=lambda cursor: self._authorize(cursor, target))
 
@@ -88,15 +106,17 @@ class UserRefreshManagement:
             raise ContractError("INVALID_REQUEST", "Invalid refresh job identity", 400) from None
         previous = self.jobs.get(job_id)
         scope = previous["scope"]
-        if (previous["kind"] != UserRefreshJob.KIND or previous["actor_kind"] != "user"
+        if (previous["kind"] != UserRefreshJob.KIND or previous["actor_kind"] not in {"user", "service"}
                 or set(scope) != {"type", "provider", "external_id"}
                 or scope["type"] != "user" or scope["provider"] != self.state.provider
                 or previous["barrier_active"]):
             raise ContractError("NOT_FOUND", "Refresh job is not available", 404)
+        if self.machine and (previous["actor_kind"] != "service" or previous["actor"] != self.actor_id):
+            raise ContractError("NOT_FOUND", "Refresh job is not available", 404)
         target = identifier(scope["external_id"], maximum=225)
         scopes = [dict(type="provider", provider=self.state.provider, external_id=self.state.provider)]
         scopes.extend(dict(type="user", provider=self.state.provider, external_id=user)
-            for user in sorted({self.actor.user_id, target}))
+            for user in self._users(target))
         connection = self.jobs.connection
         with scope_locks(connection, scopes):
             connection.begin()
@@ -109,7 +129,8 @@ class UserRefreshManagement:
                         raise ContractError("NOT_FOUND", "Refresh job is not available", 404)
                     current = self.jobs.get(job_id)
                     if (current["scope"] != scope or current["kind"] != UserRefreshJob.KIND
-                            or current["actor_kind"] != "user" or current["barrier_active"]):
+                            or current["actor_kind"] != previous["actor_kind"]
+                            or current["actor"] != previous["actor"] or current["barrier_active"]):
                         raise ContractError("SUBJECT_UNAVAILABLE", "Refresh scope changed", 503)
                     result = self.public_job(current)
                 connection.commit()
