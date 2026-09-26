@@ -116,6 +116,27 @@ class EventStoreTest(DatabaseTestCase):
             self.assertEqual(caught.exception.code, "WORKER_LEASE_LOST")
         self.outbox.acknowledge(new)
 
+    def test_search_running_predecessor_blocks_same_stream_but_not_other_library(self):
+        first = self.append()
+        second = self.append({**self.event, "event_id": str(uuid4()), "path": "/second"})
+        third = self.append({**self.event, "event_id": str(uuid4()), "repo_id": "22222222-2222-4222-8222-222222222222"})
+        one = self.outbox.claim("search", "worker-one")
+        self.assertEqual(one.event_id, first["event_id"])
+        other = self.outbox.claim("search", "worker-other")
+        self.assertEqual(other.event_id, third["event_id"])
+        self.assertIsNone(self.outbox.claim("search", "worker-three"))
+        self.outbox.acknowledge(one)
+        self.assertEqual(self.outbox.claim("search", "worker-three").event_id, second["event_id"])
+
+    def test_search_retry_backoff_does_not_allow_newer_same_library_event(self):
+        self.append()
+        self.append({**self.event, "event_id": str(uuid4()), "path": "/second"})
+        first = self.outbox.claim("search", "worker-one")
+        self.outbox.retry_later(first, code="INDEX_UNAVAILABLE", delay_seconds=3600)
+        self.assertIsNone(self.outbox.claim("search", "worker-two"))
+        # Resource consumers retain their independently acknowledged semantics.
+        self.assertIsNotNone(self.outbox.claim("resource", "resource-one"))
+
     def test_credentials_unknown_fields_and_oversize_event_are_not_logged(self):
         for event in ({**self.event, "token": "do-not-store"}, {**self.event, "bytes_sent": True},
                       {**self.event, "request_id": "x" * 256}):

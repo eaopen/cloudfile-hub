@@ -139,9 +139,15 @@ class Outbox:
         self.connection.begin()
         try:
             with self.connection.cursor() as cursor:
-                cursor.execute("SELECT event_id,payload," + consumer + "_epoch FROM cf_event_outbox WHERE (" + consumer +
+                # Search must not enqueue a newer library mutation while an older
+                # task is queued/running (including retry backoff). SKIP LOCKED
+                # may skip another library, never that stream's predecessor.
+                ordered = (" AND NOT EXISTS (SELECT 1 FROM cf_event_outbox prior WHERE prior.stream=next_event.stream"
+                    " AND prior.sequence<next_event.sequence AND prior.search_state<>'done')") if consumer == "search" else ""
+                cursor.execute("SELECT event_id,payload," + consumer + "_epoch FROM cf_event_outbox next_event WHERE ((" + consumer +
                                "_state='queued' AND " + consumer + "_next_at<=UTC_TIMESTAMP(6)) OR (" + consumer +
-                               "_state='running' AND " + consumer + "_expiry<=UTC_TIMESTAMP(6)) ORDER BY sequence LIMIT 1 FOR UPDATE SKIP LOCKED")
+                               "_state='running' AND " + consumer + "_expiry<=UTC_TIMESTAMP(6)))" + ordered +
+                               " ORDER BY sequence LIMIT 1 FOR UPDATE SKIP LOCKED")
                 row = cursor.fetchone()
                 if row is None:
                     self.connection.commit()
