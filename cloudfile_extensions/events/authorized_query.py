@@ -7,6 +7,9 @@ from ..tags.definitions import uuid_value
 from .query import AuditReader
 from .service import AuditService
 from .privacy import redact_event
+from .job_service import AuditTransactionJobs
+from ..jobs.store import JobStore
+from uuid import UUID
 
 
 class AuthorizedAuditQuery:
@@ -23,6 +26,51 @@ class AuthorizedAuditQuery:
         def no_export(*args, **kwargs):
             raise ContractError("AUDIT_UNAVAILABLE", "Audit export runtime is unavailable", 503)
         self.service = AuditService(reader, None, export_guard=no_export, redact=redact)
+
+    def create_export(self, request, *, idempotency_key):
+        filters = AuditService._filters(request)
+        repo = filters.pop("repo_id")
+        def submit():
+            jobs = AuditTransactionJobs(self.authority.state.connection, self.cursor)
+            job_id, created = jobs.submit(actor=self.authority.actor, actor_kind="user",
+                kind="audit.export", scope=dict(type="repo", provider="cloudfile", external_id=repo),
+                request=filters, idempotency_key=idempotency_key)
+            return AuditService._dto(jobs.get(job_id)), created
+        return self._consume(repo, submit, export=True)
+
+    def _owned_export(self, job_id):
+        try:
+            job_id = str(UUID(job_id))
+        except (ValueError, TypeError, AttributeError):
+            raise ContractError("INVALID_REQUEST", "Invalid audit export identity", 400) from None
+        job = JobStore(self.authority.state.connection).get(job_id)
+        if (job["kind"] != "audit.export" or job["actor_kind"] != "user"
+                or job["actor"] != self.authority.actor or job["barrier_active"]
+                or job["scope"].get("type") != "repo"
+                or job["scope"].get("provider") != "cloudfile"):
+            raise ContractError("NOT_FOUND", "Audit export is not available", 404)
+        resource_ref(dict(repo_id=job["scope"]["external_id"], path="/", kind="dir"))
+        return job
+
+    def export_status(self, job_id):
+        job = self._owned_export(job_id)
+        def read():
+            current = self._owned_export(job["job_id"])
+            if current["scope"] != job["scope"]:
+                raise ContractError("AUDIT_UNAVAILABLE", "Audit export scope changed", 503)
+            return AuditService._dto(current)
+        return self._consume(job["scope"]["external_id"], read, export=True)
+
+    def cancel_export(self, job_id):
+        job = self._owned_export(job_id)
+        def cancel():
+            current = self._owned_export(job["job_id"])
+            if current["scope"] != job["scope"]:
+                raise ContractError("AUDIT_UNAVAILABLE", "Audit export scope changed", 503)
+            jobs = AuditTransactionJobs(self.authority.state.connection, self.cursor)
+            return AuditService._dto(jobs.cancel(current["job_id"],
+                actor=self.authority.actor, actor_kind="user"))
+        return self._consume(job["scope"]["external_id"], cancel, export=True)
 
     def _authorize(self, actor, event):
         if self.cursor is None or actor != self.authority.actor or event.get("repo_id") != self.repo_id:
