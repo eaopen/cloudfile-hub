@@ -116,6 +116,14 @@ class ContextTest(unittest.TestCase):
         self.redis.persist(key)
         with self.assertRaises(ContractError):
             proofs.read(token, "browser-a" * 4)
+        # External TTL extension cannot extend the stored issuance deadline.
+        clock_value = [1000]
+        fixed = PendingLoginProofs(self.redis, prefix=self.prefix + "fixed:", clock=lambda: clock_value[0])
+        fixed_token = fixed.issue({**identity, "expires_at": 1600}, job, "browser-a" * 4)
+        self.redis.expire(fixed._key(fixed_token), 600)
+        clock_value[0] = 1301
+        with self.assertRaises(ContractError):
+            fixed.read(fixed_token, "browser-a" * 4)
         proofs.revoke(token)
         with self.assertRaises(ContractError):
             proofs.read(token, "browser-a" * 4)

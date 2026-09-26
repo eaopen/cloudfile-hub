@@ -40,7 +40,7 @@ class PendingLoginProofs:
             raise rejected()
         token = secrets.token_urlsafe(32)
         value = dict(identity={key: identity[key] for key in ("issuer", "sub", "userId", "expires_at")},
-                     job_id=job_id, binding=self._binding(binding))
+                     job_id=job_id, binding=self._binding(binding), expires_at=self.clock() + ttl)
         try:
             if not self.redis.set(self._key(token), json.dumps(value), ex=ttl, nx=True):
                 raise rejected()
@@ -64,7 +64,8 @@ class PendingLoginProofs:
             identity = value["identity"]
             IdentityBindings._identity(identity["issuer"], identity["sub"], identity["userId"])
             if (str(UUID(value["job_id"])) != value["job_id"] or type(identity["expires_at"]) is not int or
-                    identity["expires_at"] <= self.clock()):
+                    identity["expires_at"] <= self.clock() or type(value["expires_at"]) not in (int, float) or
+                    not self.clock() < value["expires_at"] <= identity["expires_at"]):
                 raise rejected()
             return identity, value["job_id"]
         except RedisError:
