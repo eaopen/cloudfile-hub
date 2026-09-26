@@ -24,7 +24,7 @@ class FileLockView(DirectoryPolicyView):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
             if request.GET:
                 raise invalid("Lease operations take no URL parameters")
-            if self.operation not in {"status", "acquire", "renew", "release"}:
+            if self.operation not in {"status", "acquire", "renew", "release", "force-release"}:
                 raise ContractError("LOCK_UNAVAILABLE", "Lease operation is unavailable", 503)
             csrf = CsrfViewMiddleware(lambda _: None)
             csrf.process_request(request)
@@ -46,6 +46,8 @@ class FileLockView(DirectoryPolicyView):
                     result = service.status(body)
                 elif self.operation == "acquire":
                     result = service.acquire(body, idempotency_key=key)
+                elif self.operation == "force-release":
+                    result = service.force_release(body, idempotency_key=key)
                 else:
                     result = service.change(body, idempotency_key=key, release=self.operation == "release")
                 response = JsonResponse(result)

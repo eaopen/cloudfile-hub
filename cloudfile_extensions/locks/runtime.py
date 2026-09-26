@@ -6,6 +6,7 @@ import json
 from ..common.validation import identifier
 from ..resources.runtime import ResourceServiceFactory
 from .service import FileLockService
+from .authority import LockManagementAuthority
 
 
 class FileLockFactory:
@@ -29,4 +30,12 @@ class FileLockFactory:
                 "cf.lock.holder.v1", resources.write_authority.state.provider,
                 resources.write_authority.actor, holder], ensure_ascii=False,
                 separators=(",", ":")).encode("utf-8"), "sha256").hex()
-            yield FileLockService(resources, holder=holder, version_reader=self.version_reader)
+            management = LockManagementAuthority(resources.read_authority.preparation,
+                self.resources.core, request_id=request_id, cloud_mode=self.resources.cloud_mode)
+            try:
+                yield FileLockService(resources, holder=holder, version_reader=self.version_reader, management=management)
+            finally:
+                management.epoch = None
+                management.current_subject = None
+                management.is_owner = False
+                management.effective_access = None

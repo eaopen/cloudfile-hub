@@ -79,7 +79,11 @@ def projection_required(value):
     if value["source"] == "hub":
         lock_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source",
             "action", "result", "repo_id", "path", "resource_uid", "resource_kind", "revision"}
-        if (set(value) == lock_fields and value["action"] in {"lock.acquired", "lock.renewed", "lock.released"}
+        lock_fact = (set(value) == lock_fields and value["action"] in {"lock.acquired", "lock.renewed", "lock.released"})
+        lock_recovery = (set(value) == lock_fields | {"reason"} and value["action"] == "lock.force-released" and
+            isinstance(value.get("reason"), str) and bool(value["reason"].strip()) and len(value["reason"]) <= 512 and
+            not any(ord(char) < 32 for char in value["reason"]))
+        if ((lock_fact or lock_recovery)
                 and value["actor_kind"] == "user" and value["result"] == "succeeded" and
                 value["resource_kind"] == "file" and value.get("repo_id") and value.get("path") and value.get("resource_uid")):
             revision = value.get("revision")
