@@ -50,15 +50,25 @@ class PolicyResources:
     @contextmanager
     def preparation(self, actor, request_id):
         with self.connection() as connection:
-            directory = self.directory_factory()
-            if not isinstance(directory, DirectoryProvider):
-                raise ValueError("real directory provider required")
-            try:
-                yield SubjectPreparation(connection, self.redis, provider_id=self.provider,
-                    directory=directory, native_schema=self.native_schema,
-                    identity_schema=self.identity_schema, actor_user_id=actor,
-                    request_id=request_id, prefix=self.prefix)
-            finally:
-                # The directory factory supplies an owned HTTPS session. Redis
-                # uses the fixed deployment pool and is not closed per request.
-                directory.client.session.close()
+            with self.preparation_on_connection(connection, actor, request_id) as preparation:
+                yield preparation
+
+    @contextmanager
+    def preparation_on_connection(self, connection, actor, request_id):
+        """Trusted worker connection owned by connection(), not an HTTP borrow.
+
+        This scope owns the directory session only. It must not close/commit the
+        job connection; callers retain lease and projection on the same SQL.
+        """
+        if not connection.get_autocommit():
+            raise ValueError("dedicated worker autocommit connection required")
+        directory = self.directory_factory()
+        if not isinstance(directory, DirectoryProvider):
+            raise ValueError("real directory provider required")
+        try:
+            yield SubjectPreparation(connection, self.redis, provider_id=self.provider,
+                directory=directory, native_schema=self.native_schema,
+                identity_schema=self.identity_schema, actor_user_id=actor,
+                request_id=request_id, prefix=self.prefix)
+        finally:
+            directory.client.session.close()
