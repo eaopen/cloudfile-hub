@@ -68,6 +68,11 @@ class MembershipTest(unittest.TestCase):
                                 mappings=self.maps, current_groups=(3, 4, 99), attribute_allowlist=())
         self.assertEqual((plan.add, plan.remove, plan.unmanaged), ((1, 2, 5), (3,), (4, 99)))
 
+    def test_inline_ancestors_from_source_snapshot_are_projected(self):
+        self.subject["organization_ancestors"] = [dict(namespace="dept", external_id="parent")]
+        self.maps.append(self.mapping("dept", "dept", "parent", 5))
+        self.assertEqual(self.plan().add, (2, 5))
+
     def test_namespace_and_case_are_exact_not_display_names(self):
         self.subject["roles"][0]["namespace"] = "Role"
         with self.assertRaises(ContractError):

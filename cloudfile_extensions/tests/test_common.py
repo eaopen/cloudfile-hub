@@ -111,6 +111,28 @@ class SubjectProtocolTest(unittest.TestCase):
         disabled = {**self.subject, "status": "disabled", "roles": [], "organizations": []}
         self.assertEqual(validate_subject(disabled, requested_user_id="user-1", attribute_allowlist=self.allowed)["status"], "disabled")
 
+    def test_same_snapshot_ancestors_are_exact_and_disjoint_from_direct_memberships(self):
+        ancestor = {"namespace": "directory", "external_id": "root"}
+        value = {**self.subject, "organization_ancestors": [ancestor]}
+        self.assertEqual(validate_subject(value, requested_user_id="user-1", attribute_allowlist=self.allowed)["organization_ancestors"], [ancestor])
+        direct = {key: self.subject["organizations"][0][key] for key in ("namespace", "external_id")}
+        for ancestors in ([ancestor, ancestor], [direct], [{**ancestor, "is_primary": False}], None):
+            with self.subTest(ancestors=ancestors), self.assertRaises(ContractError):
+                validate_subject({**self.subject, "organization_ancestors": ancestors}, requested_user_id="user-1", attribute_allowlist=self.allowed)
+
+    def test_hierarchical_provider_requires_ancestor_field_even_when_empty(self):
+        from cloudfile_extensions.directory.provider import DirectoryProvider
+        class Client:
+            def get(inner, url, headers):
+                return self.subject
+        provider = DirectoryProvider("https://directory.example.invalid", authorization=lambda: "Bearer fixture",
+                                     attribute_allowlist=self.allowed, client=Client(), require_organization_ancestors=True)
+        with self.assertRaises(ContractError) as caught:
+            provider.fetch("user-1")
+        self.assertEqual(caught.exception.status, 503)
+        self.subject = {**self.subject, "organization_ancestors": []}
+        self.assertEqual(provider.fetch("user-1")["organization_ancestors"], [])
+
     def test_wrong_identity_missing_memberships_credentials_and_duplicates_rejected(self):
         for invalid in (
             {**self.subject, "userId": "user-2"},

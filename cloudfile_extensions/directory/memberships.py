@@ -29,9 +29,9 @@ def plan_memberships(subject, *, user_id, provider_id, mappings, current_groups,
                      attribute_allowlist):
     """Reconcile only this provider's registered groups, never manual groups.
 
-    This plans the snapshot's direct organizations and roles. Effective ancestor
-    expansion needs a coherent organization tree in the trusted preparer before
-    native readiness; this function does not infer parents or primary priority.
+    This plans direct organizations, inline effective ancestors and roles from
+    the same source snapshot. Hierarchical providers must require the ancestor
+    field; this function does not infer parents or primary priority.
     There is no display-name matching or project-specific logic here.
     Missing desired mappings fail closed, rather than silently dropping roles.
     """
@@ -60,8 +60,8 @@ def plan_memberships(subject, *, user_id, provider_id, mappings, current_groups,
     owned = {group_id for group_id, key in owners.items() if key[0] == provider_id}
     desired = set()
     if subject["status"] == "active":
-        for field, subject_type in (("organizations", "dept"), ("roles", "group")):
-            for item in subject[field]:
+        for field, subject_type in (("organizations", "dept"), ("organization_ancestors", "dept"), ("roles", "group")):
+            for item in subject.get(field, []):
                 key = (provider_id, subject_type, item["namespace"], item["external_id"])
                 if key not in keyed:
                     raise ContractError("PROJECTION_UNAVAILABLE", "Required native group mapping is missing", 503)

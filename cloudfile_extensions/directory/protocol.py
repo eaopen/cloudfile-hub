@@ -9,7 +9,7 @@ from ..common.validation import identifier, object_fields, sequence, utc_time
 def validate_subject(value, *, requested_user_id, attribute_allowlist,
                      now=None, maximum_clock_skew=60):
     object_fields(value, ("userId", "status", "attributes", "organizations", "roles",
-                          "etag", "generated_at"), ("revision", "organization_revision"))
+                          "etag", "generated_at"), ("revision", "organization_revision", "organization_ancestors"))
     identifier(value["userId"], maximum=225)
     if value["userId"] != requested_user_id:
         raise invalid("Directory subject does not match requested identity")
@@ -49,4 +49,19 @@ def validate_subject(value, *, requested_user_id, attribute_allowlist,
             normalized[field].append(dict(item))
     if sum(item["is_primary"] for item in normalized["organizations"]) > 1:
         raise invalid("Multiple primary organizations")
+    if "organization_ancestors" in value:
+        ancestors = value["organization_ancestors"]
+        if not isinstance(ancestors, list) or len(ancestors) + len(normalized["organizations"]) > 4096:
+            raise invalid("Invalid effective organization memberships")
+        seen = {(item["namespace"], item["external_id"]) for item in normalized["organizations"]}
+        normalized["organization_ancestors"] = []
+        for item in ancestors:
+            object_fields(item, ("namespace", "external_id"))
+            key = (identifier(item["namespace"]), identifier(item["external_id"]))
+            if key in seen:
+                raise invalid("Duplicate effective organization membership")
+            seen.add(key)
+            normalized["organization_ancestors"].append(dict(item))
+        if value["status"] == "disabled" and ancestors:
+            raise invalid("Disabled subject cannot have organization ancestors")
     return {**value, "attributes": dict(attributes), **normalized}
