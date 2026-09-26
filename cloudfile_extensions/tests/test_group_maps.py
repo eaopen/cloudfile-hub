@@ -59,3 +59,24 @@ class GroupMapTest(DatabaseTestCase):
             self.assertEqual(cursor.fetchall(), (("directory", "legacy-id", 77),))
         with self.assertRaises(ContractError):
             self.maps.read("directory")
+
+    def test_field_width_native_type_and_prefix_index_drift_rejected(self):
+        variants = (
+            ("ALTER TABLE cf_sso_group_map MODIFY namespace VARCHAR(200) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL",
+             "ALTER TABLE cf_sso_group_map MODIFY namespace VARCHAR(255) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL"),
+            ("ALTER TABLE cf_sso_group_map MODIFY group_id BIGINT NOT NULL",
+             "ALTER TABLE cf_sso_group_map MODIFY group_id INT NOT NULL"),
+            ("ALTER TABLE cf_sso_group_map DROP INDEX group_map_subject, ADD UNIQUE KEY group_map_subject(provider,subject_type,namespace,external_id(100))",
+             "ALTER TABLE cf_sso_group_map DROP INDEX group_map_subject, ADD UNIQUE KEY group_map_subject(provider,subject_type,namespace,external_id)"),
+        )
+        for changed, restored in variants:
+            with self.subTest(changed=changed):
+                with self.connection.cursor() as cursor:
+                    cursor.execute(changed)
+                try:
+                    with self.assertRaises(MigrationError):
+                        SchemaRunner(self.connection).require_current()
+                finally:
+                    with self.connection.cursor() as cursor:
+                        cursor.execute(restored)
+                SchemaRunner(self.connection).require_current()
