@@ -53,6 +53,7 @@ class ResourceStore:
 
     def _row(self, reference, evidence, *, locking=False):
         with self.connection.cursor() as cursor:
+            self._storage(cursor)
             cursor.execute("SELECT uid,path,lifecycle_ref,revision,description,local_open_type "
                            "FROM cf_resource WHERE repo_id=%s AND path_hash=%s AND kind=%s AND state='active' LIMIT 2" +
                            (" FOR UPDATE" if locking else ""),
@@ -64,6 +65,21 @@ class ResourceStore:
         if not rows:
             return None
         return self._decode_row(reference, rows[0])
+
+    @staticmethod
+    def _storage(cursor):
+        # Pin table metadata before checking constraints. Missing/prefix/extra
+        # index columns cannot satisfy the point-lookup and lifecycle contract.
+        cursor.execute("SELECT uid FROM cf_resource LIMIT 0 FOR UPDATE")
+        cursor.fetchall()
+        cursor.execute("SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_resource'")
+        if cursor.fetchall() != (("InnoDB",),):
+            raise ContractError("RESOURCE_UNAVAILABLE", "Resource storage requires reconciliation", 503)
+        for index, expected in (("PRIMARY", (("uid", 0, None),)),
+                ("resource_location", (("repo_id", 1, None), ("path_hash", 1, None), ("kind", 1, None)))):
+            cursor.execute("SELECT column_name,non_unique,sub_part FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_resource' AND index_name=%s ORDER BY seq_in_index", (index,))
+            if cursor.fetchall() != expected:
+                raise ContractError("RESOURCE_UNAVAILABLE", "Resource indexes require reconciliation", 503)
 
     @staticmethod
     def _decode_row(reference, row):
