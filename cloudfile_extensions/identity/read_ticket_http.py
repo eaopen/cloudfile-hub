@@ -9,6 +9,7 @@ from ..authorization.http import DirectoryPolicyView
 from ..authorization.runtime import AuthenticatedPolicyActor
 from ..common.errors import ContractError, invalid
 from ..common.validation import object_fields
+from ..resources.paths import resource_ref
 from .read_ticket import OIDCReadTicketIssuer
 from .resources import LoginResources
 from .session_authority import OIDCSessionAuthority
@@ -51,11 +52,14 @@ class OIDCReadTicketView(DirectoryPolicyView):
                 raise ContractError("ACCESS_DENIED", "CSRF verification failed", 403)
             body = self._body(request)  # Bounded UTF-8 JSON, rejects duplicate fields.
             object_fields(body, ("reference",), ("operation",))
+            reference = resource_ref(body["reference"])
+            operation = body.get("operation", "download")
+            if reference["kind"] != "file" or operation not in ("view", "download"):
+                raise invalid("Download tickets require a file and supported read operation")
             if not isinstance(self.service_factory, OIDCReadTicketFactory):
                 raise ContractError("POLICY_UNAVAILABLE", "Download ticket runtime is unavailable", 503)
             with self.service_factory(request, request_id) as issuer:
-                result = issuer.issue(request, body["reference"],
-                    operation=body.get("operation", "download"))
+                result = issuer.issue(request, reference, operation=operation)
             response = JsonResponse(result, status=201)
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)
