@@ -35,12 +35,14 @@ class ProvisioningBackground:
                 authorize=reject, audit=reject)
             jit = SQLJITProvisioner(bindings, issuer=issuer, directory=directory,
                 enabled=True, request_id=str(uuid4()))
-            def preparation(user):
+            def task_preparation(user, request_id):
                 return SubjectPreparation(connection, resources.redis, provider_id=resources.provider,
                     directory=directory, native_schema=resources.native_schema,
                     identity_schema=resources.identity_schema, actor_user_id=user,
-                    request_id=str(uuid4()), prefix=resources.prefix)
-            self.pipeline = ProvisioningJobs(JobStore(connection), jit, preparation_factory=preparation)
+                    request_id=request_id, prefix=resources.prefix)
+            self.pipeline = ProvisioningJobs(JobStore(connection), jit,
+                preparation_factory=lambda user: task_preparation(user, str(uuid4())),
+                task_preparation_factory=task_preparation)
             self.worker = JobWorker(self.pipeline.store, owner=owner,
                 handlers={ProvisioningJobs.KIND: self.pipeline.handler}, lease_seconds=lease_seconds)
         except Exception:

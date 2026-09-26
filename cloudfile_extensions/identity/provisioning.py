@@ -17,11 +17,14 @@ from .jit import SQLJITProvisioner
 class ProvisioningJobs:
     KIND = "identity.provision"
 
-    def __init__(self, store, jit, *, preparation_factory):
+    def __init__(self, store, jit, *, preparation_factory, task_preparation_factory=None):
         if (not isinstance(store, JobStore) or not isinstance(jit, SQLJITProvisioner) or
                 store.connection is not jit.bindings.connection or not callable(preparation_factory)):
             raise ValueError("same-connection native provisioning assembly required")
         self.store, self.jit, self.factory = store, jit, preparation_factory
+        if task_preparation_factory is not None and not callable(task_preparation_factory):
+            raise ValueError("trusted task preparation factory required")
+        self.task_factory = task_preparation_factory
         self.handler = Handler(self.execute)
 
     def submit(self, identity):
@@ -124,9 +127,10 @@ class ProvisioningJobs:
         with self.store.connection.cursor() as cursor:
             assert_claim(cursor)
         # Reconcile from actual identity, not checkpoint claims of past success.
-        self.jit.ensure(claim.request, assert_transaction=assert_claim)
+        self.jit.ensure(claim.request, assert_transaction=assert_claim, request_id=claim.job_id)
         execution.checkpoint(step="identity_created", value={})
-        preparation = self.factory(user_id)
+        preparation = (self.factory(user_id) if self.task_factory is None
+            else self.task_factory(user_id, claim.job_id))
         if (not isinstance(preparation, SubjectPreparation) or preparation.actor != user_id or
                 preparation.state.connection is not self.store.connection):
             raise ValueError("same-connection own-subject preparation required")

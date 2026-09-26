@@ -33,7 +33,9 @@ class SQLJITProvisioner:
         self.state = NativeSubjectState(bindings.connection, native_schema=bindings.native_schema,
                                        identity_schema=bindings.identity_schema, provider=bindings.provider)
 
-    def ensure(self, identity, *, assert_transaction=None):
+    def ensure(self, identity, *, assert_transaction=None, request_id=None):
+        from ..common.validation import identifier
+        request_id = self.request_id if request_id is None else identifier(request_id)
         if assert_transaction is not None and not callable(assert_transaction):
             raise ValueError("trusted transaction assertion required")
         if not self.enabled or identity.get("issuer") != self.issuer:
@@ -79,7 +81,7 @@ class SQLJITProvisioner:
                                        (username, provider, subject, json.dumps(metadata, sort_keys=True)))
                         EventWriter().append(cursor, dict(event_id=str(uuid4()),
                             occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                            request_id=self.request_id, actor_user_id=user_id, actor_kind="user", source="idp",
+                            request_id=request_id, actor_user_id=user_id, actor_kind="user", source="idp",
                             action="identity.created", result="succeeded", target_user_id=user_id))
                         if assert_transaction is not None:
                             assert_transaction(cursor)
