@@ -7,6 +7,7 @@ from .callback_http import login_callback_routes
 from .pending_http import PendingStatusView
 from .resources import LoginResources
 from .logout_http import LocalLogoutView
+from .rp_logout_http import RPLogoutView
 
 
 def login_routes(*, resources, return_path="/"):
@@ -21,4 +22,6 @@ def login_routes(*, resources, return_path="/"):
         + [path("pending/", PendingStatusView.as_view(service_factory=pending),
             name="cloudfile-oidc-pending"),
            path("logout/", LocalLogoutView.as_view(resources=resources),
-            name="cloudfile-oidc-local-logout")])
+            name="cloudfile-oidc-local-logout"),
+           path("logout/idp/", RPLogoutView.as_view(resources=resources),
+            name="cloudfile-oidc-rp-logout")])

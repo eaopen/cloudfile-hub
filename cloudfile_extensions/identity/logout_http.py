@@ -14,6 +14,9 @@ class LocalLogoutView(View):
     resources = None
     http_method_names = ["post"]
 
+    def logout_response(self, request):
+        return JsonResponse(dict(local_logged_out=True, idp_logged_out=False))
+
     def dispatch(self, request, *args, **kwargs):
         request_id = str(uuid4())
         try:
@@ -33,6 +36,9 @@ class LocalLogoutView(View):
             binding = None
             if any(part.strip().split("=", 1)[0] == BINDING_COOKIE for part in raw.split(";")):
                 binding = request_binding(request)
+            # Prepare protocol response while the server hint is still present;
+            # it is never returned if native or browser cleanup then fails.
+            response = self.logout_response(request)
             from seahub.auth import logout
             from seahub.auth.models import AnonymousUser
             try:
@@ -43,7 +49,6 @@ class LocalLogoutView(View):
                 request.user = AnonymousUser()
                 request.session.flush()
                 raise ContractError("IDENTITY_UNAVAILABLE", "Native logout cleanup is unavailable", 503) from None
-            response = JsonResponse(dict(local_logged_out=True, idp_logged_out=False))
             # No directory/SQL dependency for local termination. The independent
             # browser registry invalidates same-binding pending proofs only.
             if binding is not None:
