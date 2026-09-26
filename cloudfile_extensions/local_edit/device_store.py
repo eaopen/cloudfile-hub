@@ -100,7 +100,7 @@ class DeviceStore:
             (digest, device_id, revision, instance, session_id, operation, request_sha256, now, now + 60))
         return challenge
 
-    def consume(self, sql, *, provider, actor, challenge, signature):
+    def verify_saved(self, sql, *, provider, actor, challenge, signature):
         if not isinstance(challenge, DeviceChallenge):
             raise ValueError("actual saved server challenge required")
         challenge.message()
@@ -117,6 +117,11 @@ class DeviceStore:
             raise conflict()
         sql.execute("SELECT FLOOR(UNIX_TIMESTAMP())")
         verify_possession(key, challenge, signature, now=int(sql.fetchone()[0]))
+        return revision
+
+    def consume(self, sql, *, provider, actor, challenge, signature):
+        revision = self.verify_saved(sql, provider=provider, actor=actor, challenge=challenge, signature=signature)
+        digest = hashlib.sha256(challenge.nonce.encode("ascii")).hexdigest()
         # Repeat expiry at the actual conditional consumption statement, not
         # only before cryptography. Revocation uses this same locked device row.
         sql.execute("UPDATE cf_local_device_challenge SET consumed_at=UTC_TIMESTAMP(6) WHERE nonce_digest=%s AND consumed_at IS NULL AND expires_at>FLOOR(UNIX_TIMESTAMP())", (digest,))

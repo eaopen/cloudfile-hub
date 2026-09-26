@@ -18,6 +18,22 @@ def encode(raw):
 
 
 class DeviceStoreTests(DatabaseTestCase):
+    def test_precheck_does_not_consume_challenge_or_activate_device(self):
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as sql:
+                self.create(sql)
+                challenge = self.issue(sql)
+                self.assertEqual(self.store.verify_saved(sql, provider="etech", actor="user-1",
+                    challenge=challenge, signature=self.sign(challenge)), 1)
+                sql.execute("SELECT consumed_at FROM cf_local_device_challenge")
+                self.assertIsNone(sql.fetchone()[0])
+                sql.execute("SELECT state FROM cf_local_device WHERE device_id=%s", (self.device_id,))
+                self.assertEqual(sql.fetchone()[0], "pending")
+                self.assertEqual(self.consume(sql, challenge)["state"], "active")
+        finally:
+            self.connection.rollback()
+
     def setUp(self):
         super().setUp()
         SchemaRunner(self.connection).apply()
