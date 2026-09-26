@@ -11,6 +11,26 @@ from cloudfile_extensions.tests.test_schema import DatabaseTestCase
 
 
 class EventStoreTest(DatabaseTestCase):
+    def test_recovery_never_commits_or_rolls_back_foreign_transaction(self):
+        self.append()
+        claim = self.outbox.claim("search", "worker")
+        self.connection.begin()
+        with self.connection.cursor() as sql:
+            sql.execute("UPDATE cf_event_outbox SET resource_error='FOREIGN_PENDING' WHERE event_id=%s", (claim.event_id,))
+        for operation in (lambda: self.outbox.require_recovery(claim, code="SEARCH_SUBMISSION_UNKNOWN"),
+                lambda: self.outbox.reconcile_audit_only(claim),
+                lambda: self.outbox.claim("search", "other")):
+            with self.assertRaises(ContractError) as error:
+                operation()
+            self.assertEqual(error.exception.code, "EVENT_TRANSACTION_CONFLICT")
+        with self.connection.cursor() as sql:
+            sql.execute("SELECT resource_error,search_state FROM cf_event_outbox WHERE event_id=%s", (claim.event_id,))
+            self.assertEqual(sql.fetchone(), ("FOREIGN_PENDING", "running"))
+        self.connection.rollback()
+        with self.connection.cursor() as sql:
+            sql.execute("SELECT resource_error FROM cf_event_outbox WHERE event_id=%s", (claim.event_id,))
+            self.assertIsNone(sql.fetchone()[0])
+
     def test_parked_mutation_blocks_its_stream_but_not_another_library(self):
         self.append()
         claim = self.outbox.claim("search", "worker")

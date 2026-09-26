@@ -207,11 +207,20 @@ class Outbox:
             raise ValueError("outbox requires a dedicated autocommit connection")
         self.connection = connection
 
+    def _require_idle(self):
+        # PyMySQL's server_status is the actual last MySQL protocol response;
+        # autocommit=True alone does not exclude an explicit BEGIN. Starting a
+        # new transaction would implicitly commit a caller's existing work.
+        status = getattr(self.connection, "server_status", None)
+        if (not self.connection.get_autocommit() or type(status) is not int or status & 1):
+            raise ContractError("EVENT_TRANSACTION_CONFLICT", "Dedicated idle event connection required", 503)
+
     def claim(self, consumer, owner, *, lease_seconds=30):
         if consumer not in self.CONSUMERS or not isinstance(owner, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", owner):
             raise ValueError("invalid outbox consumer or owner")
         if type(lease_seconds) is not int or not 1 <= lease_seconds <= 300:
             raise ValueError("invalid consumer lease")
+        self._require_idle()
         self.connection.begin()
         try:
             with self.connection.cursor() as cursor:
@@ -281,6 +290,7 @@ class Outbox:
                 type(claim.epoch) is not int or claim.epoch < 1):
             raise ValueError("actual owned event claim required")
         name = claim.consumer
+        self._require_idle()
         self.connection.begin()
         try:
             with self.connection.cursor() as sql:
@@ -345,5 +355,11 @@ class Outbox:
                 not isinstance(code, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code)):
             raise ValueError("actual owned claim and safe recovery code required")
         name = claim.consumer
-        self._update(claim, name + "_state='recovery'," + name + "_expiry=NULL," +
-            name + "_owner=NULL," + name + "_error=%s", (code,))
+        self._require_idle()
+        self.connection.begin()
+        try:
+            self._update(claim, name + "_state='recovery'," + name + "_expiry=NULL," +
+                name + "_owner=NULL," + name + "_error=%s", (code,))
+            self.connection.commit()
+        finally:
+            self.connection.rollback()
