@@ -43,3 +43,28 @@ class ResourceService:
         return self.store.replace_user_tags_authorized(resource_ref(request["reference"]), request["tag_ids"],
             expected_revision=request["revision"], authority=self.write_authority,
             lifecycle_reader=self.reader, request_id=self.request_id)
+
+    def create_user_tag(self, request):
+        """Create/reuse a library tag through an actual writable resource.
+
+        Definition creation does not bind the tag or allocate a resource UID.
+        Existing colors win on label reuse. Display/disable changes need their
+        separate library-management authority, never this content-write path.
+        """
+        from ..tags.write import create_user
+        from ..tags.definitions import user_definition
+        from uuid import uuid4
+        object_fields(request, ("reference", "value"))
+        reference = resource_ref(request["reference"])
+        # Validate before acquiring native/SQL resources; no caller-controlled
+        # provider, namespace, tag ID, actor or cross-library scope is accepted.
+        candidate = user_definition(reference["repo_id"], str(uuid4()), request["value"])
+        value = {"label": candidate["label"], "color": candidate["color"]}
+        def create(cursor, ref):
+            evidence = self.store._validate_evidence(self.reader(cursor, ref))
+            # Existing sparse state must agree with actual lifecycle. An
+            # unannotated native resource is valid and remains unallocated.
+            self.store._row(ref, evidence, locking=True)
+            return create_user(cursor, repo_id=ref["repo_id"], value=value,
+                actor=self.write_authority.actor, request_id=self.request_id)
+        return self.write_authority.consume(reference, create)
