@@ -17,7 +17,7 @@ SOURCES = frozenset({"hub", "server", "fileserver", "webdav", "idp", "directory"
 
 def normalize_event(event):
     object_fields(event, ("event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source", "action", "result"),
-                  ("repo_id", "path", "target_path", "resource_uid", "resource_kind", "job_id", "device_id", "delegator", "revision", "content_version", "subject_revision", "policy_revision", "bytes_sent", "target_user_id", "reason"))
+                  ("repo_id", "path", "target_path", "resource_uid", "resource_kind", "job_id", "device_id", "session_id", "delegator", "revision", "content_version", "subject_revision", "policy_revision", "bytes_sent", "target_user_id", "reason"))
     value = dict(event)
     try:
         value["event_id"] = str(UUID(value["event_id"]))
@@ -29,6 +29,9 @@ def normalize_event(event):
             value["job_id"] = str(UUID(value["job_id"]))
         if "device_id" in value:
             if not isinstance(value["device_id"], str) or str(UUID(value["device_id"])) != value["device_id"]:
+                raise ValueError()
+        if "session_id" in value:
+            if not isinstance(value["session_id"], str) or str(UUID(value["session_id"])) != value["session_id"]:
                 raise ValueError()
     except (ValueError, TypeError, AttributeError):
         raise ContractError("INVALID_REQUEST", "Invalid event identity", 400) from None
@@ -80,6 +83,14 @@ def projection_required(value):
         except (ValueError, TypeError, AttributeError):
             pass
     if value["source"] == "hub":
+        session_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source",
+            "action", "result", "session_id", "device_id", "repo_id", "path", "resource_kind", "resource_uid",
+            "revision", "content_version"}
+        if (set(value) == session_fields and value["actor_kind"] == "user" and value["result"] == "succeeded"
+                and value["action"] in {"local.session.created", "local.session.claimed"}
+                and value["resource_kind"] == "file" and re.fullmatch(r"[0-9a-f]{40}", value["content_version"])
+                and re.fullmatch(r"[1-9][0-9]{0,19}", value["revision"]) and int(value["revision"]) <= 2 ** 64 - 1):
+            return False
         device_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source",
             "action", "result", "device_id", "revision"}
         if (set(value) == device_fields and value["actor_kind"] == "user" and value["result"] == "succeeded"

@@ -37,7 +37,9 @@ class ContentReadAuthority(DirectoryManagement):
         """Trusted bounded metadata reader(cursor, reference) in this transaction.
 
         Reader must not commit, reconnect, perform DDL, stream files or issue
-        tickets. It must verify actual resource UID/lifecycle before metadata use.
+        native file-transfer tickets. Device-bound local-session claim inputs
+        remain metadata and cannot themselves release bytes or publish content.
+        It must verify actual resource UID/lifecycle before metadata use.
         An earlier authorization boolean must never substitute for this scope.
         """
         if not callable(reader):
