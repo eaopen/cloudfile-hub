@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from types import MappingProxyType
 import time
+import re
 
 import jwt
 
@@ -24,7 +25,8 @@ class ServiceCredential:
             identifier(value)
         if (not isinstance(self.secret, bytes) or len(self.secret) < 32 or
                 not isinstance(self.scopes, frozenset) or not self.scopes or
-                any(not isinstance(scope, str) or not scope or " " in scope for scope in self.scopes) or
+                any(not isinstance(scope, str) or not re.fullmatch(r"[a-z][a-z0-9._:-]{0,127}", scope)
+                    for scope in self.scopes) or
                 type(self.maximum_ttl) is not int or not 1 <= self.maximum_ttl <= 300):
             raise ValueError("invalid machine credential configuration")
 
@@ -67,7 +69,8 @@ class ServiceTokenVerifier:
             untrusted = jwt.get_unverified_header(token)
             # A header only selects a configured key, never the algorithm or identity.
             credential = self.credentials.get(untrusted.get("kid"))
-            if credential is None or untrusted.get("alg") != "HS256" or untrusted.get("typ") != "JWT":
+            if (credential is None or untrusted.get("alg") != "HS256" or untrusted.get("typ") != "JWT"
+                    or set(untrusted) - {"alg", "typ", "kid"}):
                 raise ValueError()
             claims = jwt.decode(token, credential.secret, algorithms=["HS256"],
                                 issuer=credential.issuer, audience=credential.audience,
@@ -78,7 +81,7 @@ class ServiceTokenVerifier:
             if (type(issued) is not int or type(expires) is not int or
                     not 0 < expires - issued <= credential.maximum_ttl or
                     issued > now + self.clock_skew or expires <= now or
-                    claims["sub"] != credential.service_id or
+                    claims["sub"] != credential.service_id or claims["aud"] != credential.audience or
                     ("nbf" in claims and (type(claims["nbf"]) is not int or claims["nbf"] > now + self.clock_skew))):
                 raise ValueError()
             identifier(claims["jti"], maximum=128)
