@@ -13,6 +13,7 @@ from ..jobs.authority import scope_locks
 
 BACKEND = "cloudfile_extensions.identity.native_backend.CloudFileOIDCBackend"
 LOGOUT_HINT_KEY = "cf_oidc_logout_hint"
+SESSION_REFERENCE_KEY = "cf_oidc_session_reference"
 SERVER_SESSION_ENGINES = frozenset({"django.contrib.sessions.backends.db",
     "django.contrib.sessions.backends.cached_db", "django.contrib.sessions.backends.cache",
     "django.contrib.sessions.backends.file"})
@@ -62,6 +63,10 @@ class NativeOIDCSession:
                 request.session["remember_me"] = False
                 user.backend = BACKEND
                 auth_login(request, user)
+                request.session[SESSION_REFERENCE_KEY] = dict(scope_hash=index.scope_hash,
+                    subject_hash=index._hash(prepared.subject),
+                    sid_hash=None if prepared.session_id is None else index._hash(prepared.session_id),
+                    authenticated_at=prepared.issued_at)
                 if retain_hint:
                     request.session[LOGOUT_HINT_KEY] = dict(issuer=config.issuer,
                         client_id=config.client_id, id_token=prepared.id_token_hint)
