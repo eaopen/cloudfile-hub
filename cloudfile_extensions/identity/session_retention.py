@@ -20,7 +20,7 @@ class OIDCSessionRetention:
             try:
                 with connection.cursor() as cursor:
                     index._transaction(cursor)
-                    cursor.execute("SELECT session_key FROM cf_oidc_session FORCE INDEX(oidc_expiry) "
+                    cursor.execute("SELECT session_key FROM cf_oidc_session FORCE INDEX(oidc_scope_expiry) "
                         "WHERE expires_at<=UTC_TIMESTAMP(6) AND scope_hash=%s "
                         "ORDER BY expires_at,session_key LIMIT %s FOR UPDATE", (index.scope_hash, limit))
                     keys = tuple(row[0] for row in cursor.fetchall())
