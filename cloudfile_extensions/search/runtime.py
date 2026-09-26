@@ -91,6 +91,10 @@ class SearchRebuildRuntime:
             generation=self.generation, index=self.coordinator.execution.client.index, repo_id=repo_id,
             producer_scope=self.capture_scope)
 
+    def advance_global_catchup(self):
+        return SearchCatchupInspector(self.coordinator.execution.store).advance_global_checkpoint(
+            generation=self.generation, index=self.coordinator.execution.client.index)
+
 
 class SearchRebuildFactory(SearchInitializationFactory):
     """Owned rebuild assembly, sharing explicit connection cleanup, not jobs."""

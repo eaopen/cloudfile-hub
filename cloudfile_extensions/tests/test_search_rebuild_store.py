@@ -161,6 +161,31 @@ class RebuildStoreTest(DatabaseTestCase):
             sql.execute("SELECT state FROM cf_search_generation WHERE generation='g1'")
             self.assertEqual(sql.fetchone(), ("building",))
 
+    def test_global_checkpoint_waits_for_scans_and_covers_security_facts(self):
+        self.store.start(**self.start)
+        inspector = SearchCatchupInspector(self.store)
+        with self.assertRaises(ContractError):
+            inspector.advance_global_checkpoint(generation="g1", index="resources_g1")
+        self.store.freeze(**self.identity, path="/", offset=0, next_offset=None, documents=[])
+        client = Mock(spec=MeilisearchTasks)
+        client.index = "resources_g1"
+        SearchRebuildExecution(self.store, client).advance_page(generation="g1", repo_id=self.identity["repo_id"], path="/")
+        self.store.next_directory(**self.identity)
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as sql:
+                fact = EventWriter().append(sql, dict(event_id=str(uuid4()), occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    request_id="binding", actor_user_id="manager", actor_kind="user", source="hub", action="identity.bound", result="succeeded", target_user_id="employee"))
+            self.connection.commit()
+        finally:
+            self.connection.rollback()
+        result = inspector.advance_global_checkpoint(generation="g1", index="resources_g1")
+        self.assertEqual(result["state"], "observed_cutoff_checked")
+        self.assertEqual(result["checked_through"], fact["sequence"])
+        with self.connection.cursor() as sql:
+            sql.execute("SELECT baseline,checked_sequence,state FROM cf_search_global_catchup WHERE generation='g1'")
+            self.assertEqual(sql.fetchone(), (0, int(fact["sequence"]), "complete"))
+
     def test_persistent_checkpoint_resumes_fixed_target_not_new_events(self):
         self.store.start(**self.start)
         self.store.freeze(**self.identity, path="/", offset=0, next_offset=None, documents=[])
