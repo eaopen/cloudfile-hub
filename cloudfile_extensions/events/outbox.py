@@ -79,9 +79,14 @@ class EventWriter:
             if prior_fact != value:
                 raise ContractError("EVENT_ID_CONFLICT", "Event identity has a different fact", 409)
             return prior
+        # Managed reads are audit facts, not resource/search mutations. Preserve
+        # their stream sequence but do not spend worker capacity projecting them.
+        projection_state = "done" if (value["source"] == "fileserver"
+            and value["action"] in {"file.view", "file.download"}
+            and value.get("resource_kind") == "file") else "queued"
         cursor.execute("INSERT INTO cf_event_outbox(event_id,stream,schema_version,payload,created_at,audit_state,"
                        "resource_state,resource_next_at,search_state,search_next_at) VALUES(%s,%s,1,'{}',UTC_TIMESTAMP(6),"
-                       "'done','queued',UTC_TIMESTAMP(6),'queued',UTC_TIMESTAMP(6))", (value["event_id"], stream))
+                       "'done',%s,UTC_TIMESTAMP(6),%s,UTC_TIMESTAMP(6))", (value["event_id"], stream, projection_state, projection_state))
         value = {**value, "schema_version": 1, "stream": stream, "sequence": str(cursor.lastrowid),
                  "recorded_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}
         payload = json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))

@@ -54,6 +54,20 @@ class EventStoreTest(DatabaseTestCase):
         self.assertEqual(self.count("cf_audit_event"), 0)
         self.assertEqual(self.count("cf_event_outbox"), 0)
 
+    def test_managed_reads_preserve_audit_without_resource_or_search_projection(self):
+        for action in ("file.view", "file.download"):
+            self.append({**self.event, "event_id": str(uuid4()), "source": "fileserver",
+                "action": action, "resource_kind": "file", "result": "attempted"})
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT audit_state,resource_state,search_state FROM cf_event_outbox ORDER BY sequence")
+            self.assertEqual(cursor.fetchall(), (("done", "done", "done"), ("done", "done", "done")))
+        self.assertEqual(self.count("cf_audit_event"), 2)
+        self.assertIsNone(self.outbox.claim("resource", "resource-worker"))
+        self.assertIsNone(self.outbox.claim("search", "search-worker"))
+        self.append()
+        self.assertIsNotNone(self.outbox.claim("resource", "resource-worker"))
+        self.assertIsNotNone(self.outbox.claim("search", "search-worker"))
+
     def test_real_resource_hook_audit_and_outbox_commit_or_rollback_together(self):
         @contextmanager
         def guard(reference, actor):
