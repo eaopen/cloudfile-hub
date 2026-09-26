@@ -97,6 +97,52 @@ class ResourceStore:
             return self._snapshot(ref, evidence, row)
         return authority.consume(reference, read)
 
+    def replace_user_tags(self, reference, tag_ids, *, expected_revision, actor, request_id):
+        """Strong resource condition and first-use UID inside lifecycle guard.
+
+        Existing write_guard must protect actual content-write permission and
+        lifecycle until commit; preflight inspection cannot satisfy this contract.
+        No system bindings or source identity may be selected through this API.
+        """
+        from ..tags.bindings import replace_user_tags
+        from ..tags.definitions import uuid_value
+        from ..tags.read import bound_tags
+        reference = resource_ref(reference)
+        identifier(actor, maximum=225)
+        identifier(request_id)
+        if not isinstance(tag_ids, list) or len(tag_ids) > 128:
+            raise ContractError("INVALID_REQUEST", "Too many resource tags", 400)
+        ids = [uuid_value(value) for value in tag_ids]
+        if len(ids) != len(set(ids)):
+            raise ContractError("INVALID_REQUEST", "Duplicate resource tags", 400)
+        with self.write_guard(reference, actor) as guarded_evidence, self._bucket(reference):
+            evidence = self._validate_evidence(guarded_evidence)
+            self.connection.begin()
+            try:
+                row = self._row(reference, evidence, locking=True)
+                old = self._snapshot(reference, evidence, row)
+                compare_revision(expected_revision, old["revision"])
+                if row is None and not ids:
+                    self.connection.rollback()
+                    return {**old, "tags": []}, False
+                if row is None:
+                    row = dict(uid=str(uuid4()), path=reference["path"], lifecycle_ref=evidence.lifecycle_ref,
+                        revision=1, description=None, local_open_type=None)
+                    with self.connection.cursor() as cursor:
+                        cursor.execute("INSERT INTO cf_resource(uid,repo_id,kind,path,path_hash,lifecycle_ref,revision,state,updated_at) VALUES(%s,%s,%s,%s,%s,%s,1,'active',UTC_TIMESTAMP(6))",
+                            (row["uid"], reference["repo_id"], reference["kind"], reference["path"],
+                             self._hash(reference["path"]), evidence.lifecycle_ref))
+                with self.connection.cursor() as cursor:
+                    revision, changed = replace_user_tags(cursor, reference=reference,
+                        resource_uid=row["uid"], lifecycle_ref=evidence.lifecycle_ref,
+                        expected_revision=row["revision"], tag_ids=ids, actor=actor, request_id=request_id)
+                    tags = bound_tags(cursor, resource_uid=row["uid"], repo_id=reference["repo_id"])
+                result = {**self._snapshot(reference, evidence, {**row, "revision": revision}), "tags": tags}
+                self.connection.commit()
+                return result, changed
+            finally:
+                self.connection.rollback()
+
     @contextmanager
     def _bucket(self, reference):
         scope = json.dumps([reference["repo_id"], reference["kind"], self._hash(reference["path"])])
