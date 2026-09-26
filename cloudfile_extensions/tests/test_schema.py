@@ -20,7 +20,8 @@ class DatabaseTestCase(unittest.TestCase):
         self.connection = pymysql.connect(**self.options, database=self.database)
 
     def tearDown(self):
-        self.connection.close()
+        if self.connection.open:
+            self.connection.close()
         # The exact database was created by this setUp; no pre-existing schema is touched.
         with self.admin.cursor() as cursor:
             cursor.execute("DROP DATABASE " + self.database)

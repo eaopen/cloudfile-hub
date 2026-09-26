@@ -9,8 +9,9 @@ import re
 from uuid import uuid4
 
 from ..common.errors import ContractError
-from ..common.validation import identifier, object_fields
+from ..common.validation import identifier
 from ..events.outbox import EventWriter
+from .authority import canonical_scope, scope_locks
 
 
 def canonical(value):
@@ -24,15 +25,7 @@ def canonical(value):
 
 
 def normalize_scope(scope):
-    object_fields(scope, ("type", "provider", "external_id"), ("namespace",))
-    if scope["type"] not in {"user", "subject", "repo", "provider"}:
-        raise ContractError("INVALID_REQUEST", "Invalid job scope", 400)
-    if scope["type"] == "subject" and "namespace" not in scope:
-        raise ContractError("INVALID_REQUEST", "Subject scope requires namespace", 400)
-    for value in scope.values():
-        identifier(value)
-    # Structured canonical encoding prevents ambiguous ':' concatenation of IDs.
-    return canonical(scope)
+    return canonical_scope(scope)
 
 
 @dataclass(frozen=True)
@@ -104,7 +97,9 @@ class JobStore:
         scope_json = normalize_scope(scope)
         request_json = canonical(request)
         digest = hashlib.sha256(canonical([scope, request, barrier]).encode()).hexdigest()
-        with self._idempotency_lock(actor, actor_kind, kind, idempotency_key), self._transaction():
+        # Establish the barrier under the same scope lock as native publication.
+        # Effects and lock ownership share this exact SQL connection.
+        with scope_locks(self.connection, [scope]), self._idempotency_lock(actor, actor_kind, kind, idempotency_key), self._transaction():
             with self.connection.cursor() as cursor:
                 cursor.execute("SELECT job_id,request_digest FROM cf_background_job "
                                "WHERE actor=%s AND actor_kind=%s AND kind=%s AND idempotency_key=%s",
@@ -219,14 +214,19 @@ class JobStore:
 
     def complete(self, claim, *, result_ref=None, barrier_guard=None):
         current = self.get(claim.job_id)
+        if current["scope"] != claim.scope:
+            raise ContractError("WORKER_LEASE_LOST", "Worker scope is no longer current", 409)
         if current["barrier_active"]:
             if not callable(barrier_guard):
                 raise ContractError("BARRIER_RECONCILIATION_REQUIRED", "Barrier needs verified reconciliation", 409)
-            # Guard is the shared Server coordinator, not a browser boolean.
+            # The trusted reconciliation guard enters first so it can acquire
+            # provider/user before repo scopes. Its SQL locks must use this exact
+            # connection; never call a separately locking RPC while owning them.
             with barrier_guard(claim) as proof:
                 if proof != BarrierProof(claim.job_id, claim.epoch):
                     raise ContractError("BARRIER_RECONCILIATION_REQUIRED", "Invalid reconciliation proof", 409)
-                self._finish(claim, result_ref)
+                with scope_locks(self.connection, [current["scope"]]):
+                    self._finish(claim, result_ref)
         else:
             self._finish(claim, result_ref)
 
