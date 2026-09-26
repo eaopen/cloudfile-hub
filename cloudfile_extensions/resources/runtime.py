@@ -1,11 +1,32 @@
 """Owned authenticated host resource service scopes; no route registration."""
 from contextlib import contextmanager
+import base64
+import binascii
 
 from ..authorization.runtime import PolicyServiceFactory, AuthenticatedPolicyActor
 from ..common.errors import ContractError
 from ..common.validation import identifier
 from ..directory.preparation import SubjectPreparation
 from .service import ResourceService
+
+
+def expected_subject(request, actor):
+    """Optional caller constraint, never a source of authentication identity."""
+    value = request.headers.get("X-CloudFile-Expected-Subject")
+    if value is None:
+        return
+    try:
+        if not isinstance(value, str) or not 1 <= len(value) <= 1200:
+            raise ValueError()
+        raw = base64.b64decode(value + "=" * (-len(value) % 4), altchars=b"-_", validate=True)
+        if base64.urlsafe_b64encode(raw).decode("ascii").rstrip("=") != value:
+            raise ValueError()
+        subject = raw.decode("utf-8")
+        identifier(subject, maximum=225)
+    except (ValueError, UnicodeError, binascii.Error, ContractError):
+        raise ContractError("INVALID_REQUEST", "Invalid expected resource subject", 400) from None
+    if subject != actor.user_id:
+        raise ContractError("ACCESS_DENIED", "Resource session subject does not match", 403)
 
 
 class ResourceServiceFactory(PolicyServiceFactory):
@@ -22,6 +43,7 @@ class ResourceServiceFactory(PolicyServiceFactory):
         actor = self.authenticate(request)
         if not isinstance(actor, AuthenticatedPolicyActor):
             raise ContractError("AUTHENTICATION_REQUIRED", "Authenticated resource identity is required", 401)
+        expected_subject(request, actor)
         identifier(request_id)
         with self.preparation_scope(actor.user_id, request_id) as preparation:
             if not isinstance(preparation, SubjectPreparation) or preparation.actor != actor.user_id:
