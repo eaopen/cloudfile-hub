@@ -88,14 +88,15 @@ class SearchFanoutStore(SearchTaskStore):
             raise ValueError("tag batch exceeds byte budget")
         digest = step_hash(index, "replace", raw)
         with self._owned(claim) as sql:
-            sql.execute("SELECT batch,after_uid,upper_uid,state,index_uid,payload,payload_hash,next_uid FROM cf_search_fanout WHERE event_id=%s AND index_generation=%s FOR UPDATE", key)
+            sql.execute("SELECT " + self.FIELDS + " FROM cf_search_fanout WHERE event_id=%s AND index_generation=%s FOR UPDATE", key)
             row = sql.fetchone()
-            if row is None or row[0] != batch or row[1] != after_uid or row[3] not in ("ready", "pending"):
+            value = None if row is None else self.decode(row)
+            if value is None or value["batch"] != batch or value["after_uid"] != after_uid or value["state"] not in ("ready", "pending"):
                 raise ContractError("SEARCH_FANOUT_CHANGED", "Tag page position changed", 409)
-            if next_uid is not None and (row[2] is None or not (after_uid or "") < next_uid <= row[2]):
+            if next_uid is not None and (value["upper_uid"] is None or not (after_uid or "") < next_uid <= value["upper_uid"]):
                 raise ValueError("tag page cursor exceeds captured scan")
-            if row[3] == "pending":
-                if tuple(row[4:]) != (index, raw.decode("utf-8"), digest, next_uid):
+            if value["state"] == "pending":
+                if (value["index_uid"], value["payload"], value["payload_hash"], value["next_uid"]) != (index, raw.decode("utf-8"), digest, next_uid):
                     raise ContractError("SEARCH_PLAN_CONFLICT", "Frozen tag page changed", 409)
                 return
             sql.execute("UPDATE cf_search_fanout SET state='pending',index_uid=%s,payload=%s,payload_hash=%s,next_uid=%s,updated_at=UTC_TIMESTAMP(6) WHERE event_id=%s AND index_generation=%s", (index, raw.decode("utf-8"), digest, next_uid, *key))
