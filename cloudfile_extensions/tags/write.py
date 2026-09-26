@@ -13,6 +13,20 @@ from .definitions import user_definition, system_definition, definition_changes,
 from .read import FIELDS
 
 
+def _definition_write(cursor, statement, parameters):
+    """Translate only native duplicate-key conflicts, never other SQL failures.
+
+    The caller still owns rollback. In particular, a failed rename must not
+    advance the resource/tag revision or append an audit event.
+    """
+    try:
+        cursor.execute(statement, parameters)
+    except Exception as error:
+        if error.args and type(error.args[0]) is int and error.args[0] == 1062:
+            raise ContractError("TAG_CONFLICT", "Tag identity already exists", 409) from None
+        raise
+
+
 def _storage(cursor):
     cursor.execute("SELECT tag_id FROM cf_tag LIMIT 0 FOR UPDATE")
     cursor.fetchall()
@@ -51,7 +65,7 @@ def create_user(cursor, *, repo_id, value, actor, request_id):
     revision = str(uuid4())
     row = (candidate["tag_id"], "user", "cloudfile", candidate["namespace"], candidate["code"],
         candidate["label"], candidate["normalized_label"], candidate["color"], 1, repo_id, revision)
-    cursor.execute("INSERT INTO cf_tag(" + FIELDS + ",updated_at) VALUES(" + ",".join(["%s"] * 11) + ",UTC_TIMESTAMP(6))", row)
+    _definition_write(cursor, "INSERT INTO cf_tag(" + FIELDS + ",updated_at) VALUES(" + ",".join(["%s"] * 11) + ",UTC_TIMESTAMP(6))", row)
     result = decode(row)
     _event(cursor, result, actor, request_id, "tags.definition.created")
     return result, True
@@ -76,7 +90,7 @@ def create_system(cursor, *, provider, namespace, code, value, scope_repo_id,
     revision = str(uuid4())
     row = (candidate["tag_id"], "system", provider, namespace, code, candidate["label"],
         None, candidate["color"], int(candidate["enabled"]), scope_repo_id, revision)
-    cursor.execute("INSERT INTO cf_tag(" + FIELDS + ",updated_at) VALUES(" + ",".join(["%s"] * 11) + ",UTC_TIMESTAMP(6))", row)
+    _definition_write(cursor, "INSERT INTO cf_tag(" + FIELDS + ",updated_at) VALUES(" + ",".join(["%s"] * 11) + ",UTC_TIMESTAMP(6))", row)
     result = decode(row)
     _event(cursor, result, actor, request_id, "tags.definition.created", actor_kind="service")
     return result, True
@@ -127,7 +141,7 @@ def patch_user(cursor, *, repo_id, tag_id, changes, if_match, actor, request_id)
     if all(target[key] == old[key] for key in ("label", "color", "enabled")):
         return old, False
     revision = str(uuid4())
-    cursor.execute("UPDATE cf_tag SET label=%s,normalized_label=%s,color=%s,enabled=%s,revision=%s,updated_at=UTC_TIMESTAMP(6) WHERE tag_id=%s AND revision=%s",
+    _definition_write(cursor, "UPDATE cf_tag SET label=%s,normalized_label=%s,color=%s,enabled=%s,revision=%s,updated_at=UTC_TIMESTAMP(6) WHERE tag_id=%s AND revision=%s",
         (target["label"], target["label"], target["color"], int(target["enabled"]), revision, tag_id, old["revision"]))
     if cursor.rowcount != 1:
         raise ContractError("PRECONDITION_FAILED", "Tag has changed", 412)

@@ -1,12 +1,28 @@
 """Tag contract coverage, execution deferred until feature completion."""
 import unittest
+from unittest.mock import Mock
 from uuid import uuid4
 
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.tags.definitions import user_definition, system_definition, definition_changes, decode
+from cloudfile_extensions.tags.write import _definition_write
 
 
 class TagDefinitionTest(unittest.TestCase):
+    def test_duplicate_identity_is_conflict_without_hiding_other_sql_errors(self):
+        cursor = Mock()
+        cursor.execute.side_effect = Exception(1062, "private database detail")
+        with self.assertRaises(ContractError) as raised:
+            _definition_write(cursor, "statement", ("parameter",))
+        self.assertEqual(raised.exception.code, "TAG_CONFLICT")
+        self.assertNotIn("private", str(raised.exception))
+        cursor.commit.assert_not_called()
+        failure = Exception(1213, "deadlock")
+        cursor.execute.side_effect = failure
+        with self.assertRaises(Exception) as raised:
+            _definition_write(cursor, "statement", ())
+        self.assertIs(raised.exception, failure)
+
     def test_user_normalization_case_and_trusted_namespace(self):
         repo, tag = str(uuid4()), str(uuid4())
         value = user_definition(repo, tag, dict(label="  e\u0301  ", color="#aBc123"))
