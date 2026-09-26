@@ -94,3 +94,28 @@ class OIDCSessionIndex:
             raise ValueError("valid native session key required")
         cursor.execute("DELETE FROM cf_oidc_session WHERE scope_hash=%s AND session_key=%s",
             (self.scope_hash, session_key))
+
+    def forget_reference(self, cursor, session_key, reference):
+        """Local logout: exact captured signed-session reference, not a DTO grant."""
+        self._transaction(cursor)
+        if (not isinstance(session_key, str) or not re.fullmatch(r"[a-z0-9]{32}", session_key)
+                or not isinstance(reference, dict) or set(reference) != {
+                    "scope_hash", "subject_hash", "sid_hash", "authenticated_at"}
+                or reference["scope_hash"] != self.scope_hash
+                or not isinstance(reference["subject_hash"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", reference["subject_hash"])
+                or (reference["sid_hash"] is not None and (
+                    not isinstance(reference["sid_hash"], str)
+                    or not re.fullmatch(r"[0-9a-f]{64}", reference["sid_hash"])))
+                or type(reference["authenticated_at"]) is not int
+                or not 0 <= reference["authenticated_at"] <= 2 ** 63 - 1):
+            raise ContractError("IDENTITY_UNAVAILABLE", "Logout session reference is unavailable", 503)
+        cursor.execute("SELECT subject_hash,sid_hash,authenticated_at FROM cf_oidc_session "
+            "WHERE scope_hash=%s AND session_key=%s FOR UPDATE", (self.scope_hash, session_key))
+        rows = cursor.fetchall()
+        if not rows:
+            return  # Backchannel or retention already retired this exact key.
+        if len(rows) != 1 or tuple(rows[0]) != (
+                reference["subject_hash"], reference["sid_hash"], reference["authenticated_at"]):
+            raise ContractError("IDENTITY_UNAVAILABLE", "Logout session reference changed", 503)
+        self.forget(cursor, session_key)

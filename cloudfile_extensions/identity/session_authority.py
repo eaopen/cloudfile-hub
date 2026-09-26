@@ -1,5 +1,6 @@
 """Owned current OIDC session authority for native request/effect hosts."""
 from contextlib import contextmanager
+from copy import deepcopy
 
 from ..common.errors import ContractError
 from ..jobs.authority import scope_locks
@@ -48,3 +49,30 @@ class OIDCSessionAuthority:
     def check(self, request):
         with self.guard(request):
             pass
+
+    def terminate(self, request, native_logout):
+        """End the browser first, then retire only its captured server reference.
+
+        Never require a live native session after flush and never publish a
+        subject-wide fence for a local logout. SQL failure cannot restore login.
+        """
+        from seahub.auth import BACKEND_SESSION_KEY
+        oidc = request.session.get(BACKEND_SESSION_KEY) == BACKEND
+        key = request.session.session_key
+        reference = deepcopy(request.session.get(SESSION_REFERENCE_KEY)) if oidc else None
+        try:
+            native_logout(request)
+        finally:
+            if oidc:
+                config = self.resources.oidc
+                with self.resources.resources.connection() as connection:
+                    index = OIDCSessionIndex(connection, issuer=config.issuer,
+                        client_id=config.client_id)
+                    with scope_locks(connection, [index.scope]):
+                        connection.begin()
+                        try:
+                            with connection.cursor() as cursor:
+                                index.forget_reference(cursor, key, reference)
+                            connection.commit()
+                        finally:
+                            connection.rollback()

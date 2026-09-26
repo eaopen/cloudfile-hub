@@ -8,6 +8,7 @@ from django.views import View
 from ..common.errors import ContractError
 from .browser_binding import BINDING_COOKIE, BrowserLoginBindings, request_binding
 from .resources import LoginResources
+from .session_authority import OIDCSessionAuthority
 
 
 class LocalLogoutView(View):
@@ -41,16 +42,16 @@ class LocalLogoutView(View):
             response = self.logout_response(request)
             from seahub.auth import logout
             from seahub.auth.models import AnonymousUser
-            try:
-                logout(request)  # native session and remembered repo passwords
-            except Exception:
-                # An auxiliary native password-cleanup failure must not leave
-                # a browser authenticated. Storage failure remains a safe 503.
-                request.user = AnonymousUser()
-                request.session.flush()
-                raise ContractError("IDENTITY_UNAVAILABLE", "Native logout cleanup is unavailable", 503) from None
-            # No directory/SQL dependency for local termination. The independent
-            # browser registry invalidates same-binding pending proofs only.
+            def terminate_native(native_request):
+                try:
+                    logout(native_request)  # native session and remembered repo passwords
+                except Exception:
+                    native_request.user = AnonymousUser()
+                    native_request.session.flush()
+                    raise ContractError("IDENTITY_UNAVAILABLE", "Native logout cleanup is unavailable", 503) from None
+            OIDCSessionAuthority(self.resources).terminate(request, terminate_native)
+            # Native termination precedes independent SQL/Redis cleanup; neither
+            # failure restores the browser or returns an IdP redirect as success.
             if binding is not None:
                 BrowserLoginBindings(self.resources.resources.redis,
                     prefix=self.resources.prefix + "oidc:browser:").clear(binding, response)
