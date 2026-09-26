@@ -114,12 +114,19 @@ class SubjectContexts:
 
     def completed_state(self, user_id):
         """Trusted refresh diagnostics, including disabled; never read authority."""
+        value = self.completion_candidate(user_id)
+        if value is None:
+            raise unavailable()
+        return value
+
+    def completion_candidate(self, user_id):
+        """Trusted management join polling; None is not a completed refresh."""
         try:
             if self.barrier_active(self.provider_id, user_id):
                 raise unavailable()
             value = self._read(user_id)
             if value is None or value["status"] not in {"ready", "disabled"}:
-                raise unavailable()
+                return None
             if value["status"] == "ready" and not self.account_active(user_id):
                 raise ContractError("SUBJECT_DISABLED", "Subject is disabled", 403)
             return value
@@ -168,7 +175,7 @@ class SubjectContexts:
                     joining = joining.decode()
                 deadline = time.monotonic() + self.wait_seconds
                 while time.monotonic() < deadline:
-                    value = self.current(user_id)
+                    value = self.completion_candidate(user_id) if allow_disabled else self.current(user_id)
                     if value is not None and value.get("context_epoch") == joining:
                         if reuse_ready:
                             return value

@@ -57,6 +57,27 @@ class ContextTest(unittest.TestCase):
         self.assertEqual(self.contexts._keys(user),
                          (self.prefix + digest, self.prefix + digest + ":lease"))
 
+    def test_management_disabled_completion_does_not_grant_read(self):
+        self.source = {**self.source, "status": "disabled"}
+        value = self.contexts.prepare("u1", allow_disabled=True)
+        self.assertEqual(value["status"], "disabled")
+        self.assertEqual(self.contexts.completed_state("u1")["context_epoch"], value["context_epoch"])
+        with self.assertRaises(ContractError) as caught:
+            self.contexts.current("u1")
+        self.assertEqual(caught.exception.code, "SUBJECT_DISABLED")
+        self.barrier = True
+        with self.assertRaises(ContractError):
+            self.contexts.completed_state("u1")
+
+    def test_management_force_after_disabled_fetches_new_source(self):
+        self.source = {**self.source, "status": "disabled"}
+        disabled = self.contexts.prepare("u1", allow_disabled=True)
+        self.source = {**self.source, "status": "active", "revision": "2", "etag": "new"}
+        ready = self.contexts.prepare("u1", allow_disabled=True)
+        self.assertEqual(ready["status"], "ready")
+        self.assertNotEqual(ready["context_epoch"], disabled["context_epoch"])
+        self.assertEqual(self.source_calls, 2)
+
     def test_fixed_ttl_hit_login_expiry_and_latest_memberships(self):
         one = self.contexts.get("u1")
         key, _ = self.contexts._keys("u1")
