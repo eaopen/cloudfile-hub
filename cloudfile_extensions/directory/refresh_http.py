@@ -1,0 +1,83 @@
+"""Explicit native-session administrator refresh HTTP, not machine delegation."""
+import re
+from uuid import uuid4
+
+from django.http import JsonResponse
+from django.middleware.csrf import CsrfViewMiddleware
+from django.urls import path
+
+from ..authorization.http import DirectoryPolicyView
+from ..common.errors import ContractError, invalid
+from .refresh_management import UserRefreshManagement
+
+
+class UserRefreshView(DirectoryPolicyView):
+    service_factory = None
+    operation = "submit"
+    http_method_names = ["post"]
+
+    def dispatch(self, request, *args, **kwargs):
+        request_id = str(uuid4())
+        try:
+            expected = "POST" if self.operation == "submit" else "GET"
+            wanted = set() if self.operation == "submit" else {"job_id"}
+            if (self.operation not in {"submit", "status"} or request.method != expected
+                    or args or set(kwargs) != wanted):
+                raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed for this refresh target", 405)
+            if not request.is_secure():
+                raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
+            if request.GET:
+                raise invalid("Refresh target takes no query parameters")
+            if self.operation == "submit":
+                csrf = CsrfViewMiddleware(lambda _: None)
+                csrf.process_request(request)
+                if csrf.process_view(request, lambda *_: None, (), {}) is not None:
+                    raise ContractError("ACCESS_DENIED", "CSRF verification failed", 403)
+                key = request.headers.get("Idempotency-Key")
+                if key is None:
+                    raise ContractError("PRECONDITION_REQUIRED", "Idempotency-Key is required", 428)
+                if not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", key):
+                    raise invalid("Invalid refresh idempotency key")
+                body = self._body(request)
+            elif request.read(1):
+                raise invalid("Refresh status takes no body")
+            if not callable(self.service_factory):
+                raise ContractError("SUBJECT_UNAVAILABLE", "Refresh service is unavailable", 503)
+            with self.service_factory(request, request_id) as service:
+                if not isinstance(service, UserRefreshManagement):
+                    raise RuntimeError("invalid refresh management assembly")
+                status = 200
+                if self.operation == "submit":
+                    job_id, created = service.submit(body, idempotency_key=key)
+                    # Status performs fresh management authorization. A lost
+                    # response does not cancel the accepted durable job; retry
+                    # must use the same idempotency key and request.
+                    result = service.status(job_id)
+                    status = 202 if created else 200
+                else:
+                    result = service.status(str(kwargs["job_id"]))
+                response = JsonResponse(result, status=status)
+        except ContractError as error:
+            response = JsonResponse(error.response(request_id), status=error.status)
+        except Exception:
+            error = ContractError("SUBJECT_UNAVAILABLE", "Refresh service is unavailable", 503)
+            response = JsonResponse(error.response(request_id), status=503)
+        response["Cache-Control"] = "no-store, max-age=0"
+        response["Pragma"] = "no-cache"
+        response["Vary"] = "Cookie, Authorization"
+        response["X-Request-ID"] = request_id
+        return response
+
+
+class UserRefreshStatusView(UserRefreshView):
+    operation = "status"
+    http_method_names = ["get"]
+
+
+def user_refresh_routes(*, service_factory):
+    if not callable(service_factory):
+        raise ValueError("trusted owned native-session refresh factory required")
+    return [
+        path("v1/refreshes/", UserRefreshView.as_view(service_factory=service_factory), name="cloudfile-user-refresh-submit"),
+        path("v1/refreshes/<uuid:job_id>/", UserRefreshStatusView.as_view(service_factory=service_factory), name="cloudfile-user-refresh-status"),
+    ]
