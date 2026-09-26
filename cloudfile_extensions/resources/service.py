@@ -3,7 +3,7 @@
 Native lifecycle reader remains a required trusted data-plane adapter, not a
 request field. Strong revisions do not themselves prove authorization.
 """
-from ..authorization.read import ContentReadAuthority, ContentMetadataWriteAuthority
+from ..authorization.read import ContentReadAuthority, ContentMetadataWriteAuthority, LibraryTagManagementAuthority
 from ..common.errors import ContractError
 from ..common.validation import object_fields
 from .events import ResourceMutationEvents
@@ -18,6 +18,7 @@ class ResourceService:
         self.reader = lifecycle_reader
         self.read_authority = ContentReadAuthority(preparation, core, request_id=request_id, cloud_mode=cloud_mode)
         self.write_authority = ContentMetadataWriteAuthority(preparation, core, request_id=request_id, cloud_mode=cloud_mode)
+        self.tag_management = LibraryTagManagementAuthority(preparation, core, request_id=request_id, cloud_mode=cloud_mode)
         self.request_id = request_id
         # The authorized operations never invoke these legacy preflight hooks.
         # Fail closed if a future caller accidentally selects the old pathway.
@@ -75,3 +76,18 @@ class ResourceService:
         return self.store.replace_user_tags_authorized(resource_ref(request["reference"]), [],
             expected_revision=request["revision"], authority=self.write_authority,
             lifecycle_reader=self.reader, request_id=self.request_id, tag_values=request["values"])
+
+    def update_user_tag_definition(self, request, *, if_match):
+        """Library-wide definition patch, not a resource tag binding write."""
+        from ..tags.definitions import uuid_value, definition_changes
+        from ..tags.write import patch_user
+        object_fields(request, ("repo_id", "tag_id", "changes"))
+        repo_id = uuid_value(request["repo_id"])
+        tag_id = uuid_value(request["tag_id"])
+        changes = definition_changes(request["changes"])
+        reference = {"repo_id": repo_id, "path": "/", "kind": "dir"}
+        def update(cursor, ref):
+            return patch_user(cursor, repo_id=ref["repo_id"], tag_id=tag_id,
+                changes=changes, if_match=if_match, actor=self.tag_management.actor,
+                request_id=self.request_id)
+        return self.tag_management.consume(reference, update)

@@ -35,7 +35,7 @@ class ResourceServiceFactory(PolicyServiceFactory):
             try:
                 yield service
             finally:
-                for authority in (service.read_authority, service.write_authority):
+                for authority in (service.read_authority, service.write_authority, service.tag_management):
                     authority.epoch = None
                     authority.current_subject = None
                     authority.is_owner = False
