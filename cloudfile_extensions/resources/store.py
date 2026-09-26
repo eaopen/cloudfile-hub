@@ -137,6 +137,10 @@ class ResourceStore:
             evidence = self._validate_evidence(lifecycle_reader(cursor, ref))
             row = self._row(ref, evidence, locking=True)
             result = self._snapshot(ref, evidence, row)
+            access = getattr(authority, "effective_access", None)
+            if not isinstance(access, dict) or access.get("read") is not True or type(access.get("write")) is not bool:
+                raise ContractError("POLICY_UNAVAILABLE", "Resource access result is unavailable", 503)
+            result["access"] = dict(access)
             if include_tags:
                 from ..tags.read import bound_tags
                 result["tags"] = bound_tags(cursor, resource_uid=row["uid"], repo_id=ref["repo_id"]) if row else []

@@ -6,6 +6,11 @@ from .management import DirectoryManagement
 
 
 class ContentReadAuthority(DirectoryManagement):
+    def decision_allowed(self, decision):
+        self.effective_access = {"read": bool(decision["visible"] and decision["read"]),
+            "write": bool(decision["visible"] and decision["write"])}
+        return self.effective_access["read"]
+
     def scope_allowed(self, reference):
         # Ordinary content reads require CE qualification and C visible/read,
         # not a directory-management delegation. No management write is granted.
@@ -59,6 +64,7 @@ class ContentReadAuthority(DirectoryManagement):
             self.epoch = None
             self.current_subject = None
             self.is_owner = False
+            self.effective_access = None
 
 
 class ContentMetadataWriteAuthority(ContentReadAuthority):
