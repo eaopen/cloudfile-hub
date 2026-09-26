@@ -5,7 +5,7 @@ This module returns authenticated claims, never grants library membership.
 """
 
 import base64
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import hashlib
 import hmac
 import json
@@ -64,7 +64,7 @@ class RestrictedOAuth2Session(OAuth2Session):
 class OIDCConfig:
     issuer: str
     client_id: str
-    client_secret: str
+    client_secret: str = field(repr=False)
     redirect_uri: str
     authorization_url: str
     token_url: str

@@ -10,7 +10,8 @@ from .deployment import configure_policy
 class PolicyHost:
     def __init__(self, settings, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
                  audit_secret=None, audit_redact=None, audit_result_root=None,
-                 refresh_service_verifier=None, refresh_provider_grants=None):
+                 refresh_service_verifier=None, refresh_provider_grants=None,
+                 oidc=None, oidc_jit_enabled=False):
         # Construct after the server worker fork, never in a preload parent.
         self.pid = os.getpid()
         self.lock = threading.Lock()
@@ -20,7 +21,28 @@ class PolicyHost:
         self.deployment = configure_policy(settings, directory_authorization=directory_authorization,
             resource_secret=resource_secret, lifecycle_reader=lifecycle_reader,
             audit_secret=audit_secret, audit_redact=audit_redact, audit_result_root=audit_result_root,
-            refresh_service_verifier=refresh_service_verifier, refresh_provider_grants=refresh_provider_grants)
+            refresh_service_verifier=refresh_service_verifier, refresh_provider_grants=refresh_provider_grants,
+            oidc=oidc, oidc_jit_enabled=oidc_jit_enabled)
+
+    @contextmanager
+    def login_resources_scope(self):
+        # Cover the entire HTTP adapter, not just runtime(): RP/browser logout
+        # also accesses Redis outside the login SQL scope. Never drain that pool
+        # while one of those request operations remains in flight.
+        self._process()
+        with self.lock:
+            if self.draining or self.closed:
+                raise ContractError("IDENTITY_UNAVAILABLE", "Login host is draining", 503)
+            self.active += 1
+        try:
+            from ..identity.resources import LoginResources
+            resources = self.deployment.login_resources
+            if not isinstance(resources, LoginResources):
+                raise ContractError("IDENTITY_UNAVAILABLE", "Login runtime is not configured", 503)
+            yield resources
+        finally:
+            with self.lock:
+                self.active -= 1
 
     def _process(self):
         # Check before acquiring an inherited lock that may have been held at

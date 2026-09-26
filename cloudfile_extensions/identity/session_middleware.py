@@ -13,7 +13,7 @@ from django.http import JsonResponse
 from ..common.errors import ContractError
 from .resources import LoginResources
 from .native_session import BACKEND
-from .session_authority import OIDCSessionAuthority
+from .session_authority import OIDCSessionAuthority, HostedOIDCSessionAuthority
 from .session_stream import OIDCSessionStream
 
 
@@ -21,11 +21,19 @@ class CloudFileSessionMiddleware(SessionMiddleware):
     def __init__(self, get_response):
         super().__init__(get_response)
         resources = getattr(settings, "CLOUDFILE_OIDC_LOGIN_RESOURCES", None)
-        if not isinstance(resources, LoginResources):
+        resources_scope = getattr(settings, "CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE", None)
+        if resources is not None and resources_scope is not None:
+            raise ImproperlyConfigured("Configure one CloudFile login resource ownership mode")
+        if resources_scope is not None and not callable(resources_scope):
+            raise ImproperlyConfigured("CloudFile login resource scope must be trusted callable")
+        if resources_scope is None and not isinstance(resources, LoginResources):
             raise ImproperlyConfigured("CloudFile session middleware requires actual login resources")
         if settings.SESSION_ENGINE != "django.contrib.sessions.backends.db":
             raise ImproperlyConfigured("CloudFile guarded sessions require the database backend")
-        self.authority = OIDCSessionAuthority(resources)
+        # Gunicorn/preload hosts resolve their post-fork owner on every guard;
+        # standalone explicit resources retain their existing behavior.
+        self.authority = (HostedOIDCSessionAuthority(resources_scope) if resources_scope is not None
+            else OIDCSessionAuthority(resources))
 
     @staticmethod
     def oidc(request):

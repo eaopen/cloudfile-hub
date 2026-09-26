@@ -15,6 +15,7 @@ class PolicyDeployment:
     context_factory: object = None
     refresh_factory: object = None
     service_refresh_factory: object = None
+    login_resources: object = None
 
     def close(self):
         # The host invokes this only after draining all requests at shutdown.
@@ -23,7 +24,8 @@ class PolicyDeployment:
 
 def configure_policy(value, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
                      audit_secret=None, audit_redact=None, audit_result_root=None,
-                     refresh_service_verifier=None, refresh_provider_grants=None):
+                     refresh_service_verifier=None, refresh_provider_grants=None,
+                     oidc=None, oidc_jit_enabled=False):
     """value is trusted host settings, not request JSON or an import path.
 
     Matches the current native authority adapter: private Redis TCP, DB0, password
@@ -32,6 +34,15 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
     object_fields(value, ("database", "redis", "provider", "native_schema", "identity_schema",
                          "directory_url", "attribute_allowlist", "core_library", "cloud_mode"),
                          ("subject_prefix", "directory_ca_bundle"))
+    if type(oidc_jit_enabled) is not bool or (oidc is None and oidc_jit_enabled):
+        raise ValueError("explicit OIDC configuration required before JIT")
+    if oidc is not None:
+        from ..identity.oidc import OIDCConfig
+        if not isinstance(oidc, OIDCConfig):
+            raise ValueError("trusted validated OIDC configuration required")
+        subject_prefix = value.get("subject_prefix", "cf:subjects:")
+        if not isinstance(subject_prefix, str) or not subject_prefix.endswith(":subjects:"):
+            raise ValueError("OIDC and policy require the same subject namespace")
     database = value["database"]
     object_fields(database, ("host", "user", "name", "password"), ("port",))
     redis_settings = value["redis"]
@@ -103,8 +114,14 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
             from ..directory.service_refresh import ServiceRefreshFactory
             service_refresh_factory = ServiceRefreshFactory(verifier=refresh_service_verifier,
                 resources=factory.resources, provider_grants=refresh_provider_grants)
+        login_resources = None
+        if oidc is not None:
+            from ..identity.resources import LoginResources
+            prefix = factory.resources.prefix[:-len("subjects:")]
+            login_resources = LoginResources(factory.resources, oidc=oidc,
+                jit_enabled=oidc_jit_enabled, prefix=prefix)
         return PolicyDeployment(factory, client, resource_factory, audit_factory, context_factory,
-            refresh_factory, service_refresh_factory)
+            refresh_factory, service_refresh_factory, login_resources)
     except Exception:
         client.connection_pool.disconnect()
         raise

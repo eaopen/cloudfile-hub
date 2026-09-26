@@ -29,7 +29,9 @@ def post_worker_init(worker):
             audit_redact=getattr(settings, "CLOUDFILE_AUDIT_REDACT", None),
             audit_result_root=getattr(settings, "CLOUDFILE_AUDIT_RESULT_ROOT", None),
             refresh_service_verifier=getattr(settings, "CLOUDFILE_REFRESH_SERVICE_VERIFIER", None),
-            refresh_provider_grants=getattr(settings, "CLOUDFILE_REFRESH_PROVIDER_GRANTS", None))
+            refresh_provider_grants=getattr(settings, "CLOUDFILE_REFRESH_PROVIDER_GRANTS", None),
+            oidc=getattr(settings, "CLOUDFILE_OIDC_CONFIG", None),
+            oidc_jit_enabled=getattr(settings, "CLOUDFILE_OIDC_JIT_ENABLED", False))
     except Exception:
         raise RuntimeError("CloudFile policy worker initialization failed; check trusted configuration") from None
 
@@ -39,6 +41,13 @@ def policy_service(request, request_id):
     if _host is None or _host.pid != os.getpid():
         raise ContractError("POLICY_UNAVAILABLE", "Policy worker is unavailable", 503)
     return _host.service(request, request_id)
+
+
+def login_resources_scope():
+    """Late post-fork resolution for explicitly mounted hosted login routes."""
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("IDENTITY_UNAVAILABLE", "Login worker is unavailable", 503)
+    return _host.login_resources_scope()
 
 
 def resource_service(request, request_id):

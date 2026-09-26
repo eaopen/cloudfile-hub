@@ -76,3 +76,27 @@ class OIDCSessionAuthority:
                             connection.commit()
                         finally:
                             connection.rollback()
+
+
+class HostedOIDCSessionAuthority(OIDCSessionAuthority):
+    """Late process-owned scope for middleware save and each stream checkpoint.
+
+    No preload-master Redis handle is retained. The actual authority still
+    performs signed native-session/SQL/fence checks; the host scope only controls
+    lifecycle ownership and cannot grant access by returning a boolean.
+    """
+    def __init__(self, resources_scope):
+        if not callable(resources_scope):
+            raise ValueError("trusted process-owned login scope required")
+        self.resources_scope = resources_scope
+
+    @contextmanager
+    def guard(self, request):
+        with self.resources_scope() as resources:
+            authority = OIDCSessionAuthority(resources)
+            with authority.guard(request) as cursor:
+                yield cursor
+
+    def terminate(self, request, native_logout):
+        with self.resources_scope() as resources:
+            OIDCSessionAuthority(resources).terminate(request, native_logout)
