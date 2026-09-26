@@ -4,6 +4,7 @@ import re
 from uuid import uuid4
 from contextlib import contextmanager
 from types import MappingProxyType
+from datetime import datetime, timezone
 
 import jwt
 
@@ -13,6 +14,7 @@ from ..authorization.resources import PolicyResources
 from ..common.errors import ContractError
 from ..common.validation import identifier
 from ..resources.paths import resource_ref
+from ..events.outbox import EventWriter
 from .service_tokens import ServiceTokenVerifier
 from .user_delegation import DelegationKey
 
@@ -63,9 +65,25 @@ class UserDelegationIssuer:
             iat=now, exp=expires, jti=str(uuid4()), userId=self.authority.actor,
             provider=self.key.provider, context_epoch=epoch, resource=ref, action=operation),
             self.key.secret, algorithm="HS256", headers=dict(kid=self.kid, typ="cf-user-delegation+jwt"))
+        def record_ready(cursor, target):
+            # Re-enter actual current read authority after signing. Commit the
+            # safe issuance fact before returning any credential to the host.
+            self.verifier.assert_active(principal)
+            if self.authority.epoch != epoch or expires <= self.verifier.clock():
+                raise ContractError("AUTHENTICATION_REQUIRED", "Delegation subject or lifetime changed", 401)
+            EventWriter().append(cursor, dict(event_id=str(uuid4()),
+                occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                request_id=self.authority.rules.request_id, actor_user_id=principal.service_id,
+                actor_kind="service", source="hub", action=self.ACTION, result="succeeded",
+                target_user_id=self.authority.actor, repo_id=target["repo_id"],
+                path=target["path"], resource_kind="file", subject_revision=epoch))
+        self.authority.consume(ref, record_ready)
         # This signed claim cannot bypass subsequent verifier/current epoch,
         # exact resource/action, native CE/C, TTL or revocation checks.
-        return dict(delegation=token, expires_in=expires - now)
+        remaining = math.floor(expires - self.verifier.clock())
+        if remaining < 1:
+            raise ContractError("AUTHENTICATION_REQUIRED", "Delegation expired before delivery", 401)
+        return dict(delegation=token, expires_in=remaining)
 
 
 class UserDelegationIssueFactory:
