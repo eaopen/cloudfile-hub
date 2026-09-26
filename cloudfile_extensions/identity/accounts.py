@@ -34,11 +34,14 @@ class NativeAccounts:
     def by_user_id(self, user_id):
         identifier(user_id, maximum=225)
         try:
-            profile = self.profiles.objects.filter(login_id=user_id).first()
+            profile = self.profiles.objects.get(login_id=user_id)
+        except self.profiles.DoesNotExist:
+            raise ContractError("IDENTITY_NOT_FOUND", "Business identity has not been bound", 404) from None
+        except self.profiles.MultipleObjectsReturned:
+            # A damaged/migrated schema must not select an arbitrary account.
+            raise ContractError("IDENTITY_CONFLICT", "Business identity mapping is ambiguous", 409) from None
         except Exception:
             raise ContractError("IDENTITY_UNAVAILABLE", "Native identity mapping is unavailable", 503) from None
-        if profile is None:
-            raise ContractError("IDENTITY_NOT_FOUND", "Business identity has not been bound", 404)
         # MySQL's default collation can match another case/accent. Never infer an
         # account from contact_email, employee number, nickname or query fallback.
         if profile.login_id != user_id:
