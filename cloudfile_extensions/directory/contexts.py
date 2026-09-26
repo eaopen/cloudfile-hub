@@ -50,7 +50,8 @@ class SubjectContexts:
 
     def _keys(self, user_id):
         identifier(user_id, maximum=225)
-        digest = hashlib.sha256(json.dumps([self.provider_id, user_id], separators=(",", ":")).encode()).hexdigest()
+        digest = hashlib.sha256(json.dumps([self.provider_id, user_id], ensure_ascii=False,
+                                          separators=(",", ":")).encode()).hexdigest()
         return self.prefix + digest, self.prefix + digest + ":lease"
 
     def _read(self, user_id):

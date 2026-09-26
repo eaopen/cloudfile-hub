@@ -48,6 +48,15 @@ class ContextTest(unittest.TestCase):
         self.source_calls += 1
         return self.source
 
+    def test_native_utf8_context_key_contract(self):
+        import hashlib
+        import json
+        user = "员工:a:b"
+        encoded = json.dumps(["directory", user], ensure_ascii=False, separators=(",", ":")).encode()
+        digest = hashlib.sha256(encoded).hexdigest()
+        self.assertEqual(self.contexts._keys(user),
+                         (self.prefix + digest, self.prefix + digest + ":lease"))
+
     def test_fixed_ttl_hit_login_expiry_and_latest_memberships(self):
         one = self.contexts.get("u1")
         key, _ = self.contexts._keys("u1")
