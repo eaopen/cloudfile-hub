@@ -123,7 +123,7 @@ class SubjectContexts:
             # projection/publication. Redis lease expiry alone must not let a
             # successor invalidate an in-flight native projection under its guard.
             # Source I/O and join waits remain outside this bounded guard.
-            with self.refresh_guard(user_id, epoch):
+            with self.refresh_guard(user_id, epoch, phase="begin"):
                 started = self.redis.eval('''
                 local raw = redis.call('GET', KEYS[1])
                 local old = nil
@@ -181,7 +181,7 @@ class SubjectContexts:
                          "expires_at": now + duration, "subject": subject}
                 # This guard must hold the durable scope fence/coordinator. The
                 # projection callback must reconcile removals as well as additions.
-                with self.refresh_guard(user_id, epoch):
+                with self.refresh_guard(user_id, epoch, phase="publish"):
                     self._assert_lease(lease_key, epoch)
                     self.project(subject, epoch)
                     if subject["status"] == "active" and not self.account_active(user_id):
@@ -207,7 +207,7 @@ class SubjectContexts:
                 pending["status"] = "unavailable"
                 # Failure is also a current-generation state transition. It
                 # cannot race a final consumer holding the authority guard.
-                with self.refresh_guard(user_id, epoch):
+                with self.refresh_guard(user_id, epoch, phase="fail"):
                     self.redis.eval('''
                     if redis.call('GET', KEYS[2]) == ARGV[1] then
                         local value = redis.call('GET', KEYS[1])

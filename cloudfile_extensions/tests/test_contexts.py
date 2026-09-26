@@ -29,7 +29,7 @@ class ContextTest(unittest.TestCase):
                        "organization_revision": "1", "etag": "etag-1",
                        "generated_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")}
         @contextmanager
-        def guard(user_id, epoch):
+        def guard(user_id, epoch, *, phase):
             yield
         self.contexts = SubjectContexts(self.redis, provider_id="directory", fetch=self.fetch,
                                         attribute_allowlist={"employee_no"}, account_active=lambda u: self.active,
@@ -171,7 +171,7 @@ class ContextTest(unittest.TestCase):
         entered, finish, contender = Event(), Event(), Event()
         coordinator = Lock()
         @contextmanager
-        def guard(user_id, epoch):
+        def guard(user_id, epoch, *, phase):
             if entered.is_set() and not finish.is_set():
                 contender.set()
             with coordinator:
@@ -207,7 +207,7 @@ class ContextTest(unittest.TestCase):
     def test_start_guard_failure_preserves_generation_without_source_or_projection(self):
         original = self.contexts.get("u1")
         @contextmanager
-        def refused(user_id, epoch):
+        def refused(user_id, epoch, *, phase):
             raise ContractError("SUBJECT_UNAVAILABLE", "Subject authorization is unavailable", 503)
             yield
         self.contexts.refresh_guard = refused
@@ -220,7 +220,7 @@ class ContextTest(unittest.TestCase):
         self.assertIsNone(self.redis.get(lease_key))
 
         @contextmanager
-        def broken(user_id, epoch):
+        def broken(user_id, epoch, *, phase):
             raise RuntimeError("private coordinator credentials")
             yield
         self.contexts.refresh_guard = broken
@@ -309,3 +309,30 @@ class ContextTest(unittest.TestCase):
         self.assertIsNone(self.contexts.current("u1"))
         import json
         self.assertEqual(json.loads(self.redis.get(key))["status"], "unavailable")
+
+    def test_guard_phases_distinguish_new_generation_from_owned_publication(self):
+        calls = []
+        key, lease_key = self.contexts._keys("u1")
+        @contextmanager
+        def phased(user_id, epoch, *, phase):
+            calls.append((epoch, phase))
+            if phase == "begin":
+                self.assertNotEqual(self.redis.get(lease_key), epoch.encode())
+            elif phase == "publish":
+                self.assertEqual(self.redis.get(lease_key), epoch.encode())
+            elif phase != "fail":
+                self.fail("unknown authority phase")
+            yield
+        self.contexts.refresh_guard = phased
+        self.contexts.prepare("u1")
+        self.assertEqual([phase for _, phase in calls], ["begin", "publish"])
+        self.assertEqual(calls[0][0], calls[1][0])
+        calls.clear()
+        def failed(subject, epoch):
+            raise RuntimeError("private projection failure")
+        self.contexts.project = failed
+        with self.assertRaises(ContractError):
+            self.contexts.prepare("u1")
+        self.assertEqual([phase for _, phase in calls], ["begin", "publish", "fail"])
+        self.assertEqual(len({epoch for epoch, _ in calls}), 1)
+        self.assertIsNone(self.contexts.current("u1"))
