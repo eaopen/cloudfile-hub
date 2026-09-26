@@ -13,6 +13,7 @@ class PolicyDeployment:
     resource_factory: object = None
     audit_factory: object = None
     context_factory: object = None
+    refresh_factory: object = None
 
     def close(self):
         # The host invokes this only after draining all requests at shutdown.
@@ -90,7 +91,10 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
         context_factory = OwnContextFactory(authenticate=factory.authenticate,
             preparation_scope=factory.preparation_scope, core=factory.core,
             cloud_mode=factory.cloud_mode)
-        return PolicyDeployment(factory, client, resource_factory, audit_factory, context_factory)
+        from ..directory.refresh_factory import UserRefreshFactory
+        refresh_factory = UserRefreshFactory(authenticate=factory.authenticate,
+            preparation_scope=factory.preparation_scope, core=factory.core, cloud_mode=factory.cloud_mode)
+        return PolicyDeployment(factory, client, resource_factory, audit_factory, context_factory, refresh_factory)
     except Exception:
         client.connection_pool.disconnect()
         raise

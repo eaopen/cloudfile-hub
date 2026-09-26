@@ -58,6 +58,12 @@ def context_service(request, request_id):
     return _host.context_service(request, request_id)
 
 
+def refresh_service(request, request_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("SUBJECT_UNAVAILABLE", "Refresh worker is unavailable", 503)
+    return _host.refresh_service(request, request_id)
+
+
 def worker_exit(server, worker):
     global _host
     if _host is None or _host.pid != os.getpid():

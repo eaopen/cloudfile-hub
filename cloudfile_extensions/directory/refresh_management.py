@@ -7,6 +7,8 @@ from ..jobs.store import JobStore
 from ..schema.runner import SchemaRunner
 from .native_state import NativeSubjectState
 from .refresh_worker import UserRefreshJob
+from uuid import UUID
+import re
 
 
 class UserRefreshManagement:
@@ -64,3 +66,53 @@ class UserRefreshManagement:
             return self.jobs.submit(actor=self.actor.user_id, actor_kind="user", kind=UserRefreshJob.KIND,
                 scope=scope, request=dict(userId=target, reason=reason), idempotency_key=idempotency_key,
                 authorize_transaction=lambda cursor: self._authorize(cursor, target))
+
+    @staticmethod
+    def public_job(job):
+        steps = {"accepted": "accepted", "processing": "fetching",
+                 "subject_refreshed": "reconciling", "finished": "finished"}
+        if job["status"] not in {"queued", "running", "succeeded", "failed", "cancelled"} or job["step"] not in steps:
+            raise ContractError("SUBJECT_UNAVAILABLE", "Refresh job state is unavailable", 503)
+        code = job["error_code"]
+        if code is not None and (not isinstance(code, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code)):
+            raise ContractError("SUBJECT_UNAVAILABLE", "Refresh job state is unavailable", 503)
+        return dict(job_id=job["job_id"], status=job["status"], step=steps[job["step"]],
+            scope=dict(job["scope"]), barrier_active=job["barrier_active"],
+            status_url="/api/v2.1/cloudfile/extensions/authorization/v1/refreshes/" + job["job_id"] + "/",
+            error_code=code)
+
+    def status(self, job_id):
+        try:
+            job_id = str(UUID(job_id))
+        except (ValueError, TypeError, AttributeError):
+            raise ContractError("INVALID_REQUEST", "Invalid refresh job identity", 400) from None
+        previous = self.jobs.get(job_id)
+        scope = previous["scope"]
+        if (previous["kind"] != UserRefreshJob.KIND or previous["actor_kind"] != "user"
+                or set(scope) != {"type", "provider", "external_id"}
+                or scope["type"] != "user" or scope["provider"] != self.state.provider
+                or previous["barrier_active"]):
+            raise ContractError("NOT_FOUND", "Refresh job is not available", 404)
+        target = identifier(scope["external_id"], maximum=225)
+        scopes = [dict(type="provider", provider=self.state.provider, external_id=self.state.provider)]
+        scopes.extend(dict(type="user", provider=self.state.provider, external_id=user)
+            for user in sorted({self.actor.user_id, target}))
+        connection = self.jobs.connection
+        with scope_locks(connection, scopes):
+            connection.begin()
+            try:
+                with connection.cursor() as cursor:
+                    if self._authorize(cursor, target) is not True:
+                        raise ContractError("ACCESS_DENIED", "Refresh status is not authorized", 403)
+                    cursor.execute("SELECT job_id FROM cf_background_job WHERE job_id=%s FOR UPDATE", (job_id,))
+                    if cursor.fetchall() != ((job_id,),):
+                        raise ContractError("NOT_FOUND", "Refresh job is not available", 404)
+                    current = self.jobs.get(job_id)
+                    if (current["scope"] != scope or current["kind"] != UserRefreshJob.KIND
+                            or current["actor_kind"] != "user" or current["barrier_active"]):
+                        raise ContractError("SUBJECT_UNAVAILABLE", "Refresh scope changed", 503)
+                    result = self.public_job(current)
+                connection.commit()
+                return result
+            finally:
+                connection.rollback()
