@@ -54,7 +54,7 @@ class ResourceService:
             for repo in sorted({ref["repo_id"] for ref in references}))
         deadline = time.monotonic() + 20
         items = []
-        with scope_locks(authority.state.connection, scopes):
+        with authority.preparation.no_refresh_scope(), scope_locks(authority.state.connection, scopes):
             for reference in references:
                 if time.monotonic() >= deadline:
                     raise ContractError("RESOURCE_UNAVAILABLE", "Resource batch deadline exceeded", 503)

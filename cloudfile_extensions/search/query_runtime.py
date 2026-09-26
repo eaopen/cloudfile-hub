@@ -30,7 +30,7 @@ class GuardedSearchRequest:
         # publication changes through serialization, and assert on exit. It
         # must coordinate with producers without blocking fresh version reads
         # on a row lock held by another connection. A boolean is not a scope.
-        with self.response_scope(self.service.resources, repo):
+        with authority.preparation.no_refresh_scope(), self.response_scope(self.service.resources, repo):
             yield self.service.query(body)
 
 

@@ -4,6 +4,7 @@ Caller supplies an already authenticated business actor and machine directory
 provider. Not an HTTP authentication mechanism or native access permission.
 """
 from datetime import datetime, timezone
+from contextlib import contextmanager
 from uuid import uuid4
 
 from ..common.errors import ContractError
@@ -28,6 +29,7 @@ class SubjectPreparation:
         # across requests or worker threads and must not automatically reconnect.
         SchemaRunner(connection).require_current()
         self.actor = actor_user_id
+        self._read_epoch = None
         self.state = NativeSubjectState(connection, native_schema=native_schema,
                                        identity_schema=identity_schema, provider=provider_id)
         writer = EventWriter()
@@ -54,11 +56,40 @@ class SubjectPreparation:
         identifier(user_id, maximum=225)
         if user_id != self.actor:
             raise ContractError("ACCESS_DENIED", "Only the authenticated subject may be prepared", 403)
+        if self._read_epoch is not None:
+            if trigger != "request":
+                raise ContractError("SUBJECT_UNAVAILABLE", "Subject refresh is unavailable inside a read scope", 503)
+            value = self.contexts.current(user_id)
+            if value is None or value["context_epoch"] != self._read_epoch:
+                raise ContractError("SUBJECT_UNAVAILABLE", "Protected read subject changed or expired", 503)
+            return value
         return self.contexts.get(user_id, trigger=trigger)
+
+    @contextmanager
+    def no_refresh_scope(self):
+        """Pin a ready epoch without extending its TTL or granting access.
+
+        Refresh must happen before entering. Nested metadata consumers continue
+        native authorization/finalization, but cannot project memberships while
+        their producer/authority locks are held. Expiry fails this response;
+        the next request can refresh normally. Request-owned, not thread shared.
+        """
+        value = self.contexts.current(self.actor)
+        previous = self._read_epoch
+        if value is None or (previous is not None and value["context_epoch"] != previous):
+            raise ContractError("SUBJECT_UNAVAILABLE", "Protected read subject is unavailable", 503)
+        self._read_epoch = value["context_epoch"]
+        try:
+            yield
+            self.prepare(self.actor)
+        finally:
+            self._read_epoch = previous
 
     def refresh_for_management(self, user_id):
         """Trusted leased worker only; disabled success is not login/read ready."""
         identifier(user_id, maximum=225)
         if user_id != self.actor:
             raise ContractError("ACCESS_DENIED", "Only the prepared subject may be refreshed", 403)
+        if self._read_epoch is not None:
+            raise ContractError("SUBJECT_UNAVAILABLE", "Management refresh cannot run inside a read scope", 503)
         return self.contexts.prepare(user_id, reuse_ready=False, allow_disabled=True)
