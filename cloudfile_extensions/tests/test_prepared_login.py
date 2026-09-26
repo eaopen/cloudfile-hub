@@ -80,3 +80,20 @@ class PreparedLoginTest(unittest.TestCase):
         with self.assertRaises(ContractError) as caught:
             self.complete()
         self.assertEqual(caught.exception.status, 401)
+
+    def test_durable_provisioning_returns_pending_even_if_identity_exists(self):
+        from cloudfile_extensions.identity.provisioning import ProvisioningJobs
+        from cloudfile_extensions.identity.login import PendingLogin
+        provisioning = Mock(spec=ProvisioningJobs)
+        provisioning.jit = Mock()
+        provisioning.jit.bindings = self.bindings
+        provisioning.request_for_login.return_value = "job-id"
+        login = PreparedOIDCLogin(self.flow, self.bindings, preparation_factory=self.factory, provisioning=provisioning)
+        for username in (None, "native@example.invalid"):
+            self.bindings.resolve.return_value = username
+            result = login.complete(state="state", code="code", binding="browser")
+            self.assertEqual(result, PendingLogin("job-id"))
+            self.assertEqual(provisioning.request_for_login.call_args.kwargs["unbound"], username is None)
+        self.factory.assert_not_called()
+        provisioning.request_for_login.return_value = None
+        self.assertEqual(login.complete(state="state", code="code", binding="browser").username, "native@example.invalid")

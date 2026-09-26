@@ -197,6 +197,12 @@ class JobStore:
         return self._management_transition(job_id, status="queued", allowed=("failed", "cancelled"),
                                            actor=actor, actor_kind=actor_kind, action="job.retried")
 
+    def retry_failed(self, job_id, *, actor, actor_kind):
+        # A fresh authenticated recovery request must not undo a concurrent
+        # administrator cancellation between its read and this row lock.
+        return self._management_transition(job_id, status="queued", allowed=("failed",),
+                                           actor=actor, actor_kind=actor_kind, action="job.retried")
+
     def _management_transition(self, job_id, *, status, allowed, actor, actor_kind, action):
         identifier(actor)
         if actor_kind not in {"user", "service"}:

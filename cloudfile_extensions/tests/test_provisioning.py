@@ -69,11 +69,12 @@ class ProvisioningTest(DatabaseTestCase):
         self.assertEqual(self.worker.run_once(), job)
         self.assertEqual(self.pipeline.store.get(job)["status"], "failed")
         self.assertEqual(self.pipeline.submit(self.claims), (job, False))
-        # Explicit authorized retry fixture, not an anonymous retry endpoint.
-        self.pipeline.store.retry(job, actor="u1", actor_kind="user")
+        # Fresh verified identity fixture, not an anonymous retry endpoint.
+        self.assertEqual(self.pipeline.request_for_login(self.claims, unbound=False), job)
         self.fail_preparation = False
         self.assertEqual(self.worker.run_once(), job)
         self.assertEqual(self.pipeline.store.get(job)["status"], "succeeded")
+        self.assertIsNone(self.pipeline.request_for_login(self.claims, unbound=False))
         with self.admin.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM " + self.native + ".EmailUser")
             self.assertEqual(cursor.fetchone()[0], 1)
@@ -94,5 +95,10 @@ class ProvisioningTest(DatabaseTestCase):
         self.transport.get.side_effect = fetch
         self.worker.run_once()
         self.assertEqual(self.pipeline.store.get(job)["status"], "cancelled")
+        from cloudfile_extensions.common.errors import ContractError
+        with self.assertRaises(ContractError) as caught:
+            self.pipeline.request_for_login(self.claims, unbound=False)
+        self.assertEqual(caught.exception.code, "PROVISIONING_CANCELLED")
+        self.assertEqual(self.pipeline.store.retry_failed(job, actor="u1", actor_kind="user")["status"], "cancelled")
         values = [self.redis.get(key) for key in self.redis.scan_iter(match=self.prefix + "*")]
         self.assertFalse(any(b'"status": "ready"' in value for value in values if value))

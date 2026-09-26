@@ -34,6 +34,50 @@ class ProvisioningJobs:
         return self.store.submit(actor=request["userId"], actor_kind="user", kind=self.KIND,
                                  scope=scope, request=request, idempotency_key=key)
 
+    def request_for_login(self, identity, *, unbound):
+        """Fresh verified OIDC caller only; never resurrect cancelled work."""
+        if type(unbound) is not bool:
+            raise ValueError("invalid identity state")
+        request = {key: identity[key] for key in ("issuer", "sub", "userId")}
+        if request["issuer"] != self.jit.issuer:
+            raise ContractError("ACCESS_DENIED", "Identity provisioning source does not match", 403)
+        key = hashlib.sha256(canonical(request).encode()).hexdigest()
+        with self.store.connection.cursor() as cursor:
+            cursor.execute("SELECT job_id FROM cf_background_job WHERE actor=%s AND actor_kind='user' AND kind=%s AND idempotency_key=%s LIMIT 2",
+                           (request["userId"], self.KIND, key))
+            rows = cursor.fetchall()
+        if len(rows) > 1:
+            raise ContractError("IDENTITY_UNAVAILABLE", "Provisioning state is ambiguous", 503)
+        if not rows:
+            if not unbound:
+                return None  # Existing prebound account, not a JIT job.
+            job_id, _ = self.submit(identity)
+        else:
+            job_id = rows[0][0]
+        job = self.store.get(job_id)
+        with self.store.connection.cursor() as cursor:
+            cursor.execute("SELECT request_json FROM cf_background_job WHERE job_id=%s", (job_id,))
+            stored = cursor.fetchall()
+        expected = dict(type="user", provider=self.jit.bindings.provider, external_id=request["userId"])
+        if (job["actor"] != request["userId"] or job["actor_kind"] != "user" or
+                job["scope"] != expected or len(stored) != 1 or json.loads(stored[0][0]) != request or job["barrier_active"]):
+            raise ContractError("IDENTITY_UNAVAILABLE", "Provisioning state does not match", 503)
+        if job["status"] == "failed":
+            if not self.jit.enabled:
+                raise ContractError("ACCESS_DENIED", "Identity provisioning is not enabled", 403)
+            job = self.store.retry_failed(job_id, actor=request["userId"], actor_kind="user")
+        if job["status"] == "cancelled":
+            raise ContractError("PROVISIONING_CANCELLED", "Identity provisioning was cancelled", 409)
+        if job["status"] == "succeeded":
+            if unbound:
+                raise ContractError("IDENTITY_CONFLICT", "Provisioned identity requires management recovery", 409)
+            return None
+        if not self.jit.enabled:
+            raise ContractError("ACCESS_DENIED", "Identity provisioning is not enabled", 403)
+        if job["status"] not in {"queued", "running"}:
+            raise ContractError("IDENTITY_UNAVAILABLE", "Provisioning state is unavailable", 503)
+        return job_id
+
     def execute(self, execution):
         claim = execution.claim
         object_fields(claim.request, ("issuer", "sub", "userId"))
