@@ -45,6 +45,22 @@ class ACLRulesTest(DatabaseTestCase):
             cursor.execute("SELECT COUNT(*) FROM cf_audit_event WHERE repo_id=%s", (self.repo,))
             self.assertEqual(cursor.fetchone()[0], 3)
 
+    def test_durable_replay_is_authorized_and_has_no_duplicate_event(self):
+        one = self.rules.mutate(self.ref(), value=self.value(), idempotency_key="create")
+        self.assertEqual(self.rules.mutate(self.ref(), value=self.value(), idempotency_key="create"), one)
+        with self.assertRaises(ContractError) as caught:
+            self.rules.mutate(self.ref(), value=self.value(permission="rw"), idempotency_key="create")
+        self.assertEqual(caught.exception.status, 409)
+        deleted = self.rules.mutate(self.ref(), rule_id=one["id"], if_match=one["etag"], idempotency_key="delete")
+        self.assertEqual(self.rules.mutate(self.ref(), rule_id=one["id"], if_match=one["etag"], idempotency_key="delete"), deleted)
+        self.authorize.return_value = False
+        with self.assertRaises(ContractError) as caught:
+            self.rules.mutate(self.ref(), value=self.value(), idempotency_key="create")
+        self.assertEqual(caught.exception.status, 403)
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM cf_audit_event WHERE repo_id=%s", (self.repo,))
+            self.assertEqual(cursor.fetchone()[0], 2)
+
     def test_denied_management_and_duplicate_do_not_write_events(self):
         self.authorize.return_value = False
         with self.assertRaises(ContractError):

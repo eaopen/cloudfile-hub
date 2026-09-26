@@ -5,6 +5,7 @@ All mutations share provider/user/repo coordination with native publication.
 """
 import hashlib
 import json
+import re
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -220,10 +221,10 @@ class ACLRules:
         except Exception:
             raise ContractError("POLICY_UNAVAILABLE", "Policy page is unavailable", 503) from None
 
-    def mutate(self, reference, *, value=None, rule_id=None, if_match=None):
+    def mutate(self, reference, *, value=None, rule_id=None, if_match=None, idempotency_key=None):
         """Create, replace or delete one rule; no implicit management bypass.
 
-        API idempotency registry and delegation remain host service concerns.
+        Optional durable key replays only after current management authorization.
         value=None means delete, requiring an existing UUID and strong If-Match.
         """
         ref = resource_ref(reference)
@@ -240,6 +241,14 @@ class ACLRules:
                 raise invalid("Invalid ACL rule ID") from None
         elif value is None or if_match is not None:
             raise invalid("Invalid ACL mutation")
+        request_key = request_digest = None
+        if idempotency_key is not None:
+            if not isinstance(idempotency_key, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", idempotency_key):
+                raise invalid("Invalid idempotency key")
+            request_key = digest(json.dumps([self.TABLE, self.provider, self.actor, idempotency_key],
+                ensure_ascii=False, separators=(",", ":")))
+            request_digest = digest(json.dumps(dict(reference=ref, value=value, rule_id=rule_id, if_match=if_match),
+                ensure_ascii=False, sort_keys=True, separators=(",", ":")))
         scopes = [dict(type="provider", provider=self.provider, external_id=self.provider),
                   dict(type="user", provider=self.provider, external_id=self.actor),
                   dict(type="repo", provider="cloudfile", external_id=ref["repo_id"])]
@@ -250,6 +259,37 @@ class ACLRules:
                     with self.connection.cursor() as cursor:
                         if self.authorize(cursor, self.actor, ref) is not True:
                             raise ContractError("ACCESS_DENIED", "ACL management is not allowed", 403)
+                        if request_key is not None:
+                            cursor.execute("SELECT request_digest,result_json,inherited_effect FROM cf_policy_request WHERE request_key=%s FOR UPDATE", (request_key,))
+                            records = cursor.fetchall()
+                            cursor.execute("SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_policy_request'")
+                            if cursor.fetchall() != (("InnoDB",),) or len(records) > 1:
+                                raise ValueError("unsafe policy request storage")
+                            if records:
+                                saved_digest, saved_result, inherited = records[0]
+                                if saved_digest != request_digest:
+                                    raise ContractError("IDEMPOTENCY_CONFLICT", "Idempotency key was used for another request", 409)
+                                if type(inherited) is not int or inherited not in (0, 1):
+                                    raise ValueError("invalid saved policy effect")
+                                if self.authorize_change is not None and self.authorize_change(cursor, self.actor, ref,
+                                        {"inherit": bool(inherited)}, value) is not True:
+                                    raise ContractError("ACCESS_DENIED", "Policy replay exceeds management scope", 403)
+                                if not isinstance(saved_result, str) or len(saved_result.encode()) > 16384:
+                                    raise ValueError("invalid saved policy response")
+                                result = json.loads(saved_result)
+                                if not isinstance(result, dict):
+                                    raise ValueError("invalid saved policy response")
+                                if value is None:
+                                    if result != dict(id=rule_id, deleted=True):
+                                        raise ValueError("invalid saved deletion")
+                                elif (result.get("repo_id"), result.get("path"), result.get("kind"), result.get("subject"),
+                                      result.get("permission"), result.get("inherit")) != (ref["repo_id"], value["path"],
+                                      value["kind"], value["subject"], value["permission"], value["inherit"]):
+                                    raise ValueError("invalid saved mutation")
+                                if self.finalize is not None:
+                                    self.finalize(cursor)
+                                self.connection.commit()
+                                return result
                         previous = None
                         if rule_id is not None:
                             cursor.execute("SELECT " + self.FIELDS + " FROM " + self.TABLE + " WHERE repo_id=%s AND id=%s FOR UPDATE",
@@ -288,6 +328,10 @@ class ACLRules:
                             actor_user_id=self.actor, actor_kind="user", source="hub",
                             action=self.ACTION_PREFIX + (".deleted" if value is None else ".updated" if previous else ".created"),
                             result="succeeded", repo_id=ref["repo_id"], path=ref["path"], policy_revision=revision))
+                        if request_key is not None:
+                            cursor.execute("INSERT INTO cf_policy_request(request_key,request_digest,result_json,inherited_effect,created_at) VALUES(%s,%s,%s,%s,UTC_TIMESTAMP(6))",
+                                (request_key, request_digest, json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+                                 int(any(item is not None and item["inherit"] for item in (previous, value)))))
                         if self.finalize is not None:
                             self.finalize(cursor)
                     self.connection.commit()
