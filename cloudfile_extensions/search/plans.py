@@ -23,6 +23,12 @@ def encode_plan(index, steps):
 
 
 class SearchPlanStore(SearchTaskStore):
+    def progress(self, claim, *, generation):
+        self._key(claim, generation, 0)
+        with self._owned(claim) as sql:
+            sql.execute("SELECT step,payload_hash,state,task_id FROM cf_search_task WHERE event_id=%s AND index_generation=%s ORDER BY step FOR UPDATE", (claim.event_id, generation))
+            return sql.fetchall()
+
     def freeze(self, claim, *, generation, index, steps):
         self._key(claim, generation, 0)
         raw, digest = encode_plan(index, steps)

@@ -7,6 +7,10 @@ from .task_store import SearchTaskStore
 from .tasks import MeilisearchTasks
 
 
+def step_hash(index, operation, raw):
+    return hashlib.sha256(b"cf.search.step.v1\n" + index.encode("ascii") + b"\n" + operation.encode("ascii") + b"\n" + raw).hexdigest()
+
+
 class SearchStepExecution:
     def __init__(self, store, client):
         if not isinstance(store, SearchTaskStore) or not isinstance(client, MeilisearchTasks):
@@ -23,7 +27,7 @@ class SearchStepExecution:
         frozen = json.loads(raw.decode("utf-8"))
         if not isinstance(frozen, list) or not 1 <= len(frozen) <= 100:
             raise ValueError("bounded search batch required")
-        digest = hashlib.sha256(b"cf.search.step.v1\n" + self.client.index.encode("ascii") + b"\n" + operation.encode("ascii") + b"\n" + raw).hexdigest()
+        digest = step_hash(self.client.index, operation, raw)
         identity = dict(generation=generation, step=step)
         receipt = self.store.prepare(claim, payload_hash=digest, **identity)
         state, task_id = receipt["state"], receipt["task_id"]
