@@ -92,7 +92,7 @@ class SubjectContexts:
             return current
         return self.prepare(user_id, reuse_ready=trigger == "request")
 
-    def prepare(self, user_id, *, reuse_ready=False):
+    def prepare(self, user_id, *, reuse_ready=False, _retry_after_join=True):
         key, lease_key = self._keys(user_id)
         epoch = uuid4().hex
         try:
@@ -127,7 +127,18 @@ class SubjectContexts:
                 while time.monotonic() < deadline:
                     value = self.current(user_id)
                     if value is not None and value.get("context_epoch") == joining:
-                        return value
+                        if reuse_ready:
+                            return value
+                        # Login/force must not reuse a fetch started before this
+                        # trigger: it may precede a directory permission change.
+                        # Wait for its owner to finish, then perform a new read.
+                        owner = self.redis.get(lease_key)
+                        if isinstance(owner, bytes):
+                            owner = owner.decode()
+                        if owner != joining:
+                            if not _retry_after_join:
+                                raise unavailable()
+                            return self.prepare(user_id, reuse_ready=False, _retry_after_join=False)
                     time.sleep(0.02)
                 raise unavailable()
             try:

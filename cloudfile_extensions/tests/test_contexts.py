@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 import os
 from threading import Event
 import unittest
+from unittest.mock import patch
 from uuid import uuid4
 
 from cloudfile_extensions.common.errors import ContractError
@@ -138,6 +139,38 @@ class ContextTest(unittest.TestCase):
         key, lease_key = self.contexts._keys("u1")
         self.assertEqual(self.redis.get(lease_key), b"new-generation")
         self.assertEqual(json.loads(self.redis.get(key))["context_epoch"], "new-generation")
+
+    def test_force_does_not_reuse_snapshot_started_before_permission_change(self):
+        started, finish, joined = Event(), Event(), Event()
+        def fetch(user_id):
+            self.source_calls += 1
+            snapshot = dict(self.source)
+            if self.source_calls == 1:
+                started.set()
+                self.assertTrue(finish.wait(timeout=5))
+            return snapshot
+        self.contexts.fetch = fetch
+        original_eval = self.redis.eval
+        def observed_eval(*args, **kwargs):
+            result = original_eval(*args, **kwargs)
+            if "ARGV[5]=='1'" in args[0] and args[-1] == 0 and result[0] == 0:
+                joined.set()
+            return result
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            first = executor.submit(self.contexts.get, "u1")
+            self.assertTrue(started.wait(timeout=2))
+            self.source = {**self.source, "roles": [], "etag": "removed-role"}
+            with patch.object(self.redis, "eval", side_effect=observed_eval):
+                forced = executor.submit(self.contexts.get, "u1", trigger="force")
+                try:
+                    self.assertTrue(joined.wait(timeout=2))
+                finally:
+                    finish.set()
+                old, latest = first.result(), forced.result()
+        self.assertEqual(len(old["subject"]["roles"]), 1)
+        self.assertEqual(latest["subject"]["roles"], [])
+        self.assertNotEqual(old["context_epoch"], latest["context_epoch"])
+        self.assertEqual(self.source_calls, 2)
 
     def test_oidc_state_is_single_use_browser_bound_and_expires(self):
         flows = RedisLoginFlows(self.redis, prefix=self.prefix)
