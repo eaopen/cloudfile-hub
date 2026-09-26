@@ -5,6 +5,7 @@ from threading import Barrier
 
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.jobs.store import BarrierProof, JobStore
+from cloudfile_extensions.jobs.worker import Handler, JobResult, JobWorker
 from cloudfile_extensions.schema.runner import SchemaRunner
 from cloudfile_extensions.tests.test_schema import DatabaseTestCase
 
@@ -87,3 +88,29 @@ class JobStoreTest(DatabaseTestCase):
         with ThreadPoolExecutor(max_workers=2) as executor:
             claims = list(executor.map(claim, ("worker-1", "worker-2")))
         self.assertEqual(sum(value is not None for value in claims), 1)
+
+    def test_worker_dispatch_success_checkpoint_and_safe_failure(self):
+        job_id, _ = self.submit(barrier=False)
+        def execute(context):
+            context.checkpoint(step="verified", value={"files": 2})
+            return JobResult("report:fixture")
+        worker = JobWorker(self.store, owner="worker-1", handlers={"authorization.refresh": Handler(execute)})
+        self.assertEqual(worker.run_once(), job_id)
+        self.assertEqual(self.store.get(job_id)["status"], "succeeded")
+        self.assertEqual(self.store.get(job_id)["checkpoint"], {"files": 2})
+        self.assertIsNone(worker.run_once())
+        failed_id, _ = self.submit(barrier=False, idempotency_key="failed")
+        def failed(context):
+            raise RuntimeError("secret must never enter durable errors")
+        worker.handlers["authorization.refresh"] = Handler(failed)
+        worker.run_once()
+        self.assertEqual(self.store.get(failed_id)["error_code"], "JOB_HANDLER_FAILED")
+
+    def test_worker_without_barrier_adapter_never_executes_side_effects(self):
+        job_id, _ = self.submit()
+        effects = []
+        worker = JobWorker(self.store, owner="worker-1", handlers={"authorization.refresh": Handler(effects.append)})
+        worker.run_once()
+        self.assertEqual(effects, [])
+        self.assertTrue(self.store.active_barrier(self.scope))
+        self.assertEqual(self.store.get(job_id)["status"], "failed")
