@@ -33,7 +33,9 @@ class SQLJITProvisioner:
         self.state = NativeSubjectState(bindings.connection, native_schema=bindings.native_schema,
                                        identity_schema=bindings.identity_schema, provider=bindings.provider)
 
-    def ensure(self, identity):
+    def ensure(self, identity, *, assert_transaction=None):
+        if assert_transaction is not None and not callable(assert_transaction):
+            raise ValueError("trusted transaction assertion required")
         if not self.enabled or identity.get("issuer") != self.issuer:
             raise ContractError("ACCESS_DENIED", "Identity provisioning is not enabled", 403)
         user_id, subject = identity["userId"], identity["sub"]
@@ -60,6 +62,8 @@ class SQLJITProvisioner:
                 try:
                     with connection.cursor() as cursor:
                         self.bindings._engines(cursor)
+                        if assert_transaction is not None:
+                            assert_transaction(cursor)
                         cursor.execute("SELECT user,login_id FROM " + self.bindings.profiles + " WHERE login_id=%s FOR UPDATE", (user_id,))
                         if cursor.fetchall():
                             # Legacy/prebuilt identities require explicit prebinding.
@@ -77,6 +81,8 @@ class SQLJITProvisioner:
                             occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                             request_id=self.request_id, actor_user_id=user_id, actor_kind="user", source="idp",
                             action="identity.created", result="succeeded", target_user_id=user_id))
+                        if assert_transaction is not None:
+                            assert_transaction(cursor)
                     connection.commit()
                     return username
                 finally:
