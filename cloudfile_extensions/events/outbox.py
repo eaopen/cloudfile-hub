@@ -59,6 +59,19 @@ def normalize_event(event):
 
 def projection_required(value):
     """Shared disposition of a normalized immutable audit fact."""
+    if value["source"] == "hub":
+        if (value["action"] == "identity.bound" and value.get("result") == "succeeded" and
+                value.get("target_user_id") and not any(value.get(key) for key in ("repo_id", "path", "target_path", "resource_uid", "resource_kind"))):
+            return False
+        if (value["action"] == "user.delegation.issue" and value.get("result") == "succeeded" and
+                value.get("repo_id") and value.get("path") and value.get("resource_kind") == "file" and
+                value.get("target_user_id") and value.get("subject_revision") and
+                not any(value.get(key) for key in ("target_path", "resource_uid"))):
+            return False
+        if (value["action"] == "audit.export.download" and value.get("result") == "attempted" and
+                value.get("repo_id") and value.get("job_id") and
+                not any(value.get(key) for key in ("path", "target_path", "resource_uid", "resource_kind"))):
+            return False
     if (value["source"] == "fileserver" and value["action"] in {"file.view", "file.download"} and
             value.get("resource_kind") == "file"):
         return False
