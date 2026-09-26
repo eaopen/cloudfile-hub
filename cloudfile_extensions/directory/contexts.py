@@ -1,4 +1,4 @@
-"""CF-only fixed-TTL subject contexts with single-flight and version/epoch CAS.
+"""CF-only fixed-TTL subject contexts with single-flight and lease/epoch CAS.
 
 Projection and durable barriers are supplied by the trusted native coordinator.
 There is no stale fallback after expiry, login or a requested force refresh.
@@ -13,7 +13,7 @@ from uuid import uuid4
 from redis.exceptions import RedisError
 
 from ..common.errors import ContractError
-from ..common.validation import identifier, sequence
+from ..common.validation import identifier
 from .protocol import validate_subject
 
 
@@ -109,16 +109,10 @@ class SubjectContexts:
                 if owner then return {0, raw or '', owner} end
                 if ARGV[5]=='1' and old and old.status=='ready' then return {2, raw, ''} end
                 local pending = cjson.decode(ARGV[2])
-                if old then
-                    pending.source_revision = old.source_revision
-                    pending.organization_revision = old.organization_revision
-                    pending.source_etag = old.source_etag
-                end
                 redis.call('SET', KEYS[2], ARGV[1], 'EX', 30)
                 redis.call('SET', KEYS[1], cjson.encode(pending), 'EX', ARGV[3])
                 return {1, raw or '', ''}
             ''', 2, key, lease_key, epoch, json.dumps(pending), self.ttl, self.clock(), int(reuse_ready))
-            old = json.loads(started[1]) if started[1] else None
             if started[0] == 2:
                 value = self.current(user_id)
                 if value is None:
@@ -136,28 +130,19 @@ class SubjectContexts:
                         return value
                     time.sleep(0.02)
                 raise unavailable()
-            if old:
-                for field in ("source_revision", "organization_revision", "source_etag"):
-                    if field in old:
-                        pending[field] = old[field]
             try:
                 subject = validate_subject(self.fetch(user_id), requested_user_id=user_id,
                                            attribute_allowlist=self.allowlist)
-                if old:
-                    if ("source_revision" in old and sequence(subject["revision"]) < sequence(old["source_revision"])):
-                        raise unavailable()
-                    if ("organization_revision" in old and sequence(subject["organization_revision"]) < sequence(old["organization_revision"])):
-                        raise unavailable()
-                    if (subject["revision"] == old.get("source_revision") and old.get("source_etag") != subject["etag"]):
-                        raise unavailable()
+                # Ordering belongs to this refresh lease/epoch, not source hashes
+                # or optional source metadata. Fetch must use a coherent primary
+                # DB snapshot without response caching or asynchronous replicas.
                 jitter = self.jitter()
                 if type(jitter) is not int or not 0 <= jitter <= self.ttl // 10:
                     raise ValueError("context jitter must only shorten TTL by at most ten percent")
                 duration = self.ttl - jitter
                 now = self.clock()
                 value = {"userId": user_id, "status": "ready" if subject["status"] == "active" else "disabled",
-                         "context_epoch": epoch, "source_revision": subject["revision"], "source_etag": subject["etag"],
-                         "organization_revision": subject["organization_revision"], "fetched_at": now,
+                         "context_epoch": epoch, "source_etag": subject["etag"], "fetched_at": now,
                          "expires_at": now + duration, "subject": subject}
                 # This guard must hold the durable scope fence/coordinator. The
                 # projection callback must reconcile removals as well as additions.
@@ -209,6 +194,6 @@ class SubjectContexts:
     def public_state(value):
         from datetime import datetime, timezone
         return {"userId": value["userId"], "status": value["status"],
-                "source_revision": value["source_revision"], "context_epoch": value["context_epoch"],
+                "context_epoch": value["context_epoch"],
                 "fetched_at": datetime.fromtimestamp(value["fetched_at"], timezone.utc).isoformat().replace("+00:00", "Z"),
                 "expires_at": datetime.fromtimestamp(value["expires_at"], timezone.utc).isoformat().replace("+00:00", "Z")}

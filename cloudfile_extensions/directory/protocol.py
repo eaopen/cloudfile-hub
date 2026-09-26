@@ -9,7 +9,7 @@ from ..common.validation import identifier, object_fields, sequence, utc_time
 def validate_subject(value, *, requested_user_id, attribute_allowlist,
                      now=None, maximum_clock_skew=60):
     object_fields(value, ("userId", "status", "attributes", "organizations", "roles",
-                          "revision", "etag", "organization_revision", "generated_at"))
+                          "etag", "generated_at"), ("revision", "organization_revision"))
     identifier(value["userId"], maximum=225)
     if value["userId"] != requested_user_id:
         raise invalid("Directory subject does not match requested identity")
@@ -22,8 +22,9 @@ def validate_subject(value, *, requested_user_id, attribute_allowlist,
                 (isinstance(item, str) and len(item) > 4096)
                 for key, item in attributes.items())):
         raise invalid("Invalid or unsupported subject attributes")
-    sequence(value["revision"])
-    sequence(value["organization_revision"])
+    for field in ("revision", "organization_revision"):
+        if field in value:
+            sequence(value[field])
     identifier(value["etag"])
     generated = utc_time(value["generated_at"])
     now = datetime.now(timezone.utc) if now is None else now

@@ -88,15 +88,15 @@ class ContextTest(unittest.TestCase):
             self.contexts.get("u1")
         self.assertEqual(caught.exception.status, 403)
 
-    def test_source_revision_regression_and_equal_revision_changed_etag_rejected(self):
+    def test_refresh_without_source_counters_accepts_changed_memberships(self):
         self.contexts.get("u1")
-        self.source = {**self.source, "revision": "0"}
-        with self.assertRaises(ContractError):
-            self.contexts.prepare("u1")
-        self.source = {**self.source, "revision": "1", "etag": "changed-without-version"}
-        with self.assertRaises(ContractError):
-            self.contexts.prepare("u1")
-        self.assertEqual(len(self.projections), 1)
+        self.source.pop("revision")
+        self.source.pop("organization_revision")
+        self.source.update(etag="changed-without-version", roles=[])
+        refreshed = self.contexts.prepare("u1")
+        self.assertEqual(refreshed["subject"]["roles"], [])
+        self.assertNotIn("source_revision", self.contexts.public_state(refreshed))
+        self.assertEqual(len(self.projections), 2)
 
     def test_disabled_snapshot_is_preserved_as_disabled_not_source_failure(self):
         self.source = {**self.source, "status": "disabled", "roles": [], "organizations": []}
