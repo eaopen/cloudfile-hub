@@ -84,7 +84,10 @@ class JobStore:
             with self.connection.cursor() as cursor:
                 cursor.execute("SELECT RELEASE_LOCK(%s)", (name,))
 
-    def submit(self, *, actor, actor_kind, kind, scope, request, idempotency_key, barrier=False):
+    def submit(self, *, actor, actor_kind, kind, scope, request, idempotency_key, barrier=False,
+               authorize_transaction=None):
+        if authorize_transaction is not None and not callable(authorize_transaction):
+            raise ValueError("trusted transaction authorization required")
         identifier(actor)
         if actor_kind not in {"user", "service"} or type(barrier) is not bool:
             raise ContractError("INVALID_REQUEST", "Invalid job actor or barrier", 400)
@@ -101,6 +104,10 @@ class JobStore:
         # Effects and lock ownership share this exact SQL connection.
         with scope_locks(self.connection, [scope]), self._idempotency_lock(actor, actor_kind, kind, idempotency_key), self._transaction():
             with self.connection.cursor() as cursor:
+                # Trusted domain guard runs before both insertion and replay,
+                # using this exact transaction. Row locks survive until commit.
+                if authorize_transaction is not None and authorize_transaction(cursor) is not True:
+                    raise ContractError("ACCESS_DENIED", "Job submission is not authorized", 403)
                 cursor.execute("SELECT job_id,request_digest FROM cf_background_job "
                                "WHERE actor=%s AND actor_kind=%s AND kind=%s AND idempotency_key=%s",
                                (actor, actor_kind, kind, idempotency_key))

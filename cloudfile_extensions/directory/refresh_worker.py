@@ -25,7 +25,12 @@ class UserRefreshJob:
         if not isinstance(execution, Execution):
             raise ValueError("actual refresh job execution required")
         claim = execution.claim
-        object_fields(claim.request, ("userId",))
+        object_fields(claim.request, ("userId",), ("reason",))
+        if "reason" in claim.request:
+            reason = claim.request["reason"]
+            if (not isinstance(reason, str) or not reason.strip() or len(reason) > 512
+                    or any(ord(char) < 32 for char in reason)):
+                raise ContractError("INVALID_REQUEST", "Invalid refresh reason", 400)
         user = identifier(claim.request["userId"], maximum=225)
         scope = dict(type="user", provider=self.provider, external_id=user)
         if claim.kind != self.KIND or claim.scope != scope:
