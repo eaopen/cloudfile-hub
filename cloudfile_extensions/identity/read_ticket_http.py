@@ -13,17 +13,43 @@ from ..resources.paths import resource_ref
 from .read_ticket import OIDCReadTicketIssuer
 from .resources import LoginResources
 from .session_authority import OIDCSessionAuthority
+from .native_backend import CloudFileOIDCBackend
+from .native_session import BACKEND
+
+
+def native_download_actor(request):
+    """Fixed OIDC session/backend and bidirectional native Profile binding."""
+    from seahub.auth import BACKEND_SESSION_KEY
+    from seahub.profile.models import Profile
+    from django.core.exceptions import MultipleObjectsReturned
+    user = getattr(request, "user", None)
+    if (not request.is_secure() or request.session.get(BACKEND_SESSION_KEY) != BACKEND
+            or user is None or not user.is_authenticated):
+        raise ContractError("AUTHENTICATION_REQUIRED", "Native OIDC login is required", 401)
+    username = user.username
+    current = CloudFileOIDCBackend().get_user(username)
+    if current is None:
+        raise ContractError("AUTHENTICATION_REQUIRED", "Native download identity is unavailable", 401)
+    try:
+        profile = Profile.objects.get(user=username)
+        actor = AuthenticatedPolicyActor(profile.login_id, username)
+        reverse = Profile.objects.get(login_id=actor.user_id)
+        if reverse.user != username:
+            raise ContractError("AUTHENTICATION_REQUIRED", "Native identity binding changed", 401)
+        return actor
+    except (Profile.DoesNotExist, MultipleObjectsReturned):
+        raise ContractError("AUTHENTICATION_REQUIRED", "Native download identity is unavailable", 401) from None
 
 
 class OIDCReadTicketFactory:
-    def __init__(self, resources, *, authenticate):
-        if not isinstance(resources, LoginResources) or not callable(authenticate):
-            raise ValueError("actual login resources and trusted host authenticator required")
-        self.resources, self.authenticate = resources, authenticate
+    def __init__(self, resources):
+        if not isinstance(resources, LoginResources):
+            raise ValueError("actual login resources required")
+        self.resources = resources
 
     @contextmanager
     def __call__(self, request, request_id):
-        actor = self.authenticate(request)
+        actor = native_download_actor(request)
         if not isinstance(actor, AuthenticatedPolicyActor):
             raise ContractError("AUTHENTICATION_REQUIRED", "Authenticated download identity is required", 401)
         authority = OIDCSessionAuthority(self.resources)
