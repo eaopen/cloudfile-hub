@@ -48,7 +48,7 @@ class ACLRules:
     validate = staticmethod(rule_value)
     FIELDS = "id,repo_id,path,path_hash,kind,subject_type,provider,namespace,external_id,subject_hash,permission,inherit,revision"
 
-    def __init__(self, connection, *, provider, actor, request_id, authorize, finalize=None):
+    def __init__(self, connection, *, provider, actor, request_id, authorize, finalize=None, authorize_change=None):
         if self.TABLE not in {"cf_dir_acl", "cf_dir_admin"}:
             raise ValueError("fixed policy table required")
         if not connection.get_autocommit() or not callable(authorize):
@@ -58,10 +58,13 @@ class ACLRules:
         identifier(request_id)
         if finalize is not None and not callable(finalize):
             raise ValueError("transactional final assertion required")
+        if authorize_change is not None and not callable(authorize_change):
+            raise ValueError("transactional change authorization required")
         SchemaRunner(connection).require_current()
         self.connection, self.provider, self.actor = connection, provider, actor
         self.request_id, self.authorize = request_id, authorize
         self.finalize = finalize
+        self.authorize_change = authorize_change
         self.events = EventWriter()
         self._require_storage()
 
@@ -197,6 +200,8 @@ class ACLRules:
                             if (previous["path"], previous["kind"]) != (ref["path"], ref["kind"]):
                                 raise ContractError("NOT_FOUND", "ACL rule does not exist", 404)
                             compare_if_match(if_match, previous["etag"])
+                        if self.authorize_change is not None and self.authorize_change(cursor, self.actor, ref, previous, value) is not True:
+                            raise ContractError("ACCESS_DENIED", "Policy change exceeds management scope", 403)
                         id_ = rule_id or str(uuid4())
                         revision = str(uuid4())
                         if value is None:

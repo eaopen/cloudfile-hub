@@ -7,6 +7,7 @@ import unittest
 from uuid import uuid4
 
 from cloudfile_extensions.authorization.admins import DirectoryAdmins
+from cloudfile_extensions.authorization.management import DirectoryManagement
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.schema.runner import SchemaRunner
 from cloudfile_extensions.tests.test_schema import DatabaseTestCase
@@ -32,6 +33,26 @@ class AdminScopeTest(unittest.TestCase):
         self.assertTrue(DirectoryAdmins.permits([scope], self.ref("/parts/sub"), inherit=True))
         self.assertFalse(DirectoryAdmins.permits([scope], self.ref("/parts2/sub")))
         self.assertFalse(DirectoryAdmins.permits([scope], {**self.ref("/parts"), "repo_id": str(uuid4())}))
+
+    def test_runtime_checks_old_and_new_inherited_effects(self):
+        # Only exercises the change-scope hook, not CE/runtime authorization.
+        runtime = object.__new__(DirectoryManagement)
+        runtime.actor = "u1"
+        runtime.current_subject = {"userId": "u1"}
+        runtime.is_owner = False
+        runtime._scopes = lambda reference: [self.value]
+        check = lambda old, new: runtime.authorize_change(None, "u1", self.ref("/parts"), old, new)
+        exact = {"inherit": False}
+        inherited = {"inherit": True}
+        self.assertTrue(check(None, exact))
+        self.assertFalse(check(None, inherited))
+        self.assertFalse(check(inherited, exact))
+        self.assertFalse(check(inherited, None))
+        self.assertFalse(runtime.authorize_change(None, "other", self.ref("/parts"), None, exact))
+        runtime._scopes = lambda reference: [{**self.value, "inherit": True}]
+        self.assertTrue(check(inherited, None))
+        runtime.current_subject = None
+        self.assertFalse(check(None, exact))
 
 
 class AdminStorageTest(DatabaseTestCase):
