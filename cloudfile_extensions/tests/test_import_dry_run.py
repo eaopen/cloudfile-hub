@@ -14,11 +14,31 @@ from cloudfile_extensions.jobs.worker import Handler, JobWorker
 from cloudfile_extensions.migration.dry_run import ImportDryRun
 from cloudfile_extensions.migration.stage import ImportStage
 from cloudfile_extensions.migration.working_copy import WorkingCopyBuilder
+from cloudfile_extensions.migration.verify_copy import WorkingCopyVerifier
+from cloudfile_extensions.migration.verify_stage import ImportVerifyStage
 from cloudfile_extensions.schema.runner import SchemaRunner
 from cloudfile_extensions.tests.test_schema import DatabaseTestCase
 
 
 class ImportDryRunTests(DatabaseTestCase):
+    def test_completed_stage_is_verified_through_actual_job_evidence(self):
+        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as work:
+            (Path(source) / "file.prt").write_bytes(b"drawing")
+            scope = dict(type="repo", provider="cloudfile", external_id="00000000-0000-0000-0000-000000000001")
+            stage_id = self.store.submit(actor="admin", actor_kind="user", kind="migration.stage", scope=scope,
+                request={"source_id": "registered"}, idempotency_key="stage", barrier=False)[0]
+            handler = ImportStage(builder=WorkingCopyBuilder(sources={"registered": source}, work_root=work))
+            JobWorker(self.store, owner="stage-worker", handlers={"migration.stage": Handler(handler)}).run_once()
+            self.assertEqual(self.store.get(stage_id)["step"], "finished")
+            job_id = self.store.submit(actor="admin", actor_kind="user", kind="migration.verify-copy", scope=scope,
+                request={"stage_job_id": stage_id}, idempotency_key="verify", barrier=False)[0]
+            verify = ImportVerifyStage(verifier=WorkingCopyVerifier(work_root=work))
+            JobWorker(self.store, owner="verify-worker", handlers={"migration.verify-copy": Handler(verify)}).run_once()
+            result = self.store.get(job_id)
+            self.assertEqual(result["status"], "succeeded")
+            self.assertTrue(result["checkpoint"]["copy_verified"])
+            self.assertFalse(result["checkpoint"]["import_verified"])
+
     def test_stage_worker_records_ready_copy_without_import_success(self):
         with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as work:
             (Path(source) / "file.prt").write_bytes(b"drawing")

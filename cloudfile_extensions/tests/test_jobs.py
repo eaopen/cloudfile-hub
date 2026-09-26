@@ -11,6 +11,26 @@ from cloudfile_extensions.tests.test_schema import DatabaseTestCase
 
 
 class JobStoreTest(DatabaseTestCase):
+    def test_final_assertion_failure_rolls_back_submission_and_cancel(self):
+        def fail(sql):
+            raise ContractError("SUBJECT_UNAVAILABLE", "fixture expired", 503)
+        with self.assertRaises(ContractError):
+            self.submit(finalize_transaction=fail)
+        with self.connection.cursor() as sql:
+            sql.execute("SELECT COUNT(*) FROM cf_background_job")
+            self.assertEqual(sql.fetchone()[0], 0)
+            sql.execute("SELECT COUNT(*) FROM cf_audit_event")
+            self.assertEqual(sql.fetchone()[0], 0)
+        job_id, _ = self.submit()
+        claim = self.store.claim("worker", kinds=("authorization.refresh",))
+        with self.assertRaises(ContractError):
+            self.store.cancel(job_id, actor="admin", actor_kind="user", expected_epoch=claim.epoch,
+                finalize_transaction=fail)
+        self.assertEqual(self.store.get(job_id)["status"], "running")
+        with self.assertRaises(ContractError) as error:
+            self.store.cancel(job_id, actor="admin", actor_kind="user", expected_epoch=claim.epoch - 1)
+        self.assertEqual(error.exception.code, "JOB_VERSION_CONFLICT")
+
     def test_actual_job_transition_facts_do_not_queue_resource_or_search(self):
         self.submit(barrier=False)
         claim = self.store.claim("worker-1", kinds=("authorization.refresh",))

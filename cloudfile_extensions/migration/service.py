@@ -8,6 +8,7 @@ from ..jobs.authority import scope_locks
 from ..jobs.store import JobStore
 from ..resources.paths import resource_ref
 from ..resources.service import ResourceService
+from .public_status import public_status
 
 
 class MigrationJobService:
@@ -77,10 +78,10 @@ class MigrationJobService:
         job = self._job(job_id)
         reference = dict(repo_id=job["scope"]["external_id"], path="/", kind="dir")
         def read(sql, ref):
-            current = self.jobs.get(job_id)
-            return dict(job_id=job_id, status=current["status"], step=current["step"],
-                attempts=current["attempts"], lease_epoch=str(current["lease_epoch"]),
-                error_code=current["error_code"], import_verified=False)
+            current = self._job(job_id)
+            if current["scope"] != job["scope"] or current["kind"] != job["kind"]:
+                raise ContractError("JOB_VERSION_CONFLICT", "Migration job changed", 409)
+            return public_status(current)
         return self.management.consume(reference, read)
 
     def transition(self, operation, value):
