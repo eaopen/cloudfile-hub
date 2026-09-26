@@ -4,6 +4,21 @@ from cloudfile_extensions.events.outbox import projection_required
 
 
 class SearchEventDispositionTest(TestCase):
+    def test_job_transitions_are_audit_only_not_resource_success(self):
+        job = "11111111-1111-4111-8111-111111111111"
+        fact = dict(event_id="22222222-2222-4222-8222-222222222222", occurred_at="2026-09-27T00:00:00Z",
+            request_id=job, job_id=job, actor_user_id="worker", actor_kind="service", source="hub",
+            action="job.accepted", result="attempted")
+        for action, source, result in (("job.accepted", "hub", "attempted"), ("job.cancelled", "hub", "succeeded"),
+                ("job.retried", "hub", "succeeded"), ("job.completed", "worker", "succeeded"), ("job.failed", "worker", "failed")):
+            event = {**fact, "action": action, "source": source, "result": result}
+            self.assertFalse(projection_required(event))
+            self.assertFalse(projection_required({**event, "repo_id": "33333333-3333-4333-8333-333333333333"}))
+            for change in (dict(path="/changed"), dict(request_id="other"), dict(job_id="invalid"), dict(source="server")):
+                self.assertTrue(projection_required({**event, **change}))
+        self.assertTrue(projection_required({**fact, "action": "job.unknown"}))
+        self.assertTrue(projection_required({**fact, "action": "job.completed", "source": "worker", "result": "succeeded", "actor_kind": "user"}))
+
     def test_exact_acl_and_admin_facts_are_authorization_only(self):
         fact = dict(event_id="11111111-1111-4111-8111-111111111111", occurred_at="2026-09-27T00:00:00Z",
             request_id="request", actor_user_id="employee", actor_kind="user", source="hub",

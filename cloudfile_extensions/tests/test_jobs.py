@@ -11,6 +11,17 @@ from cloudfile_extensions.tests.test_schema import DatabaseTestCase
 
 
 class JobStoreTest(DatabaseTestCase):
+    def test_actual_job_transition_facts_do_not_queue_resource_or_search(self):
+        self.submit(barrier=False)
+        claim = self.store.claim("worker-1", kinds=("authorization.refresh",))
+        self.store.complete(claim)
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT payload,resource_state,search_state FROM cf_event_outbox ORDER BY sequence")
+            rows = cursor.fetchall()
+        import json
+        self.assertEqual([json.loads(row[0])["action"] for row in rows], ["job.accepted", "job.completed"])
+        self.assertEqual([row[1:] for row in rows], [("done", "done"), ("done", "done")])
+
     def setUp(self):
         super().setUp()
         SchemaRunner(self.connection).apply()

@@ -59,6 +59,23 @@ def normalize_event(event):
 
 def projection_required(value):
     """Shared disposition of a normalized immutable audit fact."""
+    # Actual JobStore transition records contain only scheduling identity/scope.
+    # Completing a job does NOT prove its resource changes indexed: handlers
+    # must emit those separate mutation facts in their effect transactions.
+    job_shapes = {"job.accepted": ("hub", "attempted"), "job.cancelled": ("hub", "succeeded"),
+        "job.retried": ("hub", "succeeded"), "job.completed": ("worker", "succeeded"),
+        "job.failed": ("worker", "failed")}
+    job_fields = {"event_id", "occurred_at", "request_id", "job_id", "actor_user_id", "actor_kind", "source", "action", "result"}
+    if (value.get("action") in job_shapes and
+            (value.get("source"), value.get("result")) == job_shapes[value["action"]] and
+            set(value) in (job_fields, job_fields | {"repo_id"}) and value.get("request_id") == value.get("job_id") and
+            value.get("actor_kind") in {"user", "service"} and
+            (value["source"] != "worker" or value["actor_kind"] == "service")):
+        try:
+            if str(UUID(value["job_id"])) == value["job_id"]:
+                return False
+        except (ValueError, TypeError, AttributeError):
+            pass
     if value["source"] == "hub":
         # These exact producer facts change authorization only. Query-time CE/C
         # guards still enforce the new rules; stream watermarks invalidate old
