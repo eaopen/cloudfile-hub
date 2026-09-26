@@ -1,0 +1,10 @@
+{
+  "version": "031_edit_sessions",
+  "steps": [
+    {
+      "sql": "CREATE TABLE cf_edit_session (session_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,provider VARCHAR(32) COLLATE utf8mb4_bin NOT NULL,owner_user_id VARCHAR(225) COLLATE utf8mb4_bin NOT NULL,device_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,device_revision BIGINT UNSIGNED NOT NULL,snapshot LONGTEXT COLLATE utf8mb4_bin NOT NULL,state VARCHAR(12) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,ticket_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,ticket_expires_at BIGINT UNSIGNED NOT NULL,expires_at BIGINT UNSIGNED NOT NULL,revision BIGINT UNSIGNED NOT NULL,created_at DATETIME(6) NOT NULL,updated_at DATETIME(6) NOT NULL,KEY owner_sessions(provider,owner_user_id,session_id),KEY device_sessions(device_id,state,session_id),KEY expiry(expires_at,session_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+      "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_edit_session')='InnoDB' AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_edit_session')=13 AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_edit_session' AND index_name='PRIMARY' AND non_unique=0)='session_id',1,0)",
+      "expected": 1
+    }
+  ]
+}
