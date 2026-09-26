@@ -43,6 +43,40 @@ def user_definition(repo, tag_id, value):
         enabled=True, scope_repo_id=repo)
 
 
+def system_definition(tag_id, *, provider, namespace, code, value, scope_repo_id=None):
+    """Trusted, separately authorized source identity; not browser-selected kind."""
+    uuid_value(tag_id)
+    identifier(provider, maximum=32)
+    identifier(namespace)
+    identifier(code, maximum=128)
+    if namespace.startswith("user:"):
+        raise invalid("System tag cannot use a user namespace")
+    if scope_repo_id is not None:
+        uuid_value(scope_repo_id)
+    object_fields(value, (), ("label", "color", "enabled"))
+    enabled = value.get("enabled", True)
+    if type(enabled) is not bool:
+        raise invalid("Invalid tag enabled state")
+    return dict(tag_id=tag_id, kind="system", provider=provider, namespace=namespace,
+        code=code, label=label_value(value.get("label", code)), normalized_label=None,
+        color=color_value(value.get("color")), enabled=enabled, scope_repo_id=scope_repo_id)
+
+
+def definition_changes(value):
+    """Display/state only; identity and library/source scope are immutable."""
+    object_fields(value, (), ("label", "color", "enabled"))
+    if not value:
+        raise invalid("No tag changes supplied")
+    result = dict(value)
+    if "label" in value:
+        result["label"] = label_value(value["label"])
+    if "color" in value:
+        result["color"] = color_value(value["color"])
+    if "enabled" in value and type(value["enabled"]) is not bool:
+        raise invalid("Invalid tag enabled state")
+    return result
+
+
 def decode(row):
     if len(row) != 11:
         raise ValueError("invalid stored tag")
