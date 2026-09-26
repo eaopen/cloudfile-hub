@@ -219,6 +219,17 @@ class ContextTest(unittest.TestCase):
         _, lease_key = self.contexts._keys("u1")
         self.assertIsNone(self.redis.get(lease_key))
 
+        @contextmanager
+        def broken(user_id, epoch):
+            raise RuntimeError("private coordinator credentials")
+            yield
+        self.contexts.refresh_guard = broken
+        with self.assertRaises(ContractError) as caught:
+            self.contexts.prepare("u1")
+        self.assertEqual(caught.exception.status, 503)
+        self.assertNotIn("private", caught.exception.message)
+        self.assertEqual(self.contexts.current("u1"), original)
+
     def test_force_does_not_reuse_snapshot_started_before_permission_change(self):
         started, finish, joined = Event(), Event(), Event()
         def fetch(user_id):

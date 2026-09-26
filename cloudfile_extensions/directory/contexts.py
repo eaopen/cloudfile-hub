@@ -221,6 +221,12 @@ class SubjectContexts:
         except RedisError:
             raise unavailable() from None
 
+        except ContractError:
+            raise
+        except Exception:
+            # Coordinator failures must not expose native connection details.
+            raise unavailable() from None
+
     def _assert_lease(self, key, epoch):
         current = self.redis.get(key)
         if isinstance(current, bytes):
