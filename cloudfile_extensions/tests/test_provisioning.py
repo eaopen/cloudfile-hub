@@ -172,3 +172,41 @@ class ProvisioningTest(DatabaseTestCase):
             runtime.bindings.authorize(None, "u1", "u1", "native")
         with self.assertRaises(ValueError):
             self.runtime(jit_enabled="true")
+
+    @unittest.skipUnless(os.environ.get("CF_TEST_ACL_LIBRARY"), "requires compiled shared C policy core")
+    def test_library_owner_management_real_core_denial_and_nonowner(self):
+        from cloudfile_extensions.authorization.core import PolicyCore
+        from cloudfile_extensions.authorization.management import LibraryOwnerManagement
+        from cloudfile_extensions.common.errors import ContractError
+        runtime = self.runtime(jit_enabled=True)
+        job = runtime.provisioning.request_for_login(self.claims, unbound=True)
+        worker = JobWorker(runtime.store, owner="management-worker",
+            handlers={runtime.provisioning.KIND: runtime.provisioning.handler})
+        self.assertEqual(worker.run_once(), job)
+        username = runtime.bindings.resolve(issuer=self.claims["issuer"],
+            subject=self.claims["sub"], user_id="u1")
+        repo = str(uuid4())
+        with self.connection.cursor() as cursor:
+            cursor.execute("CREATE TABLE Repo(repo_id CHAR(36) PRIMARY KEY) ENGINE=InnoDB")
+            cursor.execute("CREATE TABLE RepoInfo(repo_id CHAR(36) PRIMARY KEY,status INT) ENGINE=InnoDB")
+            cursor.execute("CREATE TABLE VirtualRepo(repo_id CHAR(36) PRIMARY KEY) ENGINE=InnoDB")
+            cursor.execute("CREATE TABLE RepoOwner(repo_id CHAR(36) PRIMARY KEY,owner_id VARCHAR(255)) ENGINE=InnoDB")
+            cursor.execute("INSERT INTO Repo VALUES(%s)", (repo,))
+            cursor.execute("INSERT INTO RepoInfo VALUES(%s,0)", (repo,))
+            cursor.execute("INSERT INTO RepoOwner VALUES(%s,%s)", (repo, username))
+        manager = LibraryOwnerManagement(runtime.preparation("u1"),
+            PolicyCore(os.environ["CF_TEST_ACL_LIBRARY"]), request_id="manager-core-test")
+        ref = dict(repo_id=repo, path="/", kind="dir")
+        value = dict(path="/", kind="dir", subject=dict(type="user", provider="directory",
+            namespace="user", external_id="u1"), permission="none", inherit=True)
+        denied = manager.mutate(ref, value=value)
+        with self.assertRaises(ContractError) as caught:
+            manager.mutate(ref, value={**value, "permission": "rw"},
+                rule_id=denied["id"], if_match=denied["etag"])
+        self.assertEqual(caught.exception.status, 403)  # Owner/manage cannot undo explicit denial.
+        with self.connection.cursor() as cursor:
+            cursor.execute("DELETE FROM cf_dir_acl WHERE repo_id=%s", (repo,))  # Test-only recovery, not a manager bypass.
+            cursor.execute("UPDATE RepoOwner SET owner_id='another-native' WHERE repo_id=%s", (repo,))
+        with self.assertRaises(ContractError) as caught:
+            manager.mutate(ref, value=value)
+        self.assertEqual(caught.exception.status, 403)

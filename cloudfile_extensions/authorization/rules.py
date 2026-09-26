@@ -45,15 +45,18 @@ def rule_value(value):
 class ACLRules:
     FIELDS = "id,repo_id,path,path_hash,kind,subject_type,provider,namespace,external_id,subject_hash,permission,inherit,revision"
 
-    def __init__(self, connection, *, provider, actor, request_id, authorize):
+    def __init__(self, connection, *, provider, actor, request_id, authorize, finalize=None):
         if not connection.get_autocommit() or not callable(authorize):
             raise ValueError("dedicated connection and transactional management authorization required")
         identifier(provider, maximum=32)
         identifier(actor, maximum=225)
         identifier(request_id)
+        if finalize is not None and not callable(finalize):
+            raise ValueError("transactional final assertion required")
         SchemaRunner(connection).require_current()
         self.connection, self.provider, self.actor = connection, provider, actor
         self.request_id, self.authorize = request_id, authorize
+        self.finalize = finalize
         self.events = EventWriter()
         self._require_storage()
 
@@ -113,7 +116,7 @@ class ACLRules:
             raise ValueError("invalid stored ACL identity")
         return dict(id=id_, repo_id=repo, **value, revision=revision, etag='"' + revision + '"')
 
-    def candidates(self, reference):
+    def candidates(self, reference, *, locking=False):
         """Complete ancestor set; no library/file-wide scan, overflow denies."""
         ref = resource_ref(reference)
         if len(ref["path"].encode()) > 4096:
@@ -125,9 +128,14 @@ class ACLRules:
                 raise invalid("ACL path is too deep")
             paths.extend("/" + "/".join(parts[:index]) for index in range(1, len(parts) + 1))
         try:
+            if locking:
+                with self.connection.cursor() as cursor:
+                    cursor.execute("SELECT id FROM cf_dir_acl LIMIT 0 FOR UPDATE")
+                    cursor.fetchall()
+                self._require_storage()
             with self.connection.cursor() as cursor:
                 cursor.execute("SELECT " + self.FIELDS + " FROM cf_dir_acl WHERE repo_id=%s AND path_hash IN (" +
-                    ",".join(["%s"] * len(paths)) + ") AND (kind='dir' OR (kind=%s AND path_hash=%s)) ORDER BY path_hash,id LIMIT 4097",
+                    ",".join(["%s"] * len(paths)) + ") AND (kind='dir' OR (kind=%s AND path_hash=%s)) ORDER BY path_hash,id LIMIT 4097" + (" FOR UPDATE" if locking else ""),
                     (ref["repo_id"], *(digest(path) for path in paths), ref["kind"], digest(ref["path"])))
                 rows = cursor.fetchall()
             if len(rows) > 4096:
@@ -208,6 +216,8 @@ class ACLRules:
                             actor_user_id=self.actor, actor_kind="user", source="hub",
                             action="acl.deleted" if value is None else "acl.updated" if previous else "acl.created",
                             result="succeeded", repo_id=ref["repo_id"], path=ref["path"], policy_revision=revision))
+                        if self.finalize is not None:
+                            self.finalize(cursor)
                     self.connection.commit()
                     return result
                 finally:
