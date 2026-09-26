@@ -67,6 +67,38 @@ class LocalSessionStore:
     def __init__(self):
         self.devices = DeviceStore()
 
+    def status(self, sql, *, provider, actor, device_id, session_id):
+        # Own diagnostic/cancel does not grant file access and must still work
+        # after device revocation, file moves or loss of content permissions.
+        self.devices._scope(sql, provider, actor, device_id)
+        require_storage(sql)
+        _, device_state, device_revision = self.devices._load(sql, provider, actor, device_id)
+        row = self._row(sql, provider, actor, device_id, session_id)
+        sql.execute("SELECT FLOOR(UNIX_TIMESTAMP())")
+        now = int(sql.fetchone()[0])
+        state = row[5]
+        if state in {"created", "claimed", "active"} and (now >= row[8] or state == "created" and now >= row[7]):
+            state = "expired"
+        return dict(session_id=session_id, state=state, revision=str(row[9]),
+            device_available=device_state == "active" and device_revision == row[3])
+
+    def cancel(self, sql, *, provider, actor, device_id, session_id, expected_revision):
+        if type(expected_revision) is not int or not 1 <= expected_revision <= 2 ** 64 - 1:
+            raise ValueError("positive session revision required")
+        self.status(sql, provider=provider, actor=actor, device_id=device_id, session_id=session_id)
+        row = self._row(sql, provider, actor, device_id, session_id)
+        if row[5] == "cancelled":
+            return dict(session_id=session_id, state="cancelled", revision=str(row[9])), False
+        if row[5] in {"committing", "completed"} or row[9] != expected_revision or row[9] == 2 ** 64 - 1:
+            # Never cancel an unknown native publish or claim it has not occurred.
+            raise conflict()
+        sql.execute("UPDATE cf_edit_session SET state='cancelled',revision=revision+1,updated_at=UTC_TIMESTAMP(6) WHERE session_id=%s AND revision=%s AND state NOT IN ('committing','completed','cancelled')", (session_id, expected_revision))
+        if sql.rowcount != 1:
+            raise conflict()
+        # Retain snapshot/digest and every local user file; no lease is released
+        # implicitly. A separately held lease follows its own ownership protocol.
+        return dict(session_id=session_id, state="cancelled", revision=str(expected_revision + 1)), True
+
     def _scope(self, sql, provider, actor, device_id):
         self.devices._scope(sql, provider, actor, device_id)
         require_storage(sql)

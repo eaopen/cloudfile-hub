@@ -83,6 +83,12 @@ def projection_required(value):
         except (ValueError, TypeError, AttributeError):
             pass
     if value["source"] == "hub":
+        cancellation_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source",
+            "action", "result", "session_id", "device_id", "revision"}
+        if (set(value) == cancellation_fields and value["action"] == "local.session.cancelled"
+                and value["actor_kind"] == "user" and value["result"] == "succeeded"
+                and re.fullmatch(r"[1-9][0-9]{0,19}", value["revision"]) and int(value["revision"]) <= 2 ** 64 - 1):
+            return False
         session_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source",
             "action", "result", "session_id", "device_id", "repo_id", "path", "resource_kind", "resource_uid",
             "revision", "content_version"}

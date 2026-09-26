@@ -30,14 +30,15 @@ class LocalSessionView(DirectoryPolicyView):
             if csrf.process_view(request, lambda *_: None, (), {}) is not None:
                 raise ContractError("ACCESS_DENIED", "CSRF verification failed", 403)
             value = self._body(request)
-            if self.operation not in {"create", "claim-challenge", "claim"}:
+            if self.operation not in {"create", "claim-challenge", "claim", "status", "cancel"}:
                 raise invalid("Local session operation is unavailable")
             if not isinstance(self.service_factory, LocalSessionFactory):
                 raise ContractError("LOCAL_SESSION_UNAVAILABLE", "Local session runtime is unavailable", 503)
             with self.service_factory(request, request_id) as service:
                 if not isinstance(service, LocalSessionService):
                     raise RuntimeError("actual local resource service required")
-                operations = {"create": service.create, "claim-challenge": service.challenge, "claim": service.claim}
+                operations = {"create": service.create, "claim-challenge": service.challenge, "claim": service.claim,
+                    "status": service.status, "cancel": service.cancel}
                 response = JsonResponse(operations[self.operation](value))
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)
@@ -60,4 +61,4 @@ def local_session_routes(*, service_factory):
         raise ValueError("actual owned local resource factory required")
     return [path("v1/sessions/" + operation + "/", LocalSessionView.as_view(
         service_factory=service_factory, operation=operation), name="local-session-" + operation)
-        for operation in ("create", "claim-challenge", "claim")]
+        for operation in ("create", "claim-challenge", "claim", "status", "cancel")]

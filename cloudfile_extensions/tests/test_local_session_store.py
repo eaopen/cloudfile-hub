@@ -5,6 +5,44 @@ from cloudfile_extensions.tests.test_device_store import DeviceStoreTests
 
 
 class LocalSessionStoreTests(DeviceStoreTests):
+    def test_revoked_device_still_allows_own_stop_and_idempotent_cancel(self):
+        sessions = LocalSessionStore()
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as sql:
+                self.active(sql)
+                issued = sessions.create(sql, **self.owner, snapshot=self.snapshot())
+                self.store.revoke(sql, **self.owner, expected_revision=2)
+                args = dict(**self.owner, session_id=issued.session_id)
+                status = sessions.status(sql, **args)
+                self.assertFalse(status["device_available"])
+                self.assertNotIn("snapshot", status)
+                self.assertNotIn("resource", status)
+                result, changed = sessions.cancel(sql, **args, expected_revision=1)
+                self.assertTrue(changed)
+                self.assertEqual(result["state"], "cancelled")
+                self.assertEqual(sessions.cancel(sql, **args, expected_revision=1), (result, False))
+            self.connection.commit()
+        finally:
+            self.connection.rollback()
+
+    def test_stale_cancel_and_in_progress_publish_are_not_overwritten(self):
+        sessions = LocalSessionStore()
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as sql:
+                self.active(sql)
+                issued = sessions.create(sql, **self.owner, snapshot=self.snapshot())
+                args = dict(**self.owner, session_id=issued.session_id)
+                with self.assertRaises(ContractError):
+                    sessions.cancel(sql, **args, expected_revision=2)
+                sql.execute("UPDATE cf_edit_session SET state='committing' WHERE session_id=%s", (issued.session_id,))
+                with self.assertRaises(ContractError):
+                    sessions.cancel(sql, **args, expected_revision=1)
+                self.assertEqual(sessions.status(sql, **args)["state"], "committing")
+        finally:
+            self.connection.rollback()
+
     def snapshot(self):
         return dict(resource=dict(repo_id="33333333-3333-4333-8333-333333333333", path="/drawing.prt", kind="file"),
             resource_uid="44444444-4444-4444-8444-444444444444", lifecycle_ref="native-lifecycle",

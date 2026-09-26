@@ -13,28 +13,58 @@ from uuid import UUID, uuid4
 
 from ..common.errors import ContractError
 from ..common.validation import object_fields
+from ..common.validation import sequence
+from ..authorization.runtime import AuthenticatedPolicyActor
 from ..events.outbox import EventWriter, Outbox
 from ..locks.service import FileLockService
 from ..migration.native_status import _object
 from ..resources.paths import resource_ref
 from ..resources.service import ResourceService
 from .device_proof import DeviceChallenge
+from .device_service import DeviceManagementService
 from .open_uri import OpenURI, make_open_uri
 from .session_store import LocalSessionStore, snapshot_json, conflict
 
 
 class LocalSessionService:
-    def __init__(self, resources, *, instance, version_reader, locks=None):
+    def __init__(self, resources, *, actor, instance, version_reader, locks=None):
         if not isinstance(resources, ResourceService) or not callable(version_reader):
             raise ValueError("actual resource service and protected native version reader required")
         if locks is not None and (not isinstance(locks, FileLockService) or locks.resources is not resources):
             raise ValueError("actual same-resource lock service required")
+        if not isinstance(actor, AuthenticatedPolicyActor) or actor.user_id != resources.read_authority.actor:
+            raise ValueError("actual authenticated native browser actor required")
         DeviceChallenge(instance, "11111111-1111-4111-8111-111111111111",
             "11111111-1111-4111-8111-111111111111", "claim", "A" * 43, 1, 61, "0" * 64).message()
         if len(instance) > 255:
             raise ValueError("fixed bounded instance origin required")
         self.resources, self.instance, self.version_reader, self.locks = resources, instance, version_reader, locks
         self.sessions, self.events = LocalSessionStore(), EventWriter()
+        self.owner = DeviceManagementService(resources.read_authority.preparation, actor,
+            instance=instance, request_id=resources.request_id)
+
+    def status(self, value):
+        object_fields(value, ("session_id", "device_id"))
+        authority = self.resources.read_authority
+        return self.owner._execute(lambda sql: self.sessions.status(sql,
+            provider=authority.state.provider, actor=authority.actor, **value))
+
+    def cancel(self, value):
+        object_fields(value, ("session_id", "device_id", "revision"))
+        revision = sequence(value["revision"])
+        authority = self.resources.read_authority
+        def effect(sql):
+            result, changed = self.sessions.cancel(sql, provider=authority.state.provider, actor=authority.actor,
+                device_id=value["device_id"], session_id=value["session_id"], expected_revision=revision)
+            if changed:
+                # Stop-only metadata audit intentionally contains no old path,
+                # filename or content that this user may no longer access.
+                self.events.append(sql, dict(event_id=str(uuid4()), request_id=self.resources.request_id,
+                    occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    actor_user_id=authority.actor, actor_kind="user", source="hub", action="local.session.cancelled",
+                    result="succeeded", session_id=value["session_id"], device_id=value["device_id"], revision=result["revision"]))
+            return result
+        return self.owner._execute(effect)
 
     def _authority(self, mode):
         if mode not in {"view", "optimistic-edit", "exclusive-edit"}:

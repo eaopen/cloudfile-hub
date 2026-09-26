@@ -3,6 +3,8 @@ from contextlib import contextmanager
 
 from ..locks.runtime import FileLockFactory
 from ..resources.runtime import ResourceServiceFactory
+from ..authorization.runtime import AuthenticatedPolicyActor
+from ..common.errors import ContractError
 from .device_proof import DeviceChallenge
 from .session_service import LocalSessionService
 
@@ -22,10 +24,13 @@ class LocalSessionFactory:
 
     @contextmanager
     def __call__(self, request, request_id):
+        actor = self.resources.authenticate(request)
+        if not isinstance(actor, AuthenticatedPolicyActor):
+            raise ContractError("AUTHENTICATION_REQUIRED", "Native local-session browser identity required", 401)
         if self.locks is not None:
             with self.locks(request, request_id) as leases:
-                yield LocalSessionService(leases.resources, instance=self.instance,
+                yield LocalSessionService(leases.resources, actor=actor, instance=self.instance,
                     version_reader=self.version_reader, locks=leases)
         else:
             with self.resources(request, request_id) as resources:
-                yield LocalSessionService(resources, instance=self.instance, version_reader=self.version_reader)
+                yield LocalSessionService(resources, actor=actor, instance=self.instance, version_reader=self.version_reader)

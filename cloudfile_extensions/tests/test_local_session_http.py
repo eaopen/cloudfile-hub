@@ -50,3 +50,10 @@ class LocalSessionHTTPTests(unittest.TestCase):
         self.assertFalse(projection_required(normalize_event(fact)))
         self.assertTrue(projection_required(normalize_event({**fact, "action": "local.session.committed"})))
         self.assertTrue(projection_required(normalize_event({**fact, "target_path": "/moved.prt"})))
+
+    def test_stop_audit_does_not_reveal_inaccessible_file_metadata(self):
+        fact = dict(event_id=str(uuid4()), request_id="local-stop", occurred_at="2026-09-27T00:00:00Z",
+            actor_user_id="user-1", actor_kind="user", source="hub", action="local.session.cancelled",
+            result="succeeded", session_id=str(uuid4()), device_id=str(uuid4()), revision="2")
+        self.assertFalse(projection_required(normalize_event(fact)))
+        self.assertTrue(projection_required(normalize_event({**fact, "content_version": "a" * 40})))
