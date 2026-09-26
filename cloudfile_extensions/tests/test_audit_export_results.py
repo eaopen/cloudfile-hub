@@ -78,6 +78,14 @@ class AuditExportResultTests(DatabaseTestCase):
             self.results.verify(self.job, actor="owner")
         self.assertEqual(caught.exception.code, "EXPORT_NOT_READY")
 
+    def test_expiry_during_regeneration_never_releases_content(self):
+        expires = self.store.get(self.job)["checkpoint"]["expires_at"]
+        readings = iter((expires - 1, expires - 1, expires))
+        self.results.clock = lambda: next(readings)
+        with self.assertRaises(ContractError) as caught:
+            self.results.read(self.job, actor="owner")
+        self.assertEqual(caught.exception.code, "EXPORT_UNAVAILABLE")
+
     def test_tampered_and_symlink_files_are_never_verified(self):
         original = self.file.read_bytes()
         self.file.write_bytes(original.replace(b"writer", b"reader"))

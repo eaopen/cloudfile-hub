@@ -24,6 +24,7 @@ class VerifiedExport:
     result_ref: str
     size: int
     sha256: str
+    expires_at: float
 
 
 class AuditExportResults:
@@ -115,5 +116,9 @@ class AuditExportResults:
                 os.close(directory)
         if self.exporter.authorize(actor, repo) is not True:
             raise ContractError("FORBIDDEN", "Audit export scope is not available", 403)
-        verified = VerifiedExport(job_id, reference, size, digest.hexdigest())
+        # Regeneration and descriptor reads can outlive the initial validity
+        # check. Expiry is a release condition, not just a lookup condition.
+        if self.clock() >= metadata["expires_at"]:
+            raise ContractError("EXPORT_UNAVAILABLE", "Audit export expired during verification", 409)
+        verified = VerifiedExport(job_id, reference, size, digest.hexdigest(), metadata["expires_at"])
         return (verified, b"".join(chunks)) if include_content else verified

@@ -95,6 +95,12 @@ class AuthorizedAuditQuery:
             verified, content = results.read(job["job_id"], actor=self.authority.actor)
             def release():
                 current = self._owned_export(job["job_id"])
+                # Recheck immediately before recording payload release: the
+                # final authority transaction itself can wait on SQL locks.
+                import time
+                if (current["checkpoint"].get("expires_at") != verified.expires_at
+                        or time.time() >= verified.expires_at):
+                    raise ContractError("EXPORT_UNAVAILABLE", "Audit export is expired or changed", 409)
                 if (current["scope"] != job["scope"] or current["status"] != "succeeded"
                         or current["result_ref"] != verified.result_ref
                         or self.epoch != exporter.epoch):
