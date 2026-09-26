@@ -1,5 +1,6 @@
 """Lease operations consumed by actual current CE/C resource authorities."""
 import re
+import hashlib
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
@@ -9,6 +10,7 @@ from ..common.validation import object_fields, identifier, sequence
 from ..events.outbox import EventWriter
 from ..resources.paths import resource_ref
 from ..resources.service import ResourceService
+from ..resources.requests import execute
 from .store import LockLeaseStore
 
 
@@ -40,7 +42,23 @@ class FileLockService:
             action=action, result="succeeded", repo_id=ref["repo_id"], path=ref["path"],
             resource_uid=uid, resource_kind="file", revision=lease["fencing"]))
 
-    def acquire(self, request):
+    def _retry(self, sql, ref, evidence, *, request, key, operation, mutate):
+        # Durable retry identity binds the authenticated holder and digest, not
+        # the plaintext token. Replays still run inside current write authority.
+        protected = {name: value for name, value in request.items() if name != "token"}
+        protected["reference"] = ref
+        protected["holder"] = self.holder
+        protected["token_digest"] = hashlib.sha256(request["token"].encode("ascii")).hexdigest()
+        receipt, _ = execute(sql, provider=self.resources.write_authority.state.provider,
+            actor=self.resources.write_authority.actor, operation=operation, key=key,
+            request=protected, lifecycle=evidence.lifecycle_ref, secret=self.resources.store.secret,
+            mutate=lambda: (mutate(), True))
+        # A saved success can outlive its lease. Return a current locked status
+        # separately instead of promoting the old receipt into a write grant.
+        current = self.leases.status(sql, resource_uid=receipt["resource_uid"], repo_id=ref["repo_id"])
+        return dict(receipt=receipt, current_lease=current)
+
+    def acquire(self, request, *, idempotency_key):
         object_fields(request, ("reference", "revision", "base_version", "token"), ("seconds",))
         ref = self._reference(request["reference"])
         seconds = request.get("seconds", 600)
@@ -48,8 +66,7 @@ class FileLockService:
         self.leases._holder(actor, self.holder, request["token"], seconds)
         if not isinstance(request["base_version"], str) or not re.fullmatch(r"[0-9a-f]{40}", request["base_version"]):
             raise invalid("Expected native content version required")
-        def apply(sql, reference):
-            evidence, row = self._resource(sql, reference)
+        def mutate(sql, reference, evidence, row):
             store = self.resources.store
             compare_revision(request["revision"], store._snapshot(reference, evidence, row)["revision"])
             # Must read the actual current native file under the SAME authority
@@ -70,9 +87,13 @@ class FileLockService:
             self._audit(sql, reference, row["uid"], "lock.acquired", lease)
             return dict(resource_uid=row["uid"], resource=reference,
                 resource_revision=store._snapshot(reference, evidence, row)["revision"], **lease)
+        def apply(sql, reference):
+            evidence, row = self._resource(sql, reference)
+            return self._retry(sql, reference, evidence, request=request, key=idempotency_key,
+                operation="locks.acquire", mutate=lambda: mutate(sql, reference, evidence, row))
         return self.resources.write_authority.consume(ref, apply)
 
-    def change(self, request, *, release=False):
+    def change(self, request, *, idempotency_key, release=False):
         object_fields(request, ("reference", "resource_uid", "fencing", "token"), ("seconds",))
         ref = self._reference(request["reference"])
         try:
@@ -87,9 +108,13 @@ class FileLockService:
         seconds = request.get("seconds", 600)
         self.leases._holder(actor, self.holder, request["token"], seconds)
         def apply(sql, reference):
-            _, row = self._resource(sql, reference)
+            evidence, row = self._resource(sql, reference)
             if row is None or row["uid"] != request["resource_uid"]:
                 raise ContractError("LOCK_CONFLICT", "Resource lifecycle changed", 409)
+            return self._retry(sql, reference, evidence, request=request, key=idempotency_key,
+                operation="locks.release" if release else "locks.renew",
+                mutate=lambda: mutate(sql, reference, row))
+        def mutate(sql, reference, row):
             lease = self.leases.change(sql, resource_uid=row["uid"], repo_id=reference["repo_id"], actor=actor,
                 holder=self.holder, token=request["token"], fencing=fence, release=release, seconds=seconds)
             self._audit(sql, reference, row["uid"], "lock.released" if release else "lock.renewed", lease)
