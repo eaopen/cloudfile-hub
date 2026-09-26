@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 import json
 import math
+from uuid import UUID
 
 from ..authorization.resources import PolicyResources
 from ..common.errors import ContractError
@@ -46,6 +47,8 @@ class DelegatedReadTicketIssuer:
             raise ContractError("INVALID_REQUEST", "Native ticket conditions exceed budget", 400)
         try:
             ticket = resolve_and_issue_native_ticket(ref["repo_id"], ref["path"], operation, username, encoded)
+            if not isinstance(ticket, str) or str(UUID(ticket)) != ticket:
+                raise ValueError("invalid native ticket response")
         except Exception:
             raise ContractError("POLICY_UNAVAILABLE", "Native delegated ticket is unavailable", 503) from None
         self.verifier.assert_active(principal)

@@ -74,3 +74,20 @@ class DelegatedReadTicketTests(unittest.TestCase):
         with patch("cloudfile_extensions.identity.delegated_read_ticket.resolve_and_issue_native_ticket",
                 return_value=self.ticket), self.assertRaises(ContractError):
             self.issuer.issue(self.request, self.reference)
+
+    def test_invalid_native_ticket_response_is_never_delivered(self):
+        for value in (None, {}, "not-a-ticket", self.ticket.upper().replace("2", "A", 1)):
+            with self.subTest(value_type=type(value).__name__), patch(
+                    "cloudfile_extensions.identity.delegated_read_ticket.resolve_and_issue_native_ticket",
+                    return_value=value), self.assertRaises(ContractError) as error:
+                self.issuer.issue(self.request, self.reference)
+            self.assertEqual(error.exception.status, 503)
+
+    def test_expiry_during_native_issuance_never_delivers_ticket(self):
+        def native(*args):
+            self.now = 1060
+            return self.ticket
+        with patch("cloudfile_extensions.identity.delegated_read_ticket.resolve_and_issue_native_ticket",
+                side_effect=native), self.assertRaises(ContractError) as error:
+            self.issuer.issue(self.request, self.reference)
+        self.assertEqual(error.exception.status, 401)

@@ -16,8 +16,9 @@ class UserDelegationTests(unittest.TestCase):
         self.redis.eval.return_value = 1
         self.secret = b"fixture-only-delegation-secret-32bytes"
         self.key = DelegationKey("login-service", "issuer", "cf-download", "etech", self.secret)
+        self.now = 1000
         self.verifier = UserDelegationVerifier({"delegation-1": self.key},
-            revocations=ServiceRevocations(self.redis, clock=lambda: 1000), clock=lambda: 1000)
+            revocations=ServiceRevocations(self.redis, clock=lambda: self.now), clock=lambda: self.now)
         self.resource = dict(repo_id="11111111-1111-1111-1111-111111111111", path="/file", kind="file")
         self.claims = dict(iss="issuer", aud="cf-download", sub="login-service", iat=1000,
             exp=1060, jti="token-1", userId="employee-user-id", provider="etech",
@@ -76,3 +77,14 @@ class UserDelegationTests(unittest.TestCase):
         self.now = principal.expires_at + 10
         self.assertTrue(self.verifier.revoke(principal))
         self.assertEqual(self.redis.eval.call_args.args[-1], 291)
+
+    def test_finished_transfer_window_needs_no_revocation_marker(self):
+        principal = self.verifier.verify(self.token())
+        self.now = principal.expires_at + 300
+        self.assertFalse(self.verifier.revoke(principal))
+        self.redis.eval.assert_not_called()
+
+    def test_retention_does_not_make_expired_jwt_usable(self):
+        self.now = 1060
+        with self.assertRaises(ContractError):
+            self.verifier.verify(self.token())
