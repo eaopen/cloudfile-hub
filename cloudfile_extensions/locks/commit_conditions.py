@@ -19,6 +19,24 @@ class NativeLeaseConditions:
     encoded: str = field(repr=False)
     base_version: str
 
+    def for_head(self, head_id):
+        """Bind a trusted native Branch head, not a browser-supplied revision.
+
+        This is an internal RPC envelope, not a durable commit receipt. Callers
+        must release preparation SQL scopes before submitting and must not
+        retry an ambiguous native response as though it proved no publication.
+        """
+        if not isinstance(head_id, str) or not re.fullmatch(r"[0-9a-f]{40}", head_id):
+            raise invalid("Exact native Branch head required")
+        conditions = json.loads(self.encoded)
+        if set(conditions) != {"path", "context", "scopes", "oidc_session", "lease"}:
+            raise invalid("Exact internal lease conditions required")
+        conditions["head_id"] = head_id
+        encoded = json.dumps(conditions, ensure_ascii=False, separators=(",", ":"))
+        if len(encoded.encode("utf-8")) > 16384:
+            raise invalid("Native lease conditions exceed budget")
+        return encoded
+
 
 class OIDCLeaseCommitConditions:
     def __init__(self, service, session_authority):
