@@ -20,6 +20,13 @@ class AuditQueryFactory(PolicyServiceFactory):
             raise ValueError("fixed audit cursor secret and deployment redaction required")
         self.secret, self.redact = secret, redact
 
+    def export_handler(self, *, result_root):
+        """Explicit trusted worker assembly; does not start or enable a worker."""
+        from .worker import AuthorizedAuditExportJob
+        return AuthorizedAuditExportJob(preparation_scope=self.preparation_scope,
+            core=self.core, cloud_mode=self.cloud_mode, secret=self.secret,
+            redact=self.redact, result_root=result_root)
+
     @contextmanager
     def __call__(self, request, request_id):
         actor = self.authenticate(request)
