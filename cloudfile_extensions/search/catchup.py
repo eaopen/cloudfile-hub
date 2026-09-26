@@ -12,6 +12,33 @@ from ..common.validation import sequence
 from ..events.outbox import normalize_event, projection_required
 from .meilisearch import _object
 from .rebuild_store import SearchRebuildStore
+from .plans import encode_plan
+from .execution import step_hash
+
+
+def plan_receipts_complete(index, row, receipts):
+    """Exact full immutable plan, never a selected subset of successful steps."""
+    try:
+        if len(row) != 2 or not isinstance(row[1], str) or len(row[1].encode("utf-8")) > 1048576:
+            raise ValueError()
+        plan = json.loads(row[1], object_pairs_hook=_object)
+        if not isinstance(plan, dict) or set(plan) != {"index", "steps"} or plan["index"] != index:
+            raise ValueError()
+        raw, digest = encode_plan(plan["index"], plan["steps"])
+        if digest != row[0] or raw.decode("utf-8") != row[1]:
+            raise ValueError()
+        hashes = [step_hash(index, step["operation"], json.dumps(step["payload"], sort_keys=True,
+            separators=(",", ":"), ensure_ascii=False, allow_nan=False).encode("utf-8")) for step in plan["steps"]]
+        if len(receipts) != len(hashes):
+            return False
+        for position, receipt in enumerate(receipts):
+            if (len(receipt) != 4 or type(receipt[0]) is not int or receipt[0] != position or
+                    receipt[1] != hashes[position] or receipt[2] != "succeeded" or
+                    type(receipt[3]) is not int or not 0 <= receipt[3] <= 2 ** 63 - 1):
+                return False
+        return True
+    except Exception:
+        raise ContractError("SEARCH_PLAN_CONFLICT", "Catch-up frozen plan is invalid", 409) from None
 
 
 class SearchCatchupInspector:
@@ -62,12 +89,23 @@ class SearchCatchupInspector:
                     raise ContractError("SEARCH_PLAN_CONFLICT", "Catch-up event is invalid", 409) from None
                 qualified = state == "done"
                 if qualified and projection_required(fact):
-                    sql.execute("SELECT event_id FROM cf_search_plan WHERE event_id=%s AND index_generation=%s", (event_id, generation))
+                    sql.execute("SELECT plan_hash,payload FROM cf_search_plan WHERE event_id=%s AND index_generation=%s", (event_id, generation))
                     plan = sql.fetchone()
                     sql.execute("SELECT state FROM cf_search_fanout WHERE event_id=%s AND index_generation=%s", (event_id, generation))
                     fanout = sql.fetchone()
-                    qualified = plan is not None or fanout == ("scanned",)
+                    if plan is not None:
+                        if fanout is not None:
+                            raise ContractError("SEARCH_PLAN_CONFLICT", "Event has conflicting projection plans", 409)
+                        budget += len(plan[1].encode("utf-8")) if isinstance(plan[1], str) else 1048577
+                        if budget > 1048576:
+                            raise ContractError("SEARCH_UNAVAILABLE", "Catch-up plan budget exceeded", 503)
+                        sql.execute("SELECT step,payload_hash,state,task_id FROM cf_search_task WHERE event_id=%s AND index_generation=%s ORDER BY step LIMIT 10002", (event_id, generation))
+                        qualified = plan_receipts_complete(index, plan, sql.fetchall())
+                    else:
+                        qualified = fanout == ("scanned",)
                     sql.execute("SELECT event_id FROM cf_search_task WHERE event_id=%s AND index_generation=%s AND (state<>'succeeded' OR task_id IS NULL OR task_id>9223372036854775807) LIMIT 1", (event_id, generation))
+                    qualified = qualified and sql.fetchone() is None
+                    sql.execute("SELECT event_id FROM cf_search_task WHERE event_id=%s AND index_generation<>%s AND state<>'succeeded' LIMIT 1", (event_id, generation))
                     qualified = qualified and sql.fetchone() is None
                 if not qualified:
                     return dict(state="event_pending", checked_through=str(checked), observed_cutoff=str(target), pending_event_id=event_id)
