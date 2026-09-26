@@ -21,6 +21,7 @@ class PreparedLogin:
     username: str
     context_epoch: str
     redirect: str
+    expires_at: int
 
 
 @dataclass(frozen=True)
@@ -93,4 +94,4 @@ class PreparedOIDCLogin:
         if (latest is None or latest["context_epoch"] != context["context_epoch"]
                 or preparation.state.username(identity["userId"]) != username):
             raise ContractError("IDENTITY_UNAVAILABLE", "Login subject changed during preparation", 503)
-        return PreparedLogin(identity["userId"], username, context["context_epoch"], redirect)
+        return PreparedLogin(identity["userId"], username, context["context_epoch"], redirect, identity["expires_at"])

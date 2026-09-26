@@ -4,6 +4,7 @@ This guard is not authentication and must never be exposed as a DTO endpoint.
 Only a native callback that has completed actual OIDC verification may use it.
 """
 from contextlib import contextmanager
+import time
 
 from ..common.errors import ContractError
 from ..directory.preparation import SubjectPreparation
@@ -21,6 +22,8 @@ def prepared_session_guard(preparation, prepared):
     scopes = [dict(type="provider", provider=state.provider, external_id=state.provider),
               dict(type="user", provider=state.provider, external_id=prepared.user_id)]
     def check(cursor):
+        if type(prepared.expires_at) is not int or prepared.expires_at <= time.time():
+            raise ContractError("AUTHENTICATION_REQUIRED", "OIDC authentication expired before session creation", 401)
         for schema, table in ((state.native_schema, "EmailUser"),
                               (state.identity_schema, "profile_profile")):
             cursor.execute("SELECT ENGINE FROM information_schema.tables WHERE table_schema=%s AND table_name=%s",
