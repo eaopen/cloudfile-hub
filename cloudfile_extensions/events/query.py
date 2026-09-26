@@ -34,10 +34,24 @@ class AuditReader:
             raise ValueError("audit reader requires a dedicated autocommit connection")
         self.connection, self.secret, self.authorize, self.clock = connection, secret, authorize, clock
 
+    @staticmethod
+    def _storage(sql):
+        sql.execute("SELECT id FROM cf_audit_event LIMIT 0 FOR UPDATE")
+        sql.fetchall()
+        sql.execute("SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_audit_event'")
+        if sql.fetchall() != (("InnoDB",),):
+            raise ValueError("unsafe audit storage")
+        for name, expected in (("PRIMARY", (("id", 0, None),)),
+                ("audit_repo_page", (("repo_id", 1, None), ("occurred_at", 1, None), ("id", 1, None)))):
+            sql.execute("SELECT column_name,non_unique,sub_part FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_audit_event' AND index_name=%s ORDER BY seq_in_index", (name,))
+            if sql.fetchall() != expected:
+                raise ValueError("invalid audit pagination index")
+
     def upper_bound(self):
         """Internal insertion cutoff, not a cross-request MVCC snapshot."""
         try:
             with self.connection.cursor() as sql:
+                self._storage(sql)
                 sql.execute("SELECT COALESCE(MAX(id),0) FROM cf_audit_event")
                 return sql.fetchone()[0]
         except Exception:
@@ -116,7 +130,8 @@ class AuditReader:
         # hidden-row count. A page may be empty yet have a continuation cursor.
         try:
             with self.connection.cursor() as sql:
-                sql.execute("SELECT " + ",".join(self.FIELDS) + " FROM cf_audit_event WHERE " +
+                self._storage(sql)
+                sql.execute("SELECT " + ",".join(self.FIELDS) + " FROM cf_audit_event FORCE INDEX (audit_repo_page) WHERE " +
                             " AND ".join(clauses) + " ORDER BY occurred_at DESC,id DESC LIMIT 1001", values)
                 rows = sql.fetchall()
         except Exception:
