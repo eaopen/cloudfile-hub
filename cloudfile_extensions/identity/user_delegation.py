@@ -43,6 +43,7 @@ class UserDelegation:
     resource: object
     action: str
     token_id: str
+    issued_at: int
     expires_at: int
 
     def require(self, reference, action):
@@ -94,7 +95,7 @@ class UserDelegationVerifier:
                 raise ValueError()
             principal = UserDelegation(key.service_id, claims["userId"], key.provider,
                 claims["context_epoch"], MappingProxyType(resource), claims["action"],
-                claims["jti"], expires)
+                claims["jti"], issued, expires)
         except (jwt.PyJWTError, ValueError, TypeError, KeyError, ContractError):
             raise ContractError("AUTHENTICATION_REQUIRED", "Invalid user delegation", 401) from None
         self.assert_active(principal)
