@@ -8,6 +8,7 @@ from contextlib import contextmanager
 
 from ..common.errors import ContractError
 from ..events.outbox import EventClaim
+from .generations import SearchGenerationStore
 
 
 class SearchTaskStore:
@@ -70,6 +71,31 @@ class SearchTaskStore:
         if type(task_id) is not int or not 0 <= task_id <= 2 ** 63 - 1:
             raise ValueError("exact accepted task id required")
         self._transition(claim, generation, step, "submitting", "submitted", task_id)
+
+    def dispatch(self, claim, *, generation, step, index, send):
+        """One dispatch under current lease and permanent generation row locks.
+
+        Intent was committed separately. Failure here rolls back only the
+        receipt, leaving submitting for reconciliation, never retry permission.
+        Retirement waits for this bounded network operation to finish; delayed
+        remote application remains confined to the immutable physical index.
+        """
+        key = self._key(claim, generation, step)
+        if not callable(send):
+            raise ValueError("single bounded private dispatch required")
+        registry = SearchGenerationStore(self.connection)
+        with self._owned(claim) as sql:
+            registry.require_dispatch(sql, generation, index)
+            sql.execute("SELECT state,task_id FROM cf_search_task WHERE event_id=%s AND index_generation=%s AND step=%s FOR UPDATE", key)
+            if sql.fetchone() != ("submitting", None):
+                raise ContractError("SEARCH_TASK_CONFLICT", "Search dispatch intent is not current", 409)
+            task_id = send()
+            if type(task_id) is not int or not 0 <= task_id <= 2 ** 63 - 1:
+                raise ContractError("SEARCH_SUBMISSION_UNKNOWN", "Search receipt is invalid", 503)
+            sql.execute("UPDATE cf_search_task SET state='submitted',task_id=%s,updated_at=UTC_TIMESTAMP(6) WHERE event_id=%s AND index_generation=%s AND step=%s AND state='submitting' AND task_id IS NULL", (task_id, *key))
+            if sql.rowcount != 1:
+                raise ContractError("SEARCH_SUBMISSION_UNKNOWN", "Search receipt could not be stored", 503)
+            return task_id
 
     def record_succeeded(self, claim, *, generation, step):
         # Caller must have checked exact uid/index/type succeeded via task API.

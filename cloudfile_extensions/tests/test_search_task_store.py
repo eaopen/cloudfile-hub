@@ -7,6 +7,7 @@ from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.events.outbox import EventWriter, Outbox
 from cloudfile_extensions.schema.runner import SchemaRunner
 from cloudfile_extensions.search.task_store import SearchTaskStore
+from cloudfile_extensions.search.generations import SearchGenerationStore
 from cloudfile_extensions.search.fanout_store import SearchFanoutStore
 from cloudfile_extensions.search.fanout_execution import SearchFanoutExecution
 from cloudfile_extensions.search.documents import resource_document
@@ -18,6 +19,7 @@ class SearchTaskStoreTest(DatabaseTestCase):
     def setUp(self):
         super().setUp()
         SchemaRunner(self.connection).apply()
+        SearchGenerationStore(self.connection).register("index", "resources")
         self.connection.begin()
         try:
             with self.connection.cursor() as sql:
@@ -49,6 +51,25 @@ class SearchTaskStoreTest(DatabaseTestCase):
             with self.assertRaises(ContractError):
                 self.store.complete_event(self.claim, generation="index", payload_hashes=hashes)
             self.assertEqual(self.state(), "running")
+
+    def test_retired_generation_never_dispatches_and_keeps_unknown_intent(self):
+        self.store.prepare(self.claim, generation="index", step=0, payload_hash="a" * 64)
+        self.store.mark_submitting(self.claim, generation="index", step=0)
+        SearchGenerationStore(self.connection).retire("index", "resources")
+        send = Mock(return_value=7)
+        with self.assertRaises(ContractError):
+            self.store.dispatch(self.claim, generation="index", step=0, index="resources", send=send)
+        send.assert_not_called()
+        self.assertEqual(self.store.prepare(self.claim, generation="index", step=0, payload_hash="a" * 64), dict(state="submitting", task_id=None))
+
+    def test_dispatch_failure_preserves_committed_intent(self):
+        self.store.prepare(self.claim, generation="index", step=0, payload_hash="a" * 64)
+        self.store.mark_submitting(self.claim, generation="index", step=0)
+        send = Mock(side_effect=RuntimeError("uncertain"))
+        with self.assertRaises(RuntimeError):
+            self.store.dispatch(self.claim, generation="index", step=0, index="resources", send=send)
+        send.assert_called_once()
+        self.assertEqual(self.store.prepare(self.claim, generation="index", step=0, payload_hash="a" * 64), dict(state="submitting", task_id=None))
 
     def test_exact_successful_plan_acknowledges_without_resource_ack(self):
         self.succeeded(0, "a" * 64)

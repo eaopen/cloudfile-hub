@@ -39,8 +39,8 @@ class SearchStepExecution:
             self.store.mark_submitting(claim, **identity)
             # Timeout/accepted-but-not-persisted leaves durable submitting.
             # Never retry this call automatically, even after a new lease.
-            task_id = self.client.replace_documents(frozen) if operation == "replace" else self.client.delete_documents(frozen)
-            self.store.record_task(claim, task_id=task_id, **identity)
+            task_id = self.store.dispatch(claim, index=self.client.index,
+                send=lambda: self.client.replace_documents(frozen) if operation == "replace" else self.client.delete_documents(frozen), **identity)
         elif state != "submitted":
             raise ContractError("SEARCH_TASK_CONFLICT", "Search task state is invalid", 409)
         status = self.client.task_status(task_id, task_type="documentAdditionOrUpdate" if operation == "replace" else "documentDeletion")

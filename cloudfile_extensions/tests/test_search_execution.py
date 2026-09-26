@@ -13,6 +13,7 @@ class SearchExecutionTest(TestCase):
         self.store = Mock(spec=SearchTaskStore)
         self.client = Mock(spec=MeilisearchTasks)
         self.client.index = "resources"
+        self.store.dispatch.side_effect = lambda claim, **options: options["send"]()
         self.execution = SearchStepExecution(self.store, self.client)
         self.claim = EventClaim("event", "search", "worker", 1, {})
         self.options = dict(generation="generation", step=0, operation="delete", payload=["a" * 64])
@@ -37,7 +38,8 @@ class SearchExecutionTest(TestCase):
         self.client.task_status.return_value = "succeeded"
         self.assertTrue(self.execution.advance(self.claim, **self.options))
         self.store.mark_submitting.assert_called_once()
-        self.store.record_task.assert_called_once()
+        self.store.dispatch.assert_called_once()
+        self.store.record_task.assert_not_called()
         self.store.record_succeeded.assert_called_once()
 
     def test_network_failure_does_not_record_success(self):
