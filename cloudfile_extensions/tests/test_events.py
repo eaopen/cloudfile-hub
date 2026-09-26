@@ -11,6 +11,32 @@ from cloudfile_extensions.tests.test_schema import DatabaseTestCase
 
 
 class EventStoreTest(DatabaseTestCase):
+    def test_explicit_historical_audit_recovery_preserves_fact_and_other_consumer(self):
+        fact = dict(event_id=str(uuid4()), occurred_at="2026-09-27T00:00:00Z", request_id="recovery",
+            actor_user_id="u1", actor_kind="user", source="hub", action="acl.updated", result="succeeded",
+            repo_id="11111111-1111-4111-8111-111111111111", path="/parts", resource_kind="dir", policy_revision=str(uuid4()))
+        saved = self.append(fact)
+        # Isolated test fixture reproduces an event saved before classification
+        # was corrected; production recovery never bulk-resets these states.
+        with self.connection.cursor() as sql:
+            sql.execute("UPDATE cf_event_outbox SET search_state='queued',resource_state='queued' WHERE event_id=%s", (fact["event_id"],))
+        claim = self.outbox.claim("search", "recovery")
+        self.outbox.reconcile_audit_only(claim)
+        with self.connection.cursor() as sql:
+            sql.execute("SELECT payload,search_state,resource_state FROM cf_event_outbox WHERE event_id=%s", (fact["event_id"],))
+            row = sql.fetchone()
+        import json
+        self.assertEqual(json.loads(row[0]), saved)
+        self.assertEqual(row[1:], ("done", "queued"))
+        with self.assertRaises(ContractError):
+            self.outbox.reconcile_audit_only(claim)
+
+    def test_resource_mutation_cannot_use_audit_recovery(self):
+        self.append()
+        claim = self.outbox.claim("search", "recovery")
+        with self.assertRaises(ContractError):
+            self.outbox.reconcile_audit_only(claim)
+
     def setUp(self):
         super().setUp()
         SchemaRunner(self.connection).apply()

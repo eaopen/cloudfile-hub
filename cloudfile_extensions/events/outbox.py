@@ -7,7 +7,7 @@ import re
 from uuid import UUID, uuid4
 
 from ..common.errors import ContractError
-from ..common.validation import identifier, object_fields, utc_time
+from ..common.validation import identifier, object_fields, utc_time, sequence
 from ..resources.paths import normalize_path
 
 
@@ -225,6 +225,49 @@ class Outbox:
         if name not in self.CONSUMERS:
             raise ValueError("unknown outbox consumer")
         self._update(claim, name + "_state='done'," + name + "_expiry=NULL," + name + "_error=NULL", ())
+
+    def reconcile_audit_only(self, claim):
+        """Explicit one-claim recovery; never reset plans, tasks or whole streams.
+
+        Historical facts can predate disposition fixes. Re-read the exact owned
+        lease/fact and reject any frozen search work in ANY generation before
+        acknowledging only this consumer. Caller must explicitly invoke this;
+        no scheduler, bulk SQL update or automatic search bypass is installed.
+        """
+        if (not isinstance(claim, EventClaim) or claim.consumer not in self.CONSUMERS or
+                type(claim.epoch) is not int or claim.epoch < 1):
+            raise ValueError("actual owned event claim required")
+        name = claim.consumer
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as sql:
+                sql.execute("SELECT payload,stream,sequence,schema_version,audit_state FROM cf_event_outbox WHERE event_id=%s AND " +
+                    name + "_state='running' AND " + name + "_owner=%s AND " + name +
+                    "_epoch=%s AND " + name + "_expiry>UTC_TIMESTAMP(6) FOR UPDATE", (claim.event_id, claim.owner, claim.epoch))
+                row = sql.fetchone()
+                if row is None:
+                    raise ContractError("WORKER_LEASE_LOST", "Event lease is no longer current", 409)
+                payload = json.loads(row[0])
+                if (not isinstance(payload, dict) or payload != claim.payload or type(row[2]) is not int or
+                        payload.get("event_id") != claim.event_id or payload.get("schema_version") != 1 or
+                        type(payload.get("schema_version")) is not int or row[3] != 1 or row[4] != "done" or
+                        sequence(payload.get("sequence")) != row[2] or payload.get("stream") != row[1]):
+                    raise ContractError("EVENT_RECOVERY_CONFLICT", "Saved event identity changed", 409)
+                fact = normalize_event({key: value for key, value in payload.items()
+                    if key not in {"schema_version", "stream", "sequence", "recorded_at"}})
+                expected_stream = "repo." + fact["repo_id"] if fact.get("repo_id") else "security"
+                if row[1] != expected_stream or projection_required(fact):
+                    raise ContractError("EVENT_RECOVERY_REQUIRED", "Event still requires projection", 409)
+                # Lock order starts at outbox, as do actual search plan/task
+                # writers. No generation is selected to hide older receipts.
+                for table in ("cf_search_task", "cf_search_plan", "cf_search_fanout"):
+                    sql.execute("SELECT event_id FROM " + table + " WHERE event_id=%s LIMIT 1 FOR UPDATE", (claim.event_id,))
+                    if sql.fetchone() is not None:
+                        raise ContractError("EVENT_RECOVERY_REQUIRED", "Frozen index work requires separate recovery", 409)
+                self._update(claim, name + "_state='done'," + name + "_expiry=NULL," + name + "_error=NULL", ())
+            self.connection.commit()
+        finally:
+            self.connection.rollback()
 
     def retry_later(self, claim, *, code, delay_seconds=5):
         if not isinstance(code, str) or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", code):
