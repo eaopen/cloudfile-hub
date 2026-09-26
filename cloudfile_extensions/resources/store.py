@@ -51,13 +51,15 @@ class ResourceStore:
         identifier(evidence.lifecycle_ref, maximum=512)
         return evidence
 
-    def _row(self, reference, evidence):
+    def _row(self, reference, evidence, *, locking=False):
         with self.connection.cursor() as cursor:
             cursor.execute("SELECT uid,path,lifecycle_ref,revision,description,local_open_type "
-                           "FROM cf_resource WHERE repo_id=%s AND path_hash=%s AND kind=%s AND state='active'",
+                           "FROM cf_resource WHERE repo_id=%s AND path_hash=%s AND kind=%s AND state='active' LIMIT 2" +
+                           (" FOR UPDATE" if locking else ""),
                            (reference["repo_id"], self._hash(reference["path"]), reference["kind"]))
-            rows = [row for row in cursor.fetchall() if row[1] == reference["path"]]
-        if len(rows) > 1 or (rows and rows[0][2] != evidence.lifecycle_ref):
+            rows = cursor.fetchall()
+        if (len(rows) > 1 or any(row[1] != reference["path"] for row in rows) or
+                (rows and rows[0][2] != evidence.lifecycle_ref)):
             raise ContractError("PATH_STATE_PENDING", "Resource lifecycle requires reconciliation", 503)
         if not rows:
             return None
@@ -76,6 +78,24 @@ class ResourceStore:
         reference = resource_ref(reference)
         evidence = self._evidence(reference, actor, "read")
         return self._snapshot(reference, evidence, self._row(reference, evidence))
+
+    def resolve_authorized(self, reference, *, authority, lifecycle_reader):
+        """Same-transaction ordinary read; no earlier inspector boolean grant.
+
+        Trusted lifecycle_reader(cursor, reference) must resolve actual native
+        lifecycle under the held authority scope, not synthesize hash/head IDs.
+        This method does not create a sparse row for an unannotated resource.
+        """
+        from ..authorization.read import ContentReadAuthority
+        if (not isinstance(authority, ContentReadAuthority) or
+                authority.state.connection is not self.connection or not callable(lifecycle_reader)):
+            raise ValueError("same-connection read authority and lifecycle reader required")
+        reference = resource_ref(reference)
+        def read(cursor, ref):
+            evidence = self._validate_evidence(lifecycle_reader(cursor, ref))
+            row = self._row(ref, evidence, locking=True)
+            return self._snapshot(ref, evidence, row)
+        return authority.consume(reference, read)
 
     @contextmanager
     def _bucket(self, reference):
