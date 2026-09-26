@@ -90,6 +90,41 @@ class SQLBindingsTest(DatabaseTestCase):
             cursor.execute("SELECT COUNT(*) FROM cf_probe_binding_audit")
             self.assertEqual(cursor.fetchone()[0], 1)
 
+    def test_native_manager_authority_and_real_transactional_audit(self):
+        from cloudfile_extensions.identity.management import IdentityManagement
+        from cloudfile_extensions.schema.runner import SchemaRunner
+        SchemaRunner(self.connection).apply()
+        with self.admin.cursor() as cursor:
+            cursor.execute("ALTER TABLE " + self.native + ".EmailUser ADD is_staff INT NOT NULL DEFAULT 0")
+            cursor.execute("INSERT INTO " + self.native + ".EmailUser VALUES('manager@example.invalid',1,0)")
+            cursor.execute("INSERT INTO " + self.identity + ".profile_profile VALUES('manager@example.invalid','admin')")
+        management = IdentityManagement(self.connection, native_schema=self.native,
+            identity_schema=self.identity, directory_provider="directory",
+            actor_user_id="admin", request_id="prebind-test")
+        request = {key: value for key, value in self.request.items() if key != "actor"}
+        with self.assertRaises(ContractError) as caught:
+            management.prebind(**request)
+        self.assertEqual(caught.exception.status, 403)
+        with self.admin.cursor() as cursor:
+            cursor.execute("UPDATE " + self.native + ".EmailUser SET is_staff=1 WHERE email='manager@example.invalid'")
+        with self.assertRaises(ContractError):
+            management.prebind(**{**request, "reason": "private\nreason"})
+        self.assertIsNone(self.resolve())
+        self.assertEqual(management.prebind(**request), (request["username"], True))
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT actor_user_id,event_payload FROM cf_audit_event")
+            actor, raw = cursor.fetchone()
+            self.assertEqual(actor, "admin")
+            self.assertEqual(json.loads(raw)["target_user_id"], "u1")
+            self.assertEqual(json.loads(raw)["reason"], request["reason"])
+            cursor.execute("SELECT COUNT(*) FROM cf_event_outbox")
+            self.assertEqual(cursor.fetchone()[0], 1)
+        with self.admin.cursor() as cursor:
+            cursor.execute("UPDATE " + self.native + ".EmailUser SET is_staff=0 WHERE email='manager@example.invalid'")
+        with self.assertRaises(ContractError) as caught:
+            management.prebind(**request)
+        self.assertEqual(caught.exception.status, 403)
+
     def test_binding_conflicts_do_not_merge_accounts(self):
         self.binding.prebind(**self.request)
         for changes in (dict(username="other@example.invalid"), dict(user_id="other"), dict(subject="other-sub", username="other@example.invalid")):

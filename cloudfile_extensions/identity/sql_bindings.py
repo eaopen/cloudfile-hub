@@ -101,13 +101,14 @@ class SQLIdentityBindings:
                   dict(type="subject", provider=provider, namespace="oidc", external_id=subject)]
         try:
             with scope_locks(self.connection, scopes):
-                # SQL serialization is not management authorization.
-                if self.authorize(actor, user_id, username) is not True:
-                    raise ContractError("ACCESS_DENIED", "Identity management is denied", 403)
                 self.connection.begin()
                 try:
                     with self.connection.cursor() as cursor:
                         self._engines(cursor)
+                        # Authorization may lock the current manager account;
+                        # it must share this transaction, not use another RPC.
+                        if self.authorize(cursor, actor, user_id, username) is not True:
+                            raise ContractError("ACCESS_DENIED", "Identity management is denied", 403)
                         self._account(cursor, username, locked=True)
                         cursor.execute("SELECT user,login_id FROM " + self.profiles + " WHERE user=%s OR login_id=%s FOR UPDATE", (username, user_id))
                         rows = cursor.fetchall()

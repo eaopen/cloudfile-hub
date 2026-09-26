@@ -17,7 +17,7 @@ SOURCES = frozenset({"hub", "server", "fileserver", "webdav", "idp", "directory"
 
 def normalize_event(event):
     object_fields(event, ("event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source", "action", "result"),
-                  ("repo_id", "path", "target_path", "resource_uid", "job_id", "delegator", "revision", "content_version", "subject_revision", "policy_revision", "bytes_sent"))
+                  ("repo_id", "path", "target_path", "resource_uid", "job_id", "delegator", "revision", "content_version", "subject_revision", "policy_revision", "bytes_sent", "target_user_id", "reason"))
     value = dict(event)
     try:
         value["event_id"] = str(UUID(value["event_id"]))
@@ -44,6 +44,12 @@ def normalize_event(event):
     for field in ("delegator", "revision", "content_version", "subject_revision", "policy_revision"):
         if field in value:
             identifier(value[field])
+    if "target_user_id" in value:
+        identifier(value["target_user_id"], maximum=225)
+    if "reason" in value:
+        reason = value["reason"]
+        if not isinstance(reason, str) or not reason.strip() or len(reason) > 512 or any(ord(char) < 32 for char in reason):
+            raise ContractError("INVALID_REQUEST", "Invalid audit reason", 400)
     if "bytes_sent" in value and (type(value["bytes_sent"]) is not int or not 0 <= value["bytes_sent"] <= 2 ** 63 - 1):
         raise ContractError("INVALID_REQUEST", "Invalid transfer byte count", 400)
     return value
