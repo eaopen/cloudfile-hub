@@ -6,6 +6,11 @@ from .management import DirectoryManagement
 
 
 class ContentReadAuthority(DirectoryManagement):
+    def library_status_allowed(self, status):
+        # Native read-only affects writes, not otherwise-authorized reads.
+        # Suspended/unknown states never qualify.
+        return status in (0, 1)
+
     def decision_allowed(self, decision):
         self.effective_access = {"read": bool(decision["visible"] and decision["read"]),
             "write": bool(decision["visible"] and decision["write"])}
@@ -77,9 +82,15 @@ class ContentMetadataWriteAuthority(ContentReadAuthority):
     def decision_allowed(self, decision):
         return decision["visible"] and decision["write"]
 
+    def library_status_allowed(self, status):
+        return status == 0
+
 
 class LibraryWideManagementAuthority(ContentReadAuthority):
     """Whole-library management, not an exact root or subdirectory grant."""
+    def library_status_allowed(self, status):
+        return status == 0
+
     def scope_allowed(self, reference):
         from .admins import DirectoryAdmins
         if reference["kind"] != "dir" or reference["path"] != "/":

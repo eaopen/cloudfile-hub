@@ -21,6 +21,7 @@ class LibraryOwnerManagement:
         self.epoch = None
         self.current_subject = None
         self.is_owner = False
+        self.hard_readonly = False
         self.rules = ACLRules(self.state.connection, provider=self.state.provider,
             actor=self.actor, request_id=request_id, authorize=self.authorize,
             finalize=self.finalize, authorize_change=self.authorize_change)
@@ -29,6 +30,7 @@ class LibraryOwnerManagement:
             authorize_change=self.authorize_change)
 
     def authorize(self, cursor, actor, reference):
+        self.hard_readonly = False
         if actor != self.actor:
             return False
         current = self.preparation.contexts.current(actor)
@@ -53,8 +55,11 @@ class LibraryOwnerManagement:
         if cursor.fetchall() != ((repo,),):
             return False
         cursor.execute("SELECT status FROM RepoInfo WHERE repo_id=%s FOR UPDATE", (repo,))
-        if cursor.fetchall() != ((0,),):
+        statuses = cursor.fetchall()
+        if (len(statuses) != 1 or len(statuses[0]) != 1
+                or type(statuses[0][0]) is not int or not self.library_status_allowed(statuses[0][0])):
             return False
+        self.hard_readonly = statuses[0][0] == 1
         cursor.execute("SELECT repo_id FROM VirtualRepo WHERE repo_id=%s FOR UPDATE", (repo,))
         if cursor.fetchall():
             return False
@@ -74,12 +79,17 @@ class LibraryOwnerManagement:
             return False
         decision = self.core.evaluate(reference, provider=self.state.provider,
             subject=current["subject"], rules=self.rules.candidates(reference, locking=True),
-            ce_permission=permission, attribute_allowlist=self.preparation.contexts.allowlist)
+            ce_permission=permission, attribute_allowlist=self.preparation.contexts.allowlist,
+            hard_readonly=self.hard_readonly)
         # Manage is separate but cannot reveal/override explicit content denial.
         return self.decision_allowed(decision)
 
     def decision_allowed(self, decision):
         return decision["visible"] and decision["read"]
+
+    def library_status_allowed(self, status):
+        # Management and mutations retain the native normal-state gate.
+        return status == 0
 
     def qualification(self, cursor, reference, username, owner):
         return "rw" if self.is_owner else None
