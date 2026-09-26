@@ -1,0 +1,15 @@
+{
+  "version": "020_search_rebuild",
+  "steps": [
+    {
+      "sql": "CREATE TABLE cf_search_rebuild (generation VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,commit_id CHAR(40) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,source_sequence VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,state VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,updated_at DATETIME(6) NOT NULL,PRIMARY KEY(generation,repo_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+      "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_search_rebuild')='InnoDB' AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_search_rebuild')=6 AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_search_rebuild' AND index_name='PRIMARY')='generation,repo_id',1,0)",
+      "expected": 1
+    },
+    {
+      "sql": "CREATE TABLE cf_search_rebuild_directory (generation VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,path_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,path TEXT NOT NULL,position INT UNSIGNED NOT NULL,next_position INT UNSIGNED NULL,payload LONGTEXT NULL,payload_hash CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,state VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,task_id BIGINT UNSIGNED NULL,updated_at DATETIME(6) NOT NULL,PRIMARY KEY(generation,repo_id,path_hash),KEY pending_directories(generation,repo_id,state,path_hash)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+      "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_search_rebuild_directory')='InnoDB' AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_search_rebuild_directory')=11 AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_search_rebuild_directory' AND index_name='PRIMARY')='generation,repo_id,path_hash' AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_search_rebuild_directory' AND index_name='pending_directories')='generation,repo_id,state,path_hash',1,0)",
+      "expected": 1
+    }
+  ]
+}
