@@ -43,6 +43,9 @@ class SourceScanner:
                 path = prefix + entry.name
                 try:
                     path.encode("utf-8", errors="strict")
+                    if len(path.encode("utf-8")) + 1 > 4096:
+                        yield {"path": path, "kind": "unsupported", "error": "SOURCE_PATH_TOO_LONG"}
+                        continue
                     info = entry.stat(follow_symlinks=False)
                     if stat.S_ISLNK(info.st_mode):
                         yield {"path": path, "kind": "unsupported", "error": "SOURCE_SYMLINK"}

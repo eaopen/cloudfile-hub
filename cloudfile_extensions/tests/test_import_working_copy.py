@@ -8,9 +8,30 @@ from uuid import uuid4
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.migration.working_copy import WorkingCopyBuilder
 from cloudfile_extensions.migration.workspace_guard import ImportWorkspaceGuard
+from cloudfile_extensions.migration.verify_copy import WorkingCopyVerifier
 
 
 class ImportWorkingCopyTests(unittest.TestCase):
+    def test_verifier_rejects_modified_missing_extra_and_changed_manifest(self):
+        for change in ("modified", "missing", "extra", "manifest"):
+            with self.subTest(change=change), tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as work:
+                Path(source, "file").write_bytes(b"drawing")
+                result = WorkingCopyBuilder(sources={"registered": source}, work_root=work).build(
+                    "registered", attempt_id=str(uuid4()), checkpoint=lambda _: False)
+                verifier = WorkingCopyVerifier(work_root=work)
+                self.assertTrue(verifier.verify(result, checkpoint=lambda _: False)["copy_verified"])
+                if change == "modified":
+                    Path(result.folder, "file").write_bytes(b"changed")
+                elif change == "missing":
+                    Path(result.folder, "file").unlink()
+                elif change == "extra":
+                    Path(result.folder, "extra").touch()
+                else:
+                    (Path(result.folder).parent / "manifest.ndjson").write_bytes(b"")
+                with self.assertRaises(ContractError) as error:
+                    verifier.verify(result, checkpoint=lambda _: False)
+                self.assertEqual(error.exception.code, "IMPORT_COPY_CHANGED")
+
     def test_workspace_lock_is_exclusive_and_retained_after_release(self):
         with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as work:
             result = WorkingCopyBuilder(sources={"registered": source}, work_root=work).build(

@@ -67,6 +67,8 @@ class WorkingCopyBuilder:
 
                 def record(value):
                     encoded = (json.dumps(value, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+                    if len(encoded) > 16384:
+                        raise ContractError("SOURCE_RECORD_TOO_LARGE", "Import source entry exceeds manifest budget", 409)
                     report.write(encoded)
                     digest.update(encoded)
 
@@ -78,6 +80,8 @@ class WorkingCopyBuilder:
                             name = entry.name
                             name.encode("utf-8")
                             path = prefix + name
+                            if len(path.encode("utf-8")) + 1 > 4096:
+                                raise ContractError("SOURCE_PATH_TOO_LONG", "Import source path exceeds CloudFile limit", 409)
                             before = entry.stat(follow_symlinks=False)
                             if stat.S_ISDIR(before.st_mode):
                                 if depth >= 128:

@@ -60,6 +60,8 @@ class WorkingCopyVerifier:
                     kind, path = value.get("kind"), value.get("path")
                     if kind not in ("file", "directory") or not isinstance(path, str):
                         raise ValueError()
+                    if len(path.encode("utf-8")) + 1 > 4096:
+                        raise ValueError()
                     parts = path.split("/")
                     if len(parts) > 129 or any(part in ("", ".", "..") or "\0" in part for part in parts):
                         raise ValueError()
