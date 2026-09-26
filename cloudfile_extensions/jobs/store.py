@@ -204,17 +204,23 @@ class JobStore:
         return self._management_transition(job_id, status="queued", allowed=("failed", "cancelled"),
                                            actor=actor, actor_kind=actor_kind, action="job.retried")
 
-    def retry_failed(self, job_id, *, actor, actor_kind):
+    def retry_failed(self, job_id, *, actor, actor_kind, authorize_transaction=None):
         # A fresh authenticated recovery request must not undo a concurrent
         # administrator cancellation between its read and this row lock.
         return self._management_transition(job_id, status="queued", allowed=("failed",),
-                                           actor=actor, actor_kind=actor_kind, action="job.retried")
+                                           actor=actor, actor_kind=actor_kind, action="job.retried",
+                                           authorize_transaction=authorize_transaction)
 
-    def _management_transition(self, job_id, *, status, allowed, actor, actor_kind, action):
+    def _management_transition(self, job_id, *, status, allowed, actor, actor_kind, action,
+                               authorize_transaction=None):
+        if authorize_transaction is not None and not callable(authorize_transaction):
+            raise ValueError("trusted transaction authorization required")
         identifier(actor)
         if actor_kind not in {"user", "service"}:
             raise ContractError("INVALID_REQUEST", "Invalid management actor", 400)
         with self._transaction(), self.connection.cursor() as cursor:
+            if authorize_transaction is not None and authorize_transaction(cursor) is not True:
+                raise ContractError("ACCESS_DENIED", "Job transition is not authorized", 403)
             cursor.execute("SELECT status FROM cf_background_job WHERE job_id=%s FOR UPDATE", (job_id,))
             row = cursor.fetchone()
             if row is None:

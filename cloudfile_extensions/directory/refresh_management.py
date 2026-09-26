@@ -110,7 +110,7 @@ class UserRefreshManagement:
             status_url="/api/v2.1/cloudfile/extensions/authorization/v1/refreshes/" + job["job_id"] + "/",
             error_code=code)
 
-    def status(self, job_id):
+    def _job(self, job_id):
         try:
             job_id = str(UUID(job_id))
         except (ValueError, TypeError, AttributeError):
@@ -124,6 +124,11 @@ class UserRefreshManagement:
             raise ContractError("NOT_FOUND", "Refresh job is not available", 404)
         if self.machine and (previous["actor_kind"] != "service" or previous["actor"] != self.actor_id):
             raise ContractError("NOT_FOUND", "Refresh job is not available", 404)
+        return previous
+
+    def status(self, job_id):
+        previous = self._job(job_id)
+        job_id, scope = previous["job_id"], previous["scope"]
         target = identifier(scope["external_id"], maximum=225)
         scopes = [dict(type="provider", provider=self.state.provider, external_id=self.state.provider)]
         scopes.extend(dict(type="user", provider=self.state.provider, external_id=user)
@@ -148,3 +153,30 @@ class UserRefreshManagement:
                 return result
             finally:
                 connection.rollback()
+
+    def retry_failed(self, job_id, *, expected_attempt):
+        """Internal conditional recovery; never resurrect cancelled work."""
+        if type(expected_attempt) is not int or not 0 <= expected_attempt <= 2 ** 63 - 1:
+            raise ContractError("INVALID_REQUEST", "Invalid refresh attempt condition", 400)
+        previous = self._job(job_id)
+        scope, target = previous["scope"], previous["scope"]["external_id"]
+        scopes = [dict(type="provider", provider=self.state.provider, external_id=self.state.provider)]
+        scopes.extend(dict(type="user", provider=self.state.provider, external_id=user)
+            for user in self._users(target))
+        def authorize(cursor):
+            if self._authorize(cursor, target) is not True:
+                return False
+            cursor.execute("SELECT lease_epoch,status FROM cf_background_job WHERE job_id=%s FOR UPDATE",
+                (previous["job_id"],))
+            rows = cursor.fetchall()
+            if len(rows) != 1 or rows[0][0] != expected_attempt or rows[0][1] not in {"failed", "queued"}:
+                raise ContractError("PRECONDITION_FAILED", "Refresh attempt changed or cannot be retried", 412)
+            current = self._job(previous["job_id"])
+            if (current["scope"] != scope or current["actor"] != previous["actor"]
+                    or current["actor_kind"] != previous["actor_kind"]):
+                raise ContractError("SUBJECT_UNAVAILABLE", "Refresh scope changed", 503)
+            return True
+        with scope_locks(self.jobs.connection, scopes):
+            self.jobs.retry_failed(previous["job_id"], actor=self.actor_id, actor_kind=self.actor_kind,
+                authorize_transaction=authorize)
+        return self.status(previous["job_id"])
