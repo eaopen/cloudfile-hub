@@ -1,5 +1,11 @@
 """Real SQL worker/dry-run integration, isolated report/source temporary volumes."""
 import json
+import importlib.util
+import os
+import subprocess
+import selectors
+import sys
+import unittest
 from pathlib import Path
 import tempfile
 
@@ -59,3 +65,61 @@ class ImportDryRunTests(DatabaseTestCase):
             JobWorker(self.store, owner="import-worker", handlers={"migration.scan": Handler(handler)}).run_once()
             self.assertEqual(self.store.get(job_id)["status"], "failed")
             self.assertEqual(list(Path(reports).iterdir()), [])
+
+    def native_worker_environment(self, source, reports):
+        return {**os.environ, "CLOUDFILE_DB_HOST": self.options["host"],
+                       "CLOUDFILE_DB_PORT": str(self.options["port"]), "CLOUDFILE_DB_USER": "root",
+                       "CLOUDFILE_DB_PASSWORD": "", "CLOUDFILE_DB_NAME": self.database,
+                       "CLOUDFILE_IMPORT_SOURCES": json.dumps({"registered": source}),
+                       "CLOUDFILE_IMPORT_REPORT_ROOT": reports}
+
+    def run_native_worker(self, source, reports):
+        return subprocess.run([sys.executable, "-m", "cloudfile_extensions.jobs", "--once"],
+                              env=self.native_worker_environment(source, reports),
+                              capture_output=True, text=True, timeout=30)
+
+    @unittest.skipUnless(importlib.util.find_spec("MySQLdb"), "requires CE mysqlclient runtime")
+    def test_native_cli_claims_and_completes_real_scan(self):
+        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as reports:
+            (Path(source) / "drawing.prt").write_bytes(b"drawing")
+            job_id = self.submit({"source_id": "registered"})
+            result = self.run_native_worker(source, reports)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            messages = [json.loads(line) for line in result.stdout.splitlines()]
+            self.assertEqual(messages, [{"state": "ready"}, {"state": "job_processed", "job_id": job_id},
+                                        {"state": "stopped"}])
+            self.assertEqual(self.store.get(job_id)["status"], "succeeded")
+            self.assertEqual(len(list(Path(reports).iterdir())), 1)
+
+    @unittest.skipUnless(importlib.util.find_spec("MySQLdb"), "requires CE mysqlclient runtime")
+    def test_native_cli_refuses_schema_drift_without_claiming_or_upgrading(self):
+        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as reports:
+            job_id = self.submit({"source_id": "registered"})
+            with self.connection.cursor() as cursor:
+                cursor.execute("UPDATE cf_schema_migration SET checksum=%s", ("0" * 64,))
+            result = self.run_native_worker(source, reports)
+            self.assertEqual(result.returncode, 1)
+            self.assertEqual(result.stdout, "")
+            self.assertEqual(self.store.get(job_id)["status"], "queued")
+            self.assertEqual(list(Path(reports).iterdir()), [])
+
+    @unittest.skipUnless(importlib.util.find_spec("MySQLdb"), "requires CE mysqlclient runtime")
+    def test_native_cli_sigterm_wakes_idle_poll_and_closes_process(self):
+        with tempfile.TemporaryDirectory() as source, tempfile.TemporaryDirectory() as reports:
+            process = subprocess.Popen([sys.executable, "-m", "cloudfile_extensions.jobs", "--poll-seconds", "30"],
+                                       env=self.native_worker_environment(source, reports),
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+            try:
+                with selectors.DefaultSelector() as selector:
+                    selector.register(process.stdout, selectors.EVENT_READ)
+                    self.assertTrue(selector.select(timeout=15), "Worker startup timed out")
+                self.assertEqual(json.loads(process.stdout.readline()), {"state": "ready"})
+                process.terminate()
+                output, errors = process.communicate(timeout=5)
+                self.assertEqual(process.returncode, 0, errors)
+                self.assertEqual(json.loads(output), {"state": "stopped"})
+                self.assertEqual(list(Path(reports).iterdir()), [])
+            finally:
+                if process.poll() is None:
+                    process.kill()
+                process.communicate(timeout=5)

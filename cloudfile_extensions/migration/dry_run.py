@@ -26,6 +26,13 @@ class ImportDryRun:
                 raise ValueError("source roots must be deployment registered absolute paths")
         if not isinstance(report_root, str) or not os.path.isabs(report_root):
             raise ValueError("registered report volume is required")
+        report_path = os.path.realpath(report_root)
+        for root in sources.values():
+            source_path = os.path.realpath(root)
+            # Reports must not mutate a source or recursively enter its manifest;
+            # parent symlink aliases cannot disguise overlapping volumes.
+            if os.path.commonpath((source_path, report_path)) in {source_path, report_path}:
+                raise ValueError("source and report volumes must not overlap")
         self.sources = dict(sources)
         self.report_root = report_root
         self.clock = clock
