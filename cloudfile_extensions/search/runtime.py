@@ -23,6 +23,7 @@ from .rebuild_execution import SearchRebuildExecution
 from .rebuild_coordinator import SearchRebuildCoordinator
 from .catchup import SearchCatchupInspector
 from .global_fanout_coordinator import GlobalTagFanoutCoordinator
+from .publication import SearchPublication
 
 
 class SearchInitializationFactory:
@@ -99,6 +100,11 @@ class SearchRebuildRuntime:
     def refresh_global_catchup_target(self):
         return SearchCatchupInspector(self.coordinator.execution.store).refresh_global_target(
             generation=self.generation, index=self.coordinator.execution.client.index, producer_scope=self.global_capture_scope)
+
+    def publish(self, *, repo_id):
+        return SearchPublication(self.coordinator.execution.store, self.coordinator.execution.client,
+            producer_scope=self.capture_scope, global_producer_scope=self.global_capture_scope).publish(
+                generation=self.generation, repo_id=repo_id)
 
 
 class SearchRebuildFactory(SearchInitializationFactory):
