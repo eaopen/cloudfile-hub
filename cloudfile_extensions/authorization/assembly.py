@@ -44,5 +44,7 @@ def session_policy_factory(*, environment, redis, provider_id, native_schema,
     resources = PolicyResources(environment=environment, redis=redis,
         provider_id=provider_id, directory_factory=directory_factory,
         native_schema=native_schema, identity_schema=identity_schema, prefix=prefix)
-    return PolicyServiceFactory(authenticate=SeahubPolicyAuthentication(resources.state),
+    factory = PolicyServiceFactory(authenticate=SeahubPolicyAuthentication(resources.state),
         preparation_scope=resources.preparation, core=core, cloud_mode=cloud_mode)
+    factory.resources = resources
+    return factory

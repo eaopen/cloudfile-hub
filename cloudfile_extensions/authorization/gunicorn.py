@@ -27,7 +27,9 @@ def post_worker_init(worker):
             lifecycle_reader=getattr(settings, "CLOUDFILE_RESOURCE_LIFECYCLE_READER", None),
             audit_secret=getattr(settings, "CLOUDFILE_AUDIT_CURSOR_SECRET", None),
             audit_redact=getattr(settings, "CLOUDFILE_AUDIT_REDACT", None),
-            audit_result_root=getattr(settings, "CLOUDFILE_AUDIT_RESULT_ROOT", None))
+            audit_result_root=getattr(settings, "CLOUDFILE_AUDIT_RESULT_ROOT", None),
+            refresh_service_verifier=getattr(settings, "CLOUDFILE_REFRESH_SERVICE_VERIFIER", None),
+            refresh_provider_grants=getattr(settings, "CLOUDFILE_REFRESH_PROVIDER_GRANTS", None))
     except Exception:
         raise RuntimeError("CloudFile policy worker initialization failed; check trusted configuration") from None
 
@@ -62,6 +64,12 @@ def refresh_service(request, request_id):
     if _host is None or _host.pid != os.getpid():
         raise ContractError("SUBJECT_UNAVAILABLE", "Refresh worker is unavailable", 503)
     return _host.refresh_service(request, request_id)
+
+
+def machine_refresh_service(request, request_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("SUBJECT_UNAVAILABLE", "Refresh worker is unavailable", 503)
+    return _host.machine_refresh_service(request, request_id)
 
 
 def worker_exit(server, worker):

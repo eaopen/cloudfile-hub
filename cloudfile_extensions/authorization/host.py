@@ -9,7 +9,8 @@ from .deployment import configure_policy
 
 class PolicyHost:
     def __init__(self, settings, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
-                 audit_secret=None, audit_redact=None, audit_result_root=None):
+                 audit_secret=None, audit_redact=None, audit_result_root=None,
+                 refresh_service_verifier=None, refresh_provider_grants=None):
         # Construct after the server worker fork, never in a preload parent.
         self.pid = os.getpid()
         self.lock = threading.Lock()
@@ -18,7 +19,8 @@ class PolicyHost:
         self.closed = False
         self.deployment = configure_policy(settings, directory_authorization=directory_authorization,
             resource_secret=resource_secret, lifecycle_reader=lifecycle_reader,
-            audit_secret=audit_secret, audit_redact=audit_redact, audit_result_root=audit_result_root)
+            audit_secret=audit_secret, audit_redact=audit_redact, audit_result_root=audit_result_root,
+            refresh_service_verifier=refresh_service_verifier, refresh_provider_grants=refresh_provider_grants)
 
     def _process(self):
         # Check before acquiring an inherited lock that may have been held at
@@ -41,15 +43,21 @@ class PolicyHost:
     def refresh_service(self, request, request_id):
         return self._service(request, request_id, resource=False, refresh=True)
 
+    def machine_refresh_service(self, request, request_id):
+        return self._service(request, request_id, resource=False, machine_refresh=True)
+
     @contextmanager
-    def _service(self, request, request_id, *, resource, audit=False, context=False, refresh=False):
+    def _service(self, request, request_id, *, resource, audit=False, context=False, refresh=False,
+                 machine_refresh=False):
         self._process()
         with self.lock:
             if self.draining or self.closed:
                 raise ContractError("POLICY_UNAVAILABLE", "Policy host is draining", 503)
             self.active += 1
         try:
-            if refresh:
+            if machine_refresh:
+                factory = self.deployment.service_refresh_factory
+            elif refresh:
                 factory = self.deployment.refresh_factory
             elif context:
                 factory = self.deployment.context_factory

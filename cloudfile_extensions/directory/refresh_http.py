@@ -14,6 +14,7 @@ from .refresh_management import UserRefreshManagement
 class UserRefreshView(DirectoryPolicyView):
     service_factory = None
     operation = "submit"
+    authentication_mode = "session"
     http_method_names = ["post"]
 
     def dispatch(self, request, *args, **kwargs):
@@ -28,11 +29,16 @@ class UserRefreshView(DirectoryPolicyView):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
             if request.GET:
                 raise invalid("Refresh target takes no query parameters")
+            if self.authentication_mode not in {"session", "service"}:
+                raise RuntimeError("invalid fixed refresh authentication mode")
+            if self.authentication_mode == "service" and request.headers.get("Cookie"):
+                raise invalid("Machine refresh does not accept browser cookies")
             if self.operation == "submit":
-                csrf = CsrfViewMiddleware(lambda _: None)
-                csrf.process_request(request)
-                if csrf.process_view(request, lambda *_: None, (), {}) is not None:
-                    raise ContractError("ACCESS_DENIED", "CSRF verification failed", 403)
+                if self.authentication_mode == "session":
+                    csrf = CsrfViewMiddleware(lambda _: None)
+                    csrf.process_request(request)
+                    if csrf.process_view(request, lambda *_: None, (), {}) is not None:
+                        raise ContractError("ACCESS_DENIED", "CSRF verification failed", 403)
                 key = request.headers.get("Idempotency-Key")
                 if key is None:
                     raise ContractError("PRECONDITION_REQUIRED", "Idempotency-Key is required", 428)
@@ -46,6 +52,8 @@ class UserRefreshView(DirectoryPolicyView):
             with self.service_factory(request, request_id) as service:
                 if not isinstance(service, UserRefreshManagement):
                     raise RuntimeError("invalid refresh management assembly")
+                if service.machine != (self.authentication_mode == "service"):
+                    raise RuntimeError("refresh authentication assembly mismatch")
                 status = 200
                 if self.operation == "submit":
                     job_id, created = service.submit(body, idempotency_key=key)
@@ -80,4 +88,23 @@ def user_refresh_routes(*, service_factory):
     return [
         path("v1/refreshes/", UserRefreshView.as_view(service_factory=service_factory), name="cloudfile-user-refresh-submit"),
         path("v1/refreshes/<uuid:job_id>/", UserRefreshStatusView.as_view(service_factory=service_factory), name="cloudfile-user-refresh-status"),
+    ]
+
+
+class MachineUserRefreshView(UserRefreshView):
+    authentication_mode = "service"
+
+
+class MachineUserRefreshStatusView(MachineUserRefreshView):
+    operation = "status"
+    http_method_names = ["get"]
+
+
+def machine_user_refresh_routes(*, service_factory):
+    """Mount instead of session routes at this scope, never fallback to Cookie."""
+    if not callable(service_factory):
+        raise ValueError("trusted owned machine refresh factory required")
+    return [
+        path("v1/refreshes/", MachineUserRefreshView.as_view(service_factory=service_factory), name="cloudfile-machine-refresh-submit"),
+        path("v1/refreshes/<uuid:job_id>/", MachineUserRefreshStatusView.as_view(service_factory=service_factory), name="cloudfile-machine-refresh-status"),
     ]

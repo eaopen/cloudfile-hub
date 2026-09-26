@@ -14,6 +14,7 @@ class PolicyDeployment:
     audit_factory: object = None
     context_factory: object = None
     refresh_factory: object = None
+    service_refresh_factory: object = None
 
     def close(self):
         # The host invokes this only after draining all requests at shutdown.
@@ -21,7 +22,8 @@ class PolicyDeployment:
 
 
 def configure_policy(value, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
-                     audit_secret=None, audit_redact=None, audit_result_root=None):
+                     audit_secret=None, audit_redact=None, audit_result_root=None,
+                     refresh_service_verifier=None, refresh_provider_grants=None):
     """value is trusted host settings, not request JSON or an import path.
 
     Matches the current native authority adapter: private Redis TCP, DB0, password
@@ -47,6 +49,8 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
     trusted_https_url(value["directory_url"])
     if not callable(directory_authorization):
         raise ValueError("machine directory credential supplier required")
+    if (refresh_service_verifier is None) != (refresh_provider_grants is None):
+        raise ValueError("machine refresh verifier and provider grants required together")
     if audit_secret is None and (audit_redact is not None or audit_result_root is not None):
         raise ValueError("audit redaction requires an audit cursor secret")
     if audit_secret is not None and (not isinstance(audit_secret, bytes)
@@ -94,7 +98,13 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
         from ..directory.refresh_factory import UserRefreshFactory
         refresh_factory = UserRefreshFactory(authenticate=factory.authenticate,
             preparation_scope=factory.preparation_scope, core=factory.core, cloud_mode=factory.cloud_mode)
-        return PolicyDeployment(factory, client, resource_factory, audit_factory, context_factory, refresh_factory)
+        service_refresh_factory = None
+        if refresh_service_verifier is not None:
+            from ..directory.service_refresh import ServiceRefreshFactory
+            service_refresh_factory = ServiceRefreshFactory(verifier=refresh_service_verifier,
+                resources=factory.resources, provider_grants=refresh_provider_grants)
+        return PolicyDeployment(factory, client, resource_factory, audit_factory, context_factory,
+            refresh_factory, service_refresh_factory)
     except Exception:
         client.connection_pool.disconnect()
         raise
