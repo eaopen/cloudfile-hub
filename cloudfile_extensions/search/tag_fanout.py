@@ -9,12 +9,32 @@ from ..tags.definitions import decode, uuid_value
 from ..tags.read import FIELDS
 
 
-def binding_page(cursor, *, repo_id, tag_id, revision, after=None, limit=100):
+def binding_cutoff(cursor, *, tag_id):
+    """Capture once and persist with the batch job, not once per page.
+
+    UUID upper bound is a scan boundary, not a temporal membership snapshot.
+    Later bindings are covered by their independently persisted resource events.
+    """
+    uuid_value(tag_id)
+    try:
+        cursor.execute("SELECT MAX(resource_uid) FROM cf_tag_binding FORCE INDEX(tag_resources) WHERE tag_id=%s", (tag_id,))
+        row = cursor.fetchone()
+        if row is None or len(row) != 1:
+            raise ValueError()
+        return None if row[0] is None else uuid_value(row[0])
+    except Exception:
+        raise ContractError("SEARCH_PROJECTION_PENDING", "Tag scan boundary is unavailable", 503) from None
+
+
+def binding_page(cursor, *, repo_id, tag_id, revision, upper_uid, after=None, limit=100):
     uuid_value(repo_id)
     uuid_value(tag_id)
     uuid_value(revision)
+    uuid_value(upper_uid)
     if after is not None:
         uuid_value(after)
+        if after > upper_uid:
+            raise ValueError("fanout cursor exceeds captured boundary")
     if type(limit) is not int or not 1 <= limit <= 100:
         raise ValueError("bounded fanout page required")
     try:
@@ -30,14 +50,14 @@ def binding_page(cursor, *, repo_id, tag_id, revision, after=None, limit=100):
             raise ValueError()
         # Limit binding rows before projecting any metadata. Global system tags
         # may include other libraries; skipped rows still advance this scan.
-        cursor.execute("SELECT b.resource_uid,r.uid,r.repo_id,r.path,r.kind,r.state FROM cf_tag_binding b FORCE INDEX(tag_resources) LEFT JOIN cf_resource r ON r.uid=b.resource_uid WHERE b.tag_id=%s AND b.resource_uid>%s ORDER BY b.resource_uid LIMIT %s", (tag_id, after or "", limit + 1))
+        cursor.execute("SELECT b.resource_uid,r.uid,r.repo_id,r.path,r.kind,r.state FROM cf_tag_binding b FORCE INDEX(tag_resources) LEFT JOIN cf_resource r ON r.uid=b.resource_uid WHERE b.tag_id=%s AND b.resource_uid>%s AND b.resource_uid<=%s ORDER BY b.resource_uid LIMIT %s", (tag_id, after or "", upper_uid, limit + 1))
         rows = cursor.fetchall()
         if len(rows) > limit + 1:
             raise ValueError()
         selected, previous = [], after or ""
         for row in rows[:limit]:
             uid = uuid_value(row[0])
-            if uid <= previous or row[1] != uid:
+            if uid <= previous or uid > upper_uid or row[1] != uid:
                 raise ValueError()
             previous = uid
             ref = resource_ref(dict(repo_id=row[2], path=row[3], kind=row[4]))

@@ -2,7 +2,7 @@ from unittest import TestCase
 from unittest.mock import Mock
 
 from cloudfile_extensions.common.errors import ContractError
-from cloudfile_extensions.search.tag_fanout import binding_page
+from cloudfile_extensions.search.tag_fanout import binding_page, binding_cutoff
 
 
 class TagFanoutTest(TestCase):
@@ -17,18 +17,29 @@ class TagFanoutTest(TestCase):
     def test_page_uses_indexed_uid_order_and_preserves_literal_path(self):
         row = (self.uid, self.uid, self.repo, "/a%2Fb", "file", "active")
         self.cursor.fetchall.side_effect = [(self.definition,), (("tag_id", None), ("resource_uid", None)), (row,)]
-        result = binding_page(self.cursor, repo_id=self.repo, tag_id=self.tag, revision=self.revision)
+        result = binding_page(self.cursor, repo_id=self.repo, tag_id=self.tag, revision=self.revision, upper_uid=self.uid)
         self.assertEqual(result["items"][0]["reference"]["path"], "/a%2Fb")
         self.assertIsNone(result["next_uid"])
-        self.assertEqual(self.cursor.execute.call_args.args[1], (self.tag, "", 101))
+        self.assertEqual(self.cursor.execute.call_args.args[1], (self.tag, "", self.uid, 101))
 
     def test_definition_change_does_not_continue_stale_fanout(self):
         self.cursor.fetchall.return_value = (self.definition,)
         with self.assertRaises(ContractError) as caught:
-            binding_page(self.cursor, repo_id=self.repo, tag_id=self.tag, revision=self.uid)
+            binding_page(self.cursor, repo_id=self.repo, tag_id=self.tag, revision=self.uid, upper_uid=self.uid)
         self.assertEqual(caught.exception.code, "SEARCH_FANOUT_CHANGED")
 
     def test_orphan_binding_is_not_silently_dropped(self):
         self.cursor.fetchall.side_effect = [(self.definition,), (("tag_id", None), ("resource_uid", None)), ((self.uid, None, None, None, None, None),)]
         with self.assertRaises(ContractError):
-            binding_page(self.cursor, repo_id=self.repo, tag_id=self.tag, revision=self.revision)
+            binding_page(self.cursor, repo_id=self.repo, tag_id=self.tag, revision=self.revision, upper_uid=self.uid)
+
+    def test_cutoff_is_explicit_and_empty_binding_set_is_distinct(self):
+        self.cursor.fetchone.return_value = (self.uid,)
+        self.assertEqual(binding_cutoff(self.cursor, tag_id=self.tag), self.uid)
+        self.cursor.fetchone.return_value = (None,)
+        self.assertIsNone(binding_cutoff(self.cursor, tag_id=self.tag))
+
+    def test_cursor_beyond_cutoff_does_not_query(self):
+        with self.assertRaises(ValueError):
+            binding_page(self.cursor, repo_id=self.repo, tag_id=self.tag, revision=self.revision, upper_uid=self.revision, after=self.uid)
+        self.cursor.execute.assert_not_called()
