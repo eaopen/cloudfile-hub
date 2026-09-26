@@ -5,6 +5,7 @@ from ..schema.runner import SchemaRunner
 from .generations import SearchGenerationStore
 from .meilisearch import unavailable
 from .rebuild_store import SearchRebuildStore
+from .policy_version import SearchPolicyVersionReader
 
 
 class SearchPublicationReader:
@@ -16,7 +17,9 @@ class SearchPublicationReader:
     policy_reader must read current durable policy state, not request input.
     This adapter does not replace the final permission/response guard.
     """
-    def __init__(self, *, connection_factory, generation, index, policy_reader):
+    def __init__(self, *, connection_factory, generation, index, policy_reader=None):
+        if policy_reader is None:
+            policy_reader = SearchPolicyVersionReader(connection_factory)
         if not callable(connection_factory) or not callable(policy_reader):
             raise ValueError("fresh owned SQL and durable policy reader required")
         SearchGenerationStore._identity(generation, index)
