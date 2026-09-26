@@ -11,6 +11,7 @@ from .logout_token import LogoutTokenValidator
 from .logout_jobs import BackchannelJobs
 from .logout_worker import BackchannelWorker
 from .session_delete import NativeDBSessionDelete
+from .session_retention import OIDCSessionRetention
 
 
 class LogoutBackground:
@@ -29,6 +30,7 @@ class LogoutBackground:
             deletion = NativeDBSessionDelete(self.jobs.index,
                 identity_schema=resources.resources.identity_schema)
             self.pipeline = BackchannelWorker(self.jobs, deletion, page_size=page_size)
+            self.retention = OIDCSessionRetention(deletion)
             self.worker = JobWorker(self.jobs.store, owner=owner,
                 handlers={BackchannelJobs.KIND: self.pipeline.handler}, lease_seconds=lease_seconds)
         except Exception:
@@ -40,7 +42,10 @@ class LogoutBackground:
             raise RuntimeError("logout background is closed or already running")
         self.running = True
         try:
-            return self.worker.run_once()
+            result = self.worker.run_once()
+            if result is None:
+                self.retention.run_once()
+            return result
         except Exception:
             self.running = False
             self.close()

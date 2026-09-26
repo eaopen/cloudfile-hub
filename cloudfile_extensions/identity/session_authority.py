@@ -39,6 +39,7 @@ class OIDCSessionAuthority:
                                 or request.session.get(BACKEND_SESSION_KEY) != BACKEND
                                 or request.session.get(SESSION_REFERENCE_KEY) != reference):
                             raise ContractError("AUTHENTICATION_REQUIRED", "Native OIDC session changed", 401)
+                        deletion.sync_expiry(cursor, key, reference)
                         deletion.assert_current(cursor, key, reference)
                     connection.commit()
                 finally:

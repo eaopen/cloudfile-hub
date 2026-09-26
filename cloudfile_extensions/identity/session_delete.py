@@ -130,3 +130,18 @@ class NativeDBSessionDelete:
         # remove its index on this exact same transaction, never a second DB.
         self.index.forget(cursor, session_key)
         return bool(sessions)
+
+    def sync_expiry(self, cursor, session_key, reference):
+        """Follow an actual Django save; never accept a caller-provided TTL."""
+        from seahub.auth import BACKEND_SESSION_KEY
+        self.index._transaction(cursor)
+        cursor.execute("SELECT session_data,expire_date,expire_date>UTC_TIMESTAMP(6) FROM " +
+            self.table + " WHERE session_key=%s FOR UPDATE", (session_key,))
+        rows = cursor.fetchall()
+        if len(rows) != 1 or rows[0][2] != 1:
+            raise ContractError("AUTHENTICATION_REQUIRED", "Saved native session is unavailable", 401)
+        data = self.decoder.decode(rows[0][0])
+        if (data.get(BACKEND_SESSION_KEY) != BACKEND or data.get(SESSION_REFERENCE_KEY) != reference):
+            raise ContractError("AUTHENTICATION_REQUIRED", "Saved native session reference changed", 401)
+        cursor.execute("UPDATE cf_oidc_session SET expires_at=%s WHERE scope_hash=%s AND session_key=%s",
+            (rows[0][1], self.index.scope_hash, session_key))
