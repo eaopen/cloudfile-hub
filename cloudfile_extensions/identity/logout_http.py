@@ -20,6 +20,8 @@ class LocalLogoutView(View):
 
     def dispatch(self, request, *args, **kwargs):
         request_id = str(uuid4())
+        termination_started = False
+        binding = None
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Local logout only accepts POST", 405)
@@ -34,7 +36,6 @@ class LocalLogoutView(View):
             if not isinstance(self.resources, LoginResources):
                 raise ContractError("IDENTITY_UNAVAILABLE", "Logout runtime is unavailable", 503)
             raw = request.headers.get("Cookie", "")
-            binding = None
             if any(part.strip().split("=", 1)[0] == BINDING_COOKIE for part in raw.split(";")):
                 binding = request_binding(request)
             # Prepare protocol response while the server hint is still present;
@@ -49,21 +50,27 @@ class LocalLogoutView(View):
                     native_request.user = AnonymousUser()
                     native_request.session.flush()
                     raise ContractError("IDENTITY_UNAVAILABLE", "Native logout cleanup is unavailable", 503) from None
+            termination_started = True
             OIDCSessionAuthority(self.resources).terminate(request, terminate_native)
-            # Native termination precedes independent SQL/Redis cleanup; neither
-            # failure restores the browser or returns an IdP redirect as success.
-            if binding is not None:
-                BrowserLoginBindings(self.resources.resources.redis,
-                    prefix=self.resources.prefix + "oidc:browser:").clear(binding, response)
-            else:
-                response.set_cookie(BINDING_COOKIE, "", max_age=0, path="/",
-                    secure=True, httponly=True, samesite="Lax")
-            response.delete_cookie("seahub_auth")
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)
         except Exception:
             error = ContractError("IDENTITY_UNAVAILABLE", "Logout runtime is unavailable", 503)
             response = JsonResponse(error.response(request_id), status=503)
+        if termination_started:
+            # SQL/native cleanup errors must not skip the independent browser
+            # registry. Replace an RP redirect/form with a safe failure if any
+            # cleanup fails, and attach cookie expiry to that final response.
+            try:
+                if binding is not None:
+                    BrowserLoginBindings(self.resources.resources.redis,
+                        prefix=self.resources.prefix + "oidc:browser:").clear(binding, response)
+            except Exception:
+                error = ContractError("IDP_STATE_UNAVAILABLE", "Browser login cleanup is unavailable", 503)
+                response = JsonResponse(error.response(request_id), status=503)
+            response.set_cookie(BINDING_COOKIE, "", max_age=0, path="/",
+                secure=True, httponly=True, samesite="Lax")
+            response.delete_cookie("seahub_auth")
         response["Cache-Control"] = "no-store, max-age=0"
         response["Pragma"] = "no-cache"
         response["Referrer-Policy"] = "no-referrer"
