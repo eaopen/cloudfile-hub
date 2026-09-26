@@ -32,7 +32,7 @@ def rule_value(value):
         raise invalid("Invalid ACL subject type")
     for key, item in subject.items():
         identifier(item, maximum=32 if key == "provider" else 255)
-    if subject["type"] == "user" and len(subject["external_id"]) > 225:
+    if subject["type"] == "user" and (len(subject["external_id"]) > 225 or subject["namespace"] != "user"):
         raise invalid("Invalid business user identifier")
     if (not isinstance(value["permission"], str) or
             value["permission"] not in {"invisible", "none", "r", "rw"} or
