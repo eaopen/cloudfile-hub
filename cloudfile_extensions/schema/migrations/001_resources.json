@@ -1,0 +1,10 @@
+{
+  "version": "001_resources",
+  "steps": [
+    {
+      "sql": "CREATE TABLE cf_resource (uid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY,repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,kind VARCHAR(8) CHARACTER SET ascii NOT NULL,path LONGTEXT CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,path_hash CHAR(64) CHARACTER SET ascii NOT NULL,lifecycle_ref VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL,revision BIGINT UNSIGNED NOT NULL DEFAULT 1,description TEXT CHARACTER SET utf8mb4 NULL,local_open_type VARCHAR(64) CHARACTER SET ascii NULL,state VARCHAR(16) CHARACTER SET ascii NOT NULL DEFAULT 'active',updated_at DATETIME(6) NOT NULL,INDEX resource_location(repo_id,path_hash,kind)) ENGINE=InnoDB",
+      "verify": "SELECT IF((SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_resource' AND column_name IN ('uid','repo_id','kind','path','path_hash','lifecycle_ref','revision','description','local_open_type','state','updated_at'))=11 AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_resource' AND ((column_name='uid' AND column_key='PRI' AND character_maximum_length=36) OR (column_name='path' AND data_type='longtext' AND collation_name='utf8mb4_bin') OR (column_name='revision' AND data_type='bigint' AND column_type LIKE '%unsigned') OR (column_name='lifecycle_ref' AND character_maximum_length=512)))=4 AND (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_resource' AND index_name='resource_location' AND non_unique=1 AND ((seq_in_index=1 AND column_name='repo_id') OR (seq_in_index=2 AND column_name='path_hash') OR (seq_in_index=3 AND column_name='kind')))=3,1,0)",
+      "expected": 1
+    }
+  ]
+}

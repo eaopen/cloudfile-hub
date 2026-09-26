@@ -15,4 +15,7 @@ class CapabilitiesView(APIView):
     def get(self, request):
         configured = getattr(settings, "CLOUDFILE_CAPABILITIES", {})
         seafile_version = getattr(settings, "SEAFILE_VERSION", "14.0.8")
-        return Response(build_capability_document(configured, seafile_version=seafile_version))
+        webdav_enabled = getattr(settings, "CLOUDFILE_WEBDAV_SERVICE_ENABLED", False)
+        return Response(build_capability_document(
+            configured, seafile_version=seafile_version, webdav_enabled=webdav_enabled
+        ))
