@@ -3,7 +3,7 @@ from contextlib import contextmanager
 from threading import Lock
 
 from ..common.errors import ContractError
-from ..resources.paths import resource_ref
+from ..resources.paths import resource_ref, normalize_path
 from ..resources.store import ResourceStore
 from ..schema.runner import SchemaRunner
 from ..tags.definitions import uuid_value
@@ -20,9 +20,13 @@ class OwnedIndexSource:
         self._connections, self._readers, self._lock = set(), {}, Lock()
 
     @contextmanager
-    def scope(self, repo_id, tag_id, revision):
-        for value in (repo_id, tag_id, revision):
-            uuid_value(value)
+    def scope(self, repo_id, tag_id=None, revision=None):
+        uuid_value(repo_id)
+        if (tag_id is None) != (revision is None):
+            raise ValueError("complete optional tag source identity required")
+        if tag_id is not None:
+            uuid_value(tag_id)
+            uuid_value(revision)
         connection = self.connection_factory()
         with self._lock:
             if connection is self.worker_connection or id(connection) in self._connections:
@@ -66,3 +70,24 @@ class OwnedIndexSource:
         if entry is None or entry[0] is not cursor or entry[1] != ref["repo_id"]:
             raise ContractError("SEARCH_PROJECTION_PENDING", "Owned source cursor is not active for this repository", 503)
         return entry[2](cursor, ref)
+
+    def read_attribute(self, repo_id, path):
+        """Exact existing sparse location, then actual native lifecycle validation.
+
+        Annotation events already name a sparse UID. An absent/ambiguous row is
+        a reconciliation condition, not permission to allocate or guess kind.
+        """
+        uuid_value(repo_id)
+        path = normalize_path(path, "dir")
+        try:
+            if len(path.encode("utf-8")) > 4096:
+                raise ValueError()
+        except (UnicodeError, ValueError):
+            raise ContractError("SEARCH_PROJECTION_PENDING", "Invalid annotation event path", 503) from None
+        with self.scope(repo_id) as cursor:
+            ResourceStore._storage(cursor)
+            cursor.execute("SELECT kind,path FROM cf_resource FORCE INDEX(resource_location) WHERE repo_id=%s AND path_hash=%s AND state='active' ORDER BY kind LIMIT 2 FOR UPDATE", (repo_id, ResourceStore._hash(path)))
+            rows = cursor.fetchall()
+            if len(rows) != 1 or len(rows[0]) != 2 or rows[0][1] != path or rows[0][0] not in ("file", "dir"):
+                raise ContractError("SEARCH_PROJECTION_PENDING", "Annotation event location requires reconciliation", 503)
+            return self.read(cursor, dict(repo_id=repo_id, path=path, kind=rows[0][0]))

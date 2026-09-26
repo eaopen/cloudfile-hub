@@ -42,3 +42,20 @@ class OwnedIndexSourceTest(TestCase):
                     pass
         self.connection.begin.assert_not_called()
         self.connection.close.assert_called_once()
+
+    def test_attribute_source_preserves_literal_path_and_passes_actual_kind(self):
+        self.cursor.fetchall.return_value = (("dir", "/a%2Fb"),)
+        with patch("cloudfile_extensions.search.source.SchemaRunner"), patch("cloudfile_extensions.search.source.ResourceStore._storage"), patch("cloudfile_extensions.search.source.IndexSnapshotReader") as reader:
+            reader.return_value.return_value = dict(description="说明")
+            self.assertEqual(self.source.read_attribute(self.repo, "/a%2Fb"), dict(description="说明"))
+            reader.return_value.assert_called_once_with(self.cursor, dict(repo_id=self.repo, path="/a%2Fb", kind="dir"))
+        self.connection.rollback.assert_called_once()
+        self.connection.close.assert_called_once()
+
+    def test_ambiguous_sparse_location_never_calls_native_reader(self):
+        self.cursor.fetchall.return_value = (("dir", "/x"), ("file", "/x"))
+        with patch("cloudfile_extensions.search.source.SchemaRunner"), patch("cloudfile_extensions.search.source.ResourceStore._storage"), patch("cloudfile_extensions.search.source.IndexSnapshotReader") as reader:
+            with self.assertRaises(ContractError):
+                self.source.read_attribute(self.repo, "/x")
+            reader.return_value.assert_not_called()
+        self.connection.close.assert_called_once()
