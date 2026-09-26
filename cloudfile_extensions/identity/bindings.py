@@ -19,6 +19,20 @@ def conflict():
 
 
 class IdentityBindings:
+    @classmethod
+    def native(cls, *, guard, audit):
+        """Use CE's actual models/state lookup, never an always-active callback.
+
+        Trusted runtime assembly still supplies coordinator/audit adapters; this
+        factory does not enable OIDC, JIT or a public prebinding endpoint.
+        """
+        from seahub.profile.models import Profile
+        from seahub.auth.models import SocialAuthUser
+        from .accounts import NativeAccounts
+        accounts = NativeAccounts(profiles=Profile)
+        return cls(profiles=Profile, social_users=SocialAuthUser,
+                   account_active=accounts.active_username, guard=guard, audit=audit)
+
     def __init__(self, *, profiles, social_users, account_active, guard, audit):
         if not all(callable(value) for value in (account_active, guard, audit)):
             raise ValueError("trusted identity coordinator and audit adapters are required")
