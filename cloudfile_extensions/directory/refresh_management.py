@@ -60,7 +60,14 @@ class UserRefreshManagement:
             if cursor.fetchall() != ((username, user),):
                 return False
             cursor.execute("SELECT email,is_active FROM " + self.state.accounts + " WHERE email=%s FOR UPDATE", (username,))
-            if cursor.fetchall() != ((username, 1),):
+            accounts = cursor.fetchall()
+            if (len(accounts) != 1 or accounts[0][0] != username
+                    or type(accounts[0][1]) is not int or accounts[0][1] not in (0, 1)):
+                return False
+            # An inactive target still needs membership removals and diagnostic
+            # status. This is not a reactivation grant: the native projector
+            # rejects active source projection into an inactive CE account.
+            if user != target and accounts[0][1] != 1:
                 return False
             if self.state.barrier_active(self.state.provider, user):
                 raise ContractError("SUBJECT_UNAVAILABLE", "Refresh scope is fenced", 503)
