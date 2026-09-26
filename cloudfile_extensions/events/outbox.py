@@ -212,8 +212,29 @@ class Outbox:
         # autocommit=True alone does not exclude an explicit BEGIN. Starting a
         # new transaction would implicitly commit a caller's existing work.
         status = getattr(self.connection, "server_status", None)
-        if (not self.connection.get_autocommit() or type(status) is not int or status & 1):
-            raise ContractError("EVENT_TRANSACTION_CONFLICT", "Dedicated idle event connection required", 503)
+        if self.connection.get_autocommit():
+            if type(status) is int:
+                if not status & 1:
+                    return
+            else:
+                # mysqlclient/MySQLdb does not expose the PyMySQL attribute.
+                # Same server semantics as EventWriter's transaction probe:
+                # outside a transaction SAVEPOINT is a no-op and RELEASE gets
+                # ER_SP_DOES_NOT_EXIST(1305). A random name cannot replace a
+                # caller's savepoint. No BEGIN/commit/rollback/DDL is issued.
+                savepoint = "cf_idle_" + uuid4().hex
+                try:
+                    with self.connection.cursor() as sql:
+                        sql.execute("SAVEPOINT " + savepoint)
+                        try:
+                            sql.execute("RELEASE SAVEPOINT " + savepoint)
+                        except Exception as error:
+                            if error.args and type(error.args[0]) is int and error.args[0] == 1305:
+                                return
+                            raise
+                except Exception:
+                    pass  # Unknown transport/probe failure is not idle evidence.
+        raise ContractError("EVENT_TRANSACTION_CONFLICT", "Dedicated idle event connection required", 503)
 
     def claim(self, consumer, owner, *, lease_seconds=30):
         if consumer not in self.CONSUMERS or not isinstance(owner, str) or not re.fullmatch(r"[A-Za-z0-9._-]{1,128}", owner):
