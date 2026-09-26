@@ -28,7 +28,7 @@ def rule_value(value):
         raise invalid("ACL path exceeds budget")
     subject = value["subject"]
     object_fields(subject, ("type", "provider", "namespace", "external_id"))
-    if subject["type"] not in {"user", "dept", "group"}:
+    if not isinstance(subject["type"], str) or subject["type"] not in {"user", "dept", "group"}:
         raise invalid("Invalid ACL subject type")
     for key, item in subject.items():
         identifier(item, maximum=32 if key == "provider" else 255)
@@ -43,9 +43,14 @@ def rule_value(value):
 
 
 class ACLRules:
+    TABLE = "cf_dir_acl"
+    ACTION_PREFIX = "acl"
+    validate = staticmethod(rule_value)
     FIELDS = "id,repo_id,path,path_hash,kind,subject_type,provider,namespace,external_id,subject_hash,permission,inherit,revision"
 
     def __init__(self, connection, *, provider, actor, request_id, authorize, finalize=None):
+        if self.TABLE not in {"cf_dir_acl", "cf_dir_admin"}:
+            raise ValueError("fixed policy table required")
         if not connection.get_autocommit() or not callable(authorize):
             raise ValueError("dedicated connection and transactional management authorization required")
         identifier(provider, maximum=32)
@@ -71,9 +76,9 @@ class ACLRules:
              ("namespace", 255, "utf8mb4_bin"), ("external_id", 255, "utf8mb4_bin"))})
         try:
             with self.connection.cursor() as cursor:
-                cursor.execute("SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_dir_acl'")
+                cursor.execute("SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=%s", (self.TABLE,))
                 if cursor.fetchall() != (("InnoDB",),): raise ValueError()
-                cursor.execute("SELECT column_name,data_type,character_maximum_length,collation_name,is_nullable FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_dir_acl'")
+                cursor.execute("SELECT column_name,data_type,character_maximum_length,collation_name,is_nullable FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name=%s", (self.TABLE,))
                 columns = {row[0]: row[1:] for row in cursor.fetchall()}
                 if any(columns.get(name) != (*shape, "NO") for name, shape in expected.items()):
                     raise ValueError()
@@ -81,7 +86,7 @@ class ACLRules:
                         columns["path"][2:] != ("utf8mb4_bin", "NO") or
                         columns.get("inherit") != ("tinyint", None, None, "NO")):
                     raise ValueError()
-                cursor.execute("SELECT index_name,column_name,seq_in_index,sub_part,non_unique FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_dir_acl' ORDER BY index_name,seq_in_index")
+                cursor.execute("SELECT index_name,column_name,seq_in_index,sub_part,non_unique FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name=%s ORDER BY index_name,seq_in_index", (self.TABLE,))
                 indexes = {}
                 for name, column, order, prefix, non_unique in cursor.fetchall():
                     indexes.setdefault(name, []).append((column, order, prefix, non_unique))
@@ -106,7 +111,7 @@ class ACLRules:
             raise ValueError("invalid stored inheritance")
         try:
             ref = resource_ref(dict(repo_id=repo, path=path, kind=kind))
-            value = rule_value(dict(path=path, kind=kind, subject=dict(type=type_, provider=provider,
+            value = cls.validate(dict(path=path, kind=kind, subject=dict(type=type_, provider=provider,
                 namespace=namespace, external_id=external), permission=permission, inherit=bool(inherit)))
         except ContractError:
             raise ValueError("invalid stored ACL") from None
@@ -130,11 +135,11 @@ class ACLRules:
         try:
             if locking:
                 with self.connection.cursor() as cursor:
-                    cursor.execute("SELECT id FROM cf_dir_acl LIMIT 0 FOR UPDATE")
+                    cursor.execute("SELECT id FROM " + self.TABLE + " LIMIT 0 FOR UPDATE")
                     cursor.fetchall()
                 self._require_storage()
             with self.connection.cursor() as cursor:
-                cursor.execute("SELECT " + self.FIELDS + " FROM cf_dir_acl WHERE repo_id=%s AND path_hash IN (" +
+                cursor.execute("SELECT " + self.FIELDS + " FROM " + self.TABLE + " WHERE repo_id=%s AND path_hash IN (" +
                     ",".join(["%s"] * len(paths)) + ") AND (kind='dir' OR (kind=%s AND path_hash=%s)) ORDER BY path_hash,id LIMIT 4097" + (" FOR UPDATE" if locking else ""),
                     (ref["repo_id"], *(digest(path) for path in paths), ref["kind"], digest(ref["path"])))
                 rows = cursor.fetchall()
@@ -160,7 +165,7 @@ class ACLRules:
         if len(ref["path"].encode()) > 4096 or len(ref["path"].split("/")) > 130:
             raise invalid("ACL path exceeds budget")
         if value is not None:
-            value = rule_value(value)
+            value = self.validate(value)
             if (value["path"], value["kind"]) != (ref["path"], ref["kind"]):
                 raise invalid("ACL target mismatch")
         if rule_id is not None:
@@ -182,7 +187,7 @@ class ACLRules:
                             raise ContractError("ACCESS_DENIED", "ACL management is not allowed", 403)
                         previous = None
                         if rule_id is not None:
-                            cursor.execute("SELECT " + self.FIELDS + " FROM cf_dir_acl WHERE repo_id=%s AND id=%s FOR UPDATE",
+                            cursor.execute("SELECT " + self.FIELDS + " FROM " + self.TABLE + " WHERE repo_id=%s AND id=%s FOR UPDATE",
                                            (ref["repo_id"], rule_id))
                             rows = cursor.fetchall()
                             if not rows:
@@ -195,7 +200,7 @@ class ACLRules:
                         id_ = rule_id or str(uuid4())
                         revision = str(uuid4())
                         if value is None:
-                            cursor.execute("DELETE FROM cf_dir_acl WHERE id=%s AND repo_id=%s", (id_, ref["repo_id"]))
+                            cursor.execute("DELETE FROM " + self.TABLE + " WHERE id=%s AND repo_id=%s", (id_, ref["repo_id"]))
                             if cursor.rowcount != 1: raise ValueError()
                             result = dict(id=id_, deleted=True)
                         else:
@@ -204,17 +209,17 @@ class ACLRules:
                                 s["namespace"], s["external_id"], self._subject_hash(s), value["permission"],
                                 int(value["inherit"]), revision)
                             if previous is None:
-                                cursor.execute("INSERT INTO cf_dir_acl(" + self.FIELDS + ") VALUES(" +
+                                cursor.execute("INSERT INTO " + self.TABLE + "(" + self.FIELDS + ") VALUES(" +
                                     ",".join(["%s"] * 13) + ")", (id_, ref["repo_id"], *fields))
                             else:
-                                cursor.execute("UPDATE cf_dir_acl SET path=%s,path_hash=%s,kind=%s,subject_type=%s,provider=%s,namespace=%s,external_id=%s,subject_hash=%s,permission=%s,inherit=%s,revision=%s WHERE id=%s AND repo_id=%s",
+                                cursor.execute("UPDATE " + self.TABLE + " SET path=%s,path_hash=%s,kind=%s,subject_type=%s,provider=%s,namespace=%s,external_id=%s,subject_hash=%s,permission=%s,inherit=%s,revision=%s WHERE id=%s AND repo_id=%s",
                                     (*fields, id_, ref["repo_id"]))
                                 if cursor.rowcount != 1: raise ValueError()
                             result = dict(id=id_, repo_id=ref["repo_id"], **value, revision=revision, etag='"' + revision + '"')
                         self.events.append(cursor, dict(event_id=str(uuid4()), request_id=self.request_id,
                             occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                             actor_user_id=self.actor, actor_kind="user", source="hub",
-                            action="acl.deleted" if value is None else "acl.updated" if previous else "acl.created",
+                            action=self.ACTION_PREFIX + (".deleted" if value is None else ".updated" if previous else ".created"),
                             result="succeeded", repo_id=ref["repo_id"], path=ref["path"], policy_revision=revision))
                         if self.finalize is not None:
                             self.finalize(cursor)

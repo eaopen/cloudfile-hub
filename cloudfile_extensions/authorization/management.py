@@ -7,6 +7,7 @@ from ..common.errors import ContractError
 from ..directory.preparation import SubjectPreparation
 from .core import PolicyCore
 from .rules import ACLRules
+from .admins import DirectoryAdmins
 
 
 class LibraryOwnerManagement:
@@ -20,6 +21,8 @@ class LibraryOwnerManagement:
         self.rules = ACLRules(self.state.connection, provider=self.state.provider,
             actor=self.actor, request_id=request_id, authorize=self.authorize,
             finalize=self.finalize)
+        self.admins = DirectoryAdmins(self.state.connection, provider=self.state.provider,
+            actor=self.actor, request_id=request_id, authorize=self.authorize, finalize=self.finalize)
 
     def authorize(self, cursor, actor, reference):
         if actor != self.actor:
@@ -81,5 +84,13 @@ class LibraryOwnerManagement:
         self.epoch = None
         try:
             return self.rules.mutate(reference, **arguments)
+        finally:
+            self.epoch = None
+
+    def mutate_admin(self, reference, **arguments):
+        self.preparation.prepare(self.actor)
+        self.epoch = None
+        try:
+            return self.admins.mutate(reference, **arguments)
         finally:
             self.epoch = None
