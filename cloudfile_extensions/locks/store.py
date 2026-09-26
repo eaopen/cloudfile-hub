@@ -6,6 +6,7 @@ from uuid import UUID
 
 from ..common.errors import ContractError
 from ..common.validation import identifier
+from .storage import require_storage
 
 
 class LockLeaseStore:
@@ -20,6 +21,7 @@ class LockLeaseStore:
             raise ValueError("canonical resource/library required")
         sql.execute("SAVEPOINT cf_lock_transaction")
         sql.execute("RELEASE SAVEPOINT cf_lock_transaction")
+        require_storage(sql)
 
     @staticmethod
     def _holder(actor, holder, token, seconds):

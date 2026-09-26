@@ -60,6 +60,9 @@ class FileLockService:
             actor=self.resources.write_authority.actor, operation=operation, key=key,
             request=protected, lifecycle=evidence.lifecycle_ref, secret=self.resources.store.secret,
             mutate=lambda: (mutate(), True))
+        row = self.resources.store._row(ref, evidence, locking=True)
+        if (row is None or receipt.get("resource_uid") != row["uid"] or receipt.get("resource") != ref):
+            raise ContractError("LOCK_CONFLICT", "Saved lease receipt does not match current resource", 409)
         # A saved success can outlive its lease. Return a current locked status
         # separately instead of promoting the old receipt into a write grant.
         current = self.leases.status(sql, resource_uid=receipt["resource_uid"], repo_id=ref["repo_id"])
