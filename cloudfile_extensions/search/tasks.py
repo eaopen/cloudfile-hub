@@ -4,7 +4,7 @@ import re
 from urllib.parse import urlsplit
 from urllib.request import Request
 
-from .documents import document_key
+from .documents import INDEX_SETTINGS, document_key
 from .meilisearch import MeilisearchCandidates, _object, unavailable
 
 
@@ -15,6 +15,7 @@ class MeilisearchTasks(MeilisearchCandidates):
         self.index_url = self.url.rsplit("/", 1)[0]
         parsed = urlsplit(self.url)
         self.task_url = parsed.scheme + "://" + parsed.netloc + "/tasks/"
+        self.indexes_url = parsed.scheme + "://" + parsed.netloc + "/indexes"
 
     def _request(self, url, *, method, data=None, status):
         try:
@@ -62,8 +63,39 @@ class MeilisearchTasks(MeilisearchCandidates):
         value = self._request(self.index_url + "/documents/delete-batch", method="POST", data=keys, status=202)
         return self._accepted(value, "documentDeletion")
 
+    def create_index(self):
+        """Explicit fixed physical index; existing-index failure is not success.
+
+        The trusted initialization coordinator must persist intent before this
+        call and its receipt afterwards. This method never retries or adopts an
+        existing index, and does not mark a generation ready.
+        """
+        value = self._request(self.indexes_url, method="POST",
+            data=dict(uid=self.index, primaryKey="id"), status=202)
+        return self._accepted(value, "indexCreation")
+
+    def configure_index(self):
+        # No caller-defined settings, raw filters, project attributes or wildcard
+        # displayed fields. Copy lists so transport cannot mutate the constants.
+        settings = {key: list(values) for key, values in INDEX_SETTINGS.items()}
+        value = self._request(self.index_url + "/settings", method="PATCH", data=settings, status=202)
+        return self._accepted(value, "settingsUpdate")
+
+    def require_configuration(self):
+        """Current physical identity/settings check, not publication proof."""
+        identity = self._request(self.index_url, method="GET", status=200)
+        if identity.get("uid") != self.index or identity.get("primaryKey") != "id":
+            raise unavailable()
+        settings = self._request(self.index_url + "/settings", method="GET", status=200)
+        for key, expected in INDEX_SETTINGS.items():
+            actual = settings.get(key)
+            if (not isinstance(actual, list) or any(not isinstance(value, str) for value in actual) or
+                    len(actual) != len(expected) or
+                    (actual != expected if key == "searchableAttributes" else set(actual) != set(expected))):
+                raise unavailable()
+
     def task_status(self, task_id, *, task_type):
-        if type(task_id) is not int or not 0 <= task_id <= 2 ** 63 - 1 or task_type not in ("documentAdditionOrUpdate", "documentDeletion"):
+        if type(task_id) is not int or not 0 <= task_id <= 2 ** 63 - 1 or task_type not in ("documentAdditionOrUpdate", "documentDeletion", "indexCreation", "settingsUpdate"):
             raise ValueError("exact persisted task identity required")
         value = self._request(self.task_url + str(task_id), method="GET", status=200)
         if (type(value.get("uid")) is not int or value["uid"] != task_id or value.get("indexUid") != self.index or
