@@ -52,6 +52,23 @@ class ProvisioningTest(DatabaseTestCase):
         self.pipeline = ProvisioningJobs(JobStore(self.connection), jit, preparation_factory=preparation)
         self.worker = JobWorker(self.pipeline.store, owner="jit-test", handlers={self.pipeline.KIND: self.pipeline.handler})
 
+    def test_epoch_invalidated_after_projection_does_not_complete_provisioning(self):
+        original_factory = self.pipeline.factory
+        def factory(user):
+            preparation = original_factory(user)
+            original_prepare = preparation.prepare
+            def prepare(*args, **kwargs):
+                value = original_prepare(*args, **kwargs)
+                # Inject invalidation only after actual SQL/Redis projection.
+                preparation.contexts.current = lambda _: None
+                return value
+            preparation.prepare = prepare
+            return preparation
+        self.pipeline.factory = factory
+        job, _ = self.pipeline.submit(self.claims)
+        self.worker.run_once()
+        self.assertEqual(self.pipeline.store.get(job)["status"], "failed")
+
     def tearDown(self):
         keys = list(self.redis.scan_iter(match=self.prefix + "*"))
         if keys:

@@ -149,6 +149,17 @@ class ProvisioningJobs:
         preparation.contexts.refresh_guard = refresh_guard
         try:
             value = preparation.prepare(user_id, trigger="force")
+            # A completed projection is not proof that its epoch remains ready:
+            # a concurrent refresh/suspension may invalidate it before the job
+            # checkpoint. Pending status is diagnostic, never a session grant.
+            current = preparation.contexts.current(user_id)
+            username = self.jit.bindings.resolve(issuer=claim.request["issuer"],
+                subject=claim.request["sub"], user_id=user_id)
+            if (current is None or current["context_epoch"] != value["context_epoch"]
+                    or username is None or preparation.state.username(user_id) != username):
+                raise ContractError("IDENTITY_UNAVAILABLE", "Provisioned subject changed before completion", 503)
+            with self.store.connection.cursor() as cursor:
+                assert_claim(cursor)
             execution.checkpoint(step="subject_prepared", value={"context_epoch": value["context_epoch"]})
         finally:
             preparation.projector.assert_generation = original_assertion
