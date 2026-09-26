@@ -3,6 +3,7 @@ import unittest
 
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.directory.memberships import plan_memberships
+from cloudfile_extensions.directory.organizations import OrganizationNode, effective_organizations
 
 
 class MembershipTest(unittest.TestCase):
@@ -55,6 +56,17 @@ class MembershipTest(unittest.TestCase):
         self.assertEqual(self.plan(()).add, (1, 2))
         plan = self.plan((1, 2, 4, 99))
         self.assertEqual((plan.add, plan.remove), ((), ()))
+
+    def test_effective_ancestors_feed_exact_mapping_plan(self):
+        nodes = [OrganizationNode("dept", "d1", "dept", "parent", True),
+                 OrganizationNode("dept", "parent", None, None, True)]
+        expanded = effective_organizations(self.subject["organizations"], nodes)
+        self.assertEqual(len(self.subject["organizations"]), 1)
+        self.maps.append(self.mapping("dept", "dept", "parent", 5))
+        prepared = {**self.subject, "organizations": expanded}
+        plan = plan_memberships(prepared, user_id="u1", provider_id="directory",
+                                mappings=self.maps, current_groups=(3, 4, 99), attribute_allowlist=())
+        self.assertEqual((plan.add, plan.remove, plan.unmanaged), ((1, 2, 5), (3,), (4, 99)))
 
     def test_namespace_and_case_are_exact_not_display_names(self):
         self.subject["roles"][0]["namespace"] = "Role"
