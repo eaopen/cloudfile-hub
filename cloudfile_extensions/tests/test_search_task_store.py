@@ -9,6 +9,7 @@ from cloudfile_extensions.schema.runner import SchemaRunner
 from cloudfile_extensions.search.task_store import SearchTaskStore
 from cloudfile_extensions.search.generations import SearchGenerationStore
 from cloudfile_extensions.search.initialization import SearchInitializationStore
+from cloudfile_extensions.search.rebuild_store import SearchRebuildStore
 from cloudfile_extensions.search.fanout_store import SearchFanoutStore
 from cloudfile_extensions.search.fanout_execution import SearchFanoutExecution
 from cloudfile_extensions.search.documents import resource_document
@@ -77,6 +78,21 @@ class SearchTaskStoreTest(DatabaseTestCase):
             self.store.dispatch(self.claim, generation="index", step=0, index="resources", send=send)
         send.assert_called_once()
         self.assertEqual(self.store.prepare(self.claim, generation="index", step=0, payload_hash="a" * 64), dict(state="submitting", task_id=None))
+
+    def test_scanning_blocks_actual_incremental_intent_without_poisoning_task(self):
+        self.store.prepare(self.claim, generation="index", step=0, payload_hash="a" * 64)
+        SearchRebuildStore(self.connection).start(generation="index", index="resources", repo_id="11111111-1111-4111-8111-111111111111", commit_id="a" * 40, source_sequence="0")
+        with self.assertRaises(ContractError) as caught:
+            self.store.mark_dispatch_intent(self.claim, generation="index", step=0, index="resources")
+        self.assertEqual(caught.exception.code, "SEARCH_REBUILD_PENDING")
+        self.assertEqual(self.store.prepare(self.claim, generation="index", step=0, payload_hash="a" * 64), dict(state="prepared", task_id=None))
+
+    def test_pending_incremental_intent_prevents_rebuild_start(self):
+        self.store.prepare(self.claim, generation="index", step=0, payload_hash="a" * 64)
+        self.store.mark_dispatch_intent(self.claim, generation="index", step=0, index="resources")
+        with self.assertRaises(ContractError) as caught:
+            SearchRebuildStore(self.connection).start(generation="index", index="resources", repo_id="11111111-1111-4111-8111-111111111111", commit_id="a" * 40, source_sequence="0")
+        self.assertEqual(caught.exception.code, "SEARCH_TASK_PENDING")
 
     def test_exact_successful_plan_acknowledges_without_resource_ack(self):
         self.succeeded(0, "a" * 64)

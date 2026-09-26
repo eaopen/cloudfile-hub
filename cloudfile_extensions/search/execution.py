@@ -37,7 +37,7 @@ class SearchStepExecution:
         if state == "submitting":
             raise ContractError("SEARCH_SUBMISSION_UNKNOWN", "Search submission requires reconciliation", 503)
         if state == "prepared":
-            self.store.mark_submitting(claim, **identity)
+            self.store.mark_dispatch_intent(claim, index=self.client.index, **identity)
             # Timeout/accepted-but-not-persisted leaves durable submitting.
             # Never retry this call automatically, even after a new lease.
             task_id = self.store.dispatch(claim, index=self.client.index,

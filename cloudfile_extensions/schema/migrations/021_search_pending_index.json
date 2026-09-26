@@ -1,0 +1,8 @@
+{
+  "version": "021_search_pending_index",
+  "steps": [{
+    "sql": "ALTER TABLE cf_search_task ADD INDEX generation_pending(index_generation,state,event_id)",
+    "verify": "SELECT IF((SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_search_task' AND index_name='generation_pending' AND sub_part IS NULL)='index_generation,state,event_id',1,0)",
+    "expected": 1
+  }]
+}

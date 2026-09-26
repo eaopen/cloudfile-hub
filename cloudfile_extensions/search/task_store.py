@@ -10,6 +10,7 @@ from ..common.errors import ContractError
 from ..events.outbox import EventClaim
 from .generations import SearchGenerationStore
 from .initialization import SearchInitializationStore
+from ..tags.definitions import uuid_value
 
 
 class SearchTaskStore:
@@ -68,6 +69,36 @@ class SearchTaskStore:
         # Commit before the one network dispatch. Never reset submitting here.
         self._transition(claim, generation, step, "prepared", "submitting")
 
+    def _incremental_gate(self, sql, claim, generation):
+        # Read the actual locked event stream, not a caller-selected repository.
+        sql.execute("SELECT stream FROM cf_event_outbox WHERE event_id=%s FOR UPDATE", (claim.event_id,))
+        row = sql.fetchone()
+        if row is None or not isinstance(row[0], str):
+            raise ContractError("SEARCH_PLAN_CONFLICT", "Search event stream is invalid", 409)
+        stream = row[0]
+        if stream.startswith("repo."):
+            repo = uuid_value(stream[5:])
+            sql.execute("SELECT state FROM cf_search_rebuild WHERE generation=%s AND repo_id=%s FOR UPDATE", (generation, repo))
+            rebuild = sql.fetchone()
+            if rebuild is not None and rebuild[0] != "scanned":
+                raise ContractError("SEARCH_REBUILD_PENDING", "Library rebuild must finish before incremental writes", 503)
+        elif stream == "security":
+            sql.execute("SELECT repo_id FROM cf_search_rebuild WHERE generation=%s AND state<>'scanned' LIMIT 1 FOR UPDATE", (generation,))
+            if sql.fetchone() is not None:
+                raise ContractError("SEARCH_REBUILD_PENDING", "Global incremental writes wait for rebuild", 503)
+        else:
+            raise ContractError("SEARCH_PLAN_CONFLICT", "Search event stream is invalid", 409)
+
+    def mark_dispatch_intent(self, claim, *, generation, step, index):
+        key = self._key(claim, generation, step)
+        with self._owned(claim) as sql:
+            SearchGenerationStore(self.connection).require_dispatch(sql, generation, index)
+            SearchInitializationStore(self.connection).require_complete(sql, generation, index)
+            self._incremental_gate(sql, claim, generation)
+            sql.execute("UPDATE cf_search_task SET state='submitting',updated_at=UTC_TIMESTAMP(6) WHERE event_id=%s AND index_generation=%s AND step=%s AND state='prepared' AND task_id IS NULL", key)
+            if sql.rowcount != 1:
+                raise ContractError("SEARCH_TASK_CONFLICT", "Search dispatch intent is not current", 409)
+
     def record_task(self, claim, *, generation, step, task_id):
         if type(task_id) is not int or not 0 <= task_id <= 2 ** 63 - 1:
             raise ValueError("exact accepted task id required")
@@ -88,6 +119,7 @@ class SearchTaskStore:
         with self._owned(claim) as sql:
             registry.require_dispatch(sql, generation, index)
             SearchInitializationStore(self.connection).require_complete(sql, generation, index)
+            self._incremental_gate(sql, claim, generation)
             sql.execute("SELECT state,task_id FROM cf_search_task WHERE event_id=%s AND index_generation=%s AND step=%s FOR UPDATE", key)
             if sql.fetchone() != ("submitting", None):
                 raise ContractError("SEARCH_TASK_CONFLICT", "Search dispatch intent is not current", 409)
@@ -105,6 +137,7 @@ class SearchTaskStore:
         with self._owned(claim) as sql:
             SearchGenerationStore(self.connection).require_dispatch(sql, generation, index)
             SearchInitializationStore(self.connection).require_complete(sql, generation, index)
+            self._incremental_gate(sql, claim, generation)
 
     def record_succeeded(self, claim, *, generation, step):
         # Caller must have checked exact uid/index/type succeeded via task API.

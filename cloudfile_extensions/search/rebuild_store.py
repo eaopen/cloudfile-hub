@@ -40,6 +40,11 @@ class SearchRebuildStore:
         if not isinstance(commit_id, str) or not re.fullmatch(r"[0-9a-f]{40}", commit_id):
             raise ValueError("fixed native commit required")
         with self._owned(generation, index) as sql:
+            # Serialized with incremental intent/dispatch on the generation row.
+            # Accepted or uncertain writes must finish/reconcile before scanning.
+            sql.execute("SELECT event_id FROM cf_search_task FORCE INDEX(generation_pending) WHERE index_generation=%s AND state IN ('submitting','submitted') LIMIT 1 FOR UPDATE", (generation,))
+            if sql.fetchone() is not None:
+                raise ContractError("SEARCH_TASK_PENDING", "Existing index writes must finish before rebuilding", 409)
             sql.execute("INSERT INTO cf_search_rebuild(generation,repo_id,commit_id,source_sequence,state,updated_at) VALUES(%s,%s,%s,%s,'scanning',UTC_TIMESTAMP(6)) ON DUPLICATE KEY UPDATE generation=generation", (generation, ref["repo_id"], commit_id, source_sequence))
             sql.execute("SELECT commit_id,source_sequence,state FROM cf_search_rebuild WHERE generation=%s AND repo_id=%s FOR UPDATE", (generation, ref["repo_id"]))
             if sql.fetchone() != (commit_id, source_sequence, "scanning"):

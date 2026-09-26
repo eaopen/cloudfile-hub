@@ -30,7 +30,7 @@ class SearchExecutionTest(TestCase):
         with self.assertRaises(ContractError):
             self.execution.advance(self.claim, **self.options)
         self.store.prepare.assert_not_called()
-        self.store.mark_submitting.assert_not_called()
+        self.store.mark_dispatch_intent.assert_not_called()
         self.store.dispatch.assert_not_called()
 
     def test_existing_task_is_polled_not_dispatched_again(self):
@@ -45,7 +45,7 @@ class SearchExecutionTest(TestCase):
         self.client.delete_documents.return_value = 7
         self.client.task_status.return_value = "succeeded"
         self.assertTrue(self.execution.advance(self.claim, **self.options))
-        self.store.mark_submitting.assert_called_once()
+        self.store.mark_dispatch_intent.assert_called_once()
         self.store.dispatch.assert_called_once()
         self.store.record_task.assert_not_called()
         self.store.record_succeeded.assert_called_once()
