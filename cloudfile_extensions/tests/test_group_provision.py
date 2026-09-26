@@ -18,6 +18,7 @@ class GroupProvisionTest(DatabaseTestCase):
         with self.admin.cursor() as cursor:
             cursor.execute("CREATE DATABASE " + self.native)
             cursor.execute("CREATE TABLE " + self.native + ".`Group`(group_id BIGINT PRIMARY KEY AUTO_INCREMENT,group_name VARCHAR(255),creator_name VARCHAR(255),timestamp BIGINT,type VARCHAR(32),parent_group_id INT) ENGINE=InnoDB")
+            cursor.execute("CREATE TABLE " + self.native + ".GroupStructure(id BIGINT PRIMARY KEY AUTO_INCREMENT,group_id INT UNIQUE,path VARCHAR(1024)) ENGINE=InnoDB")
         with self.connection.cursor() as cursor:
             cursor.execute("CREATE TABLE cf_probe_group_audit(group_id INT PRIMARY KEY) ENGINE=InnoDB")
         self.writer = self.writer_for(self.connection)
@@ -93,6 +94,51 @@ class GroupProvisionTest(DatabaseTestCase):
             self.writer.ensure(**self.request)
         self.assertEqual(caught.exception.status, 403)
         self.assertEqual(self.counts(), (0, 0, 0))
+
+    def test_department_root_child_and_retry_keep_native_structure(self):
+        root, created = self.writer.ensure_department(**self.request)
+        self.assertTrue(created)
+        child = {**self.request, "external_id": "child", "parent": "r1"}
+        group, created = self.writer.ensure_department(**child)
+        self.assertTrue(created)
+        self.assertEqual(self.writer.ensure_department(**child), (group, False))
+        with self.admin.cursor() as cursor:
+            cursor.execute("SELECT path FROM " + self.native + ".GroupStructure WHERE group_id=%s", (group,))
+            self.assertEqual(cursor.fetchone()[0], f"{root}, {group}")
+        self.assertEqual(self.counts(), (2, 2, 2))
+
+    def test_missing_alias_parent_and_reparenting_rejected(self):
+        with self.assertRaises(ContractError):
+            self.writer.ensure_department(**self.request, parent="missing")
+        self.writer.ensure_department(**self.request)
+        with self.assertRaises(ContractError):
+            self.writer.ensure_department(**{**self.request, "external_id": "child"}, parent="r1 ")
+        with self.assertRaises(ContractError):
+            self.writer.ensure_department(**self.request, parent="missing")
+        self.assertEqual(self.counts(), (1, 1, 1))
+
+    def test_department_audit_failure_rolls_back_structure_too(self):
+        def fail(cursor, event):
+            raise RuntimeError("failed audit")
+        self.writer.audit = fail
+        with self.assertRaises(ContractError):
+            self.writer.ensure_department(**self.request)
+        self.assertEqual(self.counts(), (0, 0, 0))
+        with self.admin.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM " + self.native + ".GroupStructure")
+            self.assertEqual(cursor.fetchone()[0], 0)
+
+    def test_department_structure_drift_and_nontransactional_table_rejected(self):
+        root, _ = self.writer.ensure_department(**self.request)
+        with self.admin.cursor() as cursor:
+            cursor.execute("UPDATE " + self.native + ".GroupStructure SET path='999' WHERE group_id=%s", (root,))
+        with self.assertRaises(ContractError):
+            self.writer.ensure_department(**{**self.request, "external_id": "child"}, parent="r1")
+        with self.admin.cursor() as cursor:
+            cursor.execute("ALTER TABLE " + self.native + ".GroupStructure ENGINE=MyISAM")
+        with self.assertRaises(ContractError):
+            self.writer.ensure_department(**{**self.request, "external_id": "another"})
+        self.assertEqual(self.counts(), (1, 1, 1))
 
     def test_deleted_or_repurposed_native_group_is_not_recreated(self):
         group, _ = self.writer.ensure(**self.request)
