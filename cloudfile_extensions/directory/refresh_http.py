@@ -24,7 +24,7 @@ class UserRefreshView(DirectoryPolicyView):
         try:
             expected = "GET" if self.operation == "status" else "POST"
             wanted = set() if self.operation == "submit" else {"job_id"}
-            if (self.operation not in {"submit", "status", "retry"} or request.method != expected
+            if (self.operation not in {"submit", "status", "retry", "cancel"} or request.method != expected
                     or args or set(kwargs) != wanted):
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed for this refresh target", 405)
             if not request.is_secure():
@@ -37,7 +37,7 @@ class UserRefreshView(DirectoryPolicyView):
                 raise invalid("Machine refresh does not accept browser cookies")
             if self.authentication_mode == "service" and not request.headers.get("Authorization", "").startswith("Bearer "):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Machine Bearer authentication is required", 401)
-            if self.operation in {"submit", "retry"}:
+            if self.operation in {"submit", "retry", "cancel"}:
                 if self.authentication_mode == "session":
                     csrf = CsrfViewMiddleware(lambda _: None)
                     csrf.process_request(request)
@@ -52,7 +52,7 @@ class UserRefreshView(DirectoryPolicyView):
                 body = self._body(request)
             elif request.read(1):
                 raise invalid("Refresh status and retry take no body")
-            if self.operation == "retry":
+            if self.operation in {"retry", "cancel"}:
                 condition = request.headers.get("If-Match")
                 if condition is None:
                     raise ContractError("PRECONDITION_REQUIRED", "If-Match is required", 428)
@@ -74,8 +74,9 @@ class UserRefreshView(DirectoryPolicyView):
                     # must use the same idempotency key and request.
                     result, etag = service.status(job_id, with_condition=True)
                     status = 202 if created else 200
-                elif self.operation == "retry":
-                    result, etag = service.retry_failed(str(kwargs["job_id"]),
+                elif self.operation in {"retry", "cancel"}:
+                    transition = service.cancel if self.operation == "cancel" else service.retry_failed
+                    result, etag = transition(str(kwargs["job_id"]),
                         expected_attempt=int(match[1]), with_condition=True)
                 else:
                     result, etag = service.status(str(kwargs["job_id"]), with_condition=True)
@@ -102,6 +103,10 @@ class UserRefreshRetryView(UserRefreshView):
     operation = "retry"
 
 
+class UserRefreshCancelView(UserRefreshView):
+    operation = "cancel"
+
+
 def user_refresh_routes(*, service_factory):
     if not callable(service_factory):
         raise ValueError("trusted owned native-session refresh factory required")
@@ -109,6 +114,7 @@ def user_refresh_routes(*, service_factory):
         path("v1/refreshes/", UserRefreshView.as_view(service_factory=service_factory), name="cloudfile-user-refresh-submit"),
         path("v1/refreshes/<uuid:job_id>/", UserRefreshStatusView.as_view(service_factory=service_factory), name="cloudfile-user-refresh-status"),
         path("v1/refreshes/<uuid:job_id>/retry/", UserRefreshRetryView.as_view(service_factory=service_factory), name="cloudfile-user-refresh-retry"),
+        path("v1/refreshes/<uuid:job_id>/cancel/", UserRefreshCancelView.as_view(service_factory=service_factory), name="cloudfile-user-refresh-cancel"),
     ]
 
 
@@ -126,6 +132,10 @@ class MachineUserRefreshRetryView(MachineUserRefreshView):
     operation = "retry"
 
 
+class MachineUserRefreshCancelView(MachineUserRefreshView):
+    operation = "cancel"
+
+
 def machine_user_refresh_routes(*, service_factory):
     """Mount instead of session routes at this scope, never fallback to Cookie."""
     if not callable(service_factory):
@@ -134,4 +144,5 @@ def machine_user_refresh_routes(*, service_factory):
         path("v1/refreshes/", MachineUserRefreshView.as_view(service_factory=service_factory), name="cloudfile-machine-refresh-submit"),
         path("v1/refreshes/<uuid:job_id>/", MachineUserRefreshStatusView.as_view(service_factory=service_factory), name="cloudfile-machine-refresh-status"),
         path("v1/refreshes/<uuid:job_id>/retry/", MachineUserRefreshRetryView.as_view(service_factory=service_factory), name="cloudfile-machine-refresh-retry"),
+        path("v1/refreshes/<uuid:job_id>/cancel/", MachineUserRefreshCancelView.as_view(service_factory=service_factory), name="cloudfile-machine-refresh-cancel"),
     ]

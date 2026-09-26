@@ -161,6 +161,15 @@ class UserRefreshManagement:
 
     def retry_failed(self, job_id, *, expected_attempt, with_condition=False):
         """Internal conditional recovery; never resurrect cancelled work."""
+        return self._transition(job_id, expected_attempt=expected_attempt,
+            with_condition=with_condition, cancel=False)
+
+    def cancel(self, job_id, *, expected_attempt, with_condition=False):
+        """Fence this attempt without undoing already published subject data."""
+        return self._transition(job_id, expected_attempt=expected_attempt,
+            with_condition=with_condition, cancel=True)
+
+    def _transition(self, job_id, *, expected_attempt, with_condition, cancel):
         if type(expected_attempt) is not int or not 0 <= expected_attempt <= 2 ** 63 - 1:
             raise ContractError("INVALID_REQUEST", "Invalid refresh attempt condition", 400)
         previous = self._job(job_id)
@@ -174,14 +183,16 @@ class UserRefreshManagement:
             cursor.execute("SELECT lease_epoch,status FROM cf_background_job WHERE job_id=%s FOR UPDATE",
                 (previous["job_id"],))
             rows = cursor.fetchall()
-            if len(rows) != 1 or rows[0][0] != expected_attempt or rows[0][1] not in {"failed", "queued"}:
-                raise ContractError("PRECONDITION_FAILED", "Refresh attempt changed or cannot be retried", 412)
+            allowed = {"queued", "running", "failed", "cancelled"} if cancel else {"failed", "queued"}
+            if len(rows) != 1 or rows[0][0] != expected_attempt or rows[0][1] not in allowed:
+                raise ContractError("PRECONDITION_FAILED", "Refresh attempt changed or transition is unavailable", 412)
             current = self._job(previous["job_id"])
             if (current["scope"] != scope or current["actor"] != previous["actor"]
                     or current["actor_kind"] != previous["actor_kind"]):
                 raise ContractError("SUBJECT_UNAVAILABLE", "Refresh scope changed", 503)
             return True
         with scope_locks(self.jobs.connection, scopes):
-            self.jobs.retry_failed(previous["job_id"], actor=self.actor_id, actor_kind=self.actor_kind,
+            transition = self.jobs.cancel if cancel else self.jobs.retry_failed
+            transition(previous["job_id"], actor=self.actor_id, actor_kind=self.actor_kind,
                 authorize_transaction=authorize)
         return self.status(previous["job_id"], with_condition=with_condition)

@@ -195,10 +195,11 @@ class JobStore:
                 self._record(cursor, self.get(claim.job_id), action="job.failed", result="failed",
                              actor=claim.owner, actor_kind="service", source="worker")
 
-    def cancel(self, job_id, *, actor, actor_kind):
+    def cancel(self, job_id, *, actor, actor_kind, authorize_transaction=None):
         # The management caller must authorize the exact job scope before calling.
         return self._management_transition(job_id, status="cancelled", allowed=("queued", "running", "failed"),
-                                           actor=actor, actor_kind=actor_kind, action="job.cancelled")
+                                           actor=actor, actor_kind=actor_kind, action="job.cancelled",
+                                           authorize_transaction=authorize_transaction)
 
     def retry(self, job_id, *, actor, actor_kind):
         return self._management_transition(job_id, status="queued", allowed=("failed", "cancelled"),
