@@ -12,10 +12,11 @@ def post_worker_init(worker):
     global _host
     from django.conf import settings
     local_edit_enabled = getattr(settings, "CLOUDFILE_LOCAL_EDIT_ENABLED", False)
+    authorization_enabled = getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False)
     config = getattr(settings, "CLOUDFILE_POLICY_CONFIG", None)
     if config is None:
-        if local_edit_enabled:
-            raise RuntimeError("CloudFile local edit requires the post-fork policy worker")
+        if local_edit_enabled or authorization_enabled:
+            raise RuntimeError("enabled CloudFile routes require the post-fork policy worker")
         _host = None
         return
     if _host is not None and _host.pid == os.getpid():
@@ -33,11 +34,14 @@ def post_worker_init(worker):
             audit_result_root=getattr(settings, "CLOUDFILE_AUDIT_RESULT_ROOT", None),
             refresh_service_verifier=getattr(settings, "CLOUDFILE_REFRESH_SERVICE_VERIFIER", None),
             refresh_provider_grants=getattr(settings, "CLOUDFILE_REFRESH_PROVIDER_GRANTS", None),
+            delegation_service_verifier=getattr(settings, "CLOUDFILE_DELEGATION_SERVICE_VERIFIER", None),
+            delegation_signing_keys=getattr(settings, "CLOUDFILE_DELEGATION_SIGNING_KEYS", None),
             oidc=getattr(settings, "CLOUDFILE_OIDC_CONFIG", None),
             oidc_jit_enabled=getattr(settings, "CLOUDFILE_OIDC_JIT_ENABLED", False),
             local_edit_instance=getattr(settings, "CLOUDFILE_LOCAL_EDIT_INSTANCE", None),
             local_edit_version_reader=getattr(settings, "CLOUDFILE_LOCAL_EDIT_VERSION_READER", None),
-            local_edit_enabled=local_edit_enabled)
+            local_edit_enabled=local_edit_enabled,
+            authorization_enabled=authorization_enabled)
     except Exception:
         raise RuntimeError("CloudFile policy worker initialization failed; check trusted configuration") from None
 
@@ -85,6 +89,12 @@ def machine_refresh_service(request, request_id):
     if _host is None or _host.pid != os.getpid():
         raise ContractError("SUBJECT_UNAVAILABLE", "Refresh worker is unavailable", 503)
     return _host.machine_refresh_service(request, request_id)
+
+
+def delegation_issue_service(request, request_id, user_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("POLICY_UNAVAILABLE", "Delegation issuance worker is unavailable", 503)
+    return _host.delegation_issue_service(request, request_id, user_id)
 
 
 def local_session_service(request, request_id):

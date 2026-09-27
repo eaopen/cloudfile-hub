@@ -67,6 +67,19 @@ class LocalEditHostTest(unittest.TestCase):
                 resource_secret=b"s" * 32, lifecycle_reader=Mock(),
                 local_edit_instance="https://cloudfile.invalid/", local_edit_version_reader="invalid")
 
+    def test_delegation_runtime_requires_verifier_and_keys_together(self):
+        with self.assertRaisesRegex(ValueError, "delegation verifier and signing keys"):
+            configure_policy(self.config(), directory_authorization=Mock(),
+                delegation_service_verifier=Mock())
+        with self.assertRaisesRegex(ValueError, "delegation verifier and signing keys"):
+            configure_policy(self.config(), directory_authorization=Mock(),
+                delegation_signing_keys={"login": object()})
+
+    def test_enabled_authorization_requires_both_machine_runtimes_before_redis(self):
+        with self.assertRaisesRegex(ValueError, "refresh and delegation service runtimes"):
+            configure_policy(self.config(), directory_authorization=Mock(),
+                authorization_enabled=True)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,8 +11,10 @@ class PolicyHost:
     def __init__(self, settings, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
                  audit_secret=None, audit_redact=None, audit_result_root=None,
                  refresh_service_verifier=None, refresh_provider_grants=None,
+                 delegation_service_verifier=None, delegation_signing_keys=None,
                  oidc=None, oidc_jit_enabled=False, local_edit_instance=None,
-                 local_edit_version_reader=None, local_edit_enabled=False):
+                 local_edit_version_reader=None, local_edit_enabled=False,
+                 authorization_enabled=False):
         # Construct after the server worker fork, never in a preload parent.
         self.pid = os.getpid()
         self.lock = threading.Lock()
@@ -23,10 +25,13 @@ class PolicyHost:
             resource_secret=resource_secret, lifecycle_reader=lifecycle_reader,
             audit_secret=audit_secret, audit_redact=audit_redact, audit_result_root=audit_result_root,
             refresh_service_verifier=refresh_service_verifier, refresh_provider_grants=refresh_provider_grants,
+            delegation_service_verifier=delegation_service_verifier,
+            delegation_signing_keys=delegation_signing_keys,
             oidc=oidc, oidc_jit_enabled=oidc_jit_enabled,
             local_edit_instance=local_edit_instance,
             local_edit_version_reader=local_edit_version_reader,
-            local_edit_enabled=local_edit_enabled)
+            local_edit_enabled=local_edit_enabled,
+            authorization_enabled=authorization_enabled)
 
     @contextmanager
     def login_resources_scope(self):
@@ -77,6 +82,24 @@ class PolicyHost:
 
     def local_device_service(self, request, request_id):
         return self._service(request, request_id, resource=False, local_device=True)
+
+    @contextmanager
+    def delegation_issue_service(self, request, request_id, user_id):
+        """Resolve the worker-owned login-service issuer inside host drain ownership."""
+        self._process()
+        with self.lock:
+            if self.draining or self.closed:
+                raise ContractError("POLICY_UNAVAILABLE", "Policy host is draining", 503)
+            self.active += 1
+        try:
+            factory = self.deployment.delegation_issue_factory
+            if factory is None:
+                raise ContractError("POLICY_UNAVAILABLE", "Delegation issuance is not configured", 503)
+            with factory(request, request_id, user_id) as issuer:
+                yield issuer
+        finally:
+            with self.lock:
+                self.active -= 1
 
     @contextmanager
     def _service(self, request, request_id, *, resource, audit=False, context=False, refresh=False,

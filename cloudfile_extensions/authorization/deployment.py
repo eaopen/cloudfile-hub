@@ -15,6 +15,7 @@ class PolicyDeployment:
     context_factory: object = None
     refresh_factory: object = None
     service_refresh_factory: object = None
+    delegation_issue_factory: object = None
     login_resources: object = None
     local_session_factory: object = None
     local_device_factory: object = None
@@ -29,8 +30,10 @@ class PolicyDeployment:
 def configure_policy(value, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
                      audit_secret=None, audit_redact=None, audit_result_root=None,
                      refresh_service_verifier=None, refresh_provider_grants=None,
+                     delegation_service_verifier=None, delegation_signing_keys=None,
                      oidc=None, oidc_jit_enabled=False, local_edit_instance=None,
-                     local_edit_version_reader=None, local_edit_enabled=False):
+                     local_edit_version_reader=None, local_edit_enabled=False,
+                     authorization_enabled=False):
     """value is trusted host settings, not request JSON or an import path.
 
     Matches the current native authority adapter: private Redis TCP, DB0, password
@@ -43,6 +46,8 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
         raise ValueError("explicit OIDC configuration required before JIT")
     if type(local_edit_enabled) is not bool:
         raise ValueError("explicit local edit enablement required")
+    if type(authorization_enabled) is not bool:
+        raise ValueError("explicit authorization enablement required")
     if oidc is not None:
         from ..identity.oidc import OIDCConfig
         if not isinstance(oidc, OIDCConfig):
@@ -69,6 +74,11 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
         raise ValueError("machine directory credential supplier required")
     if (refresh_service_verifier is None) != (refresh_provider_grants is None):
         raise ValueError("machine refresh verifier and provider grants required together")
+    if (delegation_service_verifier is None) != (delegation_signing_keys is None):
+        raise ValueError("delegation verifier and signing keys required together")
+    if authorization_enabled and (refresh_service_verifier is None
+            or delegation_service_verifier is None):
+        raise ValueError("enabled authorization requires refresh and delegation service runtimes")
     if audit_secret is None and (audit_redact is not None or audit_result_root is not None):
         raise ValueError("audit redaction requires an audit cursor secret")
     if audit_secret is not None and (not isinstance(audit_secret, bytes)
@@ -128,6 +138,12 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
             from ..directory.service_refresh import ServiceRefreshFactory
             service_refresh_factory = ServiceRefreshFactory(verifier=refresh_service_verifier,
                 resources=factory.resources, provider_grants=refresh_provider_grants)
+        delegation_issue_factory = None
+        if delegation_service_verifier is not None:
+            from ..identity.delegation_issue import UserDelegationIssueFactory
+            delegation_issue_factory = UserDelegationIssueFactory(resources=factory.resources,
+                core=factory.core, service_verifier=delegation_service_verifier,
+                signing_keys=delegation_signing_keys, cloud_mode=factory.cloud_mode)
         login_resources = None
         if oidc is not None:
             from ..identity.resources import LoginResources
@@ -150,6 +166,7 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
         return PolicyDeployment(factory=factory, redis=client, resource_factory=resource_factory,
             audit_factory=audit_factory, context_factory=context_factory,
             refresh_factory=refresh_factory, service_refresh_factory=service_refresh_factory,
+            delegation_issue_factory=delegation_issue_factory,
             login_resources=login_resources, local_session_factory=local_session_factory,
             local_device_factory=local_device_factory, local_agent_runtime=local_agent_runtime,
             local_read_issuer=local_read_issuer)
