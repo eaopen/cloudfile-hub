@@ -1,8 +1,8 @@
 """Actual resource authority consumers; not file transfer or publication.
 
 The required lifecycle/version adapters must protect real native observations
-under this same scope. This service is deliberately unregistered until those
-providers and native entry-point release gates are proved.
+under this same scope. Routes are mounted only when those providers and native
+entry-point release gates are configured.
 """
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone

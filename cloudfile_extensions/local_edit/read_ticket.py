@@ -31,8 +31,8 @@ class AgentReadTicketIssuer:
             # Never replay consumed proof or disclose RPC details/conditions.
             raise ContractError("LOCAL_READ_UNAVAILABLE", "Native local read could not be established", 503) from None
         # Same-origin dedicated guarded endpoint, not legacy /files/{token}.
-        # The bearer belongs in a header, never a URL/query/log. This candidate
-        # path remains unregistered until deployment/native release gates pass.
+        # The bearer belongs in a header, never a URL/query/log. The route is
+        # mounted only when explicit deployment/native release gates pass.
         return dict(ticket=ticket, expires_in=60,
             transfer=dict(path="/seafhttp/cloudfile/read", method="GET",
                 authorization="Bearer", redirects=False, resume=False),
