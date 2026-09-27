@@ -80,6 +80,19 @@ class LocalEditHostTest(unittest.TestCase):
             configure_policy(self.config(), directory_authorization=Mock(),
                 authorization_enabled=True)
 
+    def test_primitive_authorization_configuration_reaches_postfork_assembly(self):
+        value = {**self.config(), "directory_bearer_token": "directory-token",
+            "service_credentials": {"machine": {"service_id": "login", "issuer": "login",
+                "audience": "cloudfile", "secret": "m" * 32,
+                "scopes": ["subject.refresh", "user.delegation.issue"]}},
+            "refresh_provider_grants": {"login": ["fixture"]},
+            "delegation_signing_keys": {"login": {"kid": "delegation", "issuer": "cloudfile",
+                "audience": "download", "secret": "d" * 32}}}
+        with patch("cloudfile_extensions.authorization.deployment.session_policy_factory",
+                   side_effect=RuntimeError("assembly reached")):
+            with self.assertRaisesRegex(RuntimeError, "assembly reached"):
+                configure_policy(value, directory_authorization=None, authorization_enabled=True)
+
 
 if __name__ == "__main__":
     unittest.main()

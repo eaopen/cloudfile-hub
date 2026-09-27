@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from ..common.http import trusted_https_url
 from ..common.validation import object_fields, identifier
 from .assembly import session_policy_factory
+from .service_configuration import directory_authorization as resolve_directory_authorization
+from .service_configuration import parse_service_runtime
 
 
 @dataclass
@@ -41,7 +43,9 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
     """
     object_fields(value, ("database", "redis", "provider", "native_schema", "identity_schema",
                          "directory_url", "attribute_allowlist", "core_library", "cloud_mode"),
-                         ("subject_prefix", "directory_ca_bundle"))
+                         ("subject_prefix", "directory_ca_bundle", "directory_bearer_token",
+                          "service_credentials", "refresh_provider_grants",
+                          "delegation_signing_keys", "service_revocation_prefix"))
     if type(oidc_jit_enabled) is not bool or (oidc is None and oidc_jit_enabled):
         raise ValueError("explicit OIDC configuration required before JIT")
     if type(local_edit_enabled) is not bool:
@@ -70,13 +74,17 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
     if any(type(port) is not int or not 1 <= port <= 65535 for port in (db_port, redis_port)):
         raise ValueError("invalid deployment port")
     trusted_https_url(value["directory_url"])
-    if not callable(directory_authorization):
-        raise ValueError("machine directory credential supplier required")
+    directory_authorization = resolve_directory_authorization(value, directory_authorization)
+    service_runtime = parse_service_runtime(value, provider=value["provider"])
+    if service_runtime is not None and any(item is not None for item in
+            (refresh_service_verifier, refresh_provider_grants,
+             delegation_service_verifier, delegation_signing_keys)):
+        raise ValueError("service security runtime is configured twice")
     if (refresh_service_verifier is None) != (refresh_provider_grants is None):
         raise ValueError("machine refresh verifier and provider grants required together")
     if (delegation_service_verifier is None) != (delegation_signing_keys is None):
         raise ValueError("delegation verifier and signing keys required together")
-    if authorization_enabled and (refresh_service_verifier is None
+    if authorization_enabled and service_runtime is None and (refresh_service_verifier is None
             or delegation_service_verifier is None):
         raise ValueError("enabled authorization requires refresh and delegation service runtimes")
     if audit_secret is None and (audit_redact is not None or audit_result_root is not None):
@@ -105,6 +113,9 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
         socket_timeout=1, retry_on_timeout=False, decode_responses=False,
         max_connections=32)
     try:
+        if service_runtime is not None:
+            (refresh_service_verifier, refresh_provider_grants,
+             delegation_service_verifier, delegation_signing_keys) = service_runtime.build(client)
         factory = session_policy_factory(environment=environment, redis=client,
             provider_id=value["provider"], native_schema=value["native_schema"],
             identity_schema=value["identity_schema"], directory_url=value["directory_url"],
