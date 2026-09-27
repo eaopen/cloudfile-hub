@@ -41,8 +41,8 @@ class HostedLoginView(View):
                     adapter = BackchannelLogoutView.as_view(resources=LogoutResources(resources, enabled=True))
                 elif self.operation == "read":
                     adapter = OIDCReadTicketView.as_view(service_factory=OIDCReadTicketFactory(resources))
-                elif self.operation == "update":
-                    adapter = OIDCManualUpdateView.as_view(resources=resources)
+                elif self.operation in ("update", "upload"):
+                    adapter = OIDCManualUpdateView.as_view(resources=resources, create=self.operation == "upload")
                 elif self.operation == "pending":
                     @contextmanager
                     def pending(request_id):
@@ -99,6 +99,8 @@ def hosted_login_routes(*, resources_scope, return_path="/", backchannel_enabled
             resources_scope=resources_scope, operation="read"), name="cloudfile-oidc-read-ticket"))
         result.append(path("manual-update/", HostedLoginView.as_view(
             resources_scope=resources_scope, operation="update"), name="cloudfile-oidc-manual-update"))
+        result.append(path("manual-upload/", HostedLoginView.as_view(
+            resources_scope=resources_scope, operation="upload"), name="cloudfile-oidc-manual-upload"))
     if backchannel_enabled:
         # CSRF middleware sees the outer hosted view. Only this cookie-free,
         # signed server notification gets an exemption, never browser logout.

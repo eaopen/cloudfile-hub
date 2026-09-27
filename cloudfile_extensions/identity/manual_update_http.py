@@ -1,4 +1,4 @@
-"""Explicit Web replacement through existing native conditional publication."""
+"""Explicit Web creation/replacement through native conditional publication."""
 from copy import deepcopy
 import json
 import os
@@ -26,19 +26,20 @@ from .ticket_transport import _call
 
 class OIDCManualUpdateView(View):
     resources = None
+    create = False
     http_method_names = ["post"]
 
     def dispatch(self, request, *args, **kwargs):
         request_id = str(uuid4())
         try:
             if request.method != "POST" or args or kwargs:
-                raise ContractError("METHOD_NOT_ALLOWED", "Manual update requires POST", 405)
+                raise ContractError("METHOD_NOT_ALLOWED", "Manual upload/update requires POST", 405)
             if (request.GET or request.headers.get("Authorization")
                     or request.headers.get("Content-Encoding")):
-                raise invalid("Manual update requires a native session and multipart form")
+                raise invalid("Manual upload/update requires a native session and multipart form")
             actor = native_download_actor(request)
             if not isinstance(self.resources, LoginResources):
-                raise ContractError("POLICY_UNAVAILABLE", "Manual update runtime is unavailable", 503)
+                raise ContractError("POLICY_UNAVAILABLE", "Manual upload/update runtime is unavailable", 503)
             authority = OIDCSessionAuthority(self.resources)
             authority.check(request)
             csrf = CsrfViewMiddleware(lambda _: None)
@@ -68,6 +69,9 @@ class OIDCManualUpdateView(View):
                     PolicyCore(policy["core_library"]), request_id=request_id,
                     cloud_mode=policy["cloud_mode"])
                 preflight.consume(reference, lambda cursor, target: None)
+                if self.create:
+                    parent = reference["path"].rpartition("/")[0] or "/"
+                    preflight.consume(dict(reference, path=parent, kind="dir"), lambda cursor, target: None)
                 from seaserv import seafile_api
                 if seafile_api.check_quota(reference["repo_id"], uploaded.size) != 0:
                     raise ContractError("QUOTA_EXCEEDED", "Library quota is unavailable", 403)
@@ -86,6 +90,8 @@ class OIDCManualUpdateView(View):
                         dict(type="user", provider=provider, external_id=actor.user_id),
                         dict(type="repo", provider="cloudfile", external_id=reference["repo_id"])],
                     oidc_session=proof)
+                if self.create:
+                    condition["create"] = True
                 # Trusted shared data directory; the submitted filename never
                 # selects the staging path. Cleanup also runs on RPC failure.
                 data_dir = os.environ.get("SEAFILE_DATA_DIR", "")
@@ -107,11 +113,11 @@ class OIDCManualUpdateView(View):
                             "Native update was refused or completion is unconfirmed", 503) from None
             if not isinstance(object_id, str) or not re.fullmatch(r"[0-9a-f]{40}", object_id):
                 raise ContractError("PUBLICATION_UNCONFIRMED", "Native completion is unconfirmed", 503)
-            response = JsonResponse(dict(object_id=object_id, request_id=request_id))
+            response = JsonResponse(dict(object_id=object_id, request_id=request_id), status=201 if self.create else 200)
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)
         except Exception:
-            error = ContractError("POLICY_UNAVAILABLE", "Manual update runtime is unavailable", 503)
+            error = ContractError("POLICY_UNAVAILABLE", "Manual upload/update runtime is unavailable", 503)
             response = JsonResponse(error.response(request_id), status=503)
         response["Cache-Control"] = "no-store, max-age=0"
         response["Pragma"] = "no-cache"

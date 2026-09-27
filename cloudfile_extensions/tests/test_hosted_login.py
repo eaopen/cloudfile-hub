@@ -151,8 +151,8 @@ class HostedLoginHTTPTests(unittest.TestCase):
     def test_native_web_routes_require_explicit_enablement_and_keep_csrf(self):
         scope = Mock()
         routes = hosted_login_routes(resources_scope=scope, read_tickets_enabled=True)
-        native = [route for route in routes if str(route.pattern) in {'read-tickets/', 'manual-update/'}]
-        self.assertEqual(len(native), 2)
+        native = [route for route in routes if str(route.pattern) in {'read-tickets/', 'manual-update/', 'manual-upload/'}]
+        self.assertEqual(len(native), 3)
         self.assertTrue(all(not getattr(route.callback, 'csrf_exempt', False) for route in native))
         scope.assert_not_called()
         with self.assertRaises(ValueError):
