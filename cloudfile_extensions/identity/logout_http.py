@@ -41,6 +41,9 @@ class LocalLogoutView(View):
             # Prepare protocol response while the server hint is still present;
             # it is never returned if native or browser cleanup then fails.
             response = self.logout_response(request)
+            # From this point every failure, including a missing/broken native
+            # logout adapter import, must still clear independent browser state.
+            termination_started = True
             from seahub.auth import logout
             from seahub.auth.models import AnonymousUser
             def terminate_native(native_request):
@@ -50,7 +53,6 @@ class LocalLogoutView(View):
                     native_request.user = AnonymousUser()
                     native_request.session.flush()
                     raise ContractError("IDENTITY_UNAVAILABLE", "Native logout cleanup is unavailable", 503) from None
-            termination_started = True
             OIDCSessionAuthority(self.resources).terminate(request, terminate_native)
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)

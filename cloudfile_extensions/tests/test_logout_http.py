@@ -23,6 +23,10 @@ class LocalLogoutHTTPTests(unittest.TestCase):
     def setUp(self):
         self.requests = RequestFactory()
         self.resources = Mock(spec=LoginResources)
+        # Instance-owned collaborators are established by LoginResources.__init__
+        # and therefore are not present on the class used as the Mock spec.
+        self.resources.resources = Mock()
+        self.resources.prefix = "cf:"
         self.view = LocalLogoutView.as_view(resources=self.resources)
 
     def request(self, *, csrf=False, cookie=None, **options):
