@@ -4,6 +4,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import Mock, patch
 
+from cloudfile_extensions.authorization.deployment import configure_policy
 from cloudfile_extensions.authorization.host import PolicyHost
 from cloudfile_extensions.local_edit import gunicorn
 
@@ -19,6 +20,13 @@ class _AgentRuntime:
 
 
 class LocalEditHostTest(unittest.TestCase):
+    @staticmethod
+    def config():
+        return dict(database=dict(host="db", user="cloudfile", name="cloudfile", password="secret"),
+            redis=dict(host="redis", port=6379, password="secret"), provider="fixture",
+            native_schema="ccnet", identity_schema="cloudfile", directory_url="https://directory.invalid/",
+            attribute_allowlist=[], core_library="libcloudfile_acl.so", cloud_mode=False)
+
     def host(self):
         @contextmanager
         def sessions(request, request_id):
@@ -49,6 +57,15 @@ class LocalEditHostTest(unittest.TestCase):
         with patch.object(gunicorn.policy_host, "local_agent_call", return_value={"ok": True}) as agent:
             self.assertEqual(gunicorn.local_agent_runtime.challenge({}, "request-id"), {"ok": True})
             agent.assert_called_once_with("challenge", {}, "request-id")
+
+    def test_enabled_routes_require_complete_native_runtime_before_redis(self):
+        with self.assertRaisesRegex(ValueError, "native lifecycle/version adapters"):
+            configure_policy(self.config(), directory_authorization=Mock(), local_edit_enabled=True)
+
+        with self.assertRaisesRegex(ValueError, "native lifecycle/version adapters"):
+            configure_policy(self.config(), directory_authorization=Mock(), local_edit_enabled=True,
+                resource_secret=b"s" * 32, lifecycle_reader=Mock(),
+                local_edit_instance="https://cloudfile.invalid/", local_edit_version_reader="invalid")
 
 
 if __name__ == "__main__":

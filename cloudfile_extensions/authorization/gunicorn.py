@@ -11,8 +11,11 @@ def post_worker_init(worker):
     """Called after the worker has loaded Django, never in the preload master."""
     global _host
     from django.conf import settings
+    local_edit_enabled = getattr(settings, "CLOUDFILE_LOCAL_EDIT_ENABLED", False)
     config = getattr(settings, "CLOUDFILE_POLICY_CONFIG", None)
     if config is None:
+        if local_edit_enabled:
+            raise RuntimeError("CloudFile local edit requires the post-fork policy worker")
         _host = None
         return
     if _host is not None and _host.pid == os.getpid():
@@ -33,7 +36,8 @@ def post_worker_init(worker):
             oidc=getattr(settings, "CLOUDFILE_OIDC_CONFIG", None),
             oidc_jit_enabled=getattr(settings, "CLOUDFILE_OIDC_JIT_ENABLED", False),
             local_edit_instance=getattr(settings, "CLOUDFILE_LOCAL_EDIT_INSTANCE", None),
-            local_edit_version_reader=getattr(settings, "CLOUDFILE_LOCAL_EDIT_VERSION_READER", None))
+            local_edit_version_reader=getattr(settings, "CLOUDFILE_LOCAL_EDIT_VERSION_READER", None),
+            local_edit_enabled=local_edit_enabled)
     except Exception:
         raise RuntimeError("CloudFile policy worker initialization failed; check trusted configuration") from None
 

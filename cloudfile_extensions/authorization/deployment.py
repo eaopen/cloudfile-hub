@@ -30,7 +30,7 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
                      audit_secret=None, audit_redact=None, audit_result_root=None,
                      refresh_service_verifier=None, refresh_provider_grants=None,
                      oidc=None, oidc_jit_enabled=False, local_edit_instance=None,
-                     local_edit_version_reader=None):
+                     local_edit_version_reader=None, local_edit_enabled=False):
     """value is trusted host settings, not request JSON or an import path.
 
     Matches the current native authority adapter: private Redis TCP, DB0, password
@@ -41,6 +41,8 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
                          ("subject_prefix", "directory_ca_bundle"))
     if type(oidc_jit_enabled) is not bool or (oidc is None and oidc_jit_enabled):
         raise ValueError("explicit OIDC configuration required before JIT")
+    if type(local_edit_enabled) is not bool:
+        raise ValueError("explicit local edit enablement required")
     if oidc is not None:
         from ..identity.oidc import OIDCConfig
         if not isinstance(oidc, OIDCConfig):
@@ -81,6 +83,9 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
         raise ValueError("local edit origin and native version adapter are required together")
     if local_edit_instance is not None and resource_secret is None:
         raise ValueError("local edit requires the configured resource runtime")
+    if local_edit_enabled and (local_edit_instance is None or resource_secret is None or
+            not callable(lifecycle_reader) or not callable(local_edit_version_reader)):
+        raise ValueError("enabled local edit requires origin and native lifecycle/version adapters")
     environment = {"CLOUDFILE_DB_" + key.upper(): str(item) for key, item in
         dict(host=database["host"], user=database["user"], name=database["name"],
              password=database["password"], port=db_port).items()}
