@@ -2,6 +2,7 @@
 from datetime import datetime, timezone
 import hashlib
 import re
+import secrets
 
 from ..common.validation import identifier
 from ..common.errors import ContractError
@@ -24,9 +25,14 @@ class OIDCSessionIndex:
     def _transaction(self, cursor):
         if cursor.connection is not self.connection:
             raise ValueError("index requires this owned SQL connection")
-        cursor.execute("SELECT @@in_transaction")
-        if cursor.fetchone() != (1,):
-            raise ValueError("index effect requires the caller's actual transaction")
+        # SAVEPOINT is supported by both locked MySQL and MariaDB baselines and
+        # proves an actual caller-owned transaction without vendor variables.
+        point = "cf_oidc_" + secrets.token_hex(8)
+        try:
+            cursor.execute("SAVEPOINT " + point)
+            cursor.execute("RELEASE SAVEPOINT " + point)
+        except Exception:
+            raise ValueError("index effect requires the caller's actual transaction") from None
 
     @staticmethod
     def _hash(value):
