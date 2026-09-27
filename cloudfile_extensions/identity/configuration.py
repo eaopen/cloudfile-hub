@@ -63,7 +63,8 @@ def configure_oidc_host(settings):
         from .hosted_routes import hosted_login_routes
         from ..authorization.gunicorn import login_resources_scope
         hosted_login_routes(resources_scope=login_resources_scope, return_path=return_path,
-            backchannel_enabled=backchannel)
+            backchannel_enabled=backchannel,
+            read_tickets_enabled=getattr(settings, "CLOUDFILE_TRANSFER_ENABLED", False))
         existing_scope = getattr(settings, "CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE", None)
         if existing_scope is not None and existing_scope is not login_resources_scope:
             raise ValueError()

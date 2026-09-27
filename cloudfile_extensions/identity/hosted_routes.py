@@ -17,6 +17,8 @@ from .resources import LoginResources
 from .rp_logout_http import RPLogoutView
 from .logout_backchannel_http import BackchannelLogoutView
 from .logout_resources import LogoutResources
+from .read_ticket_http import OIDCReadTicketFactory, OIDCReadTicketView
+from .manual_update_http import OIDCManualUpdateView
 
 
 class HostedLoginView(View):
@@ -37,6 +39,10 @@ class HostedLoginView(View):
                     "logout": LocalLogoutView, "idp": RPLogoutView, "return": LogoutReturnView}
                 if self.operation == "backchannel":
                     adapter = BackchannelLogoutView.as_view(resources=LogoutResources(resources, enabled=True))
+                elif self.operation == "read":
+                    adapter = OIDCReadTicketView.as_view(service_factory=OIDCReadTicketFactory(resources))
+                elif self.operation == "update":
+                    adapter = OIDCManualUpdateView.as_view(resources=resources)
                 elif self.operation == "pending":
                     @contextmanager
                     def pending(request_id):
@@ -67,12 +73,15 @@ class HostedLoginView(View):
             return response
 
 
-def hosted_login_routes(*, resources_scope, return_path="/", backchannel_enabled=False):
+def hosted_login_routes(*, resources_scope, return_path="/", backchannel_enabled=False,
+                        read_tickets_enabled=False):
     """Configuration only; never enable capabilities, backends or middleware."""
     if not callable(resources_scope):
         raise ValueError("trusted process-owned login scope required")
     if type(backchannel_enabled) is not bool:
         raise ValueError("explicit boolean backchannel enablement required")
+    if type(read_tickets_enabled) is not bool:
+        raise ValueError("explicit boolean read ticket enablement required")
     if (not isinstance(return_path, str) or not return_path.startswith("/") or
             return_path.startswith("//") or "\\" in return_path or len(return_path) > 2048 or
             any(ord(char) < 32 for char in return_path)):
@@ -85,6 +94,11 @@ def hosted_login_routes(*, resources_scope, return_path="/", backchannel_enabled
         ("logout/return/", "return", "cloudfile-oidc-logout-return"))
     result = [path(route, HostedLoginView.as_view(resources_scope=resources_scope,
         operation=operation, return_path=return_path), name=name) for route, operation, name in routes]
+    if read_tickets_enabled:
+        result.append(path("read-tickets/", HostedLoginView.as_view(
+            resources_scope=resources_scope, operation="read"), name="cloudfile-oidc-read-ticket"))
+        result.append(path("manual-update/", HostedLoginView.as_view(
+            resources_scope=resources_scope, operation="update"), name="cloudfile-oidc-manual-update"))
     if backchannel_enabled:
         # CSRF middleware sees the outer hosted view. Only this cookie-free,
         # signed server notification gets an exemption, never browser logout.

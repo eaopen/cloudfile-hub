@@ -148,6 +148,16 @@ class HostedLoginHTTPTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             hosted_login_routes(resources_scope=scope, backchannel_enabled='true')
 
+    def test_native_web_routes_require_explicit_enablement_and_keep_csrf(self):
+        scope = Mock()
+        routes = hosted_login_routes(resources_scope=scope, read_tickets_enabled=True)
+        native = [route for route in routes if str(route.pattern) in {'read-tickets/', 'manual-update/'}]
+        self.assertEqual(len(native), 2)
+        self.assertTrue(all(not getattr(route.callback, 'csrf_exempt', False) for route in native))
+        scope.assert_not_called()
+        with self.assertRaises(ValueError):
+            hosted_login_routes(resources_scope=scope, read_tickets_enabled='false')
+
     def test_uninitialized_worker_error_is_safe_uncached(self):
         @contextmanager
         def resources_scope():
