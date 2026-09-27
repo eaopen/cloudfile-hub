@@ -21,6 +21,7 @@ class RoutingTest(unittest.TestCase):
                 ALLOWED_HOSTS=["testserver"], INSTALLED_APPS=[],
                 REST_FRAMEWORK={"UNAUTHENTICATED_USER": None},
                 CLOUDFILE_EXTENSION_URLCONFS={"project": "cf_test_project"},
+                CLOUDFILE_LOCAL_EDIT_ENABLED=True,
                 CLOUDFILE_CAPABILITIES={"auth.oidc": True})
             import django
             django.setup()
@@ -40,6 +41,7 @@ class RoutingTest(unittest.TestCase):
             client = Client()
             assert client.get("/api/v2.1/native/").json() == {"native": True}
             assert client.get("/api/v2.1/cloudfile/extensions/project/ping/").json() == {"project": True}
+            assert client.post("/api/v2.1/cloudfile/extensions/local-edit/v1/agent/challenge/").status_code == 401
             response = client.get("/api/v2.1/cloudfile/capabilities/")
             assert response.status_code == 200
             assert response.json()["capabilities"]["auth.oidc"]["enabled"] is False

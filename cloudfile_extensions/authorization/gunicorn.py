@@ -31,7 +31,9 @@ def post_worker_init(worker):
             refresh_service_verifier=getattr(settings, "CLOUDFILE_REFRESH_SERVICE_VERIFIER", None),
             refresh_provider_grants=getattr(settings, "CLOUDFILE_REFRESH_PROVIDER_GRANTS", None),
             oidc=getattr(settings, "CLOUDFILE_OIDC_CONFIG", None),
-            oidc_jit_enabled=getattr(settings, "CLOUDFILE_OIDC_JIT_ENABLED", False))
+            oidc_jit_enabled=getattr(settings, "CLOUDFILE_OIDC_JIT_ENABLED", False),
+            local_edit_instance=getattr(settings, "CLOUDFILE_LOCAL_EDIT_INSTANCE", None),
+            local_edit_version_reader=getattr(settings, "CLOUDFILE_LOCAL_EDIT_VERSION_READER", None))
     except Exception:
         raise RuntimeError("CloudFile policy worker initialization failed; check trusted configuration") from None
 
@@ -79,6 +81,30 @@ def machine_refresh_service(request, request_id):
     if _host is None or _host.pid != os.getpid():
         raise ContractError("SUBJECT_UNAVAILABLE", "Refresh worker is unavailable", 503)
     return _host.machine_refresh_service(request, request_id)
+
+
+def local_session_service(request, request_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("LOCAL_SESSION_UNAVAILABLE", "Local edit worker is unavailable", 503)
+    return _host.local_session_service(request, request_id)
+
+
+def local_device_service(request, request_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("DEVICE_UNAVAILABLE", "Local device worker is unavailable", 503)
+    return _host.local_device_service(request, request_id)
+
+
+def local_agent_call(operation, value, request_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("LOCAL_SESSION_UNAVAILABLE", "Local edit worker is unavailable", 503)
+    return _host.local_agent_call(operation, value, request_id)
+
+
+def local_read_ticket(value, request_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("LOCAL_READ_UNAVAILABLE", "Local read worker is unavailable", 503)
+    return _host.local_read_ticket(value, request_id)
 
 
 def worker_exit(server, worker):

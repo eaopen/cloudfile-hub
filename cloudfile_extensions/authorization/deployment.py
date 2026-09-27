@@ -16,6 +16,10 @@ class PolicyDeployment:
     refresh_factory: object = None
     service_refresh_factory: object = None
     login_resources: object = None
+    local_session_factory: object = None
+    local_device_factory: object = None
+    local_agent_runtime: object = None
+    local_read_issuer: object = None
 
     def close(self):
         # The host invokes this only after draining all requests at shutdown.
@@ -25,7 +29,8 @@ class PolicyDeployment:
 def configure_policy(value, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
                      audit_secret=None, audit_redact=None, audit_result_root=None,
                      refresh_service_verifier=None, refresh_provider_grants=None,
-                     oidc=None, oidc_jit_enabled=False):
+                     oidc=None, oidc_jit_enabled=False, local_edit_instance=None,
+                     local_edit_version_reader=None):
     """value is trusted host settings, not request JSON or an import path.
 
     Matches the current native authority adapter: private Redis TCP, DB0, password
@@ -72,6 +77,10 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
     if resource_secret is not None and (not isinstance(resource_secret, bytes)
             or len(resource_secret) < 32 or not callable(lifecycle_reader)):
         raise ValueError("trusted resource secret and lifecycle adapter required")
+    if (local_edit_instance is None) != (local_edit_version_reader is None):
+        raise ValueError("local edit origin and native version adapter are required together")
+    if local_edit_instance is not None and resource_secret is None:
+        raise ValueError("local edit requires the configured resource runtime")
     environment = {"CLOUDFILE_DB_" + key.upper(): str(item) for key, item in
         dict(host=database["host"], user=database["user"], name=database["name"],
              password=database["password"], port=db_port).items()}
@@ -120,8 +129,25 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
             prefix = factory.resources.prefix[:-len("subjects:")]
             login_resources = LoginResources(factory.resources, oidc=oidc,
                 jit_enabled=oidc_jit_enabled, prefix=prefix)
-        return PolicyDeployment(factory, client, resource_factory, audit_factory, context_factory,
-            refresh_factory, service_refresh_factory, login_resources)
+        local_session_factory = local_device_factory = local_agent_runtime = local_read_issuer = None
+        if local_edit_instance is not None:
+            from ..local_edit.agent_runtime import AgentClaimRuntime
+            from ..local_edit.device_runtime import DeviceManagementFactory
+            from ..local_edit.read_ticket import AgentReadTicketIssuer
+            from ..local_edit.session_runtime import LocalSessionFactory
+            local_session_factory = LocalSessionFactory(resource_factory, instance=local_edit_instance,
+                version_reader=local_edit_version_reader)
+            local_device_factory = DeviceManagementFactory(factory, instance=local_edit_instance)
+            local_agent_runtime = AgentClaimRuntime(factory.resources, factory.core,
+                instance=local_edit_instance, cloud_mode=factory.cloud_mode, secret=resource_secret,
+                lifecycle_reader=lifecycle_reader, version_reader=local_edit_version_reader)
+            local_read_issuer = AgentReadTicketIssuer(local_agent_runtime)
+        return PolicyDeployment(factory=factory, redis=client, resource_factory=resource_factory,
+            audit_factory=audit_factory, context_factory=context_factory,
+            refresh_factory=refresh_factory, service_refresh_factory=service_refresh_factory,
+            login_resources=login_resources, local_session_factory=local_session_factory,
+            local_device_factory=local_device_factory, local_agent_runtime=local_agent_runtime,
+            local_read_issuer=local_read_issuer)
     except Exception:
         client.connection_pool.disconnect()
         raise

@@ -33,6 +33,9 @@ def _extension_urlconfs():
 urlpatterns = [
     re_path(r"^api/v2.1/cloudfile/", include("cloudfile_extensions.urls")),
 ]
+if getattr(settings, "CLOUDFILE_LOCAL_EDIT_ENABLED", False):
+    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/local-edit/",
+        include("cloudfile_extensions.local_edit.urls")))
 urlpatterns.extend(
     re_path(rf"^api/v2.1/cloudfile/extensions/{name}/", include(module))
     for name, module in _extension_urlconfs()

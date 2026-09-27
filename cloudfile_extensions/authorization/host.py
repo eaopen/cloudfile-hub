@@ -11,7 +11,8 @@ class PolicyHost:
     def __init__(self, settings, *, directory_authorization, resource_secret=None, lifecycle_reader=None,
                  audit_secret=None, audit_redact=None, audit_result_root=None,
                  refresh_service_verifier=None, refresh_provider_grants=None,
-                 oidc=None, oidc_jit_enabled=False):
+                 oidc=None, oidc_jit_enabled=False, local_edit_instance=None,
+                 local_edit_version_reader=None):
         # Construct after the server worker fork, never in a preload parent.
         self.pid = os.getpid()
         self.lock = threading.Lock()
@@ -22,7 +23,9 @@ class PolicyHost:
             resource_secret=resource_secret, lifecycle_reader=lifecycle_reader,
             audit_secret=audit_secret, audit_redact=audit_redact, audit_result_root=audit_result_root,
             refresh_service_verifier=refresh_service_verifier, refresh_provider_grants=refresh_provider_grants,
-            oidc=oidc, oidc_jit_enabled=oidc_jit_enabled)
+            oidc=oidc, oidc_jit_enabled=oidc_jit_enabled,
+            local_edit_instance=local_edit_instance,
+            local_edit_version_reader=local_edit_version_reader)
 
     @contextmanager
     def login_resources_scope(self):
@@ -68,16 +71,26 @@ class PolicyHost:
     def machine_refresh_service(self, request, request_id):
         return self._service(request, request_id, resource=False, machine_refresh=True)
 
+    def local_session_service(self, request, request_id):
+        return self._service(request, request_id, resource=False, local_session=True)
+
+    def local_device_service(self, request, request_id):
+        return self._service(request, request_id, resource=False, local_device=True)
+
     @contextmanager
     def _service(self, request, request_id, *, resource, audit=False, context=False, refresh=False,
-                 machine_refresh=False):
+                 machine_refresh=False, local_session=False, local_device=False):
         self._process()
         with self.lock:
             if self.draining or self.closed:
                 raise ContractError("POLICY_UNAVAILABLE", "Policy host is draining", 503)
             self.active += 1
         try:
-            if machine_refresh:
+            if local_session:
+                factory = self.deployment.local_session_factory
+            elif local_device:
+                factory = self.deployment.local_device_factory
+            elif machine_refresh:
                 factory = self.deployment.service_refresh_factory
             elif refresh:
                 factory = self.deployment.refresh_factory
@@ -91,6 +104,28 @@ class PolicyHost:
                 raise ContractError("RESOURCE_UNAVAILABLE", "Resource runtime is not configured", 503)
             with factory(request, request_id) as service:
                 yield service
+        finally:
+            with self.lock:
+                self.active -= 1
+
+    def local_agent_call(self, operation, value, request_id):
+        return self._local_agent_call("local_agent_runtime", operation, value, request_id)
+
+    def local_read_ticket(self, value, request_id):
+        return self._local_agent_call("local_read_issuer", "issue", value, request_id)
+
+    def _local_agent_call(self, runtime_name, operation, value, request_id):
+        self._process()
+        with self.lock:
+            if self.draining or self.closed:
+                raise ContractError("LOCAL_SESSION_UNAVAILABLE", "Local edit host is draining", 503)
+            self.active += 1
+        try:
+            runtime = getattr(self.deployment, runtime_name, None)
+            method = getattr(runtime, operation, None)
+            if not callable(method):
+                raise ContractError("LOCAL_SESSION_UNAVAILABLE", "Local edit runtime is unavailable", 503)
+            return method(value, request_id)
         finally:
             with self.lock:
                 self.active -= 1
