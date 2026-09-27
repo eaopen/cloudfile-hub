@@ -1069,6 +1069,14 @@ class SeafileAPI {
     return this.req.get(url);
   }
 
+  async cloudFileLogout() {
+    const response = await this.req.post(siteRoot + 'api/v2.1/cloudfile/extensions/identity/v1/logout/', null);
+    if (response.data.local_logged_out !== true) {
+      throw new Error('Local logout was not confirmed');
+    }
+    return response;
+  }
+
   cloudFileRead(repoID, filePath) {
     const url = this.server + '/api/v2.1/cloudfile/extensions/identity/v1/read-tickets/';
     return this.req.post(url, { reference: { repo_id: repoID, path: filePath, kind: 'file' } }).then(res => {

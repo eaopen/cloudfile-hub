@@ -49,3 +49,11 @@ test('unconfirmed publication is not retried automatically', async () => {
   await expect(seafileAPI.cloudFileUpload('repo', '/', new File(['x'], 'a'), true)).rejects.toThrow();
   expect(seafileAPI.req.post).toHaveBeenCalledTimes(1);
 });
+
+test('local logout is an empty CSRF-client POST and requires a confirmed response', async () => {
+  seafileAPI.req.post.mockResolvedValueOnce({ data: { local_logged_out: true, idp_logged_out: false } });
+  await seafileAPI.cloudFileLogout();
+  expect(seafileAPI.req.post).toHaveBeenCalledWith('/api/v2.1/cloudfile/extensions/identity/v1/logout/', null);
+  seafileAPI.req.post.mockResolvedValueOnce({ data: { local_logged_out: false } });
+  await expect(seafileAPI.cloudFileLogout()).rejects.toThrow('Local logout was not confirmed');
+});

@@ -5,6 +5,7 @@ import { seafileAPI } from '@/api/seafile-api';
 import { siteRoot, isPro, gettext, appAvatarURL, enableSSOToThirdpartWebsite, enableSeafileAI } from '@/utils/constants';
 import { Utils } from '@/utils/utils';
 import Icon from '../icon';
+import Logout from '../logout';
 import toaster from '../toast';
 
 const {
@@ -154,7 +155,7 @@ class Account extends Component {
           {enableSSOToThirdpartWebsite && this.renderDivider()}
           {enableSSOToThirdpartWebsite && <a href={siteRoot + 'sso-to-thirdpart/'} className="item">{gettext('Customer Portal')}</a>}
           {this.renderDivider()}
-          <a href={siteRoot + 'accounts/logout/'} className="item">{gettext('Log out')}</a>
+          <Logout className="item border-0 bg-transparent text-left w-100">{gettext('Log out')}</Logout>
         </Popover>
       </div>
     );
