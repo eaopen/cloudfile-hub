@@ -40,11 +40,15 @@ def _storage(cursor):
 
 
 def _event(cursor, value, actor, request_id, action, *, actor_kind="user"):
-    EventWriter().append(cursor, dict(event_id=str(uuid4()), request_id=request_id,
+    event = dict(event_id=str(uuid4()), request_id=request_id,
         occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
         actor_user_id=actor, actor_kind=actor_kind, source="hub", action=action,
-        result="succeeded", repo_id=value["scope_repo_id"], revision=value["revision"],
-        reason="tag_id:" + value["tag_id"]))
+        result="succeeded", revision=value["revision"], reason="tag_id:" + value["tag_id"])
+    # Global system definitions have no library. Omit the optional field rather
+    # than passing SQL NULL into the existing non-null audit projection.
+    if value["scope_repo_id"] is not None:
+        event["repo_id"] = value["scope_repo_id"]
+    EventWriter().append(cursor, event)
 
 
 def create_user(cursor, *, repo_id, value, actor, request_id):
