@@ -25,7 +25,9 @@ class BackchannelIntakeTests(DatabaseTestCase):
         SchemaRunner(self.connection).apply()
         self.validator = Mock(spec=LogoutTokenValidator)
         self.validator.config = SimpleNamespace(issuer="https://idp.invalid/", client_id="cloudfile")
-        self.validator.clock.return_value = 1000
+        # ``clock`` is an instance-owned dependency set by the validator's
+        # constructor, not a class member included by Mock(spec=...).
+        self.validator.clock = Mock(return_value=1000)
         self.notification = LogoutNotification("https://idp.invalid/", "cloudfile", "logout-jti-1",
             "opaque-subject", "opaque-session", 1000, 1060)
         self.validator.validate.return_value = self.notification
