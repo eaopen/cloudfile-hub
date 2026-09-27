@@ -107,3 +107,28 @@ def build_capability_document(configured=None, *, seafile_version="14.0.8",
         "contract_version": CONTRACT_VERSION,
         "capabilities": normalized,
     }
+
+
+def annotation_implementation_registry(host, *, annotations_enabled, oidc_enabled):
+    """Publish basic annotations only from this live, fully assembled worker.
+
+    Settings cannot manufacture readiness. External IdP acceptance and optional
+    provider maintenance APIs are separate from these installed Web operations.
+    """
+    import os
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from .authorization.host import PolicyHost
+    from .resources.runtime import ResourceServiceFactory
+    from .identity.resources import LoginResources
+    if (annotations_enabled is not True or oidc_enabled is not True
+            or not isinstance(host, PolicyHost) or host.pid != os.getpid()
+            or host.closed or host.draining
+            or not isinstance(host.deployment.resource_factory, ResourceServiceFactory)
+            or not isinstance(host.deployment.login_resources, LoginResources)):
+        return registry
+    implementations = dict(registry.implementations)
+    for name in ('auth.oidc', 'directory.subjects', 'library.policy', 'directory.acl',
+            'resource.description', 'resource.local-open-type', 'tag.extended'):
+        implementations[name] = replace(implementations[name], implemented=True, default_enabled=True)
+    return SimpleNamespace(implementations=implementations)

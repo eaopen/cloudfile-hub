@@ -3,7 +3,7 @@ from rest_framework.response import Response
 
 from seahub.api2.base import APIView
 
-from .capabilities import build_capability_document
+from .capabilities import annotation_implementation_registry, build_capability_document
 
 
 class CapabilitiesView(APIView):
@@ -16,6 +16,11 @@ class CapabilitiesView(APIView):
         configured = getattr(settings, "CLOUDFILE_CAPABILITIES", {})
         seafile_version = getattr(settings, "SEAFILE_VERSION", "14.0.8")
         webdav_enabled = getattr(settings, "CLOUDFILE_WEBDAV_SERVICE_ENABLED", False)
+        from .authorization import gunicorn
+        implementations = annotation_implementation_registry(gunicorn._host,
+            annotations_enabled=getattr(settings, 'CLOUDFILE_ANNOTATIONS_ENABLED', False),
+            oidc_enabled=getattr(settings, 'CLOUDFILE_OIDC_ENABLED', False))
         return Response(build_capability_document(
-            configured, seafile_version=seafile_version, webdav_enabled=webdav_enabled
+            configured, seafile_version=seafile_version, webdav_enabled=webdav_enabled,
+            implementation_registry=implementations
         ))

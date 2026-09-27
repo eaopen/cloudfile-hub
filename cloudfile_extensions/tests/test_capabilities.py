@@ -94,3 +94,44 @@ class CapabilityDocumentTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class AnnotationRuntimeCapabilityTest(unittest.TestCase):
+    def host(self):
+        import os
+        from unittest.mock import Mock
+        from cloudfile_extensions.authorization.host import PolicyHost
+        from cloudfile_extensions.resources.runtime import ResourceServiceFactory
+        from cloudfile_extensions.identity.resources import LoginResources
+        host = Mock(spec=PolicyHost)
+        host.pid = os.getpid(); host.closed = False; host.draining = False
+        host.deployment = Mock(resource_factory=Mock(spec=ResourceServiceFactory),
+            login_resources=Mock(spec=LoginResources))
+        return host
+
+    def document(self, host, **options):
+        from cloudfile_extensions.capabilities import annotation_implementation_registry
+        registry = annotation_implementation_registry(host, annotations_enabled=options.get('enabled', True), oidc_enabled=True)
+        return build_capability_document(options.get('configured'), implementation_registry=registry)['capabilities']
+
+    def test_live_worker_exposes_only_basic_annotation_capabilities(self):
+        capabilities = self.document(self.host())
+        for name in ('resource.description', 'resource.local-open-type', 'tag.extended'):
+            self.assertTrue(capabilities[name]['enabled'])
+        for name in ('search.resources', 'local.open-edit', 'file.lock'):
+            self.assertFalse(capabilities[name]['enabled'])
+
+    def test_missing_closed_inherited_worker_or_disabled_flag_cannot_publish(self):
+        self.assertFalse(self.document(None)['resource.description']['enabled'])
+        host = self.host()
+        self.assertFalse(self.document(host, enabled=False)['resource.description']['enabled'])
+        host.closed = True
+        self.assertFalse(self.document(host)['resource.description']['enabled'])
+        host.closed = False; host.pid = -1
+        self.assertFalse(self.document(host)['resource.description']['enabled'])
+        host = self.host(); host.deployment.resource_factory = None
+        self.assertFalse(self.document(host)['resource.description']['enabled'])
+
+    def test_explicit_disable_and_dependency_disable_are_preserved(self):
+        for configured in ({'tag.extended': False}, {'directory.acl': False}):
+            self.assertFalse(self.document(self.host(), configured=configured)['tag.extended']['enabled'])
