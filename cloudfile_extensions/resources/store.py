@@ -55,12 +55,12 @@ class ResourceStore:
         with self.connection.cursor() as cursor:
             self._storage(cursor)
             cursor.execute("SELECT uid,path,lifecycle_ref,revision,description,local_open_type "
-                           "FROM cf_resource WHERE repo_id=%s AND path_hash=%s AND kind=%s AND state='active' LIMIT 2" +
+                           "FROM cf_resource WHERE repo_id=%s AND path_hash=%s AND kind=%s "
+                           "AND state='active' AND path=%s LIMIT 2" +
                            (" FOR UPDATE" if locking else ""),
-                           (reference["repo_id"], self._hash(reference["path"]), reference["kind"]))
+                           (reference["repo_id"], self._hash(reference["path"]), reference["kind"], reference["path"]))
             rows = cursor.fetchall()
-        if (len(rows) > 1 or any(row[1] != reference["path"] for row in rows) or
-                (rows and rows[0][2] != evidence.lifecycle_ref)):
+        if len(rows) > 1 or (rows and rows[0][2] != evidence.lifecycle_ref):
             raise ContractError("PATH_STATE_PENDING", "Resource lifecycle requires reconciliation", 503)
         if not rows:
             return None
