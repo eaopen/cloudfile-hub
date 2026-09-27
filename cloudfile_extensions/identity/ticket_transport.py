@@ -59,8 +59,11 @@ def _call(function, arguments, deadline):
         return response["ret"]
 
 
-def resolve_and_issue_native_ticket(repo_id, path, operation, username, conditions):
+def resolve_and_issue_native_ticket(repo_id, path, operation, username, conditions, *, expected_object_id=None):
     """All native target I/O shares one absolute five-second budget."""
+    if expected_object_id is not None and (not isinstance(expected_object_id, str) or
+            not re.fullmatch(r"[0-9a-f]{40}", expected_object_id)):
+        raise ValueError("exact expected native object required")
     deadline = time.monotonic() + 5
     repo = _call("seafile_get_repo", (repo_id,), deadline)
     if not isinstance(repo, dict):
@@ -76,6 +79,8 @@ def resolve_and_issue_native_ticket(repo_id, path, operation, username, conditio
     obj = _call("seafile_get_file_id_by_commit_and_path", (repo_id, head, path), deadline)
     if not isinstance(obj, str) or not re.fullmatch(r"[0-9a-f]{40}", obj):
         raise ValueError("native file unavailable")
+    if expected_object_id is not None and obj != expected_object_id:
+        raise ValueError("native file changed before ticket issue")
     ticket = _call("seafile_cloudfile_issue_read_ticket",
         (repo_id, path, head, obj, operation, username, conditions), deadline)
     if not isinstance(ticket, str) or len(ticket) != 36 or str(UUID(ticket)) != ticket:

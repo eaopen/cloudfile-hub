@@ -93,7 +93,7 @@ def projection_required(value):
             "action", "result", "session_id", "device_id", "repo_id", "path", "resource_kind", "resource_uid",
             "revision", "content_version"}
         if (set(value) == session_fields and value["actor_kind"] == "user" and value["result"] == "succeeded"
-                and value["action"] in {"local.session.created", "local.session.claimed"}
+                and value["action"] in {"local.session.created", "local.session.claimed", "local.session.renewed"}
                 and value["resource_kind"] == "file" and re.fullmatch(r"[0-9a-f]{40}", value["content_version"])
                 and re.fullmatch(r"[1-9][0-9]{0,19}", value["revision"]) and int(value["revision"]) <= 2 ** 64 - 1):
             return False

@@ -6,6 +6,7 @@ the resource effect transaction after latest directory preparation.
 """
 from dataclasses import asdict
 import hashlib
+import hmac
 import json
 import os
 from uuid import UUID
@@ -118,6 +119,110 @@ class AgentClaimRuntime:
                 # prepares latest subjects and repeats device proof/expiry under
                 # current native CE/C/file snapshot before committing claim.
                 return service.claim(value)
+            finally:
+                for authority in (resources.read_authority, resources.write_authority, resources.tag_management):
+                    authority.epoch = None
+                    authority.current_subject = None
+                    authority.is_owner = False
+                    authority.effective_access = None
+
+    def read_challenge(self, value, request_id):
+        """Original URI secret permits only a public nonce, never file bytes.
+
+        Its initial claim expiry no longer applies after claim; the current
+        device/session expiry and snapshot still apply. The ticket is never
+        accepted as a standalone download credential.
+        """
+        return self._session_challenge(value, request_id, operation="read")
+
+    def renew_challenge(self, value, request_id):
+        return self._session_challenge(value, request_id, operation="renew")
+
+    def cancel_challenge(self, value, request_id):
+        return self._session_challenge(value, request_id, operation="cancel")
+
+    def _session_challenge(self, value, request_id, *, operation):
+        self._process()
+        object_fields(value, ("session_id", "device_id", "ticket"))
+        identifier(request_id)
+        with self.resources.connection() as connection:
+            Outbox(connection)._require_idle()
+            connection.begin()
+            try:
+                with connection.cursor() as sql:
+                    actor, saved = self._owner(sql, value)
+                    owner = dict(provider=self.resources.provider, actor=actor,
+                        device_id=value["device_id"], session_id=value["session_id"])
+                    row = (self.sessions._cancel_ready(sql, **owner) if operation == "cancel" else
+                        self.sessions._read_ready(sql, **owner, current_snapshot=saved))
+                    if not hmac.compare_digest(row[6], self.sessions._digest(value["ticket"])):
+                        raise conflict()
+                    if operation == "cancel":
+                        challenge = self.sessions.cancel_challenge(sql, **owner, instance=self.instance)
+                    else:
+                        method = self.sessions.renew_challenge if operation == "renew" else self.sessions.read_challenge
+                        challenge = method(sql, **owner, current_snapshot=saved, instance=self.instance)
+                connection.commit()
+                return dict(challenge=asdict(challenge))
+            finally:
+                connection.rollback()
+
+    def prepare_native_read(self, value, request_id):
+        """Private adapter result, not serializable Agent HTTP output.
+
+        Actual native read RPC and transfer adapter must consume the result
+        after all Hub SQL scopes close and repeat every native final guard.
+        """
+        return self._session_effect(value, request_id, operation="read")
+
+    def renew(self, value, request_id):
+        return self._session_effect(value, request_id, operation="renew")
+
+    def cancel(self, value, request_id):
+        return self._session_effect(value, request_id, operation="cancel")
+
+    def _session_effect(self, value, request_id, *, operation):
+        self._process()
+        object_fields(value, ("session_id", "device_id", "challenge", "signature"))
+        identifier(request_id)
+        object_fields(value["challenge"], ("instance", "device_id", "session_id", "operation", "nonce",
+            "issued_at", "expires_at", "request_sha256"))
+        challenge = DeviceChallenge(**value["challenge"])
+        with self.resources.connection() as connection:
+            Outbox(connection)._require_idle()
+            connection.begin()
+            try:
+                with connection.cursor() as sql:
+                    actor, saved = self._owner(sql, value)
+                    owner = dict(provider=self.resources.provider, actor=actor,
+                        device_id=value["device_id"], session_id=value["session_id"])
+                    row = (self.sessions._cancel_ready(sql, **owner) if operation == "cancel" else
+                        self.sessions._read_ready(sql, **owner, current_snapshot=saved))
+                    digest = {"renew": self.sessions._renew_digest, "read": self.sessions._read_digest,
+                        "cancel": self.sessions._cancel_digest}[operation]
+                    if (challenge.instance != self.instance or challenge.operation != operation or
+                            challenge.session_id != value["session_id"] or challenge.device_id != value["device_id"] or
+                            challenge.request_sha256 != digest(value["session_id"], row)):
+                        raise conflict()
+                    self.sessions.devices.verify_saved(sql, provider=self.resources.provider,
+                        actor=actor, challenge=challenge, signature=value["signature"])
+            finally:
+                connection.rollback()
+        # Verified device possession precedes the employee directory request.
+        # The saved snapshot only selects the target; the final authority checks
+        # a protected current snapshot and consumes proof in its own transaction.
+        with self.resources.preparation(actor, request_id) as preparation:
+            username = preparation.state.username(actor)
+            if not preparation.state.account_active(actor):
+                raise ContractError("ACCESS_DENIED", "Native device account is unavailable", 403)
+            resources = ResourceService(preparation, self.core, cloud_mode=self.cloud_mode,
+                request_id=request_id, secret=self.secret, lifecycle_reader=self.lifecycle_reader)
+            try:
+                service = LocalSessionService(resources, actor=AuthenticatedPolicyActor(actor, username),
+                    instance=self.instance, version_reader=self.version_reader)
+                if operation == "cancel":
+                    return service.cancel_device(value)
+                return service.renew(value) if operation == "renew" else service.prepare_native_read(value)
             finally:
                 for authority in (resources.read_authority, resources.write_authority, resources.tag_management):
                     authority.epoch = None

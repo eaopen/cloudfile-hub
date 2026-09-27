@@ -107,6 +107,43 @@ class LocalSessionStore:
             raise conflict()
         return revision
 
+    def _cancel_ready(self, sql, *, provider, actor, device_id, session_id):
+        # Stop-only authority: file access, target existence and session expiry
+        # are irrelevant. A revoked/replaced device cannot sign new operations;
+        # its owner can still cancel through the authenticated browser API.
+        device_revision = self._scope(sql, provider, actor, device_id)
+        row = self._row(sql, provider, actor, device_id, session_id)
+        if row[3] != device_revision or row[5] in {"committing", "completed"}:
+            raise conflict()
+        return row
+
+    @staticmethod
+    def _cancel_digest(session_id, row):
+        value = ["cloudfile.cancel.v1", session_id, str(row[3]), str(row[9]), row[5]]
+        return hashlib.sha256(json.dumps(value, ensure_ascii=True,
+            separators=(",", ":")).encode("ascii")).hexdigest()
+
+    def cancel_challenge(self, sql, *, provider, actor, device_id, session_id, instance):
+        row = self._cancel_ready(sql, provider=provider, actor=actor,
+            device_id=device_id, session_id=session_id)
+        return self.devices.issue(sql, provider=provider, actor=actor, device_id=device_id,
+            instance=instance, session_id=session_id, operation="cancel",
+            request_sha256=self._cancel_digest(session_id, row))
+
+    def cancel_with_proof(self, sql, *, provider, actor, device_id, session_id,
+                          instance, challenge, signature):
+        row = self._cancel_ready(sql, provider=provider, actor=actor,
+            device_id=device_id, session_id=session_id)
+        if (not isinstance(challenge, DeviceChallenge) or challenge.instance != instance or
+                challenge.operation != "cancel" or challenge.device_id != device_id or
+                challenge.session_id != session_id or
+                challenge.request_sha256 != self._cancel_digest(session_id, row)):
+            raise conflict()
+        self.devices.consume(sql, provider=provider, actor=actor,
+            challenge=challenge, signature=signature)
+        return self.cancel(sql, provider=provider, actor=actor, device_id=device_id,
+            session_id=session_id, expected_revision=row[9])
+
     @staticmethod
     def _digest(ticket):
         _decode(ticket, 32)
@@ -157,6 +194,104 @@ class LocalSessionStore:
         digest = hashlib.sha256(("cloudfile.claim.v1\n" + session_id + "\n" + row[6]).encode("ascii")).hexdigest()
         return self.devices.issue(sql, provider=provider, actor=actor, device_id=device_id,
             instance=instance, session_id=session_id, operation="claim", request_sha256=digest)
+
+    def _read_ready(self, sql, *, provider, actor, device_id, session_id, current_snapshot):
+        device_revision = self._scope(sql, provider, actor, device_id)
+        row = self._row(sql, provider, actor, device_id, session_id)
+        sql.execute("SELECT FLOOR(UNIX_TIMESTAMP())")
+        now = int(sql.fetchone()[0])
+        if (row[3] != device_revision or row[5] not in {"claimed", "active"} or
+                now >= row[8] or row[4] != snapshot_json(current_snapshot)):
+            raise conflict()
+        return row
+
+    @staticmethod
+    def _read_digest(session_id, row):
+        # Version and the entire protected snapshot are server-owned. A proof
+        # for an older session or file cannot authorize a new read request.
+        encoded = json.dumps(["cloudfile.read.v1", session_id, str(row[3]),
+            str(row[9]), hashlib.sha256(row[4].encode("utf-8")).hexdigest()],
+            ensure_ascii=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("ascii")).hexdigest()
+
+    def read_challenge(self, sql, *, provider, actor, device_id, session_id,
+                       current_snapshot, instance):
+        row = self._read_ready(sql, provider=provider, actor=actor, device_id=device_id,
+            session_id=session_id, current_snapshot=current_snapshot)
+        return self.devices.issue(sql, provider=provider, actor=actor, device_id=device_id,
+            instance=instance, session_id=session_id, operation="read",
+            request_sha256=self._read_digest(session_id, row))
+
+    def authorize_read(self, sql, *, provider, actor, device_id, session_id,
+                       current_snapshot, instance, challenge, signature):
+        """Internal native condition only, inside real current file authority.
+
+        Not a ticket or public response. The caller commits proof consumption,
+        releases this SQL scope, then submits the native read RPC separately;
+        the Server independently repeats current CE/C and local-session gates.
+        An ambiguous RPC result requires a fresh read proof, not nonce replay.
+        """
+        row = self._read_ready(sql, provider=provider, actor=actor, device_id=device_id,
+            session_id=session_id, current_snapshot=current_snapshot)
+        if (not isinstance(challenge, DeviceChallenge) or challenge.device_id != device_id or
+                challenge.session_id != session_id or challenge.instance != instance or
+                challenge.operation != "read" or
+                challenge.request_sha256 != self._read_digest(session_id, row)):
+            raise conflict()
+        self.devices.consume(sql, provider=provider, actor=actor,
+            challenge=challenge, signature=signature)
+        # Do not increment the session revision or extend activity/expiry here:
+        # previously issued current-version transfers remain revocable, and
+        # read proof possession alone cannot grant a longer editing session.
+        sql.execute("SELECT FLOOR(UNIX_TIMESTAMP())")
+        if int(sql.fetchone()[0]) >= row[8]:
+            raise conflict()
+        return dict(session_id=session_id, device_id=device_id,
+            device_revision=str(row[3]), session_revision=str(row[9]))
+
+    @staticmethod
+    def _renew_digest(session_id, row):
+        encoded = json.dumps(["cloudfile.renew.v1", session_id, str(row[3]),
+            str(row[9]), str(row[8]), hashlib.sha256(row[4].encode("utf-8")).hexdigest()],
+            ensure_ascii=True, separators=(",", ":"))
+        return hashlib.sha256(encoded.encode("ascii")).hexdigest()
+
+    def renew_challenge(self, sql, *, provider, actor, device_id, session_id,
+                        current_snapshot, instance):
+        row = self._read_ready(sql, provider=provider, actor=actor, device_id=device_id,
+            session_id=session_id, current_snapshot=current_snapshot)
+        return self.devices.issue(sql, provider=provider, actor=actor, device_id=device_id,
+            instance=instance, session_id=session_id, operation="renew",
+            request_sha256=self._renew_digest(session_id, row))
+
+    def renew(self, sql, *, provider, actor, device_id, session_id,
+              current_snapshot, instance, challenge, signature):
+        """Fixed sliding lifetime, never revive or confirm a completed download.
+
+        Caller owns actual current CE/C/native snapshot/lease authority through
+        commit. Renew preserves claimed/active; it does not complete a transfer,
+        extend an independent lease, publish bytes or recover unknown commits.
+        """
+        row = self._read_ready(sql, provider=provider, actor=actor, device_id=device_id,
+            session_id=session_id, current_snapshot=current_snapshot)
+        if (row[9] == 2 ** 64 - 1 or not isinstance(challenge, DeviceChallenge) or
+                challenge.device_id != device_id or challenge.session_id != session_id or
+                challenge.instance != instance or challenge.operation != "renew" or
+                challenge.request_sha256 != self._renew_digest(session_id, row)):
+            raise conflict()
+        self.devices.consume(sql, provider=provider, actor=actor,
+            challenge=challenge, signature=signature)
+        sql.execute("SELECT FLOOR(UNIX_TIMESTAMP())")
+        now = int(sql.fetchone()[0])
+        if now >= row[8]:
+            raise conflict()
+        expiry = max(row[8], now + 1800)
+        sql.execute("UPDATE cf_edit_session SET expires_at=%s,revision=revision+1,updated_at=UTC_TIMESTAMP(6) "
+            "WHERE session_id=%s AND revision=%s AND state=%s AND expires_at>FLOOR(UNIX_TIMESTAMP())",
+            (expiry, session_id, row[9], row[5]))
+        if sql.rowcount != 1:
+            raise conflict()
+        return dict(session_id=session_id, state=row[5], revision=str(row[9] + 1), expires_at=expiry)
 
     def claim(self, sql, *, provider, actor, device_id, session_id, ticket, current_snapshot, challenge, signature, instance):
         row = self._ready(sql, provider=provider, actor=actor, device_id=device_id,

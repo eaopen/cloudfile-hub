@@ -4,7 +4,7 @@ The required lifecycle/version adapters must protect real native observations
 under this same scope. This service is deliberately unregistered until those
 providers and native entry-point release gates are proved.
 """
-from dataclasses import asdict
+from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import hmac
 import json
@@ -24,6 +24,18 @@ from .device_proof import DeviceChallenge
 from .device_service import DeviceManagementService
 from .open_uri import OpenURI, make_open_uri
 from .session_store import LocalSessionStore, snapshot_json, conflict
+
+
+@dataclass(frozen=True)
+class NativeLocalReadConditions:
+    native_username: str = field(repr=False)
+    encoded: str = field(repr=False)
+    repo_id: str
+    path: str
+    object_id: str
+    local_open_type: str = ""
+    mode: str = "view"
+    extension: str = ""
 
 
 class LocalSessionService:
@@ -70,6 +82,28 @@ class LocalSessionService:
         if mode not in {"view", "optimistic-edit", "exclusive-edit"}:
             raise ValueError("explicit local session mode required")
         return self.resources.read_authority if mode == "view" else self.resources.write_authority
+
+    def cancel_device(self, value):
+        object_fields(value, ("session_id", "device_id", "challenge", "signature"))
+        object_fields(value["challenge"], ("instance", "device_id", "session_id", "operation",
+            "nonce", "issued_at", "expires_at", "request_sha256"))
+        challenge = DeviceChallenge(**value["challenge"])
+        authority = self.resources.read_authority
+        def effect(sql):
+            result, changed = self.sessions.cancel_with_proof(sql,
+                provider=authority.state.provider, actor=authority.actor,
+                device_id=value["device_id"], session_id=value["session_id"],
+                instance=self.instance, challenge=challenge, signature=value["signature"])
+            if changed:
+                self.events.append(sql, dict(event_id=str(uuid4()), request_id=self.resources.request_id,
+                    occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                    actor_user_id=authority.actor, actor_kind="user", source="hub",
+                    action="local.session.cancelled", result="succeeded",
+                    session_id=value["session_id"], device_id=value["device_id"], revision=result["revision"]))
+            return result
+        # Current own-subject/provider barriers, proof consumption, cancellation
+        # and path-free audit share one transaction; no CE file grant required.
+        return self.owner._execute(effect)
 
     def _snapshot(self, sql, ref, *, mode, allocate=False, expected_lease=None):
         store = self.resources.store
@@ -166,6 +200,69 @@ class LocalSessionService:
     def claim(self, value):
         object_fields(value, ("session_id", "device_id", "ticket", "challenge", "signature"))
         return self._claim(value, confirm=True)
+
+    def read_challenge(self, value):
+        object_fields(value, ("session_id", "device_id"))
+        return self._read(value, confirm=False)
+
+    def prepare_native_read(self, value):
+        # Internal only. Never serialize this result as an Agent HTTP response.
+        object_fields(value, ("session_id", "device_id", "challenge", "signature"))
+        return self._read(value, confirm=True)
+
+    def renew_challenge(self, value):
+        object_fields(value, ("session_id", "device_id"))
+        return self._read(value, confirm=False, renew=True)
+
+    def renew(self, value):
+        object_fields(value, ("session_id", "device_id", "challenge", "signature"))
+        return self._read(value, confirm=True, renew=True)
+
+    def _read(self, value, *, confirm, renew=False):
+        saved = self._saved(value)
+        authority = self._authority(saved["mode"])
+        def effect(sql, reference):
+            current = self._snapshot(sql, reference, mode=saved["mode"], expected_lease=saved["lease"])
+            arguments = dict(provider=authority.state.provider, actor=authority.actor,
+                device_id=value["device_id"], session_id=value["session_id"],
+                current_snapshot=current, instance=self.instance)
+            if not confirm:
+                method = self.sessions.renew_challenge if renew else self.sessions.read_challenge
+                return dict(challenge=asdict(method(sql, **arguments)))
+            object_fields(value["challenge"], ("instance", "device_id", "session_id", "operation", "nonce",
+                "issued_at", "expires_at", "request_sha256"))
+            challenge = DeviceChallenge(**value["challenge"])
+            if renew:
+                result = self.sessions.renew(sql, **arguments, challenge=challenge, signature=value["signature"])
+                self._audit(sql, "local.session.renewed", value["session_id"], value["device_id"],
+                    current, result["revision"])
+                return result
+            proof = self.sessions.authorize_read(sql, **arguments,
+                challenge=challenge, signature=value["signature"])
+            subject = authority.preparation.contexts.current(authority.actor)
+            if subject is None:
+                raise ContractError("SUBJECT_UNAVAILABLE", "Current local subject is unavailable", 503)
+            provider = authority.state.provider
+            conditions = dict(path=reference["path"],
+                context=dict(provider=provider, userId=authority.actor, epoch=subject["context_epoch"]),
+                scopes=[dict(type="provider", provider=provider, external_id=provider),
+                    dict(type="user", provider=provider, external_id=authority.actor),
+                    dict(type="repo", provider="cloudfile", external_id=reference["repo_id"])],
+                local_session=proof)
+            encoded = json.dumps(conditions, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+            if len(encoded.encode("utf-8")) > 16384:
+                raise ContractError("LOCAL_SESSION_PENDING", "Native read conditions exceed budget", 503)
+            return NativeLocalReadConditions(authority.state.username(authority.actor), encoded,
+                reference["repo_id"], reference["path"], current["base_version"],
+                current["local_open_type"], current["mode"], self._extension(reference["path"]))
+        # Do not invoke native RPC while holding this separately owned SQL scope.
+        return authority.consume(saved["resource"], effect)
+
+    @staticmethod
+    def _extension(path):
+        name = path.rsplit("/", 1)[-1]
+        suffix = "." + name.rsplit(".", 1)[-1] if "." in name else ""
+        return suffix if re.fullmatch(r"\.[A-Za-z0-9]{1,16}", suffix) else ""
 
     def _claim(self, value, *, confirm):
         saved = self._saved(value)
