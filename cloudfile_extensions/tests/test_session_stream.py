@@ -9,6 +9,18 @@ from cloudfile_extensions.identity.native_session import SESSION_REFERENCE_KEY
 from cloudfile_extensions.common.errors import ContractError
 
 
+class CloseableSource:
+    def __init__(self, values=()):
+        self.values = iter(values)
+        self.close = Mock()
+
+    def __iter__(self):
+        return self
+
+    def __next__(self):
+        return next(self.values)
+
+
 class SessionStreamTests(unittest.TestCase):
     def setUp(self):
         self.authority = Mock(spec=OIDCSessionAuthority)
@@ -48,8 +60,7 @@ class SessionStreamTests(unittest.TestCase):
             next(stream)
 
     def test_early_close_releases_unconsumed_source_once(self):
-        source = Mock()
-        source.__iter__ = Mock(return_value=source)
+        source = CloseableSource()
         stream = OIDCSessionStream(source, self.authority, self.request)
         stream.close()
         stream.close()

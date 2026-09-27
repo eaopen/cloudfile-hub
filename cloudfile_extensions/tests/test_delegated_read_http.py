@@ -25,8 +25,13 @@ class DelegatedReadHTTPTests(unittest.TestCase):
     def request(self, body=None, **headers):
         options = dict(HTTP_AUTHORIZATION="Bearer fixture")
         options.update(headers)
-        return self.requests.post("/delegated-read-tickets/", data=self.body if body is None else body,
+        request = self.requests.post("/delegated-read-tickets/", data=self.body if body is None else body,
             content_type="application/json", secure=True, **options)
+        # RequestFactory synthesizes an empty Cookie header; the machine client
+        # sends none. Keep explicit empty Cookie cases for the boundary test.
+        if "HTTP_COOKIE" not in headers:
+            request.META.pop("HTTP_COOKIE", None)
+        return request
 
     def test_method_tls_and_bearer(self):
         self.assertEqual(self.view(self.requests.get("/tickets/", secure=True)).status_code, 405)

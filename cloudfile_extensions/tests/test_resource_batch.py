@@ -12,6 +12,7 @@ class ResourceBatchTest(TestCase):
         self.service = object.__new__(ResourceService)
         self.service.read_authority = Mock(actor="employee")
         self.service.read_authority.state.provider = "directory"
+        self.service.read_authority.preparation.no_refresh_scope.return_value = nullcontext()
         self.service.read_authority.preparation.contexts.current.return_value = {"context_epoch": "epoch"}
         self.service.resolve = Mock(side_effect=lambda value: dict(resource=value["reference"], description=""))
         self.refs = [dict(repo_id="11111111-1111-1111-1111-111111111111", path="/a", kind="file"),

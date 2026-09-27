@@ -25,8 +25,13 @@ class DelegationIssueHTTPTests(unittest.TestCase):
     def request(self, body=None, **headers):
         options = dict(HTTP_AUTHORIZATION="Bearer fixture-machine")
         options.update(headers)
-        return self.requests.post("/delegations/", data=json.dumps(self.body) if body is None else body,
+        request = self.requests.post("/delegations/", data=json.dumps(self.body) if body is None else body,
             content_type="application/json", secure=True, **options)
+        # RequestFactory synthesizes an empty Cookie header; the login service
+        # sends none. Keep explicit empty Cookie cases for the boundary test.
+        if "HTTP_COOKIE" not in headers:
+            request.META.pop("HTTP_COOKIE", None)
+        return request
 
     def test_forbidden_credential_and_state_inputs(self):
         for headers in (dict(HTTP_COOKIE=""), dict(HTTP_COOKIE="sessionid=fixture"),
