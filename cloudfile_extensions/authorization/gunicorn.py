@@ -15,9 +15,17 @@ def post_worker_init(worker):
     authorization_enabled = getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False)
     transfer_enabled = getattr(settings, "CLOUDFILE_TRANSFER_ENABLED", False)
     oidc_enabled = getattr(settings, "CLOUDFILE_OIDC_ENABLED", False)
+    annotations_enabled = getattr(settings, "CLOUDFILE_ANNOTATIONS_ENABLED", False)
+    if type(annotations_enabled) is not bool:
+        raise RuntimeError("CLOUDFILE_ANNOTATIONS_ENABLED must be a boolean")
+    if annotations_enabled and (not oidc_enabled or
+            not isinstance(getattr(settings, "CLOUDFILE_RESOURCE_SECRET", None), bytes) or
+            len(settings.CLOUDFILE_RESOURCE_SECRET) < 32 or
+            not callable(getattr(settings, "CLOUDFILE_RESOURCE_LIFECYCLE_READER", None))):
+        raise RuntimeError("annotations require OIDC, a fixed resource secret and a trusted native lifecycle reader")
     config = getattr(settings, "CLOUDFILE_POLICY_CONFIG", None)
     if config is None:
-        if local_edit_enabled or authorization_enabled or transfer_enabled or oidc_enabled:
+        if local_edit_enabled or authorization_enabled or transfer_enabled or oidc_enabled or annotations_enabled:
             raise RuntimeError("enabled CloudFile routes require the post-fork policy worker")
         _host = None
         return

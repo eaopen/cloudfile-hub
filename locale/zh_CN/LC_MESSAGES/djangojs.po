@@ -12669,3 +12669,23 @@ msgstr "名称不能是两个点"
 
 #~ msgid "No faces"
 #~ msgstr "No faces"
+
+#: frontend/src/components/resource-annotations/index.js
+msgid "Save description"
+msgstr "保存描述"
+
+#: frontend/src/components/resource-annotations/index.js
+msgid "Save tags"
+msgstr "保存标签"
+
+#: frontend/src/components/resource-annotations/index.js
+msgid "System tags"
+msgstr "系统标签"
+
+#: frontend/src/components/resource-annotations/index.js
+msgid "User tags (one per line)"
+msgstr "用户标签（每行一个）"
+
+#: frontend/src/components/resource-annotations/index.js
+msgid "Invalid tags"
+msgstr "标签格式无效"

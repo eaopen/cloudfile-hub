@@ -1,11 +1,12 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import { seafileAPI } from '@/api/seafile-api';
+import ResourceAnnotations from '@/components/resource-annotations';
 import AIIcon from '@/features/metadata/components/metadata-details/ai-icon';
 import SettingsIcon from '@/features/metadata/components/metadata-details/settings-icon';
 import { EVENT_BUS_TYPE } from '@/features/metadata/constants';
 import { MetadataDetailsProvider } from '@/features/metadata/hooks/metadata-details';
-import { siteRoot, thumbnailSizeForGrid, enableSeafileAI, fileServerRoot, MimetypesKind } from '@/utils/constants';
+import { cloudFileAnnotationsEnabled, siteRoot, thumbnailSizeForGrid, enableSeafileAI, fileServerRoot, MimetypesKind } from '@/utils/constants';
 import ObjectUtils from '@/utils/object';
 import { Utils } from '@/utils/utils';
 import { eventBus } from '../../event-bus';
@@ -38,11 +39,13 @@ class DirentDetails extends React.Component {
   };
 
   componentDidMount() {
+    if (cloudFileAnnotationsEnabled) return;
     const fullPath = Utils.joinPath(this.props.path, this.props.dirent.name);
     this.updateDetail(this.props.repoID, this.props.dirent, fullPath);
   }
 
   UNSAFE_componentWillReceiveProps(nextProps) {
+    if (cloudFileAnnotationsEnabled) return;
     const { dirent, path, repoID, currentRepoInfo, repoTags, fileTags } = this.props;
     if (!ObjectUtils.isSameObject(currentRepoInfo, nextProps.currentRepoInfo) ||
       !ObjectUtils.isSameObject(dirent, nextProps.dirent, ['name', 'status']) ||
@@ -143,6 +146,17 @@ class DirentDetails extends React.Component {
   render() {
     const { direntDetail } = this.state;
     const { repoID, fileTags, path, dirent } = this.props;
+    if (cloudFileAnnotationsEnabled && dirent) {
+      return (
+        <Detail>
+          <Header title={dirent.name} icon={Utils.getDirentIcon(dirent, true)} onClose={this.props.onClose} />
+          <Body>
+            <ResourceAnnotations repoID={repoID} path={Utils.joinPath(path, dirent.name)}
+              kind={dirent.type === 'file' ? 'file' : 'dir'} />
+          </Body>
+        </Detail>
+      );
+    }
     if (!dirent || !direntDetail) {
       return (
         <Detail>

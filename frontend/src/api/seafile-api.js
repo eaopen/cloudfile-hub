@@ -1069,6 +1069,22 @@ class SeafileAPI {
     return this.req.get(url);
   }
 
+  cloudFileResolveAnnotations(reference) {
+    return this.req.post(siteRoot + 'api/v2.1/cloudfile/extensions/annotations/v1/resources/resolve/', reference);
+  }
+
+  cloudFileUpdateDescription(reference, revision, description, idempotencyKey) {
+    return this.req.post(siteRoot + 'api/v2.1/cloudfile/extensions/annotations/v1/resources/', {
+      resource: reference, expected_revision: revision, changes: { description }
+    }, { headers: { 'Idempotency-Key': idempotencyKey } });
+  }
+
+  cloudFileReplaceUserTags(reference, revision, values, idempotencyKey) {
+    return this.req.post(siteRoot + 'api/v2.1/cloudfile/extensions/annotations/v1/resources/user-tag-values/', {
+      reference, revision, values
+    }, { headers: { 'Idempotency-Key': idempotencyKey } });
+  }
+
   async cloudFileLogout() {
     const response = await this.req.post(siteRoot + 'api/v2.1/cloudfile/extensions/identity/v1/logout/', null);
     if (response.data.local_logged_out !== true) {

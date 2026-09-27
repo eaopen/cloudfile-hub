@@ -33,6 +33,8 @@ class ResourceResolveView(DirectoryPolicyView):
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed for this resource target", 405)
             if not request.is_secure():
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
+            if request.headers.get("Authorization") or request.headers.get("Content-Encoding"):
+                raise invalid("Resource Web requests do not accept machine credentials or encoded bodies")
             if self.operation == "user_catalog":
                 allowed = {"repo_id", "limit", "after"}
                 if (set(request.GET) - allowed or "repo_id" not in request.GET
@@ -53,6 +55,9 @@ class ResourceResolveView(DirectoryPolicyView):
                 if csrf.process_view(request, lambda *_: None, (), {}) is not None:
                     raise ContractError("ACCESS_DENIED", "CSRF verification failed", 403)
                 body = self._body(request)
+                if self.operation == "attributes":
+                    object_fields(body, ("resource", "expected_revision", "changes"))
+                    object_fields(body["changes"], ("description",))
             writes = {"attributes", "tag_ids", "tag_values", "tag_definition"}
             key = None
             if self.operation in writes:
@@ -88,6 +93,14 @@ class ResourceResolveView(DirectoryPolicyView):
                         value, changed = method(body, idempotency_key=key)
                     result = value
                 status = 201 if self.operation == "attributes" and changed else 200
+                # Local application mappings belong to v0.4, not this Web API.
+                if isinstance(result, dict):
+                    result = dict(result)
+                    result.pop("local_open_type", None)
+                    if self.operation == "batch":
+                        result["items"] = [dict(item, snapshot={key: value for key, value in item["snapshot"].items()
+                            if key != "local_open_type"}) if "snapshot" in item else item
+                            for item in result["items"]]
                 response = JsonResponse(result, status=status)
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)

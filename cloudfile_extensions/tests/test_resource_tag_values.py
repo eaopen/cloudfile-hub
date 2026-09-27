@@ -21,7 +21,7 @@ class ResourceTagValuesTest(DatabaseTestCase):
             secret=b"fixture-secret-at-least-32-bytes-long", mutation_hook=Mock())
         self.authority = Mock(spec=ContentMetadataWriteAuthority)
         self.authority.actor = "fixture-user"
-        self.authority.state = Mock(connection=self.connection)
+        self.authority.state = Mock(connection=self.connection, provider="fixture-directory")
         self.authority.consume.side_effect = self.consume
         self.evidence = ResourceEvidence("fixture-native-lifecycle")
         self.initial = self.store._snapshot(self.ref, self.evidence, None)["revision"]
@@ -37,11 +37,11 @@ class ResourceTagValuesTest(DatabaseTestCase):
         finally:
             self.connection.rollback()
 
-    def save(self, values, revision=None):
+    def save(self, values, revision=None, key=None):
         return self.store.replace_user_tags_authorized(self.ref, [],
             expected_revision=revision or self.initial, authority=self.authority,
             lifecycle_reader=lambda cursor, ref: self.evidence,
-            request_id="fixture-request", tag_values=values)
+            request_id="fixture-request", tag_values=values, idempotency_key=key)
 
     def counts(self):
         with self.connection.cursor() as cursor:
@@ -83,3 +83,49 @@ class ResourceTagValuesTest(DatabaseTestCase):
             self.save([dict(label=" e\u0301 "), dict(label="é")])
         self.authority.consume.assert_not_called()
         self.assertEqual(self.counts(), (0, 0, 0, 0))
+
+    def test_durable_replay_does_not_duplicate_tags_bindings_or_events(self):
+        first = self.save([dict(label="drawing")], key="labels-1")
+        before = self.counts()
+        self.assertEqual(self.save([dict(label="drawing")], key="labels-1"), first)
+        self.assertEqual(self.counts(), before)
+        with self.assertRaises(ContractError) as raised:
+            self.save([dict(label="different")], key="labels-1")
+        self.assertEqual(raised.exception.code, "IDEMPOTENCY_CONFLICT")
+        self.assertEqual(self.counts(), before)
+        self.evidence = ResourceEvidence("recreated-object")
+        with self.assertRaises(ContractError) as raised:
+            self.save([dict(label="drawing")], key="labels-1")
+        self.assertEqual(raised.exception.code, "PATH_STATE_PENDING")
+        self.assertEqual(self.counts(), before)
+
+    def test_description_clear_and_durable_retry_use_same_lifecycle_transaction(self):
+        def write(description, revision, key):
+            return self.store.write_authorized(self.ref, dict(description=description),
+                expected_revision=revision, authority=self.authority,
+                lifecycle_reader=lambda cursor, ref: self.evidence, idempotency_key=key)
+        first = write("CAD", self.initial, "description-1")
+        self.assertEqual(write("CAD", self.initial, "description-1"), first)
+        self.assertEqual(self.counts()[0], 1)
+        cleared, created = write("", first[0]["revision"], "description-2")
+        self.assertFalse(created)
+        self.assertEqual(cleared["description"], "")
+        with self.assertRaises(ContractError) as raised:
+            write("stale", first[0]["revision"], "description-3")
+        self.assertEqual(raised.exception.code, "RESOURCE_REVISION_CONFLICT")
+
+    def test_disabled_label_can_remain_but_cannot_be_bound_again(self):
+        first, _ = self.save([dict(label="drawing")])
+        tag_id = first["tags"][0]["tag_id"]
+        with self.connection.cursor() as cursor:
+            cursor.execute("UPDATE cf_tag SET enabled=0 WHERE tag_id=%s", (tag_id,))
+        same, changed = self.save([dict(label="drawing")], first["revision"])
+        self.assertFalse(changed)
+        self.assertFalse(same["tags"][0]["enabled"])
+        empty, changed = self.save([], same["revision"])
+        self.assertTrue(changed)
+        before = self.counts()
+        with self.assertRaises(ContractError) as raised:
+            self.save([dict(label="drawing")], empty["revision"])
+        self.assertEqual(raised.exception.code, "TAG_DISABLED")
+        self.assertEqual(self.counts(), before)

@@ -57,3 +57,20 @@ test('local logout is an empty CSRF-client POST and requires a confirmed respons
   seafileAPI.req.post.mockResolvedValueOnce({ data: { local_logged_out: false } });
   await expect(seafileAPI.cloudFileLogout()).rejects.toThrow('Local logout was not confirmed');
 });
+
+test('annotations use current resource revision and distinct explicit idempotency keys', async () => {
+  const reference = { repo_id: 'repo', path: '/part', kind: 'file' };
+  await seafileAPI.cloudFileResolveAnnotations(reference);
+  await seafileAPI.cloudFileUpdateDescription(reference, 'revision', '', 'description-1');
+  await seafileAPI.cloudFileReplaceUserTags(reference, 'revision-2', [], 'tags-1');
+  expect(seafileAPI.req.post.mock.calls[0]).toEqual([
+    '/api/v2.1/cloudfile/extensions/annotations/v1/resources/resolve/', reference
+  ]);
+  expect(seafileAPI.req.post.mock.calls[1]).toEqual([
+    '/api/v2.1/cloudfile/extensions/annotations/v1/resources/',
+    { resource: reference, expected_revision: 'revision', changes: { description: '' } },
+    { headers: { 'Idempotency-Key': 'description-1' } }
+  ]);
+  expect(seafileAPI.req.post.mock.calls[2][1]).toEqual({ reference, revision: 'revision-2', values: [] });
+  expect(seafileAPI.req.post.mock.calls[2][2]).toEqual({ headers: { 'Idempotency-Key': 'tags-1' } });
+});

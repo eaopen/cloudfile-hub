@@ -192,9 +192,15 @@ class ResourceStore:
                 from ..tags.write import create_user
                 # Definition creation and binding share the same authority,
                 # lifecycle/condition, audit, final epoch check and rollback.
-                target_ids = [create_user(cursor, repo_id=ref["repo_id"],
-                    value={"label": value["label"], "color": value["color"]},
-                    actor=authority.actor, request_id=request_id)[0]["tag_id"] for value in definitions]
+                existing = {tag["label"]: tag["tag_id"] for tag in
+                    (bound_tags(cursor, resource_uid=row["uid"], repo_id=ref["repo_id"]) if row else [])
+                    if tag["kind"] == "user"}
+                # Disabled definitions may remain bound. Only an already-bound
+                # label can be reused here; new disabled bindings still fail.
+                target_ids = [existing[value["label"]] if value["label"] in existing else
+                    create_user(cursor, repo_id=ref["repo_id"],
+                        value={"label": value["label"], "color": value["color"]},
+                        actor=authority.actor, request_id=request_id)[0]["tag_id"] for value in definitions]
             if row is None and not target_ids:
                 return {**old, "tags": []}, False
             if row is None:

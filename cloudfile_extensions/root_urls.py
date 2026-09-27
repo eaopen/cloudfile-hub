@@ -39,6 +39,9 @@ if getattr(settings, "CLOUDFILE_OIDC_ENABLED", False):
 if getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False):
     urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/authorization/",
         include("cloudfile_extensions.authorization.urls")))
+if getattr(settings, "CLOUDFILE_ANNOTATIONS_ENABLED", False):
+    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/annotations/",
+        include("cloudfile_extensions.resources.urls")))
 if getattr(settings, "CLOUDFILE_LOCAL_EDIT_ENABLED", False):
     urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/local-edit/",
         include("cloudfile_extensions.local_edit.urls")))
