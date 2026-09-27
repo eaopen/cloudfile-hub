@@ -7,12 +7,13 @@ from unittest.mock import Mock, patch
 
 from cloudfile_extensions.authorization.host import PolicyHost
 from cloudfile_extensions.common.errors import ContractError
-from cloudfile_extensions.identity import delegation_gunicorn
+from cloudfile_extensions.identity import delegated_read_gunicorn, delegation_gunicorn
 
 
 class DelegationHostTests(unittest.TestCase):
     def host(self, factory):
-        deployment = SimpleNamespace(delegation_issue_factory=factory, close=Mock())
+        deployment = SimpleNamespace(delegation_issue_factory=factory,
+            delegated_read_factory=factory, close=Mock())
         with patch("cloudfile_extensions.authorization.host.configure_policy", return_value=deployment):
             return PolicyHost({}, directory_authorization=Mock()), deployment
 
@@ -48,6 +49,26 @@ class DelegationHostTests(unittest.TestCase):
                 "request", "request-id", "business-user")
         self.assertIs(result, scope)
         service.assert_called_once_with("request", "request-id", "business-user")
+
+    def test_delegated_read_scope_participates_in_host_drain(self):
+        @contextmanager
+        def factory(request, request_id):
+            yield (request, request_id)
+
+        host, _ = self.host(factory)
+        with host.delegated_read_service("request", "request-id") as issuer:
+            self.assertEqual(issuer, ("request", "request-id"))
+            self.assertEqual(host.active, 1)
+            self.assertFalse(host.drain())
+        host.close()
+
+    def test_delegated_read_url_proxy_resolves_only_during_request(self):
+        scope = Mock()
+        with patch.object(delegated_read_gunicorn.policy_host,
+                          "delegated_read_service", return_value=scope) as service:
+            result = delegated_read_gunicorn.delegated_read_factory("request", "request-id")
+        self.assertIs(result, scope)
+        service.assert_called_once_with("request", "request-id")
 
 
 if __name__ == "__main__":

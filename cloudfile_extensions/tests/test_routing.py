@@ -23,6 +23,7 @@ class RoutingTest(unittest.TestCase):
                 CLOUDFILE_EXTENSION_URLCONFS={"project": "cf_test_project"},
                 CLOUDFILE_AUTHORIZATION_ENABLED=True,
                 CLOUDFILE_LOCAL_EDIT_ENABLED=True,
+                CLOUDFILE_TRANSFER_ENABLED=True,
                 CLOUDFILE_CAPABILITIES={"auth.oidc": True})
             import django
             django.setup()
@@ -47,6 +48,9 @@ class RoutingTest(unittest.TestCase):
             assert context_response.status_code == 401, (context_response.status_code, context_response.content)
             delegation_response = client.post("/api/v2.1/cloudfile/extensions/authorization/v1/delegations/")
             assert delegation_response.status_code == 401, (delegation_response.status_code, delegation_response.content)
+            delegated_read = client.post(
+                "/api/v2.1/cloudfile/extensions/transfer/v1/delegated-read-tickets/")
+            assert delegated_read.status_code == 401, (delegated_read.status_code, delegated_read.content)
             response = client.get("/api/v2.1/cloudfile/capabilities/")
             assert response.status_code == 200
             assert response.json()["capabilities"]["auth.oidc"]["enabled"] is False

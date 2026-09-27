@@ -6,7 +6,7 @@ import re
 from ..common.validation import identifier, object_fields
 from ..identity.service_revocations import ServiceRevocations
 from ..identity.service_tokens import ServiceCredential, ServiceTokenVerifier
-from ..identity.user_delegation import DelegationKey
+from ..identity.user_delegation import DelegationKey, UserDelegationVerifier
 
 
 @dataclass(frozen=True)
@@ -20,6 +20,16 @@ class ServiceRuntimeConfiguration:
         revocations = ServiceRevocations(redis, prefix=self.revocation_prefix)
         verifier = ServiceTokenVerifier(self.credentials, revocations=revocations)
         return verifier, self.provider_grants, verifier, self.signing_keys
+
+    def build_delegation_verifier(self, redis, *, revocations=None):
+        keys = {kid: key for kid, key in self.signing_keys.values()}
+        if len(keys) != len(self.signing_keys):
+            raise ValueError("delegation key identifiers must be unique")
+        if revocations is None:
+            revocations = ServiceRevocations(redis, prefix=self.revocation_prefix)
+        if not isinstance(revocations, ServiceRevocations) or revocations.redis is not redis:
+            raise ValueError("shared service revocation resources required")
+        return UserDelegationVerifier(keys, revocations=revocations)
 
 
 def _secret(value, message):
@@ -87,11 +97,15 @@ def parse_service_runtime(configured, *, provider):
             raise ValueError("refresh grant service has no credential")
 
     signing_keys = {}
+    key_ids = set()
     for service_id, value in delegation_value.items():
         identifier(service_id)
         object_fields(value, ("kid", "issuer", "audience", "secret"))
         kid = value["kid"]
         identifier(kid, maximum=64)
+        if kid in key_ids:
+            raise ValueError("delegation key identifiers must be unique")
+        key_ids.add(kid)
         if service_id not in grants:
             raise ValueError("delegation service has no refresh grant")
         signing_keys[service_id] = (kid, DelegationKey(service_id, value["issuer"],

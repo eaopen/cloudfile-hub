@@ -13,9 +13,10 @@ def post_worker_init(worker):
     from django.conf import settings
     local_edit_enabled = getattr(settings, "CLOUDFILE_LOCAL_EDIT_ENABLED", False)
     authorization_enabled = getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False)
+    transfer_enabled = getattr(settings, "CLOUDFILE_TRANSFER_ENABLED", False)
     config = getattr(settings, "CLOUDFILE_POLICY_CONFIG", None)
     if config is None:
-        if local_edit_enabled or authorization_enabled:
+        if local_edit_enabled or authorization_enabled or transfer_enabled:
             raise RuntimeError("enabled CloudFile routes require the post-fork policy worker")
         _host = None
         return
@@ -41,7 +42,8 @@ def post_worker_init(worker):
             local_edit_instance=getattr(settings, "CLOUDFILE_LOCAL_EDIT_INSTANCE", None),
             local_edit_version_reader=getattr(settings, "CLOUDFILE_LOCAL_EDIT_VERSION_READER", None),
             local_edit_enabled=local_edit_enabled,
-            authorization_enabled=authorization_enabled)
+            authorization_enabled=authorization_enabled,
+            transfer_enabled=transfer_enabled)
     except Exception:
         raise RuntimeError("CloudFile policy worker initialization failed; check trusted configuration") from None
 
@@ -95,6 +97,12 @@ def delegation_issue_service(request, request_id, user_id):
     if _host is None or _host.pid != os.getpid():
         raise ContractError("POLICY_UNAVAILABLE", "Delegation issuance worker is unavailable", 503)
     return _host.delegation_issue_service(request, request_id, user_id)
+
+
+def delegated_read_service(request, request_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("POLICY_UNAVAILABLE", "Delegated read worker is unavailable", 503)
+    return _host.delegated_read_service(request, request_id)
 
 
 def local_session_service(request, request_id):

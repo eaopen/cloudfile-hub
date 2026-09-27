@@ -14,7 +14,7 @@ class PolicyHost:
                  delegation_service_verifier=None, delegation_signing_keys=None,
                  oidc=None, oidc_jit_enabled=False, local_edit_instance=None,
                  local_edit_version_reader=None, local_edit_enabled=False,
-                 authorization_enabled=False):
+                 authorization_enabled=False, transfer_enabled=False):
         # Construct after the server worker fork, never in a preload parent.
         self.pid = os.getpid()
         self.lock = threading.Lock()
@@ -31,7 +31,8 @@ class PolicyHost:
             local_edit_instance=local_edit_instance,
             local_edit_version_reader=local_edit_version_reader,
             local_edit_enabled=local_edit_enabled,
-            authorization_enabled=authorization_enabled)
+            authorization_enabled=authorization_enabled,
+            transfer_enabled=transfer_enabled)
 
     @contextmanager
     def login_resources_scope(self):
@@ -83,6 +84,9 @@ class PolicyHost:
     def local_device_service(self, request, request_id):
         return self._service(request, request_id, resource=False, local_device=True)
 
+    def delegated_read_service(self, request, request_id):
+        return self._service(request, request_id, resource=False, delegated_read=True)
+
     @contextmanager
     def delegation_issue_service(self, request, request_id, user_id):
         """Resolve the worker-owned login-service issuer inside host drain ownership."""
@@ -103,7 +107,8 @@ class PolicyHost:
 
     @contextmanager
     def _service(self, request, request_id, *, resource, audit=False, context=False, refresh=False,
-                 machine_refresh=False, local_session=False, local_device=False):
+                 machine_refresh=False, local_session=False, local_device=False,
+                 delegated_read=False):
         self._process()
         with self.lock:
             if self.draining or self.closed:
@@ -114,6 +119,8 @@ class PolicyHost:
                 factory = self.deployment.local_session_factory
             elif local_device:
                 factory = self.deployment.local_device_factory
+            elif delegated_read:
+                factory = self.deployment.delegated_read_factory
             elif machine_refresh:
                 factory = self.deployment.service_refresh_factory
             elif refresh:

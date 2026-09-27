@@ -10,7 +10,7 @@ from cloudfile_extensions.authorization.service_configuration import (
 )
 from cloudfile_extensions.authorization.deployment import configure_policy
 from cloudfile_extensions.identity.service_tokens import ServiceTokenVerifier
-from cloudfile_extensions.identity.user_delegation import DelegationKey
+from cloudfile_extensions.identity.user_delegation import DelegationKey, UserDelegationVerifier
 
 
 class ServiceConfigurationTests(unittest.TestCase):
@@ -41,7 +41,8 @@ class ServiceConfigurationTests(unittest.TestCase):
 
     def test_builds_shared_revocable_verifier_and_dedicated_key(self):
         parsed = parse_service_runtime(self.configured(), provider="etech")
-        refresh, grants, delegation, keys = parsed.build(Mock())
+        redis = Mock()
+        refresh, grants, delegation, keys = parsed.build(redis)
         self.assertIsInstance(refresh, ServiceTokenVerifier)
         self.assertIs(refresh, delegation)
         self.assertEqual(grants, {"etech-login": frozenset({"etech"})})
@@ -50,6 +51,11 @@ class ServiceConfigurationTests(unittest.TestCase):
         self.assertIsInstance(key, DelegationKey)
         self.assertNotEqual(key.secret, refresh.credentials["machine-kid"].secret)
         self.assertIs(refresh.revocations, delegation.revocations)
+        delegated_read = parsed.build_delegation_verifier(redis,
+            revocations=refresh.revocations)
+        self.assertIsInstance(delegated_read, UserDelegationVerifier)
+        self.assertIs(delegated_read.revocations, refresh.revocations)
+        self.assertEqual(set(delegated_read.keys), {"delegation-kid"})
 
     def test_partial_duplicate_and_unbound_service_configuration_is_rejected(self):
         value = self.configured()
@@ -64,6 +70,14 @@ class ServiceConfigurationTests(unittest.TestCase):
         duplicate["refresh_provider_grants"] = {"missing": ["etech"]}
         with self.assertRaises(ValueError):
             parse_service_runtime(duplicate, provider="etech")
+        duplicate_kid = self.configured()
+        duplicate_kid["service_credentials"]["other-machine"] = {
+            **duplicate_kid["service_credentials"]["machine-kid"], "service_id": "other"}
+        duplicate_kid["refresh_provider_grants"]["other"] = ["etech"]
+        duplicate_kid["delegation_signing_keys"]["other"] = {
+            **duplicate_kid["delegation_signing_keys"]["etech-login"]}
+        with self.assertRaisesRegex(ValueError, "identifiers must be unique"):
+            parse_service_runtime(duplicate_kid, provider="etech")
 
     def test_directory_bearer_is_fixed_and_cannot_override_callable(self):
         supplier = directory_authorization({"directory_bearer_token": "opaque-token"}, None)
@@ -84,7 +98,8 @@ class ServiceConfigurationTests(unittest.TestCase):
                 "port": int(os.environ.get("CF_TEST_DB_PORT", "3306")),
                 "user": "root", "name": "cloudfile", "password": ""},
             "redis": {"host": os.environ.get("CF_TEST_REDIS_HOST", "redis"),
-                "port": int(os.environ["CF_TEST_REDIS_PORT"]), "password": ""},
+                "port": int(os.environ["CF_TEST_REDIS_PORT"]),
+                "password": os.environ.get("CF_TEST_REDIS_PASSWORD", "")},
             "provider": "etech", "native_schema": "ccnet_db", "identity_schema": "seahub_db",
             "directory_url": "https://directory.example.invalid/context/v2",
             "directory_bearer_token": "directory-token", "attribute_allowlist": [],
@@ -94,10 +109,15 @@ class ServiceConfigurationTests(unittest.TestCase):
         deployment = configure_policy(value, directory_authorization=None,
                                       authorization_enabled=True)
         try:
+            self.assertTrue(deployment.redis.ping())
             self.assertIs(deployment.service_refresh_factory.verifier,
                           deployment.delegation_issue_factory.verifier)
             self.assertIs(deployment.factory.resources.redis,
                           deployment.service_refresh_factory.verifier.revocations.redis)
+            self.assertIs(deployment.delegated_read_factory.resources,
+                          deployment.factory.resources)
+            self.assertIs(deployment.delegated_read_factory.verifier.revocations,
+                          deployment.service_refresh_factory.verifier.revocations)
         finally:
             deployment.close()
 

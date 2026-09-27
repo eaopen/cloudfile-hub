@@ -93,6 +93,10 @@ class LocalEditHostTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "assembly reached"):
                 configure_policy(value, directory_authorization=None, authorization_enabled=True)
 
+    def test_enabled_transfer_requires_primitive_delegation_configuration_before_redis(self):
+        with self.assertRaisesRegex(ValueError, "primitive delegation security configuration"):
+            configure_policy(self.config(), directory_authorization=Mock(), transfer_enabled=True)
+
 
 if __name__ == "__main__":
     unittest.main()
