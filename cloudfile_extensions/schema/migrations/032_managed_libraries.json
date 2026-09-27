@@ -1,0 +1,15 @@
+{
+  "version": "032_managed_libraries",
+  "steps": [
+    {
+      "sql": "CREATE TABLE cf_managed_library (repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,created_at DATETIME(6) NOT NULL) ENGINE=InnoDB",
+      "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_managed_library')='InnoDB' AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_managed_library')=2 AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_managed_library' AND column_name='repo_id' AND data_type='char' AND character_maximum_length=36 AND collation_name='ascii_bin' AND is_nullable='NO')=1 AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_managed_library' AND column_name='created_at' AND data_type='datetime' AND datetime_precision=6 AND is_nullable='NO')=1 AND (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_managed_library' AND index_name='PRIMARY' AND column_name='repo_id' AND seq_in_index=1 AND sub_part IS NULL AND non_unique=0)=1,1,0)",
+      "expected": 1
+    },
+    {
+      "sql": "INSERT IGNORE INTO cf_managed_library(repo_id,created_at) SELECT repo_id,UTC_TIMESTAMP(6) FROM (SELECT repo_id FROM cf_dir_acl UNION SELECT repo_id FROM cf_dir_admin) AS existing_policy",
+      "verify": "SELECT IF(NOT EXISTS(SELECT 1 FROM (SELECT repo_id FROM cf_dir_acl UNION SELECT repo_id FROM cf_dir_admin) AS existing_policy LEFT JOIN cf_managed_library AS managed ON managed.repo_id=existing_policy.repo_id WHERE managed.repo_id IS NULL),1,0)",
+      "expected": 1
+    }
+  ]
+}

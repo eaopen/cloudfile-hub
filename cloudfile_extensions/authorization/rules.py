@@ -260,6 +260,10 @@ class ACLRules:
                     with self.connection.cursor() as cursor:
                         if self.authorize(cursor, self.actor, ref) is not True:
                             raise ContractError("ACCESS_DENIED", "ACL management is not allowed", 403)
+                        # Monotonic enrollment shares this policy transaction.
+                        # Deleting the last rule never reopens legacy access.
+                        cursor.execute("INSERT INTO cf_managed_library(repo_id,created_at) VALUES(%s,UTC_TIMESTAMP(6)) "
+                                       "ON DUPLICATE KEY UPDATE repo_id=VALUES(repo_id)", (ref["repo_id"],))
                         if request_key is not None:
                             require_request_storage(cursor)
                             cursor.execute("SELECT request_digest,result_json,inherited_effect FROM cf_policy_request WHERE request_key=%s FOR UPDATE", (request_key,))

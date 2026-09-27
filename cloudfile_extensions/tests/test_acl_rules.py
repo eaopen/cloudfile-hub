@@ -42,6 +42,8 @@ class ACLRulesTest(DatabaseTestCase):
         self.rules.mutate(self.ref(), rule_id=two["id"], if_match=two["etag"])
         self.assertEqual(self.rules.candidates(self.ref()), [])
         with self.connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM cf_managed_library WHERE repo_id=%s", (self.repo,))
+            self.assertEqual(cursor.fetchone()[0], 1)
             cursor.execute("SELECT COUNT(*) FROM cf_audit_event WHERE repo_id=%s", (self.repo,))
             self.assertEqual(cursor.fetchone()[0], 3)
 
@@ -66,6 +68,9 @@ class ACLRulesTest(DatabaseTestCase):
         with self.assertRaises(ContractError):
             self.rules.mutate(self.ref(), value=self.value())
         self.assertEqual(self.rules.candidates(self.ref()), [])
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM cf_managed_library WHERE repo_id=%s", (self.repo,))
+            self.assertEqual(cursor.fetchone()[0], 0)
         self.authorize.return_value = True
         self.rules.mutate(self.ref(), value=self.value())
         with self.assertRaises(ContractError) as caught:
