@@ -1182,6 +1182,12 @@ def react_fake_view(request, **kwargs):
         'llm_models': json.dumps(LLM_MODELS)
     }
 
+    from seahub.auth import BACKEND_SESSION_KEY
+    from cloudfile_extensions.identity.native_session import BACKEND
+    from django.conf import settings as runtime_settings
+    return_dict['cloudfile_web_enabled'] = (getattr(runtime_settings, 'CLOUDFILE_TRANSFER_ENABLED', False)
+        and request.session.get(BACKEND_SESSION_KEY) == BACKEND)
+
     return render(request, "react_app.html", return_dict)
 
 

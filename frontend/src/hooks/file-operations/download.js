@@ -4,7 +4,7 @@ import ZipDownloadDialog from '@/components/dialog/zip-download-dialog';
 import { EVENT_BUS_TYPE } from '@/components/event-bus';
 import ModalPortal from '@/components/modal-portal';
 import toaster from '@/components/toast';
-import { useGoFileserver, fileServerRoot } from '@/utils/constants';
+import { useGoFileserver, fileServerRoot, cloudFileWebEnabled } from '@/utils/constants';
 import URLDecorator from '@/utils/url-decorator';
 import { Utils } from '@/utils/utils';
 
@@ -20,6 +20,21 @@ export const DownloadFileProvider = forwardRef(({ repoID, eventBus, children }, 
   const handleDownload = useCallback((path, direntList = []) => {
     const direntCount = direntList.length;
     if (direntCount === 0) return;
+    if (cloudFileWebEnabled) {
+      if (direntCount !== 1 || direntList[0].is_dir) return;
+      seafileAPI.cloudFileRead(repoID, Utils.joinPath(path, direntList[0].name)).then(res => {
+        const url = URL.createObjectURL(res.data);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = direntList[0].name;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      }).catch(error => toaster.danger(Utils.getErrorMsg(error)));
+      return;
+    }
+
     if (direntCount === 1 && !direntList[0].is_dir) {
       const direntPath = Utils.joinPath(path, direntList[0].name);
       const url = URLDecorator.getUrl({ type: 'download_file_url', repoID: repoID, filePath: direntPath });

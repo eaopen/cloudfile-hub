@@ -65,8 +65,14 @@ def web_list(kind):
                                 raise ContractError('ACCESS_DENIED', 'Extended browsing is unavailable', 403)
                             repo = kwargs.get('repo_id') or args[0]
                             path = request.GET.get('p', '/').rstrip('/') or '/'
-                            parent_permission = authority.consume(dict(repo_id=repo, path=path, kind='dir'),
-                                lambda cursor, target: 'rw' if authority.effective_access['write'] else 'r')
+                            def parent_state(cursor, target):
+                                cursor.execute("SELECT commit_id FROM Branch WHERE repo_id=%s AND name='master'", (repo,))
+                                rows = cursor.fetchall()
+                                if len(rows) != 1:
+                                    raise ContractError('POLICY_UNAVAILABLE', 'Current head is unavailable', 503)
+                                return ('rw' if authority.effective_access['write'] else 'r', rows[0][0])
+                            parent_permission, head_id = authority.consume(dict(repo_id=repo, path=path, kind='dir'),
+                                parent_state)
                         response = view(self, request, *args, **kwargs)
                         if response.status_code == 200:
                             data = dict(response.data)
@@ -79,6 +85,7 @@ def web_list(kind):
                                         path=posixpath.join(item['parent_dir'], item['name'])))
                                 if parent_permission == 'r':
                                     data['user_perm'] = 'r'
+                                data['head_id'] = head_id
                                 # CE metadata enrichment is outside the v0.2 browse contract.
                                 data.pop('metadata', None)
                             response.data = data

@@ -3,7 +3,7 @@ import Resumablejs from '@seafile/resumablejs';
 import MD5 from 'MD5';
 import PropTypes from 'prop-types';
 import { seafileAPI } from '@/api/seafile-api';
-import { gettext, resumableUploadFileBlockSize, maxUploadFileSize, maxNumberOfFilesForFileupload } from '@/utils/constants';
+import { gettext, cloudFileWebEnabled, resumableUploadFileBlockSize, maxUploadFileSize, maxNumberOfFilesForFileupload } from '@/utils/constants';
 import { Utils } from '@/utils/utils';
 import UploadRemindDialog from '../dialog/upload-remind-dialog';
 import toaster from '../toast';
@@ -60,6 +60,7 @@ class FileUploader extends React.Component {
   }
 
   componentDidMount() {
+    if (cloudFileWebEnabled) return;
     this.resumable = new Resumablejs({
       target: '',
       query: this.setQuery || {},
@@ -92,12 +93,13 @@ class FileUploader extends React.Component {
 
   componentWillUnmount = () => {
     window.onbeforeunload = null;
-    if (this.props.dragAndDrop === true) {
+    if (this.resumable && this.props.dragAndDrop === true) {
       this.resumable.disableDropOnDocument();
     }
   };
 
   onbeforeunload = () => {
+    if (this.state.cloudFileUploading) return '';
     if (window.uploader &&
         window.uploader.isUploadProgressDialogShow &&
         window.uploader.totalProgress !== 100) {
@@ -597,7 +599,36 @@ class FileUploader extends React.Component {
     e.stopPropagation();
   };
 
+  onCloudFileSelected = (event) => {
+    const file = event.target.files[0];
+    event.target.value = '';
+    if (!file || this.state.cloudFileUploading) return;
+    const selected = { file, fileName: file.name, repoID: this.props.repoID, path: this.props.path };
+    if (this.props.direntList.some(item => item.name === file.name)) {
+      this.setState({ currentResumableFile: selected, isUploadRemindDialogShow: true });
+    } else {
+      this.uploadCloudFile(selected, false);
+    }
+  };
+
+  uploadCloudFile = async (selected, replace) => {
+    if (this.state.cloudFileUploading) return;
+    this.setState({ cloudFileUploading: true, isUploadRemindDialogShow: false });
+    try {
+      const entry = await seafileAPI.cloudFileUpload(selected.repoID, selected.path, selected.file, replace);
+      if (selected.repoID === this.props.repoID && selected.path === this.props.path) {
+        this.props.onFileUploadSuccess(entry);
+      }
+      toaster.success(gettext('All files uploaded'));
+    } catch (error) {
+      toaster.danger(Utils.getErrorMsg(error));
+    } finally {
+      this.setState({ cloudFileUploading: false, currentResumableFile: null });
+    }
+  };
+
   onFileUpload = () => {
+    if (this.state.cloudFileUploading) return;
     this.suppressAdds = false;
     this.uploadInput.current.removeAttribute('webkitdirectory');
 
@@ -605,6 +636,7 @@ class FileUploader extends React.Component {
   };
 
   onFolderUpload = () => {
+    if (cloudFileWebEnabled) return;
     this.suppressAdds = false;
     this.uploadInput.current.setAttribute('webkitdirectory', 'webkitdirectory');
     this.uploadInput.current.click();
@@ -745,6 +777,7 @@ class FileUploader extends React.Component {
   };
 
   replaceRepetitionFile = () => {
+    if (cloudFileWebEnabled) return this.uploadCloudFile(this.state.currentResumableFile, true);
     let resumableFile = this.resumable.files[this.resumable.files.length - 1];
     this.freezeUploadContext(resumableFile);
     let { repoID } = this.props;
@@ -770,6 +803,7 @@ class FileUploader extends React.Component {
   };
 
   uploadFile = () => {
+    if (cloudFileWebEnabled) return this.cancelFileUpload();
     let resumableFile = this.resumable.files[this.resumable.files.length - 1];
     this.ensureUploadLink(resumableFile).then((uploadLink) => { // get upload link
       this.resumable.opts.target = uploadLink;
@@ -789,7 +823,7 @@ class FileUploader extends React.Component {
   };
 
   cancelFileUpload = () => {
-    this.resumable.files.pop(); // delete latest file；
+    if (this.resumable) this.resumable.files.pop(); // delete latest file；
     this.setState({ isUploadRemindDialogShow: false });
   };
 
@@ -798,9 +832,10 @@ class FileUploader extends React.Component {
       <Fragment>
         <div className="file-uploader-container">
           <div className="file-uploader">
-            <input className="upload-input" type="file" ref={this.uploadInput} onClick={this.onClick} aria-label={gettext('Upload')} />
+            <input className="upload-input" type="file" ref={this.uploadInput} disabled={this.state.cloudFileUploading} onChange={cloudFileWebEnabled ? this.onCloudFileSelected : undefined} onClick={this.onClick} aria-label={gettext('Upload')} />
           </div>
         </div>
+        {this.state.cloudFileUploading && <span role="status">{gettext('Uploading...')}</span>}
         {this.state.isUploadRemindDialogShow &&
           <UploadRemindDialog
             currentResumableFile={this.state.currentResumableFile}

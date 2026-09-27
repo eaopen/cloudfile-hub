@@ -1,7 +1,7 @@
 import axios from 'axios';
 import FormData from 'form-data';
 import Cookies from 'js-cookie';
-import { siteRoot } from '@/utils/constants';
+import { siteRoot, cloudFileWebEnabled } from '@/utils/constants';
 
 class SeafileAPI {
 
@@ -902,7 +902,7 @@ class SeafileAPI {
     if (type) {
       params.t = type;
     }
-    if (with_thumbnail) {
+    if (with_thumbnail && !cloudFileWebEnabled) {
       params.with_thumbnail = with_thumbnail;
     }
     if (with_parents) {
@@ -1067,6 +1067,36 @@ class SeafileAPI {
   getFileHistory(repoID, folderPath) {
     const url = this.server + '/api2/repos/' + repoID + '/file/history/?p=' + encodeURIComponent(folderPath);
     return this.req.get(url);
+  }
+
+  cloudFileRead(repoID, filePath) {
+    const url = this.server + '/api/v2.1/cloudfile/extensions/identity/v1/read-tickets/';
+    return this.req.post(url, { reference: { repo_id: repoID, path: filePath, kind: 'file' } }).then(res => {
+      return fetch(this.server + '/seafhttp/cloudfile/read', {
+        headers: { Authorization: 'Bearer ' + res.data.ticket },
+        credentials: 'omit', redirect: 'error'
+      }).then(async response => {
+        if (!response.ok) throw new Error('File download was refused');
+        return { data: await response.blob() };
+      });
+    });
+  }
+
+  async cloudFileUpload(repoID, parent, file, replace) {
+    const listing = await this.listDir(repoID, parent);
+    const head = listing.data.head_id;
+    if (!/^[0-9a-f]{40}$/.test(head)) throw new Error('Current head is unavailable');
+    const form = new window.FormData();
+    form.append('repo_id', repoID);
+    form.append('path', (parent === '/' ? '' : parent.replace(/\/$/, '')) + '/' + file.name);
+    form.append('head_id', head);
+    form.append('file', file);
+    const operation = replace ? 'manual-update/' : 'manual-upload/';
+    const result = await this.req.post(this.server + '/api/v2.1/cloudfile/extensions/identity/v1/' + operation, form);
+    const current = await this.listDir(repoID, parent);
+    const entry = current.data.dirent_list.find(item => item.name === file.name && item.type === 'file');
+    if (!entry || entry.id !== result.data.object_id) throw new Error('Refresh required after publication');
+    return entry;
   }
 
   getFileDownloadLink(repoID, filePath) {

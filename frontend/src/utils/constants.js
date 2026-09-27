@@ -244,3 +244,5 @@ export const SF_COLOR_MODE = 'sf_color_mode';
 
 export const SF_DIRECTORY_TREE_SORT_BY_KEY = 'sf_directory_tree_sort_by';
 export const SF_DIRECTORY_TREE_SORT_ORDER_KEY = 'sf_directory_tree_sort_order';
+
+export const cloudFileWebEnabled = window.app.pageOptions.cloudFileWebEnabled === true;

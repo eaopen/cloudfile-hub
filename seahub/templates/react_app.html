@@ -9,6 +9,7 @@
 {% block extra_script %}
 <script type="text/javascript">
   var newOptions = {
+    cloudFileWebEnabled: {% if cloudfile_web_enabled %}true{% else %}false{% endif %},
     enableShareToDepartment: {% if enable_share_to_department %} true {% else %} false {% endif %},
     shareLinkExpireDaysDefault: {{ share_link_expire_days_default }},
     shareLinkExpireDaysMin: {{ share_link_expire_days_min }},
