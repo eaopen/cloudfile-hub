@@ -51,10 +51,10 @@ class ResourceHTTPTest(unittest.TestCase):
     def view(self, cls, request):
         return cls.as_view(service_factory=self.factory)(request)
 
-    def test_resolve_uses_owned_scope_without_exposing_local_application_mapping(self):
+    def test_resolve_returns_v03_open_type_in_owned_scope(self):
         response = self.view(ResourceResolveView, self.request(self.ref))
         self.assertEqual(response.status_code, 200)
-        self.assertNotIn("local_open_type", json.loads(response.content))
+        self.assertEqual(json.loads(response.content)["local_open_type"], "cad.v1")
         self.assertEqual(self.snapshot["local_open_type"], "cad.v1")
         self.service.resolve.assert_called_once_with(dict(reference=self.ref))
         self.assertIn("no-store", response["Cache-Control"])
@@ -71,12 +71,28 @@ class ResourceHTTPTest(unittest.TestCase):
         self.assertEqual(response.status_code, 200)
         self.service.replace_user_tag_values.assert_called_once_with(body, idempotency_key="save-2")
 
-    def test_v04_and_arbitrary_attributes_are_rejected_before_service_allocation(self):
-        for changes in (dict(local_open_type="cad.v1"), dict(description="CAD", project="secret"), {}):
+    def test_invalid_attributes_are_rejected_before_service_allocation(self):
+        for changes in (dict(local_open_type="/bin/app"), dict(description="CAD", project="secret"), {}):
             body = dict(resource=self.ref, expected_revision="strong-revision", changes=changes)
             self.assertEqual(self.view(ResourceAttributesView,
                 self.request(body, HTTP_IDEMPOTENCY_KEY="save")).status_code, 400)
         self.assertEqual(self.opened, 0)
+
+    def test_open_type_can_be_saved_and_cleared_but_not_set_on_directory(self):
+        for hint in ("UG12", ""):
+            body = dict(resource=self.ref, expected_revision="strong-revision",
+                changes=dict(local_open_type=hint))
+            response = self.view(ResourceAttributesView,
+                self.request(body, HTTP_IDEMPOTENCY_KEY="open-type"))
+            self.assertEqual(response.status_code, 201)
+            self.service.update_attributes.assert_called_with(dict(reference=self.ref,
+                revision="strong-revision", changes=dict(local_open_type=hint)),
+                idempotency_key="open-type")
+        opened = self.opened
+        body["resource"] = dict(self.ref, kind="dir")
+        self.assertEqual(self.view(ResourceAttributesView,
+            self.request(body, HTTP_IDEMPOTENCY_KEY="directory")).status_code, 400)
+        self.assertEqual(self.opened, opened)
 
     def test_missing_condition_headers_machine_credentials_and_csrf(self):
         body = dict(resource=self.ref, expected_revision="r", changes=dict(description=""))
@@ -98,12 +114,12 @@ class ResourceHTTPTest(unittest.TestCase):
             self.assertEqual(response.status_code, status)
             self.assertEqual(json.loads(response.content)["code"], code)
 
-    def test_batch_hides_local_open_type_and_catalog_query_is_bounded(self):
+    def test_batch_returns_open_type_and_catalog_query_is_bounded(self):
         self.service.batch_resolve.return_value = dict(items=[dict(reference=self.ref, status=200,
             snapshot=self.snapshot), dict(reference=self.ref, status=404)])
         response = self.view(ResourceBatchView, self.request(dict(references=[self.ref])))
         items = json.loads(response.content)["items"]
-        self.assertNotIn("local_open_type", items[0]["snapshot"])
+        self.assertEqual(items[0]["snapshot"]["local_open_type"], "cad.v1")
         self.assertEqual(set(items[1]), {"reference", "status"})
         self.service.list_user_tag_definitions.return_value = dict(items=[], after=None)
         response = self.view(UserTagCatalogView, self.requests.get("/tags/",

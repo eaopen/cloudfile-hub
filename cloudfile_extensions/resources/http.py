@@ -12,7 +12,8 @@ from django.middleware.csrf import CsrfViewMiddleware
 
 from ..authorization.http import DirectoryPolicyView
 from ..common.errors import ContractError, invalid
-from ..common.validation import object_fields
+from ..common.validation import annotation_changes, object_fields
+from .paths import resource_ref
 from .service import ResourceService
 
 
@@ -57,7 +58,7 @@ class ResourceResolveView(DirectoryPolicyView):
                 body = self._body(request)
                 if self.operation == "attributes":
                     object_fields(body, ("resource", "expected_revision", "changes"))
-                    object_fields(body["changes"], ("description",))
+                    annotation_changes(body["changes"], kind=resource_ref(body["resource"])["kind"])
             writes = {"attributes", "tag_ids", "tag_values", "tag_definition"}
             key = None
             if self.operation in writes:
@@ -93,14 +94,6 @@ class ResourceResolveView(DirectoryPolicyView):
                         value, changed = method(body, idempotency_key=key)
                     result = value
                 status = 201 if self.operation == "attributes" and changed else 200
-                # Local application mappings belong to v0.4, not this Web API.
-                if isinstance(result, dict):
-                    result = dict(result)
-                    result.pop("local_open_type", None)
-                    if self.operation == "batch":
-                        result["items"] = [dict(item, snapshot={key: value for key, value in item["snapshot"].items()
-                            if key != "local_open_type"}) if "snapshot" in item else item
-                            for item in result["items"]]
                 response = JsonResponse(result, status=status)
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)
