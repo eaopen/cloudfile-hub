@@ -7,7 +7,7 @@ import re
 
 RESERVED_DOMAINS = frozenset({
     "directory", "authorization", "library-policy", "directory-acl",
-    "annotations", "audit", "search", "locks", "local-edit", "migration", "transfer",
+    "annotations", "audit", "search", "locks", "local-edit", "migration", "transfer", "identity",
 })
 CAPABILITY_NAME_RE = re.compile(r"^[a-z][a-z0-9]*(?:[._-][a-z0-9]+)*$")
 

@@ -14,9 +14,10 @@ def post_worker_init(worker):
     local_edit_enabled = getattr(settings, "CLOUDFILE_LOCAL_EDIT_ENABLED", False)
     authorization_enabled = getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False)
     transfer_enabled = getattr(settings, "CLOUDFILE_TRANSFER_ENABLED", False)
+    oidc_enabled = getattr(settings, "CLOUDFILE_OIDC_ENABLED", False)
     config = getattr(settings, "CLOUDFILE_POLICY_CONFIG", None)
     if config is None:
-        if local_edit_enabled or authorization_enabled or transfer_enabled:
+        if local_edit_enabled or authorization_enabled or transfer_enabled or oidc_enabled:
             raise RuntimeError("enabled CloudFile routes require the post-fork policy worker")
         _host = None
         return
@@ -44,6 +45,10 @@ def post_worker_init(worker):
             local_edit_enabled=local_edit_enabled,
             authorization_enabled=authorization_enabled,
             transfer_enabled=transfer_enabled)
+        if oidc_enabled and _host.deployment.login_resources is None:
+            _host.close()
+            _host = None
+            raise RuntimeError("enabled OIDC requires a configured login runtime")
     except Exception:
         raise RuntimeError("CloudFile policy worker initialization failed; check trusted configuration") from None
 

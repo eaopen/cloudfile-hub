@@ -52,3 +52,11 @@ python -m cloudfile_extensions.schema check
 CloudFile 不修改桌面端、移动端及同步协议；项目 UI 与业务逻辑应保留在对应项目仓库，通过此扩展边界接入。
 
 待开发的登录方案统一见 `eap-cloudfile/docs/features/identity-directory.md`：持久身份复用 CE 用户/原生 OAuth 绑定，最小属性、组织和角色上下文只缓存 CF 专属 Redis，默认不新增主体快照表。已有账号复用或受控预绑定，新账号经可信目录校验后受控 JIT；有效会话只在上下文缺失/过期时刷新权限，不重复要求 OIDC 登录。此方案尚未在本仓库实现。
+
+## v0.2 显式 OIDC Host
+
+`CLOUDFILE_OIDC_ENABLED=True` 时，app ready 校验 `CLOUDFILE_OIDC_CONFIG`（原始字典或既有 OIDCConfig）、policy config、固定 callback/return URI、数据库 session 与唯一 session middleware。校验通过后接入既有 CloudFile native backend、guarded session middleware 与 late post-fork login resource scope，保留本地恢复认证；不在 app ready 连接 SQL/Redis/IdP，不自动改变 capability。
+
+ROOT_URLCONF 仍由部署设置 `SITE_ROOT_URLCONF='cloudfile_extensions.root_urls'`；显式挂载 `extensions/identity/v1/` 的 begin/callback/pending/logout/idp/return。Gunicorn 使用已有 policy hooks 构造真实 LoginResources；未装 hook 的请求安全拒绝，缺 policy/login runtime 拒绝启动。旧 OAuth 不能并行启用，JIT 默认 false。Docker 变量及示例见 cloudfile-docker/CLOUDFILE.md。
+
+v0.2/v0.3 不交付 Agent；属性标签/搜索/锁/完整审计归 v0.3，本地工作流归 v0.4。版本归属与当前 E2E 缺口见 eap-cloudfile/docs/releases/，旧设计和分项源码保留为 staged。
