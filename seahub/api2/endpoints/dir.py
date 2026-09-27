@@ -8,6 +8,7 @@ import posixpath
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from cloudfile_extensions.authorization.browsing import web_list
 from rest_framework.views import APIView
 from rest_framework import status
 from urllib.parse import quote
@@ -218,6 +219,7 @@ class DirView(APIView):
 
         return dir_info
 
+    @web_list('directory')
     def get(self, request, repo_id, format=None):
         """ Get sub dirent list info.
 

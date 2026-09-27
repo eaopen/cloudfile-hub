@@ -9,6 +9,7 @@ from PIL import Image
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from cloudfile_extensions.authorization.browsing import web_list
 from rest_framework.views import APIView
 from rest_framework import status
 
@@ -47,6 +48,7 @@ class ReposView(APIView):
     permission_classes = (IsAuthenticated,)
     throttle_classes = (UserRateThrottle,)
 
+    @web_list('libraries')
     def get(self, request):
         """ Return repos user can access.
 
