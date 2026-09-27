@@ -3,9 +3,12 @@ from contextlib import contextmanager
 from uuid import uuid4
 
 from django.http import JsonResponse
+from django.conf import settings
 from django.middleware.csrf import CsrfViewMiddleware
 
 from ..authorization.http import DirectoryPolicyView
+from ..authorization.core import PolicyCore
+from ..authorization.read import ContentReadAuthority
 from ..authorization.runtime import AuthenticatedPolicyActor
 from ..common.errors import ContractError, invalid
 from ..common.validation import object_fields
@@ -15,6 +18,7 @@ from .resources import LoginResources
 from .session_authority import OIDCSessionAuthority
 from .native_backend import CloudFileOIDCBackend
 from .native_session import BACKEND
+from .transfer_audit import record_transfer
 
 
 def native_download_actor(request):
@@ -89,6 +93,16 @@ class OIDCReadTicketView(DirectoryPolicyView):
             if not isinstance(self.service_factory, OIDCReadTicketFactory):
                 raise ContractError("POLICY_UNAVAILABLE", "Download ticket runtime is unavailable", 503)
             with self.service_factory(request, request_id) as issuer:
+                config = settings.CLOUDFILE_POLICY_CONFIG
+                preflight = ContentReadAuthority(issuer.preparation, PolicyCore(config['core_library']),
+                    request_id=request_id, cloud_mode=config['cloud_mode'])
+                try:
+                    preflight.consume(reference, lambda cursor, target: None)
+                except ContractError as error:
+                    if error.code == 'ACCESS_DENIED':
+                        record_transfer(issuer.authority.resources.resources, issuer.preparation.actor,
+                            reference, request_id, 'file.' + operation, 'denied', reason=error.code)
+                    raise
                 result = issuer.issue(request, reference, operation=operation)
             response = JsonResponse(result, status=201)
         except ContractError as error:

@@ -22,6 +22,7 @@ from .read_ticket_http import native_download_actor
 from .resources import LoginResources
 from .session_authority import OIDCSessionAuthority
 from .ticket_transport import _call
+from .transfer_audit import record_transfer
 
 
 class OIDCManualUpdateView(View):
@@ -31,6 +32,9 @@ class OIDCManualUpdateView(View):
 
     def dispatch(self, request, *args, **kwargs):
         request_id = str(uuid4())
+        audited = False
+        submitted = False
+        action = "file.upload" if self.create else "file.update"
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Manual upload/update requires POST", 405)
@@ -60,6 +64,8 @@ class OIDCManualUpdateView(View):
             uploaded = request.FILES["file"]
             if uploaded.size > 512 * 1024 * 1024:
                 raise ContractError("REQUEST_TOO_LARGE", "Manual update exceeds 512 MiB", 413)
+            record_transfer(self.resources.resources, actor.user_id, reference, request_id, action, 'attempted')
+            audited = True
             with self.resources.resources.preparation(actor.user_id, request_id) as preparation:
                 preparation.prepare(actor.user_id)
                 if preparation.state.username(actor.user_id) != actor.native_username:
@@ -104,6 +110,7 @@ class OIDCManualUpdateView(View):
                     staged.flush()
                     parent, _, filename = reference["path"].rpartition("/")
                     try:
+                        submitted = True
                         object_id = _call("seafile_cloudfile_put_file_with_barriers",
                             (reference["repo_id"], staged.name, parent or "/", filename,
                              actor.native_username, json.dumps(condition, separators=(",", ":"))),
@@ -113,10 +120,26 @@ class OIDCManualUpdateView(View):
                             "Native update was refused or completion is unconfirmed", 503) from None
             if not isinstance(object_id, str) or not re.fullmatch(r"[0-9a-f]{40}", object_id):
                 raise ContractError("PUBLICATION_UNCONFIRMED", "Native completion is unconfirmed", 503)
+            record_transfer(self.resources.resources, actor.user_id, reference, request_id, action, 'succeeded',
+                reason='NATIVE_COMPLETION_ACKNOWLEDGED', content_version=object_id)
+            audited = False
             response = JsonResponse(dict(object_id=object_id, request_id=request_id), status=201 if self.create else 200)
         except ContractError as error:
+            if audited:
+                try:
+                    result = 'interrupted' if submitted else 'denied' if error.status == 403 else 'failed'
+                    record_transfer(self.resources.resources, actor.user_id, reference, request_id, action, result,
+                        reason='PUBLICATION_UNCONFIRMED' if submitted else error.code)
+                except ContractError:
+                    error = ContractError('AUDIT_UNAVAILABLE', 'Transfer audit is unavailable; completion may be unknown', 503)
             response = JsonResponse(error.response(request_id), status=error.status)
         except Exception:
+            if audited:
+                try:
+                    record_transfer(self.resources.resources, actor.user_id, reference, request_id, action,
+                        'interrupted' if submitted else 'failed', reason='PUBLICATION_UNCONFIRMED' if submitted else 'POLICY_UNAVAILABLE')
+                except ContractError:
+                    pass  # No terminal fact is invented; the durable attempt remains unresolved.
             error = ContractError("POLICY_UNAVAILABLE", "Manual upload/update runtime is unavailable", 503)
             response = JsonResponse(error.response(request_id), status=503)
         response["Cache-Control"] = "no-store, max-age=0"
