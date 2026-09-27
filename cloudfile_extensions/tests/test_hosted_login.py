@@ -138,6 +138,16 @@ class HostedLoginHTTPTests(unittest.TestCase):
         self.assertEqual(response.status_code, 405)
         self.assertEqual(events, ["entered", "exited"])
 
+    def test_only_explicit_server_notification_route_exempts_csrf(self):
+        scope = Mock()
+        routes = hosted_login_routes(resources_scope=scope, backchannel_enabled=True)
+        self.assertEqual(len(routes), 7)
+        exempt = [str(route.pattern) for route in routes if getattr(route.callback, 'csrf_exempt', False)]
+        self.assertEqual(exempt, ['logout/backchannel/'])
+        scope.assert_not_called()
+        with self.assertRaises(ValueError):
+            hosted_login_routes(resources_scope=scope, backchannel_enabled='true')
+
     def test_uninitialized_worker_error_is_safe_uncached(self):
         @contextmanager
         def resources_scope():

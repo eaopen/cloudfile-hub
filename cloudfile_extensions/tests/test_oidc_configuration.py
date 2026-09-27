@@ -54,6 +54,20 @@ class OIDCHostConfigurationTests(unittest.TestCase):
         configure_oidc_host(settings)
         self.assertEqual(vars(settings), before)
 
+    def test_backchannel_requires_boolean_flag_and_enabled_oidc_host(self):
+        for enabled, flag in [(False, True), (True, 'true')]:
+            settings = self.configured()
+            settings.CLOUDFILE_OIDC_ENABLED = enabled
+            settings.CLOUDFILE_OIDC_BACKCHANNEL_ENABLED = flag
+            before = vars(settings).copy()
+            with self.assertRaises(ImproperlyConfigured):
+                configure_oidc_host(settings)
+            self.assertEqual(vars(settings), before)
+        settings = self.configured()
+        settings.CLOUDFILE_OIDC_BACKCHANNEL_ENABLED = True
+        configure_oidc_host(settings)
+        self.assertTrue(settings.CLOUDFILE_OIDC_BACKCHANNEL_ENABLED)
+
     def test_missing_policy_legacy_oauth_and_unguarded_sessions_rejected_without_mutation(self):
         for field, value in (("CLOUDFILE_POLICY_CONFIG", None), ("ENABLE_OAUTH", True),
                 ("SESSION_ENGINE", "django.contrib.sessions.backends.cache"),

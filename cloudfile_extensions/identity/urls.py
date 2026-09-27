@@ -7,4 +7,5 @@ from .hosted_routes import hosted_login_routes
 
 
 urlpatterns = hosted_login_routes(resources_scope=login_resources_scope,
-    return_path=settings.CLOUDFILE_OIDC_RETURN_PATH)
+    return_path=settings.CLOUDFILE_OIDC_RETURN_PATH,
+    backchannel_enabled=getattr(settings, "CLOUDFILE_OIDC_BACKCHANNEL_ENABLED", False))

@@ -15,6 +15,9 @@ BACKEND = "cloudfile_extensions.identity.native_backend.CloudFileOIDCBackend"
 
 def configure_oidc_host(settings):
     enabled = getattr(settings, "CLOUDFILE_OIDC_ENABLED", False)
+    backchannel = getattr(settings, "CLOUDFILE_OIDC_BACKCHANNEL_ENABLED", False)
+    if type(backchannel) is not bool or (backchannel and enabled is not True):
+        raise ImproperlyConfigured("OIDC backchannel requires explicit OIDC enablement and a boolean flag")
     if type(enabled) is not bool:
         raise ImproperlyConfigured("CLOUDFILE_OIDC_ENABLED must be a boolean")
     if not enabled:
@@ -59,7 +62,8 @@ def configure_oidc_host(settings):
         return_path = getattr(settings, "CLOUDFILE_OIDC_RETURN_PATH", site_root)
         from .hosted_routes import hosted_login_routes
         from ..authorization.gunicorn import login_resources_scope
-        hosted_login_routes(resources_scope=login_resources_scope, return_path=return_path)
+        hosted_login_routes(resources_scope=login_resources_scope, return_path=return_path,
+            backchannel_enabled=backchannel)
         existing_scope = getattr(settings, "CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE", None)
         if existing_scope is not None and existing_scope is not login_resources_scope:
             raise ValueError()

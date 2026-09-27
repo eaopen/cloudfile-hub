@@ -5,6 +5,7 @@ from uuid import uuid4
 from django.http import JsonResponse
 from django.urls import path
 from django.views import View
+from django.views.decorators.csrf import csrf_exempt
 
 from ..common.errors import ContractError
 from .begin_http import LoginBeginView, login_begin_routes
@@ -14,6 +15,8 @@ from .logout_return_http import LogoutReturnView
 from .pending_http import PendingStatusView
 from .resources import LoginResources
 from .rp_logout_http import RPLogoutView
+from .logout_backchannel_http import BackchannelLogoutView
+from .logout_resources import LogoutResources
 
 
 class HostedLoginView(View):
@@ -32,7 +35,9 @@ class HostedLoginView(View):
                     raise ContractError("IDENTITY_UNAVAILABLE", "Login resources are unavailable", 503)
                 views = {"begin": LoginBeginView, "callback": LoginCallbackView,
                     "logout": LocalLogoutView, "idp": RPLogoutView, "return": LogoutReturnView}
-                if self.operation == "pending":
+                if self.operation == "backchannel":
+                    adapter = BackchannelLogoutView.as_view(resources=LogoutResources(resources, enabled=True))
+                elif self.operation == "pending":
                     @contextmanager
                     def pending(request_id):
                         with resources.runtime(request_id) as runtime:
@@ -62,10 +67,12 @@ class HostedLoginView(View):
             return response
 
 
-def hosted_login_routes(*, resources_scope, return_path="/"):
+def hosted_login_routes(*, resources_scope, return_path="/", backchannel_enabled=False):
     """Configuration only; never enable capabilities, backends or middleware."""
     if not callable(resources_scope):
         raise ValueError("trusted process-owned login scope required")
+    if type(backchannel_enabled) is not bool:
+        raise ValueError("explicit boolean backchannel enablement required")
     if (not isinstance(return_path, str) or not return_path.startswith("/") or
             return_path.startswith("//") or "\\" in return_path or len(return_path) > 2048 or
             any(ord(char) < 32 for char in return_path)):
@@ -76,5 +83,12 @@ def hosted_login_routes(*, resources_scope, return_path="/"):
         ("logout/", "logout", "cloudfile-oidc-local-logout"),
         ("logout/idp/", "idp", "cloudfile-oidc-rp-logout"),
         ("logout/return/", "return", "cloudfile-oidc-logout-return"))
-    return [path(route, HostedLoginView.as_view(resources_scope=resources_scope,
+    result = [path(route, HostedLoginView.as_view(resources_scope=resources_scope,
         operation=operation, return_path=return_path), name=name) for route, operation, name in routes]
+    if backchannel_enabled:
+        # CSRF middleware sees the outer hosted view. Only this cookie-free,
+        # signed server notification gets an exemption, never browser logout.
+        result.append(path("logout/backchannel/", csrf_exempt(HostedLoginView.as_view(
+            resources_scope=resources_scope, operation="backchannel")),
+            name="cloudfile-oidc-backchannel-logout"))
+    return result
