@@ -51,8 +51,12 @@ export default function ResourceAnnotations({ repoID, path, kind }) {
       const { data } = await seafileAPI.cloudFileResolveAnnotations(reference);
       if (current !== generation.current) return;
       setSnapshot(data);
-      setDescription(data.description);
-      setLabels(data.tags.filter(tag => tag.kind === 'user').map(tag => tag.label).join('\n'));
+      // Saving one field must not discard the other field's unsaved draft.
+      if (operation === 'description') {
+        setDescription(data.description);
+      } else {
+        setLabels(data.tags.filter(tag => tag.kind === 'user').map(tag => tag.label).join('\n'));
+      }
     } catch (err) {
       if (current === generation.current) setError(Utils.getErrorMsg(err));
     } finally {

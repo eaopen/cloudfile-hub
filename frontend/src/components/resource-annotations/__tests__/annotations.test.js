@@ -77,3 +77,30 @@ test('switching resource ignores a late response from the previous selection', a
   await act(async () => oldResponse({ data: snapshot }));
   expect(container.querySelector('textarea').value).toBe('Current');
 });
+
+
+test('saving either field preserves the other draft and advances the revision for the next save', async () => {
+  await render();
+  const inputs = container.querySelectorAll('textarea');
+  act(() => {
+    Simulate.change(inputs[0], { target: { value: 'Draft description' } });
+    Simulate.change(inputs[1], { target: { value: 'Draft tag' } });
+  });
+  seafileAPI.cloudFileUpdateDescription.mockResolvedValue({ data: {} });
+  seafileAPI.cloudFileResolveAnnotations.mockResolvedValue({ data: {
+    ...snapshot, description: 'Draft description', revision: 'revision-2'
+  } });
+  await act(async () => container.querySelectorAll('button')[0].click());
+  expect(inputs[1].value).toBe('Draft tag');
+  act(() => Simulate.change(inputs[0], { target: { value: 'Another draft' } }));
+  seafileAPI.cloudFileReplaceUserTags.mockResolvedValue({ data: {} });
+  seafileAPI.cloudFileResolveAnnotations.mockResolvedValue({ data: {
+    ...snapshot, description: 'Draft description', revision: 'revision-3',
+    tags: [{ tag_id: 'new', kind: 'user', label: 'Draft tag', enabled: true }]
+  } });
+  await act(async () => container.querySelectorAll('button')[1].click());
+  expect(seafileAPI.cloudFileReplaceUserTags).toHaveBeenCalledWith(reference, 'revision-2',
+    [{ label: 'Draft tag' }], 'fixture-request-key');
+  expect(inputs[0].value).toBe('Another draft');
+  expect(inputs[1].value).toBe('Draft tag');
+});
