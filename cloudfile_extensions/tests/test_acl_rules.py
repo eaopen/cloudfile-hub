@@ -47,6 +47,20 @@ class ACLRulesTest(DatabaseTestCase):
             cursor.execute("SELECT COUNT(*) FROM cf_audit_event WHERE repo_id=%s", (self.repo,))
             self.assertEqual(cursor.fetchone()[0], 3)
 
+    def test_upgrade_enrolls_existing_policy_libraries(self):
+        from cloudfile_extensions.schema.runner import SchemaRunner
+        self.rules.mutate(self.ref(), value=self.value())
+        # Only this test's owned random schema is changed. Preserve policy data
+        # while simulating the last migration not yet being installed.
+        with self.connection.cursor() as cursor:
+            cursor.execute("DROP TABLE cf_managed_library")
+            cursor.execute("DELETE FROM cf_schema_migration WHERE version='032_managed_libraries'")
+        SchemaRunner(self.connection).apply()
+        SchemaRunner(self.connection).require_current()
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM cf_managed_library WHERE repo_id=%s", (self.repo,))
+            self.assertEqual(cursor.fetchone()[0], 1)
+
     def test_durable_replay_is_authorized_and_has_no_duplicate_event(self):
         one = self.rules.mutate(self.ref(), value=self.value(), idempotency_key="create")
         self.assertEqual(self.rules.mutate(self.ref(), value=self.value(), idempotency_key="create"), one)
