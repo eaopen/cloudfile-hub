@@ -18,6 +18,8 @@
         return list;
       })(),
 			sysadmin_extra_enabled: {% if sysadmin_extra_enabled %} true {% else %} false {% endif %},
+			cloudfile_audit_enabled: {% if cloudfile_audit_enabled %} true {% else %} false {% endif %},
+			rolePermissionsEnabled: {% if role_permissions_enabled %} true {% else %} false {% endif %},
 			enable_guest_invitation: {% if enable_guest_invitation %} true {% else %} false {% endif %},
 			enable_terms_and_conditions: {% if enable_terms_and_conditions %} true {% else %} false {% endif %},
 			is_default_admin: {% if is_default_admin %} true {% else %} false {% endif %},

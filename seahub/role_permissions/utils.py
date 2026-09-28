@@ -3,9 +3,17 @@ import logging
 
 from .settings import ENABLED_ROLE_PERMISSIONS, ENABLED_ADMIN_ROLE_PERMISSIONS
 
-from seahub.constants import DEFAULT_USER, DEFAULT_ADMIN, AUDIT_ADMIN
+from django.conf import settings
+
+from seahub.constants import DEFAULT_USER, SYSTEM_ADMIN
 
 logger = logging.getLogger(__name__)
+
+
+def role_permissions_enabled():
+    """Enable role management in CloudFile without exposing unrelated Pro endpoints."""
+    from seahub.utils import is_pro_version
+    return getattr(settings, 'CLOUDFILE_ROLE_PERMISSIONS_ENABLED', False) is True or is_pro_version()
 
 
 def get_available_roles():
@@ -38,10 +46,10 @@ def get_enabled_admin_role_permissions_by_role(role):
     """
 
     if not role:
-        role = DEFAULT_ADMIN
+        role = SYSTEM_ADMIN
 
     if role not in list(ENABLED_ADMIN_ROLE_PERMISSIONS.keys()):
-        logger.warning('%s is not a valid admin role, use audit admin role.' % role)
-        role = AUDIT_ADMIN
+        logger.warning('%s is not a valid admin role; deny its permissions.' % role)
+        return {permission: False for permission in ENABLED_ADMIN_ROLE_PERMISSIONS[SYSTEM_ADMIN]}
 
     return ENABLED_ADMIN_ROLE_PERMISSIONS[role]

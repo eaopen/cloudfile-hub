@@ -32,7 +32,7 @@ from seahub.auth.decorators import login_required, login_required_ajax
 from seahub.constants import GUEST_USER, DEFAULT_USER, HASH_URLS
 from seahub.institutions.models import Institution
 from seahub.role_permissions.utils import get_available_roles, \
-        get_available_admin_roles
+        get_available_admin_roles, role_permissions_enabled
 from seahub.utils import IS_EMAIL_CONFIGURED, string2list, is_valid_username, \
     is_pro_version, send_html_email, get_site_name, is_org_context, gen_file_get_url, \
     render_error
@@ -96,6 +96,7 @@ def sysadmin_react_fake_view(request, **kwargs):
         'multi_institution': multi_institution,
         'institutions': institutions,
         'sysadmin_extra_enabled': True if is_pro_version() else False,
+        'cloudfile_audit_enabled': getattr(dj_settings, 'CLOUDFILE_AUDIT_QUERY_ENABLED', False) is True,
         'enable_guest_invitation': ENABLE_GUEST_INVITATION,
         'enable_terms_and_conditions': config.ENABLE_TERMS_AND_CONDITIONS,
         'enable_file_scan': ENABLE_FILE_SCAN,
@@ -104,6 +105,7 @@ def sysadmin_react_fake_view(request, **kwargs):
         'enable_sys_admin_view_repo': ENABLE_SYS_ADMIN_VIEW_REPO,
         'trash_repos_expire_days': expire_days if expire_days > 0 else 30,
         'available_roles': get_available_roles(),
+        'role_permissions_enabled': role_permissions_enabled(),
         'available_admin_roles': get_available_admin_roles(),
         'have_ldap': get_ldap_info(),
         'two_factor_auth_enabled': has_two_factor_auth(),
@@ -539,7 +541,7 @@ def user_toggle_role(request, email):
         return HttpResponse(json.dumps({'success': False}), status=400,
                             content_type=content_type)
 
-    if not is_pro_version():
+    if not role_permissions_enabled() or not request.user.admin_permissions.can_manage_user():
         return HttpResponse(json.dumps({'success': False}), status=403,
                             content_type=content_type)
 
@@ -547,6 +549,10 @@ def user_toggle_role(request, email):
         user_role = request.POST.get('r', DEFAULT_USER)
     except ValueError:
         user_role = DEFAULT_USER
+
+    if user_role not in get_available_roles():
+        return HttpResponse(json.dumps({'success': False}), status=400,
+                            content_type=content_type)
 
     try:
         user = User.objects.get(email)

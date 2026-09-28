@@ -22,7 +22,7 @@ from ldap import filter
 
 from seahub.auth import login
 from seahub.auth.utils import get_virtual_id_by_email
-from seahub.constants import DEFAULT_USER, DEFAULT_ORG, DEFAULT_ADMIN
+from seahub.constants import DEFAULT_USER, DEFAULT_ORG, SYSTEM_ADMIN
 from seahub.profile.models import Profile, DetailedProfile
 from seahub.role_permissions.models import AdminRole
 from seahub.role_permissions.utils import get_enabled_role_permissions_by_role, \
@@ -277,7 +277,7 @@ class UserManager(object):
                 role_obj = AdminRole.objects.get_admin_role(emailuser.email)
                 admin_role = role_obj.role
             except AdminRole.DoesNotExist:
-                admin_role = DEFAULT_ADMIN
+                admin_role = SYSTEM_ADMIN
 
             user.admin_role = admin_role
         else:
@@ -313,7 +313,7 @@ class UserManager(object):
                 role_obj = AdminRole.objects.get_admin_role(emailuser.email)
                 admin_role = role_obj.role
             except AdminRole.DoesNotExist:
-                admin_role = DEFAULT_ADMIN
+                admin_role = SYSTEM_ADMIN
 
             user.admin_role = admin_role
         else:
@@ -439,35 +439,40 @@ class AdminPermissions(object):
     def __init__(self, user):
         self.user = user
 
+    def _get(self, permission):
+        if not self.user.is_staff or not self.user.is_active:
+            return False
+        return get_enabled_admin_role_permissions_by_role(getattr(self.user, 'admin_role', None))[permission]
+
     def can_view_system_info(self):
-        return get_enabled_admin_role_permissions_by_role(self.user.admin_role)['can_view_system_info']
+        return self._get('can_view_system_info')
 
     def can_view_statistic(self):
-        return get_enabled_admin_role_permissions_by_role(self.user.admin_role)['can_view_statistic']
+        return self._get('can_view_statistic')
 
     def can_config_system(self):
-        return get_enabled_admin_role_permissions_by_role(self.user.admin_role)['can_config_system']
+        return self._get('can_config_system')
 
     def can_manage_library(self):
-        return get_enabled_admin_role_permissions_by_role(self.user.admin_role)['can_manage_library']
+        return self._get('can_manage_library')
 
     def can_manage_user(self):
-        return get_enabled_admin_role_permissions_by_role(self.user.admin_role)['can_manage_user']
+        return self._get('can_manage_user')
 
     def can_update_user(self):
-        return get_enabled_admin_role_permissions_by_role(self.user.admin_role)['can_update_user']
+        return self._get('can_update_user')
 
     def can_manage_group(self):
-        return get_enabled_admin_role_permissions_by_role(self.user.admin_role)['can_manage_group']
+        return self._get('can_manage_group')
 
     def can_view_user_log(self):
-        return get_enabled_admin_role_permissions_by_role(self.user.admin_role)['can_view_user_log']
+        return self._get('can_view_user_log')
 
     def can_view_admin_log(self):
-        return get_enabled_admin_role_permissions_by_role(self.user.admin_role)['can_view_admin_log']
+        return self._get('can_view_admin_log')
 
     def other_permission(self):
-        return get_enabled_admin_role_permissions_by_role(self.user.admin_role)['other_permission']
+        return self._get('other_permission')
 
 
 class User(object):
@@ -809,7 +814,7 @@ class AuthBackend(object):
                 role_obj = AdminRole.objects.get_admin_role(emailuser.email)
                 admin_role = role_obj.role
             except AdminRole.DoesNotExist:
-                admin_role = DEFAULT_ADMIN
+                admin_role = SYSTEM_ADMIN
 
             user.admin_role = admin_role
         else:

@@ -341,14 +341,22 @@ class ExtraGroupsSharePermission(models.Model):
     repo_id = models.CharField(max_length=36, db_index=True)
     group_id = models.IntegerField(db_index=True)
     permission = models.CharField(max_length=30)
+    auto_granted_read = models.BooleanField(default=False)
     objects = ExtraGroupsSharePermissionManager()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['repo_id', 'group_id'], name='unique_library_group_admin')]
 
 
 class ExtraSharePermission(models.Model):
     repo_id = models.CharField(max_length=36, db_index=True)
     share_to = models.CharField(max_length=255, db_index=True)
     permission = models.CharField(max_length=30)
+    auto_granted_read = models.BooleanField(default=False)
     objects = ExtraSharePermissionManager()
+
+    class Meta:
+        constraints = [models.UniqueConstraint(fields=['repo_id', 'share_to'], name='unique_library_user_admin')]
 
 
 class FileShare(models.Model):

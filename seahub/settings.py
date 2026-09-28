@@ -21,6 +21,9 @@ FILE_SERVER_ROOT = 'http://127.0.0.1:' + FILE_SERVER_PORT
 
 CLOUD_MODE = False
 
+# CloudFile supports user and administrator roles without enabling unrelated Pro features.
+CLOUDFILE_ROLE_PERMISSIONS_ENABLED = True
+
 MULTI_TENANCY = False
 
 IS_SEAFILE_PLUS = False

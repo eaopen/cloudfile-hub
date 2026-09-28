@@ -95,6 +95,14 @@ class IsProVersion(BasePermission):
     def has_permission(self, request, *args, **kwargs):
         return is_pro_version()
 
+
+class HasRolePermissions(BasePermission):
+    """Role management is available in CloudFile without a Pro license."""
+
+    def has_permission(self, request, *args, **kwargs):
+        from seahub.role_permissions.utils import role_permissions_enabled
+        return role_permissions_enabled()
+
 class IsOrgAdminUser(BasePermission):
     """
     Check whether  user is org admin

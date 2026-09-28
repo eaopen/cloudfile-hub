@@ -15,7 +15,7 @@ import { Utils } from '@/utils/utils';
 import Content from './users-content';
 import UsersFilterBar from './users-filter-bar';
 
-const { availableRoles } = window.sysadmin.pageOptions;
+const { availableRoles, rolePermissionsEnabled } = window.sysadmin.pageOptions;
 
 const propTypes = {
   isAdmin: PropTypes.bool,
@@ -453,7 +453,7 @@ class Users extends Component {
         {isAddUserDialogOpen &&
           <SysAdminAddUserDialog
             dialogTitle={gettext('Add User')}
-            showRole={isPro}
+            showRole={isPro || rolePermissionsEnabled}
             availableRoles={availableRoles}
             addUser={this.addUser}
             toggleDialog={this.props.toggleAddUserDialog}

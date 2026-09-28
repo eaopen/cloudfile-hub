@@ -51,9 +51,9 @@ from seahub.utils.timeutils import timestamp_to_isoformat_timestr, \
 from seahub.utils.user_permissions import get_user_role
 from seahub.utils.repo import normalize_repo_status_code
 from seahub.utils.ccnet_db import CcnetDB
-from seahub.constants import DEFAULT_ADMIN, DEFAULT_ORG
+from seahub.constants import SYSTEM_ADMIN, DEFAULT_ORG
 from seahub.role_permissions.models import AdminRole
-from seahub.role_permissions.utils import get_available_roles
+from seahub.role_permissions.utils import get_available_roles, role_permissions_enabled
 from seahub.utils.licenseparse import user_number_over_limit
 from seahub.institutions.models import Institution
 from seahub.avatar.templatetags.avatar_tags import api_avatar_url
@@ -304,7 +304,7 @@ def create_user_info(request, email, role, nickname,
                      login_id):
     # update additional user info
 
-    if is_pro_version() and role:
+    if role_permissions_enabled() and role:
         User.objects.update_role(email, role)
 
     if nickname is not None:
@@ -353,7 +353,7 @@ def update_user_info(request, user, password, is_active, is_staff, role,
     user.save()
 
     # update additional user info
-    if is_pro_version() and role:
+    if role_permissions_enabled() and role:
         User.objects.update_role(email, role)
 
     if nickname is not None:
@@ -496,7 +496,7 @@ class AdminAdminUsers(APIView):
                 admin_role = AdminRole.objects.get_admin_role(user.email)
                 user_info['admin_role'] = admin_role.role
             except AdminRole.DoesNotExist:
-                user_info['admin_role'] = DEFAULT_ADMIN
+                user_info['admin_role'] = SYSTEM_ADMIN
             admin_users_info.append(user_info)
 
         result = {
@@ -806,7 +806,7 @@ class AdminUsers(APIView):
 
         # additional user info check
         role = ''
-        if is_pro_version():
+        if role_permissions_enabled():
             role = request.data.get("role", None)
         if role:
             available_roles = get_available_roles()

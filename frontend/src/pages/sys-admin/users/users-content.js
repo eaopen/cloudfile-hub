@@ -14,11 +14,11 @@ import Loading from '@/components/loading';
 import Paginator from '@/components/paginator';
 import Selector from '@/components/single-selector';
 import toaster from '@/components/toast';
-import { isPro, username, gettext, multiInstitution, siteRoot } from '@/utils/constants';
+import { isPro, isDefaultAdmin, username, gettext, multiInstitution, siteRoot } from '@/utils/constants';
 import { Utils } from '@/utils/utils';
 import UserLink from '../user-link';
 
-const { availableRoles, availableAdminRoles, institutions } = window.sysadmin.pageOptions;
+const { availableRoles, availableAdminRoles, institutions, rolePermissionsEnabled } = window.sysadmin.pageOptions;
 dayjs.extend(relativeTime);
 
 class Content extends Component {
@@ -71,7 +71,7 @@ class Content extends Component {
       const colSpaceText = `${gettext('Space Used')} / ${gettext('Quota')}`;
       const colNameText = `${gettext('Name')} / ${gettext('Contact Email')}`;
       const colCreatedText = `${gettext('Created At')} / ${gettext('Last Login')} / ${gettext('Last Access')}`;
-      if (isPro) {
+      if (isPro || rolePermissionsEnabled) {
         columns.push(
           { width: '20%', text: colNameText },
           { width: '15%', text: gettext('Status') },
@@ -486,11 +486,11 @@ class Item extends Component {
               operationBeforeSelect={item.is_active ? this.toggleConfirmInactiveDialog : undefined}
             />
           </td>
-          {isPro &&
+          {(isPro || rolePermissionsEnabled) &&
           <td>
             {isAdmin ?
               <Selector
-                isDropdownToggleShown={highlight}
+                isDropdownToggleShown={highlight && isDefaultAdmin}
                 currentSelectedOption={currentSelectedAdminRoleOption}
                 options={this.adminRoleOptions}
                 selectOption={this.updateAdminRole}

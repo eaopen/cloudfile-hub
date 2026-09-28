@@ -10,20 +10,20 @@ from rest_framework import status
 
 from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
-from seahub.api2.permissions import IsProVersion
+from seahub.api2.permissions import HasRolePermissions
 from seahub.api2.utils import api_error
 
 from seahub.base.accounts import User
 from seahub.role_permissions.utils import get_available_admin_roles
 from seahub.role_permissions.models import AdminRole
-from seahub.constants import DEFAULT_ADMIN
+from seahub.constants import DEFAULT_ADMIN, SYSTEM_ADMIN
 
 logger = logging.getLogger(__name__)
 
 class AdminAdminRole(APIView):
 
     authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAdminUser, IsProVersion)
+    permission_classes = (IsAdminUser, HasRolePermissions)
     throttle_classes = (UserRateThrottle,)
 
     def get(self, request):
@@ -62,12 +62,15 @@ class AdminAdminRole(APIView):
 
         try:
             admin_role = AdminRole.objects.get_admin_role(email)
+            role = admin_role.role
+        except AdminRole.DoesNotExist:
+            role = SYSTEM_ADMIN
         except Exception as e:
             logger.error(e)
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
-        result['role'] = admin_role.role
+        result['role'] = role
 
         return Response(result)
 
@@ -79,7 +82,7 @@ class AdminAdminRole(APIView):
 
         Permission checking:
         1. email(from argument): must be an admin user.
-        2. only admin with `default_admin` role can perform this action.
+        2. only system_admin (or legacy default_admin) can perform this action.
         """
 
         if not request.user.admin_permissions.can_manage_user():
@@ -114,10 +117,9 @@ class AdminAdminRole(APIView):
             error_msg = "%s must be an administrator." % email
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
-        ## 2. only admin with `default_admin` role can perform this action.
-        if request.user.admin_role != DEFAULT_ADMIN:
-            error_msg = "%s's role must be '%s'." % (request.user.username,
-                    DEFAULT_ADMIN)
+        ## Only a full system administrator may assign administrator roles.
+        if request.user.admin_role not in (SYSTEM_ADMIN, DEFAULT_ADMIN):
+            error_msg = 'System administrator role is required.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         # add role
@@ -150,7 +152,7 @@ class AdminAdminRole(APIView):
 
         Permission checking:
         1. email(from argument): must be an admin user.
-        2. only admin with `default_admin` role can perform this action.
+        2. only system_admin (or legacy default_admin) can perform this action.
         """
 
         if not request.user.admin_permissions.can_manage_user():
@@ -185,10 +187,9 @@ class AdminAdminRole(APIView):
             error_msg = "%s must be an administrator." % email
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
-        ## 2. only admin with `default_admin` role can perform this action.
-        if request.user.admin_role != DEFAULT_ADMIN:
-            error_msg = "%s's role must be '%s'." % (request.user.username,
-                    DEFAULT_ADMIN)
+        ## Only a full system administrator may assign administrator roles.
+        if request.user.admin_role not in (SYSTEM_ADMIN, DEFAULT_ADMIN):
+            error_msg = 'System administrator role is required.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         # update role

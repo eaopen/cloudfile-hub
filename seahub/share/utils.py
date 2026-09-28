@@ -38,8 +38,13 @@ def normalize_custom_permission_name(permission):
 
 def is_repo_admin(username, repo_id, *, strict=False):
 
+    # A management marker must never outlive the user's native library access.
+    # This also protects callers that use is_repo_admin for content operations.
     # repo is shared to user with admin permission
     try:
+        native_permission = seafile_api.check_permission(repo_id, username)
+        if native_permission not in (PERMISSION_READ_WRITE, 'r'):
+            return False
         user_share_permission = ExtraSharePermission.objects. \
             get_user_permission(repo_id, username)
         if user_share_permission == PERMISSION_ADMIN:
@@ -47,8 +52,10 @@ def is_repo_admin(username, repo_id, *, strict=False):
 
         # get all groups that repo is shared to with admin permission
         group_ids = ExtraGroupsSharePermission.objects.get_admin_groups_by_repo(repo_id)
+        is_org = bool(seafile_api.get_org_repo_owner(repo_id))
         for group_id in group_ids:
-            if is_group_admin(group_id, username):
+            if is_group_admin(group_id, username) and seafile_api.get_group_shared_repo_by_path(
+                    repo_id, None, group_id, is_org):
                 return True
     except Exception as e:
         logger.error(e)
@@ -151,7 +158,7 @@ def update_user_dir_permission(repo_id, path, owner, share_to, permission, org_i
             seafile_api.update_share_subdir_perm_for_user(
                     repo_id, path, owner, share_to, permission)
 
-    if path == '/':
+    if path == '/' and extra_share_permission == PERMISSION_ADMIN:
         ExtraSharePermission.objects.update_share_permission(repo_id, 
                                                              share_to, 
                                                              extra_share_permission)
@@ -178,7 +185,7 @@ def update_group_dir_permission(repo_id, path, owner, gid, permission, org_id=No
                     repo_id, path, owner, gid, permission)
 
     # update extra share permission if updated is repo
-    if path == '/':
+    if path == '/' and extra_share_permission == PERMISSION_ADMIN:
         ExtraGroupsSharePermission.objects.update_share_permission(repo_id, 
                                                                    gid, 
                                                                    extra_share_permission)

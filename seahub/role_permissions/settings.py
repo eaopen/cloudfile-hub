@@ -106,7 +106,7 @@ ENABLED_ROLE_PERMISSIONS = merge_roles(
 
 # role permission for administraror
 
-# 1, Admin without a role or with a role of `default_admin` can view ALL pages.
+# 1, Admin without an explicit role uses `system_admin`, which can view ALL pages.
 # 2, If an admin has a role:
 #  2.1, He/she can NOT view any pages by default.
 #  2.2, If he/she wants to view some page, set the related permission to `True`.
@@ -125,10 +125,19 @@ DEFAULT_ENABLED_ADMIN_ROLE_PERMISSIONS = {
         'can_view_admin_log': True,
         'other_permission': True,
     },
-    # SYSTEM_ADMIN can ONLY view system-info(without upload licence), settings pages.
+    # CloudFile's system administrator is the full administrative role.
+    # DEFAULT_ADMIN remains a full-permission compatibility role for existing assignments.
     SYSTEM_ADMIN: {
         'can_view_system_info': True,
+        'can_view_statistic': True,
         'can_config_system': True,
+        'can_manage_library': True,
+        'can_manage_user': True,
+        'can_update_user': True,
+        'can_manage_group': True,
+        'can_view_user_log': True,
+        'can_view_admin_log': True,
+        'other_permission': True,
     },
     # DAILY_ADMIN can ONLY view system-info(without upload licence), statistic,
     # libraries, users(except 'Admins'), groups, user-logs pages.

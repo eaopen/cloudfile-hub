@@ -31,12 +31,12 @@ from seahub.utils.mail import send_html_email_with_dj_template
 from seahub.admin_log.models import USER_DELETE, USER_ADD
 from seahub.admin_log.signals import admin_operation
 from seahub.utils.timeutils import timestamp_to_isoformat_timestr, datetime_to_isoformat_timestr
-from seahub.constants import DEFAULT_ADMIN
+from seahub.constants import SYSTEM_ADMIN
 from seahub.role_permissions.models import AdminRole
 from seahub.base.templatetags.seahub_tags import email2nickname, email2contact_email
 from seahub.base.models import UserLastLogin
 from seahub.options.models import UserOptions
-from seahub.role_permissions.utils import get_available_roles
+from seahub.role_permissions.utils import get_available_roles, role_permissions_enabled
 from seahub.utils.user_permissions import get_user_role
 from seahub.auth.utils import get_virtual_id_by_email
 
@@ -113,7 +113,7 @@ class AdminAdminUsersBatch(APIView):
                 admin_role = AdminRole.objects.get_admin_role(user.email)
                 user_info['admin_role'] = admin_role.role
             except AdminRole.DoesNotExist:
-                user_info['admin_role'] = DEFAULT_ADMIN
+                user_info['admin_role'] = SYSTEM_ADMIN
             result['success'].append(user_info)
 
         return Response(result)
@@ -366,7 +366,7 @@ class AdminImportUsers(APIView):
             if record[3]:
                 try:
                     role = record[3].strip()
-                    if is_pro_version() and role in get_available_roles():
+                    if role_permissions_enabled() and role in get_available_roles():
                         User.objects.update_role(user.email, role)
                 except Exception as e:
                     logger.error(e)

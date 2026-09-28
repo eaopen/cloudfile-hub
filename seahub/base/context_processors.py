@@ -37,7 +37,7 @@ from seahub.onlyoffice.settings import ENABLE_ONLYOFFICE, \
         ONLYOFFICE_CONVERTER_EXTENSIONS, ONLYOFFICE_EDIT_FILE_EXTENSION
 from seahub.wopi.settings import ENABLE_OFFICE_WEB_APP, \
         OFFICE_WEB_APP_EDIT_FILE_EXTENSION
-from seahub.constants import DEFAULT_ADMIN
+from seahub.constants import DEFAULT_ADMIN, SYSTEM_ADMIN
 from seahub.utils import get_site_name, get_service_url
 from seahub.avatar.templatetags.avatar_tags import api_avatar_url
 from seahub.ai.utils import verify_chat_ai_config
@@ -207,7 +207,7 @@ def base(request):
         result['google_map_id'] = GOOGLE_MAP_ID
 
     if request.user.is_staff:
-        result['is_default_admin'] = request.user.admin_role == DEFAULT_ADMIN
+        result['is_default_admin'] = request.user.admin_role in (DEFAULT_ADMIN, SYSTEM_ADMIN)
         result['enable_share_link_report_abuse'] = ENABLE_SHARE_LINK_REPORT_ABUSE
 
     return result
