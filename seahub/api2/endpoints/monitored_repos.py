@@ -23,6 +23,16 @@ from seahub.api2.endpoints.utils import delete_user_monitored_cache
 logger = logging.getLogger(__name__)
 
 
+def _monitoring_enabled():
+    if is_pro_version():
+        return True
+    try:
+        from cloudfile_ext.features import is_enabled
+        return is_enabled('CF_ENABLE_WATCH')
+    except Exception:
+        return False
+
+
 class MonitoredRepos(APIView):
 
     authentication_classes = (TokenAuthentication, SessionAuthentication)
@@ -36,7 +46,7 @@ class MonitoredRepos(APIView):
         1. Only repo owner can perform this action.
         """
 
-        if not is_pro_version():
+        if not _monitoring_enabled():
             error_msg = 'Feature disabled.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -95,7 +105,7 @@ class MonitoredRepo(APIView):
         1. Only repo owner can perform this action.
         """
 
-        if not is_pro_version():
+        if not _monitoring_enabled():
             error_msg = 'Feature disabled.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 

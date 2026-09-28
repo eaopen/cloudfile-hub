@@ -1,0 +1,253 @@
+# -*- coding: utf-8 -*-
+"""CloudFile default settings.
+
+conf/seahub_settings.py does ``from cloudfile_ext.settings_defaults import *``
+before applying any operator overrides, so everything here is a default that
+the compose .env can override.
+
+Note the EXTRA_ prefix on the list settings: Seahub's ``load_local_settings``
+(seahub/settings.py) *appends* any EXTRA_<NAME> to the existing <NAME>, which
+is how cloudfile_ext gets installed without patching settings.py.
+"""
+
+# -- extension registration ----------------------------------------------
+
+EXTRA_INSTALLED_APPS = [
+    'cloudfile_ext',
+]
+
+# -- feature switches -----------------------------------------------------
+#
+# Defaults follow the 2026-09-22 product decision: a capability that needs no
+# third-party service, host mount or client install is ON by default, and the
+# rest stay opt-in.
+#
+# Why: the 網盤 delivery must not require flipping every switch by hand, and
+# "code default off while the test environment runs it on" split the story we
+# tell. The old guarantee that made default-off worthwhile -- "all switches off
+# == native CE" -- was abolished on 2026-09-22, so default-off no longer buys
+# anything for upgrade cost.
+#
+# ON by default (capability and code both live in this stack; METADATA/TAGS ride
+# the official seafile-md-server, which now starts in the default compose stack):
+#   DIR_ACL, AUDIT, METADATA, TAGS, FILE_PREVIEW, FILE_LOCK, CHECKOUT,
+#   FAVORITES_ID, WATCH, FILEOPS, SHARE_RESTRICT
+# OFF by default (third-party service, host mount or client install -- see the
+# per-switch comment below):
+#   SSO, SEARCH, ONLYOFFICE, CONVERT_EXPORT, S3_STORAGE, EXTERNAL_SOURCES,
+#   LOCAL_APP
+#
+# Operators can invert any switch through the compose .env; these defaults only
+# apply when nothing is configured. Per-switch list: cloudfile-docker's
+# docs/configuration.md.
+CF_ENABLE_DIR_ACL = True
+CF_ENABLE_AUDIT = True
+CF_ENABLE_METADATA = True
+CF_ENABLE_TAGS = True
+CF_ENABLE_FILE_PREVIEW = True
+CF_ENABLE_FILE_LOCK = True
+CF_ENABLE_CHECKOUT = True
+CF_ENABLE_FAVORITES_ID = True
+CF_ENABLE_WATCH = True
+CF_ENABLE_FILEOPS = True
+CF_ENABLE_SHARE_RESTRICT = True
+
+# Third-party identity provider (Authentik/OIDC/SAML/LDAP): login is unusable
+# without an IdP.
+CF_ENABLE_SSO = False
+# Third-party search backend (SeaSearch/Elasticsearch/Meilisearch) container
+# and its index.
+CF_ENABLE_SEARCH = False
+# Third-party OnlyOffice Document Server container.
+CF_ENABLE_ONLYOFFICE = False
+# SeaDoc container plus JWT_PRIVATE_KEY; bootstrap fails fast if either is absent.
+CF_ENABLE_CONVERT_EXPORT = False
+# Third-party S3/MinIO object-storage endpoint.
+CF_ENABLE_S3_STORAGE = False
+# Local directory mounted on the host (external sources; v1 is local-path only).
+CF_ENABLE_EXTERNAL_SOURCES = False
+# Requires the Chrome extension and Local Agent on the user's machine; on by
+# default would advertise the entry point to users who cannot use it.
+CF_ENABLE_LOCAL_APP = False
+
+# -- providers -------------------------------------------------------------
+
+# Which implementation answers each pluggable job. Empty means "native CE
+# behaviour"; a name must match something a capability registered, or the
+# first use raises UnknownProvider rather than silently falling back.
+#
+# The setting name is derived from the kind (cloudfile_ext.providers), so a
+# capability that declares a new kind needs no edit here -- these two are
+# spelled out only because operators set them.
+#
+# CF_PROVIDER_SEARCH left empty (the default) means "native": whichever
+# backend seafevents.conf configures under [SEASEARCH] or [INDEX FILES]
+# (SeaSearch or Elasticsearch) answers queries exactly as it does on upstream
+# CE. For SeaSearch specifically that is upstream's own
+# `elif HAS_FILE_SEASEARCH` branch in seahub.api2.views.Search.get(), which
+# does not go through search_files() at all -- there is no 'seasearch'
+# provider name to select, because that path needs no CloudFile code (see
+# cloudfile_ext.search's module docstring). Set this to 'meilisearch' to route
+# queries to cloudfile_ext.search.backends.meilisearch instead.
+CF_PROVIDER_SEARCH = ''            # '' (native SeaSearch/ES) or 'meilisearch'
+CF_PROVIDER_ACL_RULE_SOURCE = ''   # e.g. 'local-db', 'external-service'
+CF_PROVIDER_SSO_DIRECTORY = ''     # e.g. 'static', 'external-service'
+
+# -- tags -------------------------------------------------------------------
+#
+# Upper bound on the number of repo-tags a single bulk-add request may carry.
+# Only enforced when CF_ENABLE_TAGS is on (see seahub/api2/endpoints/repo_tags.py);
+# with the switch off the endpoint keeps native CE behaviour. The default matches
+# the review checklist's 100-object batch benchmark (docs/review-cases.md).
+CF_TAG_BATCH_LIMIT = 100
+
+# -- external services -----------------------------------------------------
+
+# Per-service settings are CF_SERVICE_<NAME>_{URL,SECRET,TIMEOUT,RETRIES,
+# ON_FAILURE}; see cloudfile_ext.external_service. Nothing is configured by
+# default, and a service is never consulted on the synchronous permission
+# path -- rules are pulled into cf_* tables and enforced from there.
+
+# -- database --------------------------------------------------------------
+
+# cf_* tables live in seafile-db rather than seahub-db because seaf-server and
+# the Go fileserver only ever connect to ccnet-db and seafile-db; putting them
+# anywhere else would make them unreadable to the layer that has to enforce
+# the rules. cloudfile_ext.db_router points cf_* models at this alias.
+#
+# The connection itself is assembled in CloudFileConfig.ready(), not here:
+# seahub_settings.py is imported as a plain module, so it has no DATABASES to
+# add an entry to. These scalars are what the docker bootstrap writes.
+CF_DATABASE_ALIAS = 'cloudfile'
+CF_DATABASE_NAME = ''
+CF_DATABASE_USER = ''
+CF_DATABASE_PASSWORD = ''
+CF_DATABASE_HOST = ''
+CF_DATABASE_PORT = '3306'
+
+# Seconds to cache a repo's ACL rules in-process. Kept short because the
+# authoritative enforcement is in seafile-server; this cache only spares the
+# Hub a query per permission check.
+CF_ACL_CACHE_TTL = 30
+
+# 修改逻辑/原因（2026-09-12）：cf_dir_acl / cf_dir_admin 按 path 存储，改名/移动不会自动搬运规则。
+# cf-worker 按此周期消费 seafevents Activity 的 rename/move，把受影响规则重写到新路径
+# （与搜索索引同一事件源；运行时最小 15 秒）。
+CF_ACL_MIGRATION_INTERVAL = 60
+
+# -- SSO directory mapping -------------------------------------------------
+#
+# Login itself is upstream's (ENABLE_OAUTH / ENABLE_ADFS_LOGIN / ENABLE_CAS,
+# all present in CE and none of them Pro-gated). These settings govern only the
+# part upstream does not do: mirroring an organisation's groups into Seafile.
+
+# Account that owns the groups the sync creates. No default on purpose --
+# picking one silently would attach every synced group to whoever happens to
+# sort first. Sync refuses to run until this names a real account.
+CF_SSO_GROUP_OWNER = ''
+
+# Seconds between full syncs, run by cf-worker. The webhook
+# (api/v2.1/cloudfile/sso/directory-webhook/) is what makes changes apply in
+# seconds; this interval is the floor when nothing pushes.
+CF_SSO_SYNC_INTERVAL = 600
+
+# Refuse a sync that would drop more than this share of managed memberships in
+# one tick. A truncated or half-failed directory feed looks exactly like a mass
+# departure, and only one of those readings is recoverable. Set to '' to lift
+# the ceiling -- do that deliberately, for one real reorganisation, not as a
+# standing configuration.
+CF_SSO_MAX_REMOVAL_RATIO = 0.5
+
+# Groups for CF_PROVIDER_SSO_DIRECTORY = 'static': a list of
+# {'external_id': ..., 'name': ..., 'members': [login, ...]}.
+CF_SSO_DIRECTORY_STATIC = []
+
+# -- search: meilisearch backend --------------------------------------------
+#
+# Only consulted when CF_PROVIDER_SEARCH = 'meilisearch'. The default
+# (CF_PROVIDER_SEARCH = '') needs none of this -- SeaSearch/Elasticsearch are
+# configured entirely through seafevents.conf, which cloudfile-docker's
+# bootstrap writes from CF_ENABLE_SEARCH and CF_SEASEARCH_TOKEN.
+
+# 修改逻辑/原因（2026-09-12）：没有外部搜索 provider 时，用内置 DB 标签后端回答
+# tags/creator 过滤（seahub 自身标签表即可作答，无需 ES/Meilisearch），
+# 避免"标签确实存在但搜索返回 0 条"的错误答案；置 False 则回到显式拒绝。
+CF_SEARCH_DB_FALLBACK = True
+
+CF_MEILISEARCH_URL = 'http://meilisearch:7700'
+CF_MEILISEARCH_API_KEY = ''
+# HTTP timeout for a single Meilisearch call. Kept short: a slow search
+# backend must not turn into a slow page load, and Seahub's own search view
+# already wraps this in a bare except that renders an empty result page.
+CF_MEILISEARCH_TIMEOUT = 5
+
+# How often cf-worker looks for new commits to index, in seconds.
+CF_SEARCH_INDEX_INTERVAL = 60
+
+# -- external sources -------------------------------------------------------
+#
+# Container paths a source root may live under. An external source is a local
+# directory the operator mounted on the host and bind-mounted here -- v1 is
+# local-path only, since SMB/NFS/OpenList are normalized to a directory on the
+# host -- so this is the boundary between "a directory ops chose to expose" and
+# "any path in the container".
+#
+# The default is deliberately restrictive rather than empty: an empty allow-list
+# would let the admin API register / as an external source, and a security
+# property that only holds when the operator configured it correctly is not one
+# worth shipping. Widen it only to prefixes that contain nothing but mounts --
+# never '/'.
+#
+# Containment against this list is re-checked on every access, not just at
+# registration. The share is writable by whoever uses the NAS, and a symlink
+# added after registration would otherwise widen what is reachable. See
+# cloudfile_ext/external_sources/paths.py and docs/external-sources.md.
+CF_EXTERNAL_SOURCES_ROOTS = ['/shared/external']
+
+# Files at or under this size (in bytes) whose extension is in the plain-text
+# set (cloudfile_ext.search.indexer.TEXT_EXTENSIONS) get their content indexed
+# alongside filename/path/metadata. Larger or non-text files are indexed by
+# metadata only -- content extraction for office/PDF formats is what SeaSearch
+# already does through seafevents; re-doing it here would duplicate that
+# pipeline for the one backend that exists specifically for sites that are not
+# running SeaSearch. See docs/search.md.
+CF_SEARCH_INDEX_TEXT_MAX_BYTES = 1024 * 1024
+
+# -- file actions ----------------------------------------------------------
+
+# Native previews remain upstream URLs; this list only decides which files get
+# a CloudFile action entry point around that existing renderer.
+CF_FILE_ACTION_PREVIEW_EXTENSIONS = (
+    'pdf', 'txt', 'md', 'markdown', 'csv', 'json', 'xml', 'html', 'htm',
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'mp3', 'mp4', 'webm',
+    'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'odt', 'ods', 'odp',
+)
+CF_FILE_ACTION_OFFICE_EXTENSIONS = (
+    'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'odt', 'ods', 'odp',
+    'csv', 'pdf',
+)
+
+# Native Messaging agents receive short-lived, single-file capabilities. A
+# local write action remains unavailable until the seafile-server lock
+# provider is present; an advisory Hub-only checkout would be unsafe.
+CF_LOCAL_APP_SESSION_TTL = 300
+
+# -- copy/move unified precheck (CF_ENABLE_FILEOPS) -------------------------
+#
+# Per the review checklist, the limits are controlled from configuration, all
+# expressed in "0 = unlimited" so that enabling the switch without tuning any
+# limit still matches native CE copy/move behaviour:
+#
+#   CF_FILEOP_MAX_FILE_SIZE    single-file size ceiling (bytes)
+#   CF_FILEOP_MAX_FOLDER_DEPTH ceiling on how deep a copied/moved folder may be
+#   CF_FILEOP_MAX_ITEM_COUNT   max selected objects per batch
+#   CF_FILEOP_MAX_BATCH_SIZE   max total bytes per batch
+#
+# The single-file and depth limits are *per item*: an over-limit item is put in
+# the failure list while the rest of the batch proceeds. The item-count and
+# batch-size limits reject the whole request, because a partial "which items
+# fit" decision for those is the operator's job, not a per-item property.
+CF_FILEOP_MAX_FILE_SIZE = 0
+CF_FILEOP_MAX_FOLDER_DEPTH = 0
+CF_FILEOP_MAX_ITEM_COUNT = 0
+CF_FILEOP_MAX_BATCH_SIZE = 0

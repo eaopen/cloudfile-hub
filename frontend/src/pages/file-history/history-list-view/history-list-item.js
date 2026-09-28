@@ -16,6 +16,8 @@ const propTypes = {
   isItemFreezed: PropTypes.bool.isRequired,
   onItemClick: PropTypes.func.isRequired,
   onItemRestore: PropTypes.func.isRequired,
+  canDownload: PropTypes.bool.isRequired,
+  canRevert: PropTypes.bool.isRequired,
   onFreezedItemToggle: PropTypes.func.isRequired,
 };
 
@@ -61,18 +63,21 @@ class HistoryListItem extends React.Component {
   };
 
   onItemRestore = () => {
-    this.props.onItemRestore(this.props.currentItem);
+    this.props.onItemRestore(this.props.item);
   };
 
   getMenuItems = () => {
-    if (!this.props.currentItem) return [];
-    let objID = this.props.currentItem.rev_file_id;
-    let url = URLDecorator.getUrl({ type: 'download_historic_file', filePath: filePath, objID: objID });
+    const { item, canDownload, canRevert } = this.props;
+    if (!item) return [];
+    const historicPath = item.path || filePath;
+    let url = URLDecorator.getUrl({ type: 'download_historic_file', filePath: historicPath, objID: item.rev_file_id });
     const items = [];
-    if (this.props.index !== 0) {
+    if (this.props.index !== 0 && canRevert) {
       items.push({ key: 'restore', label: gettext('Restore'), onClick: this.onItemRestore });
     }
-    items.push({ key: 'download', label: gettext('Download'), onClick: () => { window.location = url; } });
+    if (canDownload) {
+      items.push({ key: 'download', label: gettext('Download'), onClick: () => { window.location = url; } });
+    }
     return items;
   };
 

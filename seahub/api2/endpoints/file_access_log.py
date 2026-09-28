@@ -17,9 +17,8 @@ from seahub.avatar.templatetags.avatar_tags import api_avatar_url
 from seahub.base.templatetags.seahub_tags import email2nickname, \
         email2contact_email
 from seahub.utils.timeutils import utc_datetime_to_isoformat_timestr
-from seahub.utils import is_org_context, is_pro_version, \
-        FILE_AUDIT_ENABLED, get_file_audit_events_by_path, \
-        generate_file_audit_event_type
+from seahub.utils import is_org_context, FILE_AUDIT_ENABLED, \
+        get_file_audit_events_by_path, generate_file_audit_event_type
 
 logger = logging.getLogger(__name__)
 
@@ -34,7 +33,11 @@ class FileAccessLogView(APIView):
         """ Get file access log.
         """
 
-        if not is_pro_version() or not FILE_AUDIT_ENABLED:
+        # CloudFile: the upstream Pro gate is_pro_version() is always False
+        # on CE images, which is what CloudFile builds from. FILE_AUDIT_ENABLED
+        # is the single source of truth here -- it is derived from
+        # CF_ENABLE_AUDIT (bootstrap writes ENABLE_FILE_AUDIT=True).
+        if not FILE_AUDIT_ENABLED:
             error_msg = 'feature is not enabled.'
             return api_error(501, error_msg)
 

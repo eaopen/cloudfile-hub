@@ -10,6 +10,7 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import Cookies from 'js-cookie';
 import PropTypes from 'prop-types';
 import { seafileAPI } from '@/api/seafile-api';
+import { loadFeatures } from '@/cloudfile/features';
 import CurDirPath from '@/components/cur-dir-path';
 import DirTool from '@/components/cur-dir-path/dir-tool';
 import CopyMoveDirentProgressDialog from '@/components/dialog/copy-move-dirent-progress-dialog';
@@ -219,6 +220,13 @@ class LibContentView extends React.Component {
   componentDidMount() {
     this.unsubscribeEvent = this.props.eventBus.subscribe(EVENT_BUS_TYPE.SEARCH_LIBRARY_CONTENT, this.onSearchedClick);
     this.unsubscribeSelectSearchedTag = this.props.eventBus.subscribe(EVENT_BUS_TYPE.SELECT_TAG, this.onTreeNodeClick);
+
+    // CloudFile: populate CF_ENABLE_* once so feature-gated entry points
+    // (e.g. share hidden under CF_ENABLE_SHARE_RESTRICT) take effect after
+    // the async fetch re-renders.
+    loadFeatures().then(() => {
+      this.setState({ featuresLoaded: true });
+    });
 
     this.unsubscribeSwitchToHistoryView = eventBus.subscribe(EVENT_BUS_TYPE.SWITCH_TO_HISTORY_VIEW, this.switchToHistoryView);
     this.unsubscribeSwitchToChatView = eventBus.subscribe(EVENT_BUS_TYPE.SWITCH_TO_CHAT_VIEW, this.switchToChatView);

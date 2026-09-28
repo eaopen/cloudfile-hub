@@ -2,6 +2,7 @@ import { setPendingAttachments } from '@/components/dir-chat/hooks/ai-chat-tools
 import { AttachmentObject } from '@/components/dir-chat/models';
 import EventBus, { eventBus as globalEventBus, EVENT_BUS_TYPE } from '@/components/event-bus';
 import { Dirent } from '@/models';
+import { siteRoot } from '@/utils/constants';
 import TextTranslation from '@/utils/text-translation';
 import { Utils } from '@/utils/utils';
 import { lockFile, unlockFile, batchLockFile, batchUnlockFile, freezeDocument, unfreezeDocument, exportDocx, exportMarkdown, exportSdoc, openHistory, openViaClient, openByDefault, openWithOnlyOffice, toggleStar, convertWithOnlyOffice } from './dirent-operations';
@@ -167,6 +168,11 @@ export const menuHandlers = {
     const direntPath = Utils.joinPath(path, dirent.name);
     const name = Utils.getFileName(direntPath);
     eventBus.dispatch(EVENT_BUS_TYPE.PERMISSION, direntPath, name);
+  },
+
+  [TextTranslation.DIR_ACL.key]: ({ repoID, path, dirent }) => {
+    const dirPath = path === '/' ? '/' : Utils.joinPath(path, dirent.name);
+    window.open(siteRoot + 'cloudfile/acl/?repo_id=' + encodeURIComponent(repoID) + '&path=' + encodeURIComponent(dirPath));
   },
 
   [TextTranslation.STAR.key]: ({ dirent, repoID, path, updateDirent }) => {

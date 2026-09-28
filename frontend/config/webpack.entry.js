@@ -48,6 +48,12 @@ const entryFiles = {
   wiki: '/wiki.js',
   wiki2: '/wiki2.js',
   wikiViewer: '/pages/wiki-viewer/index.js',
+  // CloudFile extensions. Adding a key here is all a new page needs -- this
+  // dict is the only entry-point registry, so webpack.config.js stays
+  // untouched and out of the upstream merge path.
+  cloudfileAdmin: '/cloudfile/admin/index.js',
+  cloudfileAcl: '/cloudfile/acl/index.js',
+  cloudfileExternalSources: '/cloudfile/external-sources/index.js',
 };
 
 const getEntries = (isEnvDevelopment) => {

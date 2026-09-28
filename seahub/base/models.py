@@ -160,29 +160,38 @@ class UserStarredFilesManager(models.Manager):
         starred_repos = UserStarredFiles.objects.filter(email=email, path='/')
         return starred_repos
 
-    def get_starred_item(self, email, repo_id, path):
+    def get_starred_item(self, email, repo_id, path, obj_id=None):
 
-        path_list = [normalize_file_path(path), normalize_dir_path(path)]
-        starred_items = UserStarredFiles.objects.filter(email=email, repo_id=repo_id) \
-                                                .filter(Q(path__in=path_list))
+        if obj_id is not None:
+            starred_items = UserStarredFiles.objects.filter(
+                email=email, repo_id=repo_id, obj_id=obj_id)
+        else:
+            path_list = [normalize_file_path(path), normalize_dir_path(path)]
+            starred_items = UserStarredFiles.objects.filter(email=email, repo_id=repo_id) \
+                                                    .filter(Q(path__in=path_list))
 
         return starred_items[0] if len(starred_items) > 0 else None
 
-    def add_starred_item(self, email, repo_id, path, is_dir, org_id=-1):
+    def add_starred_item(self, email, repo_id, path, is_dir, org_id=-1, obj_id=None):
 
         starred_item = UserStarredFiles.objects.create(email=email,
                                                        repo_id=repo_id,
                                                        path=path,
                                                        is_dir=is_dir,
-                                                       org_id=org_id)
+                                                       org_id=org_id,
+                                                       obj_id=obj_id)
 
         return starred_item
 
-    def delete_starred_item(self, email, repo_id, path):
+    def delete_starred_item(self, email, repo_id, path, obj_id=None):
 
-        path_list = [normalize_file_path(path), normalize_dir_path(path)]
-        starred_items = UserStarredFiles.objects.filter(email=email, repo_id=repo_id) \
-                                                .filter(Q(path__in=path_list))
+        if obj_id is not None:
+            starred_items = UserStarredFiles.objects.filter(
+                email=email, repo_id=repo_id, obj_id=obj_id)
+        else:
+            path_list = [normalize_file_path(path), normalize_dir_path(path)]
+            starred_items = UserStarredFiles.objects.filter(email=email, repo_id=repo_id) \
+                                                    .filter(Q(path__in=path_list))
 
         for item in starred_items:
             item.delete()
@@ -266,6 +275,10 @@ class UserStarredFiles(models.Model):
     repo_id = models.CharField(max_length=36, db_index=True)
     path = models.TextField()
     is_dir = models.BooleanField()
+    # Stable object identity (file obj_id / dir id). Nullable so that rows
+    # written before the object-id migration keep working until they are
+    # backfilled (see CF_ENABLE_FAVORITES_ID and the backfill command).
+    obj_id = models.CharField(max_length=64, null=True, db_index=True)
 
     objects = UserStarredFilesManager()
 

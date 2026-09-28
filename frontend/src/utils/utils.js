@@ -1,8 +1,9 @@
 import React from 'react';
+import { isEnabled as cloudfileIsEnabled } from '@/cloudfile/features';
 import toaster from '@/components/toast';
 import { PRIVATE_FILE_TYPE } from '@/constants';
 import { compareTwoString } from './compare-two-string';
-import { mediaUrl, gettext, serviceURL, siteRoot, isPro, fileAuditEnabled, canGenerateShareLink, canGenerateUploadLink, shareLinkPasswordMinLength, username, folderPermEnabled, onlyofficeConverterExtensions, enableSeadoc, enableRepoSnapshotLabel,
+import { mediaUrl, gettext, serviceURL, siteRoot, isPro, fileAuditEnabled, canGenerateShareLink, canGenerateUploadLink, shareLinkPasswordMinLength, username, folderPermEnabled, cloudFileLockEnabled, onlyofficeConverterExtensions, enableSeadoc, enableRepoSnapshotLabel,
   enableResetEncryptedRepoPassword, isEmailConfigured, isSystemStaff,
   enableOnlyoffice, onlyofficeEditFileExtension,
   enableOfficeWebApp, officeWebAppEditFileExtension, enableMultipleOfficeSuite, officeSuiteEditFileExtension } from './constants';
@@ -593,8 +594,19 @@ export const Utils = {
     }
 
     if (permission == 'rw') {
-      if (folderPermEnabled && ((isRepoOwner && currentRepoInfo.has_been_shared_out) || currentRepoInfo.is_admin)) {
+      const canManageFolderPermission = isPro
+        ? ((isRepoOwner && currentRepoInfo.has_been_shared_out) || currentRepoInfo.is_admin)
+        : isRepoOwner;
+      if (folderPermEnabled && canManageFolderPermission) {
         list.push('Divider', PERMISSION);
+      }
+      // CloudFile: directory-level ACL
+      const { DIR_ACL } = TextTranslation;
+      if (cloudfileIsEnabled('CF_ENABLE_DIR_ACL')) {
+        if (list[list.length - 1] !== 'Divider') {
+          list.push('Divider');
+        }
+        list.push(DIR_ACL);
       }
     }
 
@@ -704,9 +716,12 @@ export const Utils = {
     }
 
     if (permission == 'rw') {
-      if (isPro) {
+      if (isPro || cloudFileLockEnabled) {
         if (dirent.is_locked) {
-          if (dirent.locked_by_me || dirent.lock_owner == 'OnlineOffice' || isRepoOwner || currentRepoInfo.is_admin) {
+          const canUnlock = dirent.locked_by_me || (isPro && (
+            dirent.lock_owner == 'OnlineOffice' || isRepoOwner || currentRepoInfo.is_admin
+          ));
+          if (canUnlock) {
             if (!dirent.name.endsWith('.sdoc')) {
               list.push(UNLOCK);
             }
@@ -763,7 +778,7 @@ export const Utils = {
     if (permission == 'rw') {
       let subOpList = [];
       subOpList.push(PROPERTIES, HISTORY);
-      if (isPro && fileAuditEnabled) {
+      if (fileAuditEnabled) {
         subOpList.push(ACCESS_LOG);
       }
 
@@ -1793,6 +1808,13 @@ export const Utils = {
    * @param {*} dirent
    */
   isHasPermissionToShare: function (repoInfo, userDirPermission, dirent) {
+
+    // CloudFile review share-001: when external sharing is restricted, the
+    // share entry is hidden across every menu. This is only a UI hide — the
+    // API re-checks CF_ENABLE_SHARE_RESTRICT server side.
+    if (cloudfileIsEnabled('CF_ENABLE_SHARE_RESTRICT')) {
+      return false;
+    }
 
     const { isCustomPermission, customPermission } = Utils.getUserPermission(userDirPermission);
     if (isCustomPermission) {

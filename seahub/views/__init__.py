@@ -48,7 +48,8 @@ from seahub.utils import render_permission_error, render_error, \
     is_pro_version, FILE_AUDIT_ENABLED, is_valid_dirent_name, \
     is_windows_operating_system, get_file_history_suffix, IS_EMAIL_CONFIGURED, \
     normalize_file_path, normalize_dir_path
-from seahub.utils.star import get_dir_starred_files
+from seahub.utils.star import get_dir_starred_files, get_dir_starred_obj_ids, \
+        is_favorites_id_enabled
 from seahub.utils.repo import get_library_storages, parse_repo_perm, is_repo_admin
 from seahub.utils.file_op import check_file_lock
 from seahub.utils.timeutils import utc_to_local
@@ -118,6 +119,43 @@ def get_system_default_repo_id():
     return _default_repo_id
 
 
+# CloudFile: permission hook.
+#
+# This is one of only two upstream files CloudFile patches behaviourally (see
+# cloudfile-docker/BRANCHING.md). check_folder_permission below is the choke
+# point for Hub-side permission checks -- called from 255 places across 53
+# modules: web views, REST endpoints, thumbnails, metadata -- so hooking this
+# one function covers every Hub entry point at once.
+#
+# It dispatches through the cloudfile_ext registry rather than naming a
+# capability, so adding one later is a registration rather than another edit
+# here. Hooks may only narrow a permission, never widen it, and with no hook
+# registered -- every CF_ENABLE_* switch off -- this returns its input
+# unchanged. The fallback keeps this file working in a checkout without
+# cloudfile_ext.
+try:
+    from cloudfile_ext.hooks import check_permission as _cf_check_permission
+    from cloudfile_ext.features import is_enabled as _cf_feature_enabled
+except ImportError:
+    def _cf_check_permission(username, repo_id, path, permission):
+        return permission
+
+    def _cf_feature_enabled(name):
+        return False
+
+
+def _cloudfile_dir_acl_enabled():
+    return _cf_feature_enabled('CF_ENABLE_DIR_ACL')
+
+
+def _cloudfile_file_lock_enabled():
+    return _cf_feature_enabled('CF_ENABLE_FILE_LOCK')
+
+
+def _cloudfile_watch_enabled():
+    return _cf_feature_enabled('CF_ENABLE_WATCH')
+
+
 def check_folder_permission(request, repo_id, path):
     """Check repo/folder/file access permission of a user.
 
@@ -128,7 +166,8 @@ def check_folder_permission(request, repo_id, path):
     """
     repo_status = seafile_api.get_repo_status(repo_id)
     if repo_status == 1:
-        return PERMISSION_READ
+        return _cf_check_permission(request.user.username, repo_id, path,
+                                    PERMISSION_READ)
 
     username = request.user.username
     if not username:
@@ -140,7 +179,7 @@ def check_folder_permission(request, repo_id, path):
         return None
     if permission == PERMISSION_INVISIBLE:
         return None
-    return permission
+    return _cf_check_permission(username, repo_id, path, permission)
 
 def get_seadoc_file_uuid(repo, path):
     repo_id = repo.repo_id
@@ -225,6 +264,8 @@ def get_repo_dirents(request, repo, commit, path, offset=-1, limit=-1):
 
         username = request.user.username
         starred_files = get_dir_starred_files(username, repo.id, path)
+        starred_obj_ids = get_dir_starred_obj_ids(username, repo.id) \
+            if is_favorites_id_enabled() else None
         fileshares = FileShare.objects.filter(repo_id=repo.id).filter(username=username)
         uploadlinks = UploadLinkShare.objects.filter(repo_id=repo.id).filter(username=username)
 
@@ -266,7 +307,9 @@ def get_repo_dirents(request, repo, commit, path, offset=-1, limit=-1):
                 dirent.dl_link = get_file_download_link(repo.id, dirent.obj_id,
                                                         p_fpath)
                 dirent.history_link = file_history_base + '?p=' + quote(p_fpath)
-                if fpath in starred_files:
+                if starred_obj_ids is not None:
+                    dirent.starred = dirent.obj_id in starred_obj_ids
+                elif fpath in starred_files:
                     dirent.starred = True
                 for share in fileshares:
                     if fpath == share.path:
@@ -677,6 +720,7 @@ def file_revisions(request, repo_id):
         is_locked, locked_by_me = False, False
 
     repo_perm = seafile_api.check_permission_by_path(repo_id, path, username)
+    can_download_file = parse_repo_perm(repo_perm).can_download
     if repo_perm != 'rw' or (is_locked and not locked_by_me):
         can_revert_file = False
 
@@ -716,6 +760,7 @@ def file_revisions(request, repo_id):
             'is_owner': is_owner,
             'can_compare': can_compare,
             'can_revert_file': can_revert_file,
+            'can_download_file': can_download_file,
         })
 
     return render(request, 'file_revisions_old.html', {
@@ -726,7 +771,7 @@ def file_revisions(request, repo_id):
         'is_owner': is_owner,
         'can_compare': can_compare,
         'can_revert_file': can_revert_file,
-        'can_download_file': parse_repo_perm(repo_perm).can_download,
+        'can_download_file': can_download_file,
         'use_new_api': use_new_api,
         'is_virtual_repo': repo.is_virtual,
     })
@@ -1158,7 +1203,11 @@ def react_fake_view(request, **kwargs):
         'enable_reset_encrypted_repo_password': ENABLE_RESET_ENCRYPTED_REPO_PASSWORD,
         'is_email_configured': IS_EMAIL_CONFIGURED,
         'can_add_public_repo': request.user.permissions.can_add_public_repo(),
-        'folder_perm_enabled': is_pro_version(),
+        # CloudFile's ACL page reuses the native folder-permission menu slot,
+        # while its API and seafile-server remain the enforcement boundary.
+        'folder_perm_enabled': is_pro_version() or _cloudfile_dir_acl_enabled(),
+        'cloudfile_file_lock_enabled': _cloudfile_file_lock_enabled(),
+        'cloudfile_watch_enabled': _cloudfile_watch_enabled(),
         'file_audit_enabled': FILE_AUDIT_ENABLED,
         'custom_nav_items': json.dumps(CUSTOM_NAV_ITEMS),
         'enable_show_contact_email_when_search_user': settings.ENABLE_SHOW_CONTACT_EMAIL_WHEN_SEARCH_USER,

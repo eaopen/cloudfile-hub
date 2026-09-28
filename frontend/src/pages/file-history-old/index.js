@@ -5,7 +5,7 @@ import Icon from '@/components/icon';
 import Loading from '@/components/loading';
 import Logo from '@/components/logo';
 import CommonToolbar from '@/components/toolbar/common-toolbar';
-import { gettext, PER_PAGE, filePath, fileName, historyRepoID, useNewAPI, canDownload } from '@/utils/constants';
+import { gettext, PER_PAGE, filePath, fileName, historyRepoID, useNewAPI, canDownload, canRevert } from '@/utils/constants';
 import editUtilities from '@/utils/editor-utilities';
 import { Utils } from '@/utils/utils';
 import HistoryItem from './history-item';
@@ -232,6 +232,7 @@ class FileHistory extends React.Component {
                           item={item}
                           index={index}
                           canDownload={canDownload}
+                          canRevert={canRevert}
                           onItemRestore={this.onItemRestore}
                         />
                       );

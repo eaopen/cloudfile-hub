@@ -18,6 +18,7 @@ from seahub.onlyoffice.models import OnlyOfficeDocKey
 
 from seahub.settings import ENABLE_WATERMARK
 from seahub.onlyoffice.settings import ONLYOFFICE_APIJS_URL, \
+        ONLYOFFICE_FILE_SERVER_ROOT, \
         ONLYOFFICE_FORCE_SAVE, ONLYOFFICE_JWT_SECRET, \
         ONLYOFFICE_DESKTOP_EDITOR_HTTP_USER_AGENT, \
         ONLYOFFICE_EXT_WORD, ONLYOFFICE_EXT_CELL, \
@@ -25,6 +26,19 @@ from seahub.onlyoffice.settings import ONLYOFFICE_APIJS_URL, \
 
 # Get an instance of a logger
 logger = logging.getLogger('onlyoffice')
+
+
+def gen_onlyoffice_file_get_url(token, filename):
+    """Build a file URL reachable by Document Server.
+
+    Deployments may expose Seafile on a public address that is not routable
+    from the Document Server container. Keep the public URL as the default,
+    but allow OnlyOffice traffic to use a dedicated internal fileserver root.
+    """
+    if not ONLYOFFICE_FILE_SERVER_ROOT:
+        return gen_file_get_url(token, filename)
+    return '%s/files/%s/%s' % (ONLYOFFICE_FILE_SERVER_ROOT.rstrip('/'),
+                              token, urllib.parse.quote(filename))
 
 
 def generate_onlyoffice_doc_key(repo_id, file_path, file_id):
@@ -146,7 +160,7 @@ def get_onlyoffice_dict(request, username, repo_id, file_path, file_id='',
 
     # for render onlyoffice html
     file_name = os.path.basename(file_path.rstrip('/'))
-    doc_url = gen_file_get_url(dl_token, file_name)
+    doc_url = gen_onlyoffice_file_get_url(dl_token, file_name)
 
     base_url = get_site_scheme_and_netloc()
     onlyoffice_editor_callback_url = reverse('onlyoffice_editor_callback')

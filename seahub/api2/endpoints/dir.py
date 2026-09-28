@@ -29,6 +29,7 @@ from seahub.utils.file_types import IMAGE, VIDEO, PDF, SVG, SEADOC, EPUB
 from seahub.base.models import UserStarredFiles
 from seahub.base.templatetags.seahub_tags import email2nickname, \
         email2contact_email
+from seahub.utils.star import is_favorites_id_enabled
 from seahub.utils.repo import parse_repo_perm
 from seahub.constants import PERMISSION_INVISIBLE, PERMISSION_READ
 from seahub.repo_metadata.models import RepoMetadata
@@ -74,9 +75,11 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
         else:
             starred_items = starred_items.filter(path__startswith=parent_dir)
         starred_item_path_list = [f.path.rstrip('/') for f in starred_items]
+        starred_item_obj_id_set = {f.obj_id for f in starred_items if f.obj_id}
     except Exception as e:
         logger.error(e)
         starred_item_path_list = []
+        starred_item_obj_id_set = set()
 
     thumbnail_support_file_types = [IMAGE, PDF, SVG, EPUB]
     if ENABLE_THUMBNAIL_SERVER:
@@ -104,7 +107,9 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
             # get star info
             dir_info['starred'] = False
             dir_path = posixpath.join(parent_dir, dirent.obj_name)
-            if dir_path.rstrip('/') in starred_item_path_list:
+            if is_favorites_id_enabled():
+                dir_info['starred'] = dirent.obj_id in starred_item_obj_id_set
+            elif dir_path.rstrip('/') in starred_item_path_list:
                 dir_info['starred'] = True
 
     # only get file info list
@@ -112,11 +117,28 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
 
         file_list = [dirent for dirent in dir_file_list if not stat.S_ISDIR(dirent.mode)]
 
+        cloudfile_locks = {}
+        if not is_pro_version():
+            try:
+                from cloudfile_ext.features import is_enabled as cf_feature_enabled
+                if cf_feature_enabled('CF_ENABLE_FILE_LOCK'):
+                    from cloudfile_ext.file_actions.service import lock_status_map
+                    cloudfile_locks = lock_status_map(
+                        repo_id,
+                        [posixpath.join(parent_dir, item.obj_name) for item in file_list],
+                        username)
+            except Exception as e:
+                # Listing stays available when the optional lock provider is
+                # down; write paths still fail closed in seafile-server.
+                logger.error(e)
+
         # Use dict to reduce memcache fetch cost in large for-loop.
         nickname_dict = {}
         contact_email_dict = {}
         modifier_set = {x.modifier for x in file_list}
         lock_owner_set = {x.lock_owner for x in file_list}
+        lock_owner_set.update(
+            item['owner'] for item in cloudfile_locks.values() if item.get('owner'))
         for e in modifier_set | lock_owner_set:
             if e not in nickname_dict:
                 nickname_dict[e] = email2nickname(e)
@@ -165,10 +187,21 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
                     file_info["locked_by_me"] = True
                 else:
                     file_info["locked_by_me"] = False
+            elif file_path in cloudfile_locks:
+                lock_info = cloudfile_locks[file_path]
+                lock_owner_email = lock_info['owner']
+                file_info['is_locked'] = True
+                file_info['is_freezed'] = False
+                file_info['lock_owner'] = lock_owner_email
+                file_info['lock_owner_name'] = nickname_dict.get(lock_owner_email, '')
+                file_info['lock_owner_contact_email'] = contact_email_dict.get(lock_owner_email, '')
+                file_info['locked_by_me'] = lock_info['locked_by_me']
 
             # get star info
             file_info['starred'] = False
-            if file_path.rstrip('/') in starred_item_path_list:
+            if is_favorites_id_enabled():
+                file_info['starred'] = file_obj_id in starred_item_obj_id_set
+            elif file_path.rstrip('/') in starred_item_path_list:
                 file_info['starred'] = True
 
             # get tag info
@@ -680,6 +713,10 @@ class DirView(APIView):
                                  json.dumps([dir_name]), username)
         except SearpcError as e:
             logger.error(e)
+            from cloudfile_ext.file_actions.service import searpc_lock_status
+            locked_status = searpc_lock_status(e)
+            if locked_status is not None:
+                return api_error(locked_status, str(e))
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 

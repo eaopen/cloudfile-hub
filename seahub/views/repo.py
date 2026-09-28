@@ -251,6 +251,12 @@ def view_lib_as_wiki(request, repo_id, path):
 @share_link_login_required
 def view_shared_dir(request, fileshare):
 
+    # CloudFile review share-004: with external sharing restricted, an old
+    # share link must not bypass the switch — treat it as nonexistent.
+    from cloudfile_ext.features import is_enabled
+    if is_enabled('CF_ENABLE_SHARE_RESTRICT'):
+        raise Http404
+
     token = fileshare.token
     if not check_share_link_user_access(fileshare, request.user.username):
         if not request.user.username:

@@ -1,7 +1,7 @@
 import axios from 'axios';
 import FormData from 'form-data';
 import Cookies from 'js-cookie';
-import { siteRoot, cloudFileWebEnabled } from '@/utils/constants';
+import { cloudFileLockEnabled, cloudFileWebEnabled, isPro, siteRoot } from '@/utils/constants';
 
 class SeafileAPI {
 
@@ -820,6 +820,8 @@ class SeafileAPI {
     if (searchParams.time_to) { url = url + '&time_to=' + searchParams.time_to; }
     if (searchParams.size_from) { url = url + '&size_from=' + searchParams.size_from; }
     if (searchParams.size_to) { url = url + '&size_to=' + searchParams.size_to; }
+    if (searchParams.creator_emails) { url = url + '&creator_emails=' + searchParams.creator_emails; }
+    if (searchParams.tags) { url = url + '&tags=' + searchParams.tags; }
     if (searchParams.shared_from) { url = url + '&shared_from=' + searchParams.shared_from; }
     if (searchParams.not_shared_from) { url = url + '&not_shared_from=' + searchParams.not_shared_from; }
     if (searchParams.search_filename_only) { url = url + '&search_filename_only=' + searchParams.search_filename_only; }
@@ -996,6 +998,25 @@ class SeafileAPI {
     return this.req.get(url);
   }
 
+  moveFileopsPreview(srcRepoID, srcParentDir, srcNames, dstRepoID, dstParentDir, direntType) {
+    // CloudFile fileops shadow preview (CF_ENABLE_FILEOPS): returns the
+    // permission-impact (affected_members) without moving anything, backing the
+    // move-confirm dialog. srcNames is the full batch so the precheck evaluates
+    // every selected item (the v2.1 batch entry), not just the first one.
+    const url = this.server + `/api2/repos/${srcRepoID}/fileops/move/`;
+    const operation = {
+      'src_repo_id': srcRepoID,
+      'src_parent_dir': srcParentDir,
+      'src_dirents': srcNames,
+      'dst_repo_id': dstRepoID,
+      'dst_parent_dir': dstParentDir,
+      'operation': 'move',
+      'dirent_type': direntType || 'file',
+      'preview': true,
+    };
+    return this.req.post(url, operation, { headers: { 'Content-Type': 'application/json' } });
+  }
+
   cancelCopyMoveOperation(task_id) {
     const url = this.server + '/api/v2.1/copy-move-task/';
     let params = {
@@ -1164,6 +1185,10 @@ class SeafileAPI {
   }
 
   lockfile(repoID, filePath, expire) {
+    if (cloudFileLockEnabled && !isPro) {
+      const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/file-lock/';
+      return this.req.put(url, { path: filePath });
+    }
     const url = this.server + '/api/v2.1/repos/' + repoID + '/file/?p=' + encodeURIComponent(filePath);
     let form = new FormData();
     form.append('operation', 'lock');
@@ -1174,6 +1199,10 @@ class SeafileAPI {
   }
 
   unlockfile(repoID, filePath) {
+    if (cloudFileLockEnabled && !isPro) {
+      const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/file-lock/';
+      return this.req.delete(url, { data: { path: filePath } });
+    }
     const url = this.server + '/api/v2.1/repos/' + repoID + '/file/?p=' + encodeURIComponent(filePath);
     let form = new FormData();
     form.append('operation', 'unlock');

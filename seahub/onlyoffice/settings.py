@@ -6,6 +6,7 @@ from seahub.settings import ENABLE_MULTIPLE_OFFICE_SUITE, \
 
 ENABLE_ONLYOFFICE = getattr(settings, 'ENABLE_ONLYOFFICE', False)
 ONLYOFFICE_APIJS_URL = getattr(settings, 'ONLYOFFICE_APIJS_URL', '')
+ONLYOFFICE_FILE_SERVER_ROOT = getattr(settings, 'ONLYOFFICE_FILE_SERVER_ROOT', '')
 ONLYOFFICE_CONVERTER_URL = ONLYOFFICE_APIJS_URL.replace("/web-apps/apps/api/documents/api.js",
                                                         "/ConvertService.ashx")
 

@@ -4,6 +4,10 @@ class RepoInfo {
   constructor(object) {
     this.repo_id = object.repo_id;
     this.repo_name = object.repo_name;
+    // CloudFile: external sources are marked by the shadow layer and the
+    // library view needs the discriminator to hide entries that can
+    // never succeed on a mounted directory (watch, history).
+    this.repo_type = object.repo_type;
     this.permission = object.permission;
     this.size = Utils.bytesToSize(object.size);
     this.file_count = object.file_count;

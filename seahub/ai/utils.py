@@ -132,7 +132,7 @@ def get_ai_credit_by_user(user, org_id):
     ai_credit_per_user = get_enabled_role_permissions_by_role(role)['monthly_ai_credit_per_user']
     if ai_credit_per_user < 0:
         return -1
-    
+
     if org_id and org_id > 0:
         org_members_quota = OrgMemberQuota.objects.get_quota(org_id)
         ai_credit = org_members_quota * ai_credit_per_user
@@ -150,7 +150,7 @@ def get_ai_credit_by_repo_owner(repo_owner, org_id=None):
                 owner_role = DEFAULT_USER
             else:
                 owner_role = OrgSettings.objects.get_role_by_org(org)
-        else:   
+        else:
             owner = User.objects.get(email=repo_owner)
             owner_role = get_user_role(owner)
     except User.DoesNotExist:
@@ -241,7 +241,7 @@ def resolve_repo_ai_usage_context(repo_id=None, org_id=None, scenario=AI_SCENARI
 
         repo_owner = _get_repo_owner(repo_id, usage_org_id)
         group_id = _get_group_id_by_repo_owner(repo_owner)
-        
+
     if not isinstance(usage_org_id, int) or usage_org_id <= 0:
         usage_org_id = None
 
@@ -283,7 +283,7 @@ def verify_chat_ai_config():
 def user_passes_ai_chat_folder_permissions(request, repo_id):
     if not is_pro_version():
             return True
-    
+
     username = request.user.username
     # 1. check repo user admin
     if is_repo_admin(username, repo_id):

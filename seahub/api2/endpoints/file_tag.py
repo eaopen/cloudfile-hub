@@ -198,10 +198,6 @@ def check_parameter(func):
             if not dir_id:
                 error_msg = 'Folder %s not found.' % file_path
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-            if check_folder_permission(request, repo_id, new_file_path) != 'rw':
-                error_msg = _('Permission denied.')
-                return api_error(status.HTTP_403_FORBIDDEN, error_msg)
         else:
             if filename.strip() == '':
                 error_msg = 'p %s invalid' % file_path
@@ -212,9 +208,18 @@ def check_parameter(func):
                 error_msg = 'File %s not found.' % file_path
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
-            if check_folder_permission(request, repo_id, parent_path) != 'rw':
-                error_msg = _('Permission denied.')
-                return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+        # 修改逻辑（2026-09-11 最小安全修复）：标签归属目标对象（目录或文件）自身，权限判定
+        # 必须按**目标真实路径** new_file_path 进行（check_folder_permission → Server
+        # check_permission_by_path 路径级收窄，含文件级/祖先目录规则）——此前文件只查父目录，
+        # 父目录 rw 时文件被文件级规则降为 r/none/invisible 后标签仍可被读写，属越权。
+        # 读写分阈：GET（读标签）接受 r/rw/admin；PUT/POST/DELETE（改标签）仍要求 rw——
+        # 与服务端"读=r、写=rw"的门禁口径一致，前端只读用户可正常读标签。
+        target_permission = check_folder_permission(request, repo_id, new_file_path)
+        is_write = request.method != 'GET'
+        if target_permission not in ('r', 'rw', 'admin') \
+                or (is_write and target_permission != 'rw'):
+            error_msg = _('Permission denied.')
+            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         kwargs['parent_path'] = parent_path
         kwargs['filename'] = filename

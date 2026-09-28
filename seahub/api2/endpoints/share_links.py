@@ -340,6 +340,13 @@ class ShareLinks(APIView):
         1. default(NOT guest) user;
         """
 
+        # CloudFile review share-002: when external sharing is restricted,
+        # only system admins may create new share links.
+        from cloudfile_ext.features import is_enabled
+        if is_enabled('CF_ENABLE_SHARE_RESTRICT') and not request.user.is_staff:
+            error_msg = 'External sharing is disabled.'
+            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+
         # argument check
         repo_id = request.data.get('repo_id', None)
         if not repo_id:
@@ -632,6 +639,13 @@ class ShareLink(APIView):
         1. default(NOT guest) user;
         """
 
+        # CloudFile review share-004: token APIs must not bypass the external
+        # share restriction either.
+        from cloudfile_ext.features import is_enabled
+        if is_enabled('CF_ENABLE_SHARE_RESTRICT') and not request.user.is_staff:
+            error_msg = 'token %s not found.' % token
+            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
+
         try:
             fs = FileShare.objects.get(token=token)
         except FileShare.DoesNotExist:
@@ -923,6 +937,13 @@ class ShareLinkDirents(APIView):
         2, If enable SHARE_LINK_SCOPE, user must have been authenticated by specific scope.
         3, If share link is encrypted, share link password must have been checked.
         """
+
+        # CloudFile review share-004: anonymous token APIs must not bypass the
+        # external share restriction either.
+        from cloudfile_ext.features import is_enabled
+        if is_enabled('CF_ENABLE_SHARE_RESTRICT'):
+            error_msg = 'token %s not found.' % token
+            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # argument check
         thumbnail_size = request.GET.get('thumbnail_size', THUMBNAIL_DEFAULT_SIZE)

@@ -32,7 +32,9 @@ export const TagsProvider = ({ repoID, currentPath, selectTagsView, tagsChangedC
   const { enableMetadata, enableTags } = useMetadataStatus();
 
   const tagsChanged = useCallback(() => {
-    setTagsData(storeRef.current.data);
+    // Store mutates its table in place. Publish a new wrapper so React
+    // consumers repaint tag names/colors immediately after the mutation.
+    setTagsData({ ...storeRef.current.data });
     tagsChangedCallback && tagsChangedCallback(storeRef.current.data.rows);
   }, [tagsChangedCallback]);
 
@@ -41,13 +43,13 @@ export const TagsProvider = ({ repoID, currentPath, selectTagsView, tagsChangedC
   }, []);
 
   const updateTags = useCallback((data) => {
-    setTagsData(data);
+    setTagsData(data ? { ...data } : data);
   }, []);
 
   const reloadTags = useCallback((force = false) => {
     setReloading(true);
     storeRef.current.reload(PER_LOAD_NUMBER, force).then(() => {
-      setTagsData(storeRef.current.data);
+      setTagsData({ ...storeRef.current.data });
       setReloading(false);
     }).catch(error => {
       const errorMsg = Utils.getErrorMsg(error);
@@ -72,7 +74,7 @@ export const TagsProvider = ({ repoID, currentPath, selectTagsView, tagsChangedC
       window.sfTagsDataStore = storeRef.current;
       storeRef.current.initStartIndex();
       storeRef.current.load(PER_LOAD_NUMBER).then(() => {
-        setTagsData(storeRef.current.data);
+        setTagsData({ ...storeRef.current.data });
         setLoading(false);
       }).catch(error => {
         const errorMsg = Utils.getErrorMsg(error);

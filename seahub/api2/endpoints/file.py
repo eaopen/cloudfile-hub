@@ -328,6 +328,10 @@ class FileView(APIView):
                 seafile_api.rename_file(repo_id, parent_dir, oldname, new_file_name, username)
             except SearpcError as e:
                 logger.error(e)
+                from cloudfile_ext.file_actions.service import searpc_lock_status
+                locked_status = searpc_lock_status(e)
+                if locked_status is not None:
+                    return api_error(locked_status, str(e))
                 error_msg = 'Internal Server Error'
                 if str(e) == 'File type is not allowed':
                     error_msg = _('File extension is not in the whitelist')

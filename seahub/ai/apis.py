@@ -181,7 +181,7 @@ class GenerateSummary(APIView):
         if not file_id:
             return api_error(status.HTTP_404_NOT_FOUND, f"File {path} not found")
 
-        
+
 
         params = {
             'path': path,
@@ -417,7 +417,7 @@ class WritingAssistant(APIView):
         uuid_map = FileUUIDMap.objects.get_fileuuidmap_by_uuid(file_uuid)
         if not uuid_map or uuid_map.is_dir:
             return api_error(status.HTTP_404_NOT_FOUND, 'File not found.')
-        
+
         repo_id = uuid_map.repo_id
         repo = seafile_api.get_repo(repo_id)
         if not repo:

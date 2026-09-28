@@ -13,6 +13,8 @@ from rest_framework.views import APIView
 from django.utils.translation import gettext as _
 
 from seahub.base.models import UserStarredFiles
+from seahub.utils.star import resolve_obj_id, is_favorites_id_enabled
+from cloudfile_ext.favorites.identity import relocate_path
 import seaserv
 from seaserv import seafile_api, ccnet_api
 
@@ -1809,9 +1811,25 @@ class BatchMoveItemsUpdatePath(APIView):
             # Normalize paths
             src_path = normalize_file_path(src_path)
             dst_path = normalize_file_path(dst_path)
+            src_path_dir = normalize_dir_path(src_path)
+            dst_path_dir = normalize_dir_path(dst_path)
 
             try:
-                # Update exact path match
+                # Object-id rehome first: the id survives the move and is not
+                # thrown off by a trailing-slash mismatch or a conflict rename.
+                if is_favorites_id_enabled():
+                    obj_id = resolve_obj_id(dst_repo_id, dst_path)
+                    if obj_id:
+                        is_dir = seafile_api.get_dir_id_by_path(
+                            dst_repo_id, dst_path) == obj_id
+                        new_path = dst_path_dir if is_dir else dst_path
+                        count = UserStarredFiles.objects.filter(
+                            obj_id=obj_id).update(repo_id=dst_repo_id,
+                                                  path=new_path)
+                        updated_count += count
+
+                # Update exact path match (native behaviour, and the fallback
+                # when the destination no longer resolves to an object id).
                 count = UserStarredFiles.objects.filter(
                     repo_id=src_repo_id,
                     path=src_path
@@ -1819,21 +1837,23 @@ class BatchMoveItemsUpdatePath(APIView):
                 updated_count += count
 
                 # Also try with trailing slash for directories
-                src_path_dir = normalize_dir_path(src_path)
-                dst_path_dir = normalize_dir_path(dst_path)
                 count = UserStarredFiles.objects.filter(
                     repo_id=src_repo_id,
                     path=src_path_dir
                 ).update(repo_id=dst_repo_id, path=dst_path_dir)
                 updated_count += count
 
-                # Update sub-paths (for directory moves)
+                # Update sub-paths (for directory moves). Rows already re-homed
+                # by object id no longer match src_repo_id, so they are skipped.
                 starred_items = UserStarredFiles.objects.filter(
                     repo_id=src_repo_id,
                     path__startswith=src_path_dir
                 )
                 for item in starred_items:
-                    new_path = dst_path_dir + item.path[len(src_path_dir):]
+                    new_path = relocate_path(item.path, src_path_dir,
+                                             dst_path_dir)
+                    if new_path is None:
+                        continue
                     item.repo_id = dst_repo_id
                     item.path = new_path
                     item.save()

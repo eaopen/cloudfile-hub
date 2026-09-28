@@ -22,13 +22,18 @@ const FileTagsFormatter = ({ value: oldValue, className, children: emptyFormatte
     return oldValue.filter(item => getRowById(tagsData, item?.row_id)).map(item => item.row_id);
   }, [oldValue, tagsData]);
 
+  // CloudFile review tags-008: three or more tags fold to the first two plus
+  // an ellipsis, so a heavily-tagged row stays one line.
+  const visibleIds = value.length > 2 ? value.slice(0, 2) : value;
+  const hiddenCount = value.length - visibleIds.length;
+
   if (value.length === 0) return emptyFormatter || null;
   return (
     <div className={classnames('sf-metadata-ui cell-formatter-container tags-formatter', className, {
       'multi-line-tags-formatter': !isDefaultRowHeight,
     })}>
       <div className="sf-metadata-ui-tags-container">
-        {value.map((id) => {
+        {visibleIds.map((id) => {
           const tag = getRowById(tagsData, id);
           const tagColor = getTagColor(tag);
           const tagName = getTagName(tag);
@@ -42,6 +47,9 @@ const FileTagsFormatter = ({ value: oldValue, className, children: emptyFormatte
             </div>
           );
         })}
+        {hiddenCount > 0 && (
+          <span className="sf-metadata-ui-tag-more" title={`+${hiddenCount}`}>…</span>
+        )}
       </div>
     </div>
   );

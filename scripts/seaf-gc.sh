@@ -132,6 +132,12 @@ function run_seaf_gc () {
         -d "${default_seafile_data_dir}" \
         -F "${default_conf_dir}" \
         ${seaf_gc_opts}
+    rc=$?
+    if [ ${rc} -ne 0 ]; then
+        echo "seafserv-gc failed"
+        echo
+        return ${rc}
+    fi
 
     echo "seafserv-gc run done"
     echo
@@ -152,6 +158,10 @@ then
 fi
 
 seaf_gc_opts=$@
-run_seaf_gc;
+run_seaf_gc
+rc=$?
+if [ ${rc} -ne 0 ]; then
+    exit ${rc}
+fi
 
 echo "Done."

@@ -62,7 +62,10 @@ def get_group_info(request, group_id, avatar_size=GROUP_AVATAR_DEFAULT_SIZE):
     # parent_group_id = -1: top department group
     # parent_group_id = n(n > 0):  sub department group, n is parent group's id
     if group.parent_group_id != 0:
-        group_info['group_quota'] = seafile_api.get_group_quota(group_id)
+        try:
+            group_info['group_quota'] = seafile_api.get_group_quota(group_id)
+        except AttributeError:
+            group_info['group_quota'] = -2  # CE: no group quota support
 
     group_info['group_quota_usage'] = 0
     if is_pro_version():

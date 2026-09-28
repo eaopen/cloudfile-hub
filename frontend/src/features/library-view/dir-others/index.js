@@ -1,7 +1,7 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import { eventBus, EVENT_BUS_TYPE } from '@/components/event-bus';
-import { gettext, username, isPro, siteRoot } from '@/utils/constants';
+import { gettext, username, isPro, siteRoot, cloudFileWatchEnabled } from '@/utils/constants';
 import { Utils } from '@/utils/utils';
 import TreeSection from '../tree-section';
 import Item from './item';
@@ -32,11 +32,21 @@ const DirOthers = ({ userPerm, repoID, currentRepoInfo, currentMode, updateRepoI
   const isRepoOwner = owner_email == username;
   const isDepartmentAdmin = owner_email.indexOf('@seafile_group') != -1 && is_admin;
 
-  const enableMonitorRepo = isPro && (permission == 'r' || permission == 'rw');
+  const enableMonitorRepo = (isPro || cloudFileWatchEnabled) && (permission == 'r' || permission == 'rw');
+
+  // CloudFile: an external source (virtual directory v1) is a directory the
+  // operator mounted on the host. It has no commits, so watch and history can
+  // never return anything, and the native monitor endpoint answers 404 for the
+  // synthetic repo id -- the user would just get an error toast. The shadow
+  // layer marks these repos with `repo_type: 'external'`.
+  const isExternalSource = currentRepoInfo.repo_type === 'external';
 
   return (
     <TreeSection title={gettext('Others')} className="dir-others">
-      {enableMonitorRepo && (
+      {isExternalSource && (
+        <p className="small text-muted px-2 mb-1">{gettext('External source: a read-only directory mounted on the server. Watch, history, trash and locking are not available.')}</p>
+      )}
+      {!isExternalSource && enableMonitorRepo && (
         <WatchUnwatchFileChanges
           repo={currentRepoInfo}
           updateRepoInfo={updateRepoInfo}
@@ -58,7 +68,7 @@ const DirOthers = ({ userPerm, repoID, currentRepoInfo, currentMode, updateRepoI
           isActive={currentMode === 'trash'}
         />
       )}
-      {isDesktop && (
+      {isDesktop && !isExternalSource && (
         <Item
           text={gettext('History')}
           iconSymbol="history"
@@ -66,7 +76,7 @@ const DirOthers = ({ userPerm, repoID, currentRepoInfo, currentMode, updateRepoI
           isActive={currentMode === 'history'}
         />
       )}
-      {isDesktop && (isRepoOwner || isDepartmentAdmin) && (
+      {isDesktop && !isExternalSource && (isRepoOwner || isDepartmentAdmin) && (
         <LibraryMoreOperations
           repo={currentRepoInfo}
           updateRepoInfo={updateRepoInfo}

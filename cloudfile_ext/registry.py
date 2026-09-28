@@ -1,0 +1,218 @@
+# -*- coding: utf-8 -*-
+"""CloudFile internal extension registry.
+
+This is deliberately *not* a general plugin platform. It is an in-process
+registry that lets each cloudfile_ext submodule declare what it contributes,
+so that adding a capability never means editing a central dispatch table (and
+never means editing upstream Seahub).
+
+Registration happens during ``CloudFileConfig.ready()``; lookups happen at
+request time. Registering after startup is not supported.
+
+Hook points:
+
+Two shapes of extension point live here, and the difference matters:
+
+*Chains* run every registered participant. Asking "does anything want to act?"
+has no single right answer, so several capabilities may each contribute::
+
+    ``urls``                 extra URL patterns, assembled by cloudfile_ext.urls
+    ``menu``                 navigation/menu entries surfaced to the frontend
+    ``permission_check``     narrow an already-computed permission (never widen)
+    ``file_op``              pre/post hooks around file operations
+    ``search_indexer``       feed documents to an index (several may co-exist:
+                             a full-text index and an audit trail both want
+                             the same stream)
+    ``external_source``      read-only local-directory providers, keyed by type
+    ``periodic_task``        recurring work run by the cf_worker process
+
+*Providers* are interchangeable implementations of one job, and exactly one is
+active, chosen by configuration -- see cloudfile_ext.providers::
+
+    ``search``               who answers a query (meilisearch, seasearch, ...)
+    plus whatever kinds capabilities declare for themselves, e.g. where
+    directory ACL rules come from (a local table, an external service).
+
+Registration happens during ``CloudFileConfig.ready()``; lookups happen at
+request time. Registering after startup is not supported.
+"""
+
+import logging
+
+from cloudfile_ext.providers import ProviderSet
+
+logger = logging.getLogger(__name__)
+
+#: Provider kind for the search backend. Declared here rather than by a
+#: capability because the upstream patch that dispatches to it lives in the
+#: baseline (seahub/search/utils.py), so the seam must exist even when no
+#: capability is installed.
+SEARCH = 'search'
+
+FILE_OP_PHASES = ('pre', 'post')
+
+
+class Registry(object):
+
+    def __init__(self):
+        self.urls = []
+        self.menu = []
+        self.permission_checks = []
+        self.file_op_hooks = {phase: [] for phase in FILE_OP_PHASES}
+        self.search_indexers = []
+        self.external_sources = {}
+        self.periodic_tasks = []
+        self.providers = ProviderSet()
+        self._sealed = False
+
+    # -- registration -----------------------------------------------------
+
+    def _check_open(self, what):
+        if self._sealed:
+            raise RuntimeError(
+                'cannot register %s after startup; register it in '
+                'CloudFileConfig.ready()' % what)
+
+    def register_urls(self, patterns):
+        """Add URL patterns. `patterns` is a list of django.urls entries."""
+        self._check_open('urls')
+        self.urls.extend(patterns)
+
+    def register_menu(self, entry):
+        """Add a menu entry: {'key', 'label', 'url', 'feature'}.
+
+        `feature` names the CF_ENABLE_* switch that gates the entry; it is
+        re-checked at render time so toggling a switch does not need a restart
+        of the registry itself.
+        """
+        self._check_open('menu')
+        self.menu.append(entry)
+
+    def register_permission_check(self, func):
+        """Add a permission narrowing hook.
+
+        Signature: ``func(username, repo_id, path, permission) -> permission``
+
+        Hooks run in registration order, each receiving the previous result.
+        A hook must only ever return a permission that is at most as
+        privileged as the one it was given -- see docs/acl-semantics.md.
+        """
+        self._check_open('permission checks')
+        self.permission_checks.append(func)
+        return func
+
+    def register_file_op_hook(self, phase, func):
+        """Add a file operation hook. `phase` is 'pre' or 'post'.
+
+        Signature: ``func(op, username, repo_id, path, **kwargs)``. A 'pre'
+        hook may raise to veto the operation; a 'post' hook's exceptions are
+        logged and swallowed so that auditing can never break a file write.
+        """
+        self._check_open('file op hooks')
+        if phase not in FILE_OP_PHASES:
+            raise ValueError('unknown file op phase: %s' % phase)
+        self.file_op_hooks[phase].append(func)
+        return func
+
+    def register_search_indexer(self, indexer):
+        """Add a document feed. A chain: every indexer sees every document."""
+        self._check_open('search indexers')
+        self.search_indexers.append(indexer)
+        return indexer
+
+    def register_provider(self, kind, name, provider):
+        """Add one interchangeable implementation of `kind`, called `name`.
+
+        Registering does not activate: the operator selects one by setting
+        ``CF_PROVIDER_<KIND>``. So a build may ship several backends and a
+        deployment picks one, which is what lets meilisearch be *a* way to do
+        search rather than *the* way.
+        """
+        self._check_open('providers')
+        return self.providers.register(kind, name, provider)
+
+    def register_search_provider(self, name, provider):
+        """Add a search backend under `name`.
+
+        A provider is any object with::
+
+            search_files(repos_map, search_path, keyword, obj_desc,
+                         start, size, org_id, search_filename_only,
+                         filters=None)
+                -> (files_found, total)
+
+        `files_found` is a list of dicts carrying at least ``repo_id`` and
+        ``fullpath``; Seahub's own post-processing fills in the rest, so a
+        provider does not need to know about repo ownership or dirents. See
+        cloudfile_ext.hooks.search_files.
+
+        `filters` are structured predicates over user-defined attributes and
+        tags (cloudfile_ext.search_query). A provider that can honour them
+        declares which operators it implements::
+
+            supported_filter_ops = frozenset({search_query.EQ,
+                                              search_query.IN})
+
+        Undeclared operators are refused before the provider is called, so a
+        backend never has to decide what to do with a predicate it cannot
+        express -- and can never quietly widen a query by dropping one. A
+        provider that declares nothing is only ever called without filters,
+        which is why the parameter is optional.
+        """
+        return self.register_provider(SEARCH, name, provider)
+
+    def register_external_source_provider(self, source_type, provider):
+        self._check_open('external sources')
+        if source_type in self.external_sources:
+            raise ValueError('duplicate external source type: %s' % source_type)
+        self.external_sources[source_type] = provider
+        return provider
+
+    def register_periodic_task(self, name, interval, func):
+        """Add recurring work for the cf_worker process to run.
+
+        `interval` is in seconds. Tasks run in one process, one after another,
+        so a task that blocks delays the others -- keep them short and let them
+        pick up where they left off on the next tick.
+        """
+        self._check_open('periodic tasks')
+        self.periodic_tasks.append({
+            'name': name,
+            'interval': interval,
+            'func': func,
+        })
+        return func
+
+    def seal(self):
+        """Close the registry once app startup has finished."""
+        self._sealed = True
+
+    # -- dispatch ---------------------------------------------------------
+
+    def apply_permission_checks(self, username, repo_id, path, permission):
+        """Run every permission hook in order, threading the result through."""
+        for func in self.permission_checks:
+            permission = func(username, repo_id, path, permission)
+            if permission is None:
+                return None
+        return permission
+
+    def active_search_provider(self):
+        """The selected search backend, or None to leave Seahub's alone."""
+        return self.providers.active(SEARCH)
+
+    def run_file_op_hooks(self, phase, op, username, repo_id, path, **kwargs):
+        for func in self.file_op_hooks[phase]:
+            if phase == 'post':
+                # Auditing and indexing must never break the operation they
+                # observe -- it has already happened by this point.
+                try:
+                    func(op, username, repo_id, path, **kwargs)
+                except Exception:
+                    logger.exception('cloudfile post file-op hook failed: %s', func)
+            else:
+                func(op, username, repo_id, path, **kwargs)
+
+
+#: Process-wide registry.
+registry = Registry()

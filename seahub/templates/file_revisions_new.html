@@ -16,6 +16,8 @@
             fileName: '{{ u_filename|escapejs }}',
             domain: '{{ domain }}',
             protocol: '{{ protocol }}',
+            can_download_file: {% if can_download_file %} true {% else %} false {% endif %},
+            can_revert_file: {% if can_revert_file %} true {% else %} false {% endif %},
         }
     }
     </script>
