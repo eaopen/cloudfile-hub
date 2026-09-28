@@ -15,6 +15,7 @@ REPO_CREATE = 'repo_create'
 REPO_TRANSFER = 'repo_transfer'
 # 'repo_delete': {'id': repo_id, 'name': repo_name, 'owner': repo_owner}
 REPO_DELETE = 'repo_delete'
+REPO_CONFIG = 'repo_config'
 
 # 'group_create': {'id': group_id, 'name': group_name, 'owner': group_owner}
 GROUP_CREATE = 'group_create'
@@ -35,7 +36,7 @@ USER_DELETE = 'user_delete'
 # 'user_migrate': {'from': from_user, 'to': to_user}
 USER_MIGRATE = 'user_migrate'
 
-ADMIN_LOG_OPERATION_TYPE = (REPO_TRANSFER, REPO_DELETE,
+ADMIN_LOG_OPERATION_TYPE = (REPO_TRANSFER, REPO_DELETE, REPO_CONFIG,
         GROUP_CREATE, GROUP_TRANSFER, GROUP_DELETE, GROUP_MEMBER_ADD,
         GROUP_MEMBER_DELETE, USER_ADD, USER_DELETE, USER_MIGRATE)
 

@@ -134,22 +134,49 @@ def annotation_implementation_registry(host, *, annotations_enabled, oidc_enable
     return SimpleNamespace(implementations=implementations)
 
 
-def management_implementation_registry(base, host, *, authorization_enabled):
+def management_implementation_registry(base, host, *, authorization_enabled, oidc_enabled=False):
     """Directory CRUD readiness is separate from data-plane ACL capability.
 
-    Library policy publishing and stable administrator mapping remain closed;
-    mounting directory CRUD does not claim they are implemented.
+    Library policy publishing remains closed; directory CRUD readiness is
+    independent of the native library administrator management endpoint.
     """
     import os
     from dataclasses import replace
     from types import SimpleNamespace
     from .authorization.host import PolicyHost
     from .authorization.runtime import PolicyServiceFactory
+    from .identity.resources import LoginResources
     if (authorization_enabled is not True or not isinstance(host, PolicyHost)
             or host.pid != os.getpid() or host.closed or host.draining
             or not isinstance(host.deployment.factory, PolicyServiceFactory)):
         return base
     implementations = dict(base.implementations)
-    for name in ('directory.acl.manage', 'directory.acl.effective'):
+    if oidc_enabled is True and isinstance(host.deployment.login_resources, LoginResources):
+        for name in ('auth.oidc', 'directory.subjects', 'library.policy', 'directory.acl'):
+            implementations[name] = replace(implementations[name], implemented=True, default_enabled=True)
+    for name in ('directory.acl.manage', 'directory.acl.effective', 'library.shares.manage'):
         implementations[name] = replace(implementations[name], implemented=True, default_enabled=True)
+    from django.conf import settings
+    owner = getattr(settings, 'CF_SSO_GROUP_OWNER', None)
+    resources = getattr(host.deployment.factory, 'resources', None)
+    if isinstance(owner, str) and owner and getattr(resources, 'provider', None) == 'etech':
+        name = 'directory.groups.manage'
+        implementations[name] = replace(implementations[name], implemented=True, default_enabled=True)
+    return SimpleNamespace(implementations=implementations)
+
+
+def audit_query_implementation_registry(base, host, *, audit_query_enabled):
+    """Advertise the query endpoint only from its live, configured worker."""
+    import os
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from .authorization.host import PolicyHost
+    from .events.runtime import AuditQueryFactory
+    if (audit_query_enabled is not True or not isinstance(host, PolicyHost)
+            or host.pid != os.getpid() or host.closed or host.draining
+            or not isinstance(host.deployment.audit_factory, AuditQueryFactory)):
+        return base
+    implementations = dict(base.implementations)
+    implementations['audit.query'] = replace(implementations['audit.query'],
+        implemented=True, default_enabled=True)
     return SimpleNamespace(implementations=implementations)

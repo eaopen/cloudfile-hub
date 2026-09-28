@@ -14,6 +14,10 @@ class CapabilityDocumentTest(unittest.TestCase):
             document["capabilities"]["extension.contract"],
             {"enabled": True, "version": "1.0"},
         )
+        self.assertEqual(document["capabilities"]["library.admin.manage"],
+                         {"enabled": True, "version": "1"})
+        self.assertEqual(document["capabilities"]["library.config.manage"],
+                         {"enabled": True, "version": "1"})
 
     def test_configured_capabilities_are_normalized(self):
         document = build_capability_document({
@@ -143,15 +147,40 @@ class ManagementCapabilityTest(unittest.TestCase):
         from unittest.mock import Mock
         from cloudfile_extensions.authorization.host import PolicyHost
         from cloudfile_extensions.authorization.runtime import PolicyServiceFactory
+        from cloudfile_extensions.identity.resources import LoginResources
         from cloudfile_extensions.capabilities import management_implementation_registry
         from cloudfile_extensions.registry import registry
         host = Mock(spec=PolicyHost)
         host.pid = os.getpid(); host.closed = False; host.draining = False
-        host.deployment = Mock(factory=Mock(spec=PolicyServiceFactory))
-        ready = management_implementation_registry(registry, host, authorization_enabled=True)
+        host.deployment = Mock(factory=Mock(spec=PolicyServiceFactory),
+            login_resources=Mock(spec=LoginResources))
+        ready = management_implementation_registry(registry, host, authorization_enabled=True,
+            oidc_enabled=True)
         self.assertTrue(ready.implementations['directory.acl.manage'].implemented)
-        self.assertFalse(ready.implementations['library.shares.manage'].implemented)
-        self.assertFalse(ready.implementations['library.admin.manage'].implemented)
+        self.assertTrue(build_capability_document(implementation_registry=ready)['capabilities']['directory.acl.manage']['enabled'])
+        self.assertTrue(ready.implementations['library.shares.manage'].implemented)
+        self.assertTrue(build_capability_document(implementation_registry=ready)['capabilities']['library.shares.manage']['enabled'])
+        self.assertTrue(ready.implementations['library.admin.manage'].implemented)
         host.closed = True
         closed = management_implementation_registry(registry, host, authorization_enabled=True)
         self.assertFalse(closed.implementations['directory.acl.manage'].implemented)
+
+
+class AuditQueryCapabilityTest(unittest.TestCase):
+    def test_query_transport_is_distinct_from_complete_audit(self):
+        import os
+        from unittest.mock import Mock
+        from cloudfile_extensions.authorization.host import PolicyHost
+        from cloudfile_extensions.events.runtime import AuditQueryFactory
+        from cloudfile_extensions.capabilities import audit_query_implementation_registry
+        from cloudfile_extensions.registry import registry
+        host = Mock(spec=PolicyHost)
+        host.pid = os.getpid(); host.closed = False; host.draining = False
+        host.deployment = Mock(audit_factory=Mock(spec=AuditQueryFactory))
+        ready = audit_query_implementation_registry(registry, host, audit_query_enabled=True)
+        capabilities = build_capability_document(implementation_registry=ready)['capabilities']
+        self.assertTrue(capabilities['audit.query']['enabled'])
+        self.assertFalse(capabilities['audit.log']['enabled'])
+        for closed in (audit_query_implementation_registry(registry, host, audit_query_enabled=False),
+                       audit_query_implementation_registry(registry, None, audit_query_enabled=True)):
+            self.assertFalse(build_capability_document(implementation_registry=closed)['capabilities']['audit.query']['enabled'])

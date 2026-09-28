@@ -1,0 +1,15 @@
+{
+  "version": "035_library_shares",
+  "steps": [
+    {
+      "sql": "CREATE TABLE cf_library_share_revision (repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,revision BIGINT UNSIGNED NOT NULL) ENGINE=InnoDB",
+      "verify": "SELECT IF((SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_library_share_revision' AND engine='InnoDB')=1 AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_library_share_revision')=2,1,0)",
+      "expected": 1
+    },
+    {
+      "sql": "CREATE TABLE cf_library_share_ledger (repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,external_id VARCHAR(255) COLLATE utf8mb4_bin NOT NULL,group_id INT NOT NULL,permission VARCHAR(2) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,state VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,updated_at DATETIME(6) NOT NULL,PRIMARY KEY(repo_id,external_id),KEY library_share_group(repo_id,group_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+      "verify": "SELECT IF((SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_library_share_ledger' AND engine='InnoDB')=1 AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_library_share_ledger')=6 AND (SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_library_share_ledger' AND index_name='library_share_group')=2,1,0)",
+      "expected": 1
+    }
+  ]
+}

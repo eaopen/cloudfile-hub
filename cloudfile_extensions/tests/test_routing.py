@@ -29,12 +29,18 @@ class RoutingTest(unittest.TestCase):
             import django
             django.setup()
             from django.http import JsonResponse
-            from django.urls import path, clear_url_caches
+            from django.urls import path, clear_url_caches, resolve
             from django.test import Client
             from rest_framework.views import APIView
             base = types.ModuleType("seahub.api2.base")
             base.APIView = APIView
             sys.modules[base.__name__] = base
+            configuration = types.ModuleType("cloudfile_extensions.library_configuration")
+            configuration.LibraryConfiguration = type("LibraryConfiguration", (APIView,), {})
+            sys.modules[configuration.__name__] = configuration
+            shares = types.ModuleType("cloudfile_extensions.library_shares")
+            shares.LibrarySharesDesired = type("LibrarySharesDesired", (APIView,), {})
+            sys.modules[shares.__name__] = shares
             native = types.ModuleType("seahub.urls")
             native.urlpatterns = [path("api/v2.1/native/", lambda r: JsonResponse({"native": True}))]
             sys.modules[native.__name__] = native
@@ -52,10 +58,13 @@ class RoutingTest(unittest.TestCase):
             delegated_read = client.post(
                 "/api/v2.1/cloudfile/extensions/transfer/v1/delegated-read-tickets/")
             assert delegated_read.status_code == 401, (delegated_read.status_code, delegated_read.content)
-            audit = client.get("/api/v2.1/cloudfile/extensions/audit/v1/events/",
+            audit = client.get("/api/v2.1/cloudfile/extensions/audit/v1/events/library/operations/",
                 {"repo_id": "11111111-1111-4111-8111-111111111111",
                  "start": "2026-09-01T00:00:00Z", "end": "2026-09-02T00:00:00Z"}, secure=True)
             assert audit.status_code == 503, (audit.status_code, audit.content)
+            assert resolve("/api/v2.1/cloudfile/extensions/audit/v1/admin/login/").url_name == "cloudfile-admin-audit"
+            assert resolve("/api/v2.1/cloudfile/extensions/authorization/v1/library-rules/").url_name == "library-policy-rules"
+            assert resolve("/api/v2.1/cloudfile/libraries/11111111-1111-4111-8111-111111111111/shares/desired/").url_name == "library-shares-desired"
             response = client.get("/api/v2.1/cloudfile/capabilities/")
             assert response.status_code == 200
             assert response.json()["capabilities"]["auth.oidc"]["enabled"] is False

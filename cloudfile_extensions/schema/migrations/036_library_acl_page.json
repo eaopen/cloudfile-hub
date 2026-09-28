@@ -1,0 +1,10 @@
+{
+  "version": "036_library_acl_page",
+  "steps": [
+    {
+      "sql": "ALTER TABLE cf_dir_acl ADD KEY acl_library_page(repo_id,id)",
+      "verify": "SELECT IF((SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_dir_acl' AND index_name='acl_library_page' AND sub_part IS NULL AND ((seq_in_index=1 AND column_name='repo_id') OR (seq_in_index=2 AND column_name='id')))=2,1,0)",
+      "expected": 1
+    }
+  ]
+}
