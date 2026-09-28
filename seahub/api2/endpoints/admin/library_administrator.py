@@ -13,11 +13,17 @@ from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 from seahub.base.accounts import User
+from seahub.auth.utils import get_virtual_id_by_email
 from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
 from seahub.share.utils import is_repo_admin, share_dir_to_user, share_dir_to_group
 from seahub.utils import is_valid_email, send_perm_audit_msg
 
 logger = logging.getLogger(__name__)
+
+
+def _org_repo_owner(repo_id):
+    lookup = getattr(seafile_api, 'get_org_repo_owner', None)
+    return lookup(repo_id) if lookup else None
 
 
 class AdminLibraryAdministrator(APIView):
@@ -73,12 +79,13 @@ class AdminLibraryAdministrator(APIView):
 
     @classmethod
     def _remove_auto_read(cls, repo_id, kind, subject):
-        is_org = bool(seafile_api.get_org_repo_owner(repo_id))
+        org_owner = _org_repo_owner(repo_id)
+        is_org = bool(org_owner)
         share = cls._direct_share(repo_id, kind, subject, is_org)
         # Preserve an independently upgraded rw share and already absent shares.
         if not share or share.permission != 'r':
             return
-        owner = (seafile_api.get_org_repo_owner(repo_id) if is_org
+        owner = (org_owner if is_org
                  else seafile_api.get_repo_owner(repo_id))
         if not owner:
             raise RuntimeError('Library owner is unavailable')
@@ -102,7 +109,7 @@ class AdminLibraryAdministrator(APIView):
                 return denied
             users = ExtraSharePermission.objects.get_admin_users_by_repo(repo_id)
             groups = ExtraGroupsSharePermission.objects.get_admin_groups_by_repo(repo_id)
-            is_org = bool(seafile_api.get_org_repo_owner(repo_id))
+            is_org = bool(_org_repo_owner(repo_id))
             result = Response({'repo_id': repo_id, 'administrators': [
                 *({'subject_type': 'user', 'subject': user,
                    'effective': self._effective(repo_id, 'user', user, is_org)}
@@ -128,10 +135,13 @@ class AdminLibraryAdministrator(APIView):
             denied = self._authorize(request, repo_id)
             if denied is not None:
                 return denied
+            if kind == 'user':
+                target = get_virtual_id_by_email(target)
             # A library administrator must be able to open the library. Grant
             # the minimum native read access only when no access already exists.
             access_missing = False
-            is_org = bool(seafile_api.get_org_repo_owner(repo_id))
+            org_owner = _org_repo_owner(repo_id)
+            is_org = bool(org_owner)
             if kind == 'user':
                 try:
                     user = User.objects.get(email=target)
@@ -141,7 +151,7 @@ class AdminLibraryAdministrator(APIView):
                     return api_error(status.HTTP_409_CONFLICT, 'User is inactive.')
                 # An inherited group share is not a durable grant for this user.
                 access_missing = not self._direct_share(repo_id, kind, user.username, is_org)
-                owner = (seafile_api.get_org_repo_owner(repo_id) if is_org
+                owner = (org_owner if is_org
                          else seafile_api.get_repo_owner(repo_id))
                 if user.username == owner:
                     access_missing = False
@@ -154,11 +164,11 @@ class AdminLibraryAdministrator(APIView):
             with transaction.atomic():
                 try:
                     if access_missing:
-                        owner = (seafile_api.get_org_repo_owner(repo_id) if is_org
+                        owner = (org_owner if is_org
                                  else seafile_api.get_repo_owner(repo_id))
                         if not owner:
                             return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Library owner is unavailable.')
-                        org_id = seafile_api.get_org_id_by_repo_id(repo_id)
+                        org_id = seafile_api.get_org_id_by_repo_id(repo_id) if is_org else None
                         if kind == 'user':
                             share_dir_to_user(seafile_api.get_repo(repo_id), '/', owner,
                                               request.user.username, target, 'r', org_id=org_id)
@@ -208,6 +218,8 @@ class AdminLibraryAdministrator(APIView):
             denied = self._authorize(request, repo_id)
             if denied is not None:
                 return denied
+            if kind == 'user':
+                target = get_virtual_id_by_email(target)
             with transaction.atomic():
                 lookup = {'repo_id': repo_id, 'share_to' if kind == 'user' else 'group_id': target}
                 marker = store.objects.select_for_update().filter(**lookup).first()

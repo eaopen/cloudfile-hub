@@ -12,6 +12,7 @@ from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 from seahub.base.accounts import User
+from seahub.auth.utils import get_virtual_id_by_email
 from seahub.share.utils import is_repo_admin
 from seahub.utils import is_valid_email
 
@@ -36,10 +37,12 @@ class AdminLibraryUserPermission(APIView):
             if not seafile_api.get_repo(repo_id):
                 return api_error(status.HTTP_404_NOT_FOUND, 'Library not found.')
             try:
-                user = User.objects.get(email=email)
+                user = User.objects.get(email=get_virtual_id_by_email(email))
             except User.DoesNotExist:
                 return api_error(status.HTTP_404_NOT_FOUND, 'User not found.')
-            owner = seafile_api.get_repo_owner(repo_id) or seafile_api.get_org_repo_owner(repo_id)
+            org_owner_lookup = getattr(seafile_api, 'get_org_repo_owner', None)
+            owner = seafile_api.get_repo_owner(repo_id) or (
+                org_owner_lookup(repo_id) if org_owner_lookup else None)
             if not owner:
                 raise ValueError('Library owner unavailable')
             # Use native library qualification; do not impersonate the user or scan directories.
@@ -47,7 +50,7 @@ class AdminLibraryUserPermission(APIView):
             if permission not in (None, '', 'r', 'rw'):
                 raise ValueError('Unsupported native library permission')
             repo_admin = bool(is_repo_admin(user.username, repo_id, strict=True)) if user.is_active else False
-            response = Response(dict(repo_id=repo_id, email=user.username, permission=permission or 'none',
+            response = Response(dict(repo_id=repo_id, email=email, permission=permission or 'none',
                 repo_admin=repo_admin, is_owner=owner == user.username, is_active=bool(user.is_active),
                 permission_scope='library', directory_acl_applied=False))
             response['Cache-Control'] = 'no-store'

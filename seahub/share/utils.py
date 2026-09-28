@@ -52,7 +52,11 @@ def is_repo_admin(username, repo_id, *, strict=False):
 
         # get all groups that repo is shared to with admin permission
         group_ids = ExtraGroupsSharePermission.objects.get_admin_groups_by_repo(repo_id)
-        is_org = bool(seafile_api.get_org_repo_owner(repo_id))
+        # CE's SeafileAPI does not expose get_org_repo_owner; org repos are
+        # available only when the corresponding RPC is present.
+        org_owner_lookup = getattr(seafile_api, 'get_org_repo_owner', None)
+        org_repo_owner = org_owner_lookup(repo_id) if org_owner_lookup else None
+        is_org = bool(org_repo_owner)
         for group_id in group_ids:
             if is_group_admin(group_id, username) and seafile_api.get_group_shared_repo_by_path(
                     repo_id, None, group_id, is_org):
@@ -64,7 +68,7 @@ def is_repo_admin(username, repo_id, *, strict=False):
             raise
         return False
 
-    repo_owner = seafile_api.get_repo_owner(repo_id) or seafile_api.get_org_repo_owner(repo_id)
+    repo_owner = seafile_api.get_repo_owner(repo_id) or org_repo_owner
     if not repo_owner:
         logger.error('repo %s owner is None' % repo_id)
         return False

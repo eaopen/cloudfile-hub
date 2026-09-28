@@ -31,6 +31,7 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         self.target = SimpleNamespace(username='alice@example.com', is_active=True)
         self.users.objects.get.return_value = self.target
         self.management = Mock(return_value=False)
+        self.resolve_email = Mock(side_effect=lambda email: email)
         def valid_email(email):
             try:
                 validate_email(email)
@@ -44,9 +45,10 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
             'seahub.api2.throttling': dict(UserRateThrottle=lambda: Mock(allow_request=lambda *a: True)),
             'seahub.api2.utils': dict(api_error=lambda code, text: Response({'error_msg': text}, status=code)),
             'seahub.base.accounts': dict(User=self.users),
+            'seahub.auth.utils': dict(get_virtual_id_by_email=self.resolve_email),
             'seahub.share.utils': dict(is_repo_admin=self.management,
                 share_dir_to_user=Mock(), share_dir_to_group=Mock()),
-            'seahub.utils': dict(is_valid_email=valid_email),
+            'seahub.utils': dict(is_valid_email=valid_email, send_perm_audit_msg=Mock()),
         }.items():
             module = ModuleType(name)
             module.__dict__.update(fields)
@@ -116,6 +118,18 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         with self.assertLogs(self.module.logger, level='ERROR'):
             self.assertEqual(self.query().status_code, 503)
 
+    def test_contact_email_resolves_to_virtual_id_without_org_rpc(self):
+        self.resolve_email.side_effect = None
+        self.resolve_email.return_value = 'opaque@auth.local'
+        self.target.username = 'opaque@auth.local'
+        del self.native.get_org_repo_owner
+        result = self.query('email=admin%40shanghai-electric.com')
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.data['email'], 'admin@shanghai-electric.com')
+        self.assertEqual(result.data['permission'], 'rw')
+        self.users.objects.get.assert_called_once_with(email='opaque@auth.local')
+        self.native.check_permission.assert_called_once_with('repo', 'opaque@auth.local')
+
     def test_administrator_removal_preserves_native_content_shares(self):
         user_grants, group_grants = Mock(), Mock()
         models = ModuleType('seahub.share.models')
@@ -163,12 +177,12 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         request = self.requests.post('/administrator/', {'subject_type': 'user',
             'subject': 'alice@example.com'}, format='json')
         force_authenticate(request, self.actor)
-        self.native.get_org_id_by_repo_id.return_value = 0
         with patch.object(module.transaction, 'atomic', nullcontext):
             self.assertEqual(view(request, repo_id='repo').status_code, 200)
         self.modules['seahub.share.utils'].share_dir_to_user.assert_called_once_with(
             self.native.get_repo.return_value, '/', self.native.get_repo_owner.return_value,
-            self.actor.username, 'alice@example.com', 'r', org_id=0)
+            self.actor.username, 'alice@example.com', 'r', org_id=None)
+        self.native.get_org_id_by_repo_id.assert_not_called()
         user_grants.objects.get_or_create.assert_called_once_with(
             repo_id='repo', share_to='alice@example.com',
             defaults={'permission': 'admin', 'auto_granted_read': True})
@@ -199,7 +213,7 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
             self.assertEqual(view(request, repo_id='repo').status_code, 200)
         self.modules['seahub.share.utils'].share_dir_to_group.assert_called_once_with(
             self.native.get_repo.return_value, '/', self.native.get_repo_owner.return_value,
-            self.actor.username, 42, 'r', org_id=0)
+            self.actor.username, 42, 'r', org_id=None)
         group_grants.objects.get_or_create.assert_called_once_with(
             repo_id='repo', group_id=42,
             defaults={'permission': 'admin', 'auto_granted_read': True})
@@ -295,3 +309,7 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         self.assertFalse(namespace['is_repo_admin']('manager@example.com', 'repo'))
         native.get_group_shared_repo_by_path.return_value = object()
         self.assertTrue(namespace['is_repo_admin']('manager@example.com', 'repo'))
+
+        # The CE backend has no organization owner RPC.
+        del native.get_org_repo_owner
+        self.assertTrue(namespace['is_repo_admin']('manager@example.com', 'repo', strict=True))
