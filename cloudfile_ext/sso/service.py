@@ -124,10 +124,10 @@ def _resolve_members(entries):
     """Map directory logins onto Seafile identities.
 
     Contract v2.1: entries may carry ``member_accounts`` (login emails,
-    e.g. ``admin@shanghai-electric.com``) alongside ``member_user_ids``.
+    e.g. ``admin@example.com``) alongside ``member_user_ids``.
     Accounts are preferred when present because they are what the SSO login
     actually maps: the identity layer resolves the email onto the opaque
-    Seafile id via profile contact_email. UserIds, being OBPM-internal,
+    Seafile id via profile contact_email. External user IDs, being directory-specific,
     are never a Seafile login and resolve to nothing.
 
     Unresolvable members are dropped and *named* in the report rather than
@@ -384,8 +384,8 @@ def sync_user(username, registry=None):
       has until the next full tick. Deciding who left is the full sync's job,
       where a failed read is an error and not a fact.
     * **Query by login account, not by identity.** The signal carries the
-      opaque Seafile identity (``...@auth.local``), which the etech directory
-      has never heard of -- it keys users by employee number (工号). Asking it
+      opaque Seafile identity (``...@auth.local``), which the external directory
+      may not recognize -- it keys users by login account. Asking it
       with the identity would read "no such user" as "no groups" -- which is
       exactly what the additions-only rule above then makes harmless, but the
       refresh would simply never fire. The identity is mapped back to its

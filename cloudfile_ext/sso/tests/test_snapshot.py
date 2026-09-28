@@ -197,12 +197,12 @@ def test_member_accounts_pass_through():
     the identity layer, not the validator, decides what they mean."""
     raw = {'external_id': 'dept-a', 'name': 'A',
            'member_user_ids': ['1001'],
-           'member_accounts': ['admin@shanghai-electric.com',
-                                'zhangsan@shanghai-electric.com']}
+           'member_accounts': ['admin@example.com',
+                                'user@example.com']}
     entry = snapshot.normalize_entry(raw)
     assert entry['members'] == ['1001']
-    assert entry['member_accounts'] == ['admin@shanghai-electric.com',
-                                         'zhangsan@shanghai-electric.com']
+    assert entry['member_accounts'] == ['admin@example.com',
+                                         'user@example.com']
     snapshot.validate([entry])
 
 def test_member_accounts_absent_is_none():

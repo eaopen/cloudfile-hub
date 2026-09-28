@@ -321,8 +321,8 @@ class AdminLibrarySharesStatusView(APIView):
 class AdminLibrarySharesReconcileView(APIView):
     """POST to re-apply the last recorded desired state, or dry-run it.
 
-    There is no stored desired state on this side by design -- etech owns it
-    (sys_cloud_library_share). What this endpoint reconciles is the gap
+    There is no stored desired state on this side by design -- the external
+    directory owns it. What this endpoint reconciles is the gap
     between the ledger and Seafile: rows the ledger calls ACTIVE whose share
     no longer exists in Seafile (removed by an admin cleaning up, say) get
     re-applied; REVOKED rows stay gone. Pass {"desired": [...]} to reconcile

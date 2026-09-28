@@ -42,8 +42,8 @@ REVISION = 'revision'
 MEMBER_USER_IDS = 'member_user_ids'
 MEMBERS = 'members'
 
-#: Contract v2.1 (etech deployment): directory also sends the login account
-#: for each member (e.g. 'admin' for org_user.account_). The identity layer
+#: Contract v2.1: directory also sends the login account
+#: for each member (e.g. 'admin'). The identity layer
 #: turns account into {account}@<domain> and maps it onto the Seafile
 #: identity via contact_email, which is what SSO logins actually produce.
 #: Optional and additive -- absent means the resolver falls back to

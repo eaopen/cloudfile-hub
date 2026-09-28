@@ -128,9 +128,9 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         self.resolve_email.return_value = 'opaque@auth.local'
         self.target.username = 'opaque@auth.local'
         del self.native.get_org_repo_owner
-        result = self.query('email=admin%40shanghai-electric.com')
+        result = self.query('email=admin%40example.com')
         self.assertEqual(result.status_code, 200)
-        self.assertEqual(result.data['email'], 'admin@shanghai-electric.com')
+        self.assertEqual(result.data['email'], 'admin@example.com')
         self.assertEqual(result.data['permission'], 'rw')
         self.users.objects.get.assert_called_once_with(email='opaque@auth.local')
         self.native.check_permission.assert_called_once_with('repo', 'opaque@auth.local')

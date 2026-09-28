@@ -50,6 +50,14 @@ class AmbiguousSubject(UnknownSubject):
     """
 
 
+def unique_identity(usernames):
+    """Return one native identity, None, or refuse conflicting SSO bindings."""
+    values = set(usernames)
+    if len(values) > 1:
+        raise AmbiguousSubject('External user ID maps to multiple accounts.')
+    return next(iter(values)) if values else None
+
+
 def _default_map_email(subject):
     """Seahub's own login-string -> identity mapping. Returns input if unmapped.
 
@@ -142,7 +150,7 @@ def login_of(identity):
     """The login string the directory knows this identity by, or None.
 
     The reverse of ``resolve_user``: the per-user directory query is keyed by
-    what the etech directory understands -- the employee number (工号), which
+    what the external directory understands -- its stable login account, which
     the IdP sets as ``login_id`` -- and the login refresh receives the opaque
     identity from the session. Contact email is the fallback for profiles
     provisioned before login_id was populated. Returning None when the profile

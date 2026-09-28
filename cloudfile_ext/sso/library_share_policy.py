@@ -14,7 +14,7 @@ The rules, in the order the decision states them
     a guess. Matching by display name could hand a library to whichever group
     happens to share the name; the decision forbids it outright.
 2.  A missing share is added; a drifted permission is updated in place.
-3.  A desired entry removed (or disabled on the etech side) revokes **only**
+3.  A desired entry removed (or disabled in the source directory) revokes **only**
     shares this ledger records as applied by this integration. A share that
     exists in Seafile without a ledger row was made by a person or another
     system, and is not ours to take back.

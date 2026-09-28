@@ -2,6 +2,7 @@
 """Framework-level registrations that are not gated by a feature switch."""
 
 from django.urls import path, re_path
+from django.conf import settings
 
 
 def register(registry):
@@ -25,3 +26,13 @@ def register(registry):
                 UploadTempFileView.as_view(),
                 name='cloudfile-upload-temp-file'),
     ])
+
+    # Identity provisioning belongs to the configured OAuth login provider;
+    # it is independent of optional directory/group synchronization.
+    if getattr(settings, 'ENABLE_OAUTH', False) or getattr(settings, 'ENABLE_CUSTOM_OAUTH', False):
+        from cloudfile_ext.identity_api import AdminExternalIdentityView
+        registry.register_urls([
+            path('api/v2.1/admin/cloudfile/sso/identities/resolve/',
+                 AdminExternalIdentityView.as_view(),
+                 name='cloudfile-admin-external-identity'),
+        ])
