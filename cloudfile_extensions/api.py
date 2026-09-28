@@ -3,7 +3,7 @@ from rest_framework.response import Response
 
 from seahub.api2.base import APIView
 
-from .capabilities import annotation_implementation_registry, management_implementation_registry, audit_query_implementation_registry, build_capability_document
+from .capabilities import annotation_implementation_registry, management_implementation_registry, legacy_implementation_registry, audit_query_implementation_registry, build_capability_document
 
 
 class CapabilitiesView(APIView):
@@ -23,6 +23,12 @@ class CapabilitiesView(APIView):
         implementations = management_implementation_registry(implementations, gunicorn._host,
             authorization_enabled=getattr(settings, 'CLOUDFILE_AUTHORIZATION_ENABLED', False),
             oidc_enabled=getattr(settings, 'CLOUDFILE_OIDC_ENABLED', False))
+        # The old ACL and managed-share APIs are still live on legacy SSO deployments.
+        # Publish their actual provider only when the compatibility routes are installed.
+        implementations = legacy_implementation_registry(implementations,
+            authorization_enabled=getattr(settings, 'CLOUDFILE_AUTHORIZATION_ENABLED', False),
+            dir_acl_enabled=getattr(settings, 'CF_ENABLE_DIR_ACL', False),
+            sso_enabled=getattr(settings, 'CF_ENABLE_SSO', False))
         implementations = audit_query_implementation_registry(implementations, gunicorn._host,
             audit_query_enabled=getattr(settings, 'CLOUDFILE_AUDIT_QUERY_ENABLED', False))
         return Response(build_capability_document(

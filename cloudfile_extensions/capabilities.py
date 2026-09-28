@@ -165,6 +165,27 @@ def management_implementation_registry(base, host, *, authorization_enabled, oid
     return SimpleNamespace(implementations=implementations)
 
 
+def legacy_implementation_registry(base, *, authorization_enabled, dir_acl_enabled,
+                                   sso_enabled):
+    """Advertise only the legacy endpoints installed by this deployment."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+    if authorization_enabled is True or (dir_acl_enabled is not True and sso_enabled is not True):
+        return base
+    implementations = dict(base.implementations)
+    if dir_acl_enabled is True:
+        for name in ('directory.acl', 'directory.acl.effective'):
+            implementations[name] = replace(implementations[name], implemented=True,
+                                            provider='legacy', dependencies=('auth.basic',),
+                                            default_enabled=True)
+    if sso_enabled is True:
+        name = 'library.shares.manage'
+        implementations[name] = replace(implementations[name], implemented=True,
+                                        provider='legacy', dependencies=('auth.basic',),
+                                        default_enabled=True)
+    return SimpleNamespace(implementations=implementations)
+
+
 def audit_query_implementation_registry(base, host, *, audit_query_enabled):
     """Advertise the query endpoint only from its live, configured worker."""
     import os

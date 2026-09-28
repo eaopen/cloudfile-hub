@@ -1,10 +1,25 @@
 import unittest
 
-from cloudfile_extensions.capabilities import build_capability_document
+from cloudfile_extensions.capabilities import build_capability_document, legacy_implementation_registry
 from cloudfile_extensions.registry import CapabilityImplementation, ImplementationRegistry
 
 
 class CapabilityDocumentTest(unittest.TestCase):
+    def test_legacy_provider_is_advertised_only_with_its_installed_routes(self):
+        base = ImplementationRegistry()
+        ready = legacy_implementation_registry(base, authorization_enabled=False,
+                                               dir_acl_enabled=True, sso_enabled=True)
+        capabilities = build_capability_document(implementation_registry=ready)['capabilities']
+        for name in ('directory.acl', 'directory.acl.effective', 'library.shares.manage'):
+            self.assertEqual(capabilities[name], {'enabled': True, 'version': '1',
+                                                  'provider': 'legacy'})
+        self.assertFalse(capabilities['directory.acl.manage']['enabled'])
+
+        disabled = legacy_implementation_registry(base, authorization_enabled=False,
+                                                  dir_acl_enabled=False, sso_enabled=False)
+        self.assertFalse(build_capability_document(
+            implementation_registry=disabled)['capabilities']['directory.acl.effective']['enabled'])
+
     def test_base_contract_is_enabled(self):
         document = build_capability_document()
 

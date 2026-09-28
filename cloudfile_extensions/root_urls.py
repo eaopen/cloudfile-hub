@@ -33,6 +33,12 @@ def _extension_urlconfs():
 urlpatterns = [
     re_path(r"^api/v2.1/cloudfile/", include("cloudfile_extensions.urls")),
 ]
+if (getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False) is False
+        and getattr(settings, "CF_ENABLE_DIR_ACL", False) is True):
+    from .legacy_compat import LegacyEffectivePermission
+    urlpatterns.append(re_path(
+        r"^api/v2.1/cloudfile/extensions/authorization/v1/effective-permission/$",
+        LegacyEffectivePermission.as_view(), name="cloudfile-legacy-effective-permission"))
 if getattr(settings, "CLOUDFILE_OIDC_ENABLED", False):
     urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/identity/v1/",
         include("cloudfile_extensions.identity.urls")))
