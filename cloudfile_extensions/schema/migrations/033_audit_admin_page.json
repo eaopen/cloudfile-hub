@@ -1,0 +1,10 @@
+{
+  "version": "033_audit_admin_page",
+  "steps": [
+    {
+      "sql": "ALTER TABLE cf_audit_event ADD KEY audit_admin_page(occurred_at,id)",
+      "verify": "SELECT COUNT(*) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_audit_event' AND index_name='audit_admin_page' AND ((seq_in_index=1 AND column_name='occurred_at') OR (seq_in_index=2 AND column_name='id'))",
+      "expected": 2
+    }
+  ]
+}

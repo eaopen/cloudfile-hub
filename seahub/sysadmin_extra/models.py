@@ -19,12 +19,15 @@ class UserLoginLog(models.Model):
 
     class Meta:
         ordering = ['-login_date']
+        indexes = [
+            models.Index(fields=['login_date', 'id'], name='login_time_id_idx'),
+            models.Index(fields=['username', 'login_date', 'id'], name='login_user_time_idx'),
+        ]
 
 ########## signal handler
 from django.dispatch import receiver
 from seahub.auth.signals import user_logged_in, user_logged_in_failed
 from seahub.utils.ip import get_remote_ip
-from registration.signals import user_deleted
 
 @receiver(user_logged_in)
 def create_login_log(sender, request, user, **kwargs):
@@ -39,6 +42,4 @@ def create_login_failed_log(sender, request, **kwargs):
     UserLoginLog.objects.create_login_log(username,
             login_ip, login_success=False)
 
-@receiver(user_deleted)
-def remove_login_log(sender, username, **kwargs):
-    UserLoginLog.objects.filter(username=username).delete()
+# Login history is audit evidence. Account deletion must not erase it.

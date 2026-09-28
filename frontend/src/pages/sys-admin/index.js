@@ -8,6 +8,7 @@ import AbuseReports from './abuse-reports';
 import AdminLogs from './admin-logs';
 import AdminLoginLogs from './admin-logs/login-logs';
 import AdminOperationLogs from './admin-logs/operation-logs';
+import CloudFileAuditLogs from './cloudfile-audit-logs';
 import DingtalkDepartments from './department-integration/dingtalk-departments';
 import WorkWeixinDepartments from './department-integration/work-weixin-departments';
 import Departments from './departments';
@@ -123,6 +124,10 @@ class SysAdmin extends React.Component {
         urlPartList: ['logs/']
       },
       {
+        tab: 'cloudfile-audit',
+        urlPartList: ['cloudfile-audit/']
+      },
+      {
         tab: 'virus-files',
         urlPartList: ['virus-files/']
       },
@@ -229,6 +234,7 @@ class SysAdmin extends React.Component {
               <FileUpdateLogs path="file-update" {...commonProps} />
               <SharePermissionLogs path="share-permission" {...commonProps} />
             </Logs>
+            <CloudFileAuditLogs path={`${siteRoot}sys/cloudfile-audit/`} {...commonProps} />
             <AdminLogs path={`${siteRoot}sys/admin-logs/`} {...commonProps}>
               <AdminOperationLogs path="operation" />
               <AdminLoginLogs path="login" />

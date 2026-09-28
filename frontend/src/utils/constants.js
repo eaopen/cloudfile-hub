@@ -192,6 +192,7 @@ export const constanceEnabled = window.sysadmin ? window.sysadmin.pageOptions.co
 export const multiTenancy = window.sysadmin ? window.sysadmin.pageOptions.multi_tenancy : '';
 export const multiInstitution = window.sysadmin ? window.sysadmin.pageOptions.multi_institution : '';
 export const sysadminExtraEnabled = window.sysadmin ? window.sysadmin.pageOptions.sysadmin_extra_enabled : '';
+export const cloudfileAuditEnabled = window.sysadmin ? window.sysadmin.pageOptions.cloudfile_audit_enabled : false;
 export const enableGuestInvitation = window.sysadmin ? window.sysadmin.pageOptions.enable_guest_invitation : '';
 export const enableTermsAndConditions = window.sysadmin ? window.sysadmin.pageOptions.enable_terms_and_conditions : '';
 export const isDefaultAdmin = window.sysadmin ? window.sysadmin.pageOptions.is_default_admin : '';

@@ -5,7 +5,7 @@ import Icon from '@/components/icon';
 import Logo from '@/components/logo';
 import { gettext, siteRoot, isPro, otherPermission, canViewSystemInfo, canViewStatistic,
   canConfigSystem, canManageLibrary, canManageUser, canManageGroup, canViewUserLog,
-  canViewAdminLog, constanceEnabled, multiTenancy, multiInstitution, sysadminExtraEnabled,
+  canViewAdminLog, constanceEnabled, multiTenancy, multiInstitution, sysadminExtraEnabled, cloudfileAuditEnabled,
   enableGuestInvitation, enableTermsAndConditions, enableFileScan, enableWorkWeixin, enableDingtalk,
   enableShareLinkReportAbuse, isDBSqlite3 } from '@/utils/constants';
 
@@ -211,6 +211,16 @@ class SidePanel extends React.Component {
                         <Icon symbol="activities" />
                       </span>
                       <span className="nav-text">{gettext('Logs')}</span>
+                    </Link>
+                  </li>
+                }
+                {cloudfileAuditEnabled && canViewUserLog &&
+                  <li className={`nav-item ${this.getActiveClass('cloudfile-audit')}`}>
+                    <Link className={`nav-link ellipsis ${this.getActiveClass('cloudfile-audit')}`}
+                      to={siteRoot + 'sys/cloudfile-audit/'}
+                      onClick={() => this.props.tabItemClick('cloudfile-audit')}>
+                      <span className="d-flex align-items-center"><Icon symbol="activities" /></span>
+                      <span className="nav-text">{gettext('CloudFile Logs')}</span>
                     </Link>
                   </li>
                 }
