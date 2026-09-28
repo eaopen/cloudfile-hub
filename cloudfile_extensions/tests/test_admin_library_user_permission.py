@@ -30,6 +30,10 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         self.users.DoesNotExist = type('MissingUser', (Exception,), {})
         self.target = SimpleNamespace(username='alice@example.com', is_active=True)
         self.users.objects.get.return_value = self.target
+        self.import_user = Mock(return_value=self.target)
+        self.auth_backend = Mock(return_value=SimpleNamespace(get_user_with_import=self.import_user))
+        self.profile = Mock()
+        self.profile.objects.get_contact_email_by_user.side_effect = lambda username: username
         self.management = Mock(return_value=False)
         self.resolve_email = Mock(side_effect=lambda email: email)
         def valid_email(email):
@@ -44,8 +48,9 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
             'seahub.api2.authentication': dict(TokenAuthentication=SessionAuthentication),
             'seahub.api2.throttling': dict(UserRateThrottle=lambda: Mock(allow_request=lambda *a: True)),
             'seahub.api2.utils': dict(api_error=lambda code, text: Response({'error_msg': text}, status=code)),
-            'seahub.base.accounts': dict(User=self.users),
+            'seahub.base.accounts': dict(User=self.users, AuthBackend=self.auth_backend),
             'seahub.auth.utils': dict(get_virtual_id_by_email=self.resolve_email),
+            'seahub.profile.models': dict(Profile=self.profile),
             'seahub.share.utils': dict(is_repo_admin=self.management,
                 share_dir_to_user=Mock(), share_dir_to_group=Mock()),
             'seahub.utils': dict(is_valid_email=valid_email, send_perm_audit_msg=Mock()),
@@ -129,6 +134,47 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         self.assertEqual(result.data['permission'], 'rw')
         self.users.objects.get.assert_called_once_with(email='opaque@auth.local')
         self.native.check_permission.assert_called_once_with('repo', 'opaque@auth.local')
+
+    def test_administrator_grant_imports_unseen_directory_user(self):
+        user_grants, group_grants = Mock(), Mock()
+        models = ModuleType('seahub.share.models')
+        models.ExtraSharePermission = user_grants
+        models.ExtraGroupsSharePermission = group_grants
+        path = Path(__file__).resolve().parents[2] / 'seahub/api2/endpoints/admin/library_administrator.py'
+        spec = importlib.util.spec_from_file_location('administrator_import_fixture', path)
+        module = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, {**self.modules, 'seahub.share.models': models}):
+            spec.loader.exec_module(module)
+        view = module.AdminLibraryAdministrator.as_view()
+        self.users.objects.get.side_effect = self.users.DoesNotExist()
+        self.target.username = 'imported@auth.local'
+        self.native.get_shared_repo_by_path.return_value = object()
+        user_grants.objects.get_or_create.return_value = (SimpleNamespace(permission='admin'), True)
+
+        def grant():
+            request = self.requests.post('/administrator/', {'subject_type': 'user',
+                'subject': 'directory-user@example.com'}, format='json')
+            force_authenticate(request, self.actor)
+            with patch.object(module.transaction, 'atomic', nullcontext):
+                return view(request, repo_id='repo')
+
+        result = grant()
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.data['subject'], 'directory-user@example.com')
+        self.import_user.assert_called_once_with('directory-user@example.com')
+        user_grants.objects.get_or_create.assert_called_once_with(
+            repo_id='repo', share_to='imported@auth.local',
+            defaults={'permission': 'admin', 'auto_granted_read': False})
+
+        user_grants.objects.get_or_create.reset_mock()
+        self.import_user.side_effect = self.users.DoesNotExist()
+        self.assertEqual(grant().status_code, 404)
+        user_grants.objects.get_or_create.assert_not_called()
+
+        self.import_user.side_effect = None
+        self.target.is_active = False
+        self.assertEqual(grant().status_code, 409)
+        user_grants.objects.get_or_create.assert_not_called()
 
     def test_administrator_removal_preserves_native_content_shares(self):
         user_grants, group_grants = Mock(), Mock()

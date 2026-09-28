@@ -153,6 +153,8 @@ class AdminLibraryAdministrator(APIView):
                 try:
                     user = User.objects.get(email=target)
                 except User.DoesNotExist:
+                    # LDAP users may be visible before their first login;
+                    # import their native account before evaluating the grant.
                     try:
                         user = AuthBackend().get_user_with_import(target)
                     except User.DoesNotExist:
