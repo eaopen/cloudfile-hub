@@ -14,6 +14,7 @@ from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 from seahub.base.accounts import User
 from seahub.auth.utils import get_virtual_id_by_email
+from seahub.profile.models import Profile
 from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
 from seahub.share.utils import is_repo_admin, share_dir_to_user, share_dir_to_group
 from seahub.utils import is_valid_email, send_perm_audit_msg
@@ -111,7 +112,7 @@ class AdminLibraryAdministrator(APIView):
             groups = ExtraGroupsSharePermission.objects.get_admin_groups_by_repo(repo_id)
             is_org = bool(_org_repo_owner(repo_id))
             result = Response({'repo_id': repo_id, 'administrators': [
-                *({'subject_type': 'user', 'subject': user,
+                *({'subject_type': 'user', 'subject': Profile.objects.get_contact_email_by_user(user),
                    'effective': self._effective(repo_id, 'user', user, is_org)}
                   for user in sorted(set(users))),
                 *({'subject_type': 'group', 'subject': str(group),
@@ -202,7 +203,9 @@ class AdminLibraryAdministrator(APIView):
                         except Exception:
                             logger.exception('Failed to compensate library administrator native share')
                     raise
-            return self._response(repo_id, kind, target, 'granted')
+            # Keep the public API identity stable: Seafile stores a virtual ID,
+            # while callers submitted the contact email and validate its echo.
+            return self._response(repo_id, kind, subject, 'granted')
         except Exception:
             logger.exception('Library administrator grant failed')
             return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Administrator service unavailable.')
@@ -228,7 +231,7 @@ class AdminLibraryAdministrator(APIView):
                 store.objects.delete_share_permission(repo_id, target)
                 send_perm_audit_msg('modify-repo-perm', request.user.username, str(target),
                                     repo_id, '/', 'revoke-admin')
-            return self._response(repo_id, kind, target, 'removed')
+            return self._response(repo_id, kind, subject, 'removed')
         except Exception:
             logger.exception('Library administrator removal failed')
             return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Administrator service unavailable.')
