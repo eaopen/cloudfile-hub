@@ -16,6 +16,13 @@ def post_worker_init(worker):
     transfer_enabled = getattr(settings, "CLOUDFILE_TRANSFER_ENABLED", False)
     oidc_enabled = getattr(settings, "CLOUDFILE_OIDC_ENABLED", False)
     annotations_enabled = getattr(settings, "CLOUDFILE_ANNOTATIONS_ENABLED", False)
+    audit_query_enabled = getattr(settings, "CLOUDFILE_AUDIT_QUERY_ENABLED", False)
+    if type(audit_query_enabled) is not bool:
+        raise RuntimeError("CLOUDFILE_AUDIT_QUERY_ENABLED must be a boolean")
+    if audit_query_enabled and (not oidc_enabled or not authorization_enabled or
+            not isinstance(getattr(settings, "CLOUDFILE_AUDIT_CURSOR_SECRET", None), bytes) or
+            len(settings.CLOUDFILE_AUDIT_CURSOR_SECRET) < 32):
+        raise RuntimeError("audit query requires OIDC, authorization and a fixed cursor secret")
     if type(annotations_enabled) is not bool:
         raise RuntimeError("CLOUDFILE_ANNOTATIONS_ENABLED must be a boolean")
     if annotations_enabled and (not oidc_enabled or
@@ -25,7 +32,7 @@ def post_worker_init(worker):
         raise RuntimeError("annotations require OIDC, a fixed resource secret and a trusted native lifecycle reader")
     config = getattr(settings, "CLOUDFILE_POLICY_CONFIG", None)
     if config is None:
-        if local_edit_enabled or authorization_enabled or transfer_enabled or oidc_enabled or annotations_enabled:
+        if local_edit_enabled or authorization_enabled or transfer_enabled or oidc_enabled or annotations_enabled or audit_query_enabled:
             raise RuntimeError("enabled CloudFile routes require the post-fork policy worker")
         _host = None
         return

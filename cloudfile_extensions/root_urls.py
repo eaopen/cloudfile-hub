@@ -48,6 +48,9 @@ if getattr(settings, "CLOUDFILE_LOCAL_EDIT_ENABLED", False):
 if getattr(settings, "CLOUDFILE_TRANSFER_ENABLED", False):
     urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/transfer/",
         include("cloudfile_extensions.transfer.urls")))
+if getattr(settings, "CLOUDFILE_AUDIT_QUERY_ENABLED", False):
+    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/audit/",
+        include("cloudfile_extensions.events.urls")))
 urlpatterns.extend(
     re_path(rf"^api/v2.1/cloudfile/extensions/{name}/", include(module))
     for name, module in _extension_urlconfs()

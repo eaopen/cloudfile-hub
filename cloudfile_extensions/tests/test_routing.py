@@ -24,6 +24,7 @@ class RoutingTest(unittest.TestCase):
                 CLOUDFILE_AUTHORIZATION_ENABLED=True,
                 CLOUDFILE_LOCAL_EDIT_ENABLED=True,
                 CLOUDFILE_TRANSFER_ENABLED=True,
+                CLOUDFILE_AUDIT_QUERY_ENABLED=True,
                 CLOUDFILE_CAPABILITIES={"auth.oidc": True})
             import django
             django.setup()
@@ -51,9 +52,14 @@ class RoutingTest(unittest.TestCase):
             delegated_read = client.post(
                 "/api/v2.1/cloudfile/extensions/transfer/v1/delegated-read-tickets/")
             assert delegated_read.status_code == 401, (delegated_read.status_code, delegated_read.content)
+            audit = client.get("/api/v2.1/cloudfile/extensions/audit/v1/events/",
+                {"repo_id": "11111111-1111-4111-8111-111111111111",
+                 "start": "2026-09-01T00:00:00Z", "end": "2026-09-02T00:00:00Z"}, secure=True)
+            assert audit.status_code == 503, (audit.status_code, audit.content)
             response = client.get("/api/v2.1/cloudfile/capabilities/")
             assert response.status_code == 200
             assert response.json()["capabilities"]["auth.oidc"]["enabled"] is False
+            assert response.json()["capabilities"]["audit.log"]["enabled"] is False
             assert client.get("/api/v2.1/cloudfile/extensions/annotations/v1/resources/").status_code == 404
             from django.core.exceptions import ImproperlyConfigured
             from cloudfile_extensions.registry import RESERVED_DOMAINS
