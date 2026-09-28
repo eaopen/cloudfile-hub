@@ -5,6 +5,7 @@ import json
 import logging
 import posixpath
 
+from django.conf import settings
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -41,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
-        with_thumbnail, thumbnail_size):
+        with_thumbnail, thumbnail_size, offset=-1, page_size=None, dir_id=None):
 
     repo_id = repo_obj.id
     dir_info_list = []
@@ -53,13 +54,25 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
         repo_permission = PERMISSION_READ
 
     # get dirent(folder and file) list
-    parent_dir_id = seafile_api.get_dir_id_by_path(repo_id, parent_dir)
+    parent_dir_id = dir_id or seafile_api.get_dir_id_by_path(repo_id, parent_dir)
     dir_file_list = seafile_api.list_dir_with_perm(repo_id,
-            parent_dir, parent_dir_id, username, -1, -1)
+            parent_dir, parent_dir_id, username, offset,
+            page_size + 1 if page_size is not None else -1)
+    # Count before invisible/ACL filtering: continuation follows native offsets.
+    has_more = page_size is not None and len(dir_file_list) > page_size
+    if has_more:
+        dir_file_list = dir_file_list[:page_size]
 
     try:
         starred_items = UserStarredFiles.objects.filter(email=username,
-                repo_id=repo_id, path__startswith=parent_dir, org_id=-1)
+                repo_id=repo_id, org_id=-1)
+        if page_size is not None:
+            # A page must not fetch every star in a large library.
+            paths = [posixpath.join(parent_dir, entry.obj_name).rstrip('/')
+                     for entry in dir_file_list]
+            starred_items = starred_items.filter(path__in=paths + [path + '/' for path in paths])
+        else:
+            starred_items = starred_items.filter(path__startswith=parent_dir)
         starred_item_path_list = [f.path.rstrip('/') for f in starred_items]
     except Exception as e:
         logger.error(e)
@@ -111,7 +124,8 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
                 contact_email_dict[e] = email2contact_email(e)
 
         try:
-            files_tags_in_dir = get_files_tags_in_dir(repo_id, parent_dir)
+            files_tags_in_dir = get_files_tags_in_dir(repo_id, parent_dir,
+                    filenames=[entry.obj_name for entry in file_list] if page_size is not None else None)
         except Exception as e:
             logger.error(e)
             files_tags_in_dir = {}
@@ -193,7 +207,7 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
     dir_info_list.sort(key=lambda x: x['name'].lower())
     file_info_list.sort(key=lambda x: x['name'].lower())
 
-    return dir_info_list, file_info_list
+    return dir_info_list, file_info_list, has_more
 
 
 class DirView(APIView):
@@ -258,6 +272,26 @@ class DirView(APIView):
 
         with_parents = to_python_boolean(with_parents)
 
+        # The native directory API already supports offset/limit. Keep the
+        # legacy unlimited response when neither parameter is supplied.
+        start_arg = request.GET.get('start')
+        limit_arg = request.GET.get('limit')
+        paged = start_arg is not None or limit_arg is not None
+        start = 0
+        if paged:
+            # Tree callers use the 200 default; single-level callers may ask
+            # for up to 500 without changing the default request size.
+            page_max = max(1, min(500, int(getattr(settings, 'CLOUDFILE_DIRECTORY_PAGE_MAX_ITEMS', 500))))
+            page_default = max(1, min(page_max, int(getattr(settings, 'CLOUDFILE_DIRECTORY_PAGE_SIZE', 200))))
+            try:
+                start = int(start_arg or '0')
+                limit = int(limit_arg or str(page_default))
+            except ValueError:
+                return api_error(status.HTTP_400_BAD_REQUEST, 'start/limit invalid.')
+            if (start < 0 or start > 2147483647 - page_max - 1 or
+                    limit < 1 or limit > page_max or recursive != '0' or with_parents):
+                return api_error(status.HTTP_400_BAD_REQUEST, 'start/limit invalid.')
+
         # resource check
         repo = seafile_api.get_repo(repo_id)
         if not repo:
@@ -271,13 +305,15 @@ class DirView(APIView):
         if not dir_id:
             error_msg = 'Folder %s not found.' % parent_dir
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
         # permission check
         permission = check_folder_permission(request, repo_id, parent_dir)
 
         if not permission:
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+        if paged and request.GET.get('if_dir_id') and request.GET['if_dir_id'] != dir_id:
+            # Offset pages must not silently mix different directory versions.
+            return api_error(status.HTTP_409_CONFLICT, 'Folder changed; restart paging.')
 
         # get dir/file list recursively
         username = request.user.username
@@ -331,8 +367,12 @@ class DirView(APIView):
         try:
             for parent_dir in parent_dir_list:
                 # get dir file info list
-                dir_info_list, file_info_list = get_dir_file_info_list(username,
-                        request_type, repo, parent_dir, with_thumbnail, thumbnail_size)
+                dir_info_list, file_info_list, page_has_more = get_dir_file_info_list(username,
+                        request_type, repo, parent_dir, with_thumbnail, thumbnail_size,
+                        start if paged else -1, limit if paged else None,
+                        dir_id if paged else None)
+                if paged:
+                    has_more = page_has_more
                 all_dir_info_list.extend(dir_info_list)
                 all_file_info_list.extend(file_info_list)
                 current_dir_info_list = dir_info_list  # Save last iteration for metadata
@@ -344,6 +384,9 @@ class DirView(APIView):
         response_dict = {}
         response_dict["user_perm"] = permission
         response_dict["dir_id"] = dir_id
+        if paged:
+            response_dict['has_more'] = has_more
+            response_dict['next_start'] = start + limit if has_more else None
 
         # Check if metadata is enabled for this repo
         repo_metadata = RepoMetadata.objects.filter(repo_id=repo_id).first()

@@ -6,6 +6,7 @@ import posixpath
 from seaserv import seafile_api
 
 from django.urls import reverse
+from django.test import override_settings
 
 from seahub.test_utils import BaseTestCase
 from seahub.utils import check_filename_with_rename
@@ -73,6 +74,39 @@ class DirViewTest(BaseTestCase):
 
         assert json_resp['dirent_list'][1]['type'] == 'file'
         assert json_resp['dirent_list'][1]['name'] == self.file_name
+
+    def test_can_get_single_level_pages(self):
+        self.login_as(self.user)
+        first = self.client.get(self.url + '?p=/&limit=1')
+        self.assertEqual(200, first.status_code)
+        first_data = json.loads(first.content)
+        self.assertEqual([self.folder_name], [item['name'] for item in first_data['dirent_list']])
+        self.assertTrue(first_data['has_more'])
+        self.assertEqual(1, first_data['next_start'])
+
+        second = self.client.get(self.url + '?p=/&start=1&limit=1&if_dir_id=' + first_data['dir_id'])
+        self.assertEqual(200, second.status_code)
+        second_data = json.loads(second.content)
+        self.assertEqual([self.file_name], [item['name'] for item in second_data['dirent_list']])
+        self.assertFalse(second_data['has_more'])
+        self.assertIsNone(second_data['next_start'])
+        self.assertEqual(first_data['dir_id'], second_data['dir_id'])
+
+    @override_settings(CLOUDFILE_DIRECTORY_PAGE_SIZE=1, CLOUDFILE_DIRECTORY_PAGE_MAX_ITEMS=1)
+    def test_page_size_uses_configured_default_and_ceiling(self):
+        self.login_as(self.user)
+        response = self.client.get(self.url + '?start=0')
+        self.assertEqual(200, response.status_code)
+        self.assertEqual(1, len(json.loads(response.content)['dirent_list']))
+        self.assertEqual(400, self.client.get(self.url + '?limit=2').status_code)
+
+    def test_page_rejects_recursive_and_invalid_limits(self):
+        self.login_as(self.user)
+        self.assertEqual(400, self.client.get(self.url + '?start=-1').status_code)
+        self.assertEqual(400, self.client.get(self.url + '?limit=0').status_code)
+        self.assertEqual(400, self.client.get(self.url + '?limit=501').status_code)
+        self.assertEqual(400, self.client.get(self.url + '?recursive=1&limit=1').status_code)
+        self.assertEqual(409, self.client.get(self.url + '?limit=1&if_dir_id=stale').status_code)
 
     def test_can_get_with_dir_type_parameter(self):
 

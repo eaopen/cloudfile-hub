@@ -14,10 +14,14 @@ from seahub.file_tags.models import FileTags
 logger = logging.getLogger(__name__)
 
 
-def get_files_tags_in_dir(repo_id, path):
+def get_files_tags_in_dir(repo_id, path, filenames=None):
 
     # Get QuerySet from file_tags, repo_tags and file_uuid_map
     files_tags = FileTags.objects.get_dir_file_tags(repo_id, path).select_related('repo_tag', 'file_uuid')
+    # Directory pages enrich only returned files; retain legacy full-directory
+    # behavior for callers that omit filenames.
+    if filenames is not None:
+        files_tags = files_tags.filter(file_uuid__filename__in=filenames)
 
     files_tags_in_dir = defaultdict(list)
     for file_tag in files_tags:
