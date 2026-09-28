@@ -2601,7 +2601,7 @@ class Wiki2LinkedRepoDirView(APIView):
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         try:
-            dir_info_list, file_info_list = get_dir_file_info_list(username,
+            dir_info_list, file_info_list, _ = get_dir_file_info_list(username,
                     '', repo, parent_dir, False, 0)
         except Exception as e:
             logger.error(e)
