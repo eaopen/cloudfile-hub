@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone
 import json
+import ipaddress
 import re
 from uuid import UUID, uuid4
 
@@ -17,7 +18,7 @@ SOURCES = frozenset({"hub", "server", "fileserver", "webdav", "idp", "directory"
 
 def normalize_event(event):
     object_fields(event, ("event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source", "action", "result"),
-                  ("repo_id", "path", "target_path", "resource_uid", "resource_kind", "job_id", "device_id", "session_id", "delegator", "revision", "content_version", "subject_revision", "policy_revision", "bytes_sent", "target_user_id", "reason"))
+                  ("repo_id", "path", "target_path", "resource_uid", "resource_kind", "job_id", "device_id", "session_id", "delegator", "revision", "content_version", "subject_revision", "policy_revision", "bytes_sent", "target_user_id", "reason", "client_ip"))
     value = dict(event)
     try:
         value["event_id"] = str(UUID(value["event_id"]))
@@ -60,6 +61,13 @@ def normalize_event(event):
             raise ContractError("INVALID_REQUEST", "Invalid audit reason", 400)
     if "bytes_sent" in value and (type(value["bytes_sent"]) is not int or not 0 <= value["bytes_sent"] <= 2 ** 63 - 1):
         raise ContractError("INVALID_REQUEST", "Invalid transfer byte count", 400)
+    if "client_ip" in value:
+        try:
+            if not isinstance(value["client_ip"], str) or len(value["client_ip"]) > 45 or "%" in value["client_ip"]:
+                raise ValueError()
+            value["client_ip"] = str(ipaddress.ip_address(value["client_ip"]))
+        except (ValueError, TypeError, AttributeError):
+            raise ContractError("INVALID_REQUEST", "Invalid audit client IP", 400) from None
     return value
 
 
@@ -130,6 +138,13 @@ def projection_required(value):
                     return False
             except (ValueError, TypeError, AttributeError):
                 pass
+        share_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind",
+            "source", "action", "result", "repo_id", "path", "resource_kind", "reason"}
+        if (value["action"] in {"library.share.added", "library.share.updated", "library.share.revoked"}
+                and set(value) == share_fields and value["actor_kind"] == "user"
+                and value["result"] == "succeeded" and value.get("repo_id")
+                and value.get("path") == "/" and value.get("resource_kind") == "dir"):
+            return False
         if (value["action"] == "identity.logout.sessions" and value.get("result") == "succeeded" and
                 value.get("actor_kind") == "service" and value.get("job_id") and
                 not any(value.get(key) for key in ("repo_id", "path", "target_path", "resource_uid", "resource_kind"))):
@@ -198,12 +213,13 @@ class EventWriter:
         cursor.execute("UPDATE cf_event_outbox SET payload=%s WHERE event_id=%s", (payload, value["event_id"]))
         occurred = utc_time(value["occurred_at"]).replace(tzinfo=None)
         cursor.execute("INSERT INTO cf_audit_event(repo_id,object_type,object_id,operation,operator,source,result,occurred_at,"
-                       "source_path,target_path,event_id,schema_version,recorded_at,request_id,actor_user_id,actor_kind,delegator,resource_uid,event_payload) "
-                       "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s,%s,%s,%s,%s,%s,%s)",
+                       "source_path,target_path,event_id,schema_version,recorded_at,request_id,actor_user_id,actor_kind,delegator,resource_uid,event_payload,client_ip) "
+                       "VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,1,%s,%s,%s,%s,%s,%s,%s,%s)",
                        (value.get("repo_id", ""), value.get("resource_kind", "resource" if value.get("repo_id") else "identity"), value.get("resource_uid", ""), value["action"], value["actor_user_id"], value["source"],
                         value["result"], occurred, value.get("path"), value.get("target_path"), value["event_id"],
                         utc_time(value["recorded_at"]).replace(tzinfo=None), value["request_id"],
-                        value["actor_user_id"], value["actor_kind"], value.get("delegator"), value.get("resource_uid"), payload))
+                        value["actor_user_id"], value["actor_kind"], value.get("delegator"), value.get("resource_uid"), payload,
+                        value.get("client_ip")))
         return value
 
     def resource_hook(self, *, request_id, actor_kind="user", delegator=None):

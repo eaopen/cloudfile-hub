@@ -56,9 +56,10 @@ class AuditService:
         return result
 
     @safe_errors
-    def events(self, *, actor, filters, limit=100, cursor=None):
+    def events(self, *, actor, filters, limit=100, cursor=None, path_scope="exact", event_class=None):
         identifier(actor)
-        page = self.reader.list(actor=actor, **self._filters(filters), limit=limit, cursor=cursor)
+        page = self.reader.list(actor=actor, **self._filters(filters), limit=limit, cursor=cursor,
+                                path_scope=path_scope, event_class=event_class)
         items = []
         for event in page["items"]:
             items.append(redact_event(self.redact, actor, event))

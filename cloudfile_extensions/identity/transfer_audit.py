@@ -1,12 +1,22 @@
 """Hub observations of explicit transfers, never native transaction receipts."""
 from datetime import datetime, timezone
+from ipaddress import ip_address
 from uuid import uuid4
 
 from ..common.errors import ContractError
 from ..events.outbox import EventWriter
 
 
-def record_transfer(resources, actor, reference, request_id, action, result, *, reason=None, content_version=None):
+def audit_peer_ip(request):
+    """Use the observed TCP peer; untrusted forwarding headers are not audit facts."""
+    try:
+        return str(ip_address(request.META.get('REMOTE_ADDR')))
+    except (ValueError, TypeError, AttributeError):
+        return None
+
+
+def record_transfer(resources, actor, reference, request_id, action, result, *, reason=None, content_version=None,
+                    client_ip=None):
     fact = dict(event_id=str(uuid4()), occurred_at=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         request_id=request_id, actor_user_id=actor, actor_kind='user', source='hub',
         action=action, result=result, repo_id=reference['repo_id'], path=reference['path'], resource_kind='file')
@@ -14,6 +24,8 @@ def record_transfer(resources, actor, reference, request_id, action, result, *, 
         fact['reason'] = reason
     if content_version is not None:
         fact['content_version'] = content_version
+    if client_ip is not None:
+        fact['client_ip'] = client_ip
     try:
         with resources.connection() as connection:
             connection.begin()

@@ -25,6 +25,7 @@ class AuthorizedAuditQuery:
         self.management = LibraryWideManagementAuthority(preparation, core,
             cloud_mode=cloud_mode, request_id=request_id)
         self.managed = False
+        self.whole_library = False
         self.cursor = None
         self.repo_id = None
         self.epoch = None
@@ -119,7 +120,9 @@ class AuthorizedAuditQuery:
         if self.cursor is None or actor != self.authority.actor or event.get("repo_id") != self.repo_id:
             return False
         if set(event) == {"repo_id"}:
-            return True  # root CE/C read already held in the actual transaction
+            return True  # selected library or object scope is held in this transaction
+        if self.whole_library:
+            return self.managed
         paths = [event.get(name) for name in ("source_path", "target_path") if event.get(name) is not None]
         if not paths:
             # Library/security facts require a separate audit-management scope.
@@ -145,10 +148,28 @@ class AuthorizedAuditQuery:
                 return False
         return True
 
-    def events(self, filters, *, limit=100, cursor=None):
-        filters = AuditService._filters(filters)
+    def events(self, filters, *, limit=100, cursor=None, scope="object",
+               resource_kind=None, event_class=None):
+        if scope not in {"library", "object"} or event_class not in {
+                "operations", "access", "updates", "permissions"}:
+            raise ContractError("INVALID_REQUEST", "Invalid audit scope", 400)
+        if scope == "object":
+            if resource_kind not in {"file", "dir"} or "path" not in filters:
+                raise ContractError("INVALID_REQUEST", "Object audit requires path and kind", 400)
+            # Validate against the caller's original path before the generic
+            # audit filter canonicalizes it as a directory path.
+            reference = resource_ref(dict(repo_id=filters["repo_id"], path=filters["path"], kind=resource_kind))
+            filters = AuditService._filters(filters)
+            filters["path"] = reference["path"]
+        else:
+            if resource_kind is not None or "path" in filters:
+                raise ContractError("INVALID_REQUEST", "Library audit has no object scope", 400)
+            filters = AuditService._filters(filters)
+            reference = resource_ref(dict(repo_id=filters["repo_id"], path="/", kind="dir"))
         return self._consume(filters["repo_id"], lambda: self.service.events(
-            actor=self.authority.actor, filters=filters, limit=limit, cursor=cursor))
+            actor=self.authority.actor, filters=filters, limit=limit, cursor=cursor,
+            path_scope="tree" if scope == "object" and resource_kind == "dir" else "exact",
+            event_class=event_class), reference=reference, whole_library=scope == "library")
 
     def export_page(self, filters, *, limit=200, cursor=None, upper_bound=None, expected_epoch=None):
         """Internal export page; the cutoff is never accepted by query HTTP."""
@@ -197,12 +218,15 @@ class AuthorizedAuditQuery:
         with scope_locks(self.authority.state.connection, scopes):
             yield
 
-    def _consume(self, repo_id, operation, *, export=False):
-        root = dict(repo_id=repo_id, path="/", kind="dir")
+    def _consume(self, repo_id, operation, *, export=False, reference=None, whole_library=False):
+        root = reference or dict(repo_id=repo_id, path="/", kind="dir")
+        scope_authority = self.management if whole_library else self.authority
         def read(sql, ref):
-            self.cursor, self.repo_id, self.epoch = sql, ref["repo_id"], self.authority.epoch
+            self.cursor, self.repo_id, self.epoch = sql, ref["repo_id"], scope_authority.epoch
+            self.whole_library = whole_library or export
             try:
-                self.managed = self.management.authorize(sql, self.authority.actor, ref) is True
+                managed_root = dict(repo_id=repo_id, path="/", kind="dir")
+                self.managed = self.management.authorize(sql, self.authority.actor, managed_root) is True
                 if self.management.epoch != self.epoch:
                     raise ContractError("SUBJECT_UNAVAILABLE", "Audit management subject changed", 503)
                 if export and not self.managed:
@@ -211,6 +235,7 @@ class AuthorizedAuditQuery:
             finally:
                 self.cursor = self.repo_id = self.epoch = None
                 self.managed = False
+                self.whole_library = False
                 self.management.epoch = self.management.current_subject = self.management.effective_access = None
                 self.management.is_owner = False
-        return self.authority.consume(root, read)
+        return scope_authority.consume(root, read)

@@ -1,0 +1,10 @@
+{
+  "version": "034_audit_client_ip",
+  "steps": [
+    {
+      "sql": "ALTER TABLE cf_audit_event ADD client_ip VARCHAR(45) CHARACTER SET ascii COLLATE ascii_bin NULL",
+      "verify": "SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_audit_event' AND column_name='client_ip' AND character_maximum_length=45 AND is_nullable='YES'",
+      "expected": 1
+    }
+  ]
+}

@@ -14,6 +14,8 @@ from ..authorization.http import DirectoryPolicyView
 
 class AuditEventsView(View):
     service_factory = None
+    scope = None
+    event_class = None
     http_method_names = ["get"]
 
     def dispatch(self, request, *args, **kwargs):
@@ -26,21 +28,28 @@ class AuditEventsView(View):
             query = request.META.get("QUERY_STRING", "")
             if not isinstance(query, str) or len(query.encode("utf-8")) > 16384:
                 raise ContractError("REQUEST_TOO_LARGE", "Audit query exceeds the limit", 413)
-            allowed = {"repo_id", "start", "end", "actor_user_id", "resource_uid", "path", "action", "result", "limit", "cursor"}
+            allowed = {"repo_id", "start", "end", "actor_user_id", "resource_uid", "path", "kind", "action", "result", "limit", "cursor"}
             if (set(request.GET) - allowed or not {"repo_id", "start", "end"} <= set(request.GET)
                     or any(len(request.GET.getlist(name)) != 1 for name in request.GET)
                     or request.read(1)):
                 raise invalid("Invalid audit query")
+            if self.scope == "object":
+                if request.GET.get("kind") not in {"file", "dir"} or "path" not in request.GET:
+                    raise invalid("Object audit requires path and kind")
+            elif self.scope != "library" or "kind" in request.GET or "path" in request.GET:
+                raise invalid("Library audit does not accept an object path")
             limit = request.GET.get("limit", "100")
             if not re.fullmatch(r"[1-9][0-9]{0,2}", limit) or int(limit) > 200:
                 raise invalid("Invalid audit page size")
-            filters = {name: request.GET[name] for name in request.GET if name not in {"limit", "cursor"}}
+            filters = {name: request.GET[name] for name in request.GET if name not in {"limit", "cursor", "kind"}}
             if not callable(self.service_factory):
                 raise ContractError("AUDIT_UNAVAILABLE", "Audit service is unavailable", 503)
             with self.service_factory(request, request_id) as service:
                 if not isinstance(service, AuthorizedAuditQuery):
                     raise RuntimeError("invalid audit service assembly")
-                result = service.events(filters, limit=int(limit), cursor=request.GET.get("cursor"))
+                result = service.events(filters, limit=int(limit), cursor=request.GET.get("cursor"),
+                                        scope=self.scope, resource_kind=request.GET.get("kind"),
+                                        event_class=self.event_class)
                 response = JsonResponse(result)
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)
@@ -57,7 +66,14 @@ class AuditEventsView(View):
 def audit_query_routes(*, service_factory):
     if not callable(service_factory):
         raise ValueError("trusted owned audit service factory required")
-    return [path("v1/events/", AuditEventsView.as_view(service_factory=service_factory), name="audit-events")]
+    # Different URLs make the library-wide management boundary explicit; an
+    # ordinary reader must supply a concrete object scope before any scan.
+    return [path("v1/events/%s/%s/" % (scope, event_class),
+                 AuditEventsView.as_view(service_factory=service_factory,
+                                         scope=scope, event_class=event_class),
+                 name="audit-%s-%s" % (scope, event_class))
+            for scope in ("library", "object")
+            for event_class in ("operations", "access", "updates", "permissions")]
 
 
 class AuditExportView(DirectoryPolicyView):

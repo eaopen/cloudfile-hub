@@ -5,7 +5,7 @@ from unittest.mock import patch
 from uuid import uuid4
 import json
 
-from cloudfile_extensions.identity.transfer_audit import record_transfer
+from cloudfile_extensions.identity.transfer_audit import record_transfer, audit_peer_ip
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.schema.runner import SchemaRunner
 from cloudfile_extensions.tests.test_schema import DatabaseTestCase
@@ -24,14 +24,22 @@ class TransferAuditTests(DatabaseTestCase):
     def test_attempt_and_confirmed_success_keep_business_identity_and_version(self):
         record_transfer(self.resources, 'business-user', self.reference, 'request', 'file.update', 'attempted')
         record_transfer(self.resources, 'business-user', self.reference, 'request', 'file.update', 'succeeded',
-            reason='NATIVE_COMPLETION_ACKNOWLEDGED', content_version='a' * 40)
+            reason='NATIVE_COMPLETION_ACKNOWLEDGED', content_version='a' * 40, client_ip='192.0.2.10')
         with self.connection.cursor() as cursor:
-            cursor.execute('SELECT event_payload FROM cf_audit_event ORDER BY id')
-            facts = [json.loads(row[0]) for row in cursor.fetchall()]
+            cursor.execute('SELECT event_payload,client_ip FROM cf_audit_event ORDER BY id')
+            records = cursor.fetchall()
+            facts = [json.loads(row[0]) for row in records]
         self.assertEqual([f['result'] for f in facts], ['attempted', 'succeeded'])
         self.assertTrue(all(f['actor_user_id'] == 'business-user' and f['source'] == 'hub'
             and f['path'] == '/part.txt' and f['occurred_at'] for f in facts))
         self.assertEqual(facts[-1]['content_version'], 'a' * 40)
+        self.assertEqual(records[-1][1], '192.0.2.10')
+
+    def test_peer_ip_ignores_untrusted_forwarding(self):
+        request = SimpleNamespace(META={'REMOTE_ADDR': '192.0.2.10', 'HTTP_X_FORWARDED_FOR': '203.0.113.5'})
+        self.assertEqual(audit_peer_ip(request), '192.0.2.10')
+        request.META['REMOTE_ADDR'] = 'invalid'
+        self.assertIsNone(audit_peer_ip(request))
 
     def test_denial_and_unknown_completion_cannot_be_success(self):
         for result, reason in [('denied', 'ACCESS_DENIED'), ('interrupted', 'PUBLICATION_UNCONFIRMED')]:

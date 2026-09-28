@@ -25,7 +25,7 @@ def invalid():
 class AuditReader:
     FIELDS = ("id", "event_id", "schema_version", "occurred_at", "recorded_at",
               "repo_id", "resource_uid", "actor_user_id", "actor_kind", "delegator",
-              "operator", "source", "operation", "result", "source_path", "target_path", "request_id")
+              "operator", "source", "operation", "result", "source_path", "target_path", "request_id", "client_ip")
 
     def __init__(self, connection, *, secret, authorize, clock=time.time):
         if not isinstance(secret, bytes) or len(secret) < 32 or not callable(authorize):
@@ -84,7 +84,8 @@ class AuditReader:
             raise invalid() from None
 
     def list(self, *, actor, repo_id, start, end, limit=100, cursor=None,
-             actor_user_id=None, action=None, result=None, path=None, resource_uid=None, upper_bound=None):
+             actor_user_id=None, action=None, result=None, path=None, resource_uid=None,
+             upper_bound=None, path_scope="exact", event_class=None):
         identifier(actor)
         try:
             repo_id = str(UUID(repo_id))
@@ -93,10 +94,13 @@ class AuditReader:
                 raise ValueError()
             if upper_bound is not None and (type(upper_bound) is not int or not 0 <= upper_bound <= 2 ** 63 - 1):
                 raise ValueError()
+            if path_scope not in {"exact", "tree"} or event_class not in {
+                    None, "operations", "access", "updates", "permissions"}:
+                raise ValueError()
             filters = {"actor": actor, "repo_id": repo_id, "start": first.isoformat(), "end": last.isoformat(),
                        "actor_user_id": actor_user_id, "action": action, "result": result, "path": path,
                        "resource_uid": str(UUID(resource_uid)) if resource_uid is not None else None,
-                       "upper_bound": upper_bound}
+                       "upper_bound": upper_bound, "path_scope": path_scope, "event_class": event_class}
             for name in ("actor_user_id", "action", "result"):
                 if filters[name] is not None:
                     identifier(filters[name])
@@ -120,9 +124,33 @@ class AuditReader:
             if filters[name] is not None:
                 clauses.append(column + "=%s")
                 values.append(filters[name])
+        # Access is separate; update and permission views refine operations.
+        if event_class == "access":
+            clauses.append("operation IN ('file.view','file.download')")
+        elif event_class == "operations":
+            clauses.append("operation NOT IN ('file.view','file.download')")
+        elif event_class == "updates":
+            clauses.append("(operation LIKE %s OR operation LIKE %s)")
+            values.extend(["file.%", "dir.%"])
+            clauses.append("operation NOT IN ('file.view','file.download')")
+        elif event_class == "permissions":
+            clauses.append("(operation LIKE %s OR operation LIKE %s OR "
+                           "operation LIKE %s OR operation LIKE %s OR operation LIKE %s OR operation LIKE %s)")
+            values.extend(["acl.%", "admin.%", "permission.%", "share.%",
+                           "library.admin.%", "library.share.%"])
         if filters["path"] is not None:
-            clauses.append("(source_path=%s OR target_path=%s)")
-            values.extend([filters["path"], filters["path"]])
+            path = filters["path"]
+            if path_scope == "tree" and path == "/":
+                pass  # root directory covers this repository; each row is still authorized
+            elif path_scope == "tree":
+                # Segment-boundary comparison avoids LIKE wildcard/path-prefix leaks.
+                clauses.append("(source_path=%s OR target_path=%s OR "
+                               "(LEFT(source_path,CHAR_LENGTH(%s))=%s AND SUBSTRING(source_path,CHAR_LENGTH(%s)+1,1)='/') OR "
+                               "(LEFT(target_path,CHAR_LENGTH(%s))=%s AND SUBSTRING(target_path,CHAR_LENGTH(%s)+1,1)='/'))")
+                values.extend([path, path, path, path, path, path, path, path])
+            else:
+                clauses.append("(source_path=%s OR target_path=%s)")
+                values.extend([path, path])
         if position is not None:
             clauses.append("(occurred_at<%s OR (occurred_at=%s AND id<%s))")
             values.extend([position[0], position[0], position[1]])

@@ -88,9 +88,26 @@ class AuditQueryTests(DatabaseTestCase):
     def test_unbounded_queries_are_rejected(self):
         for change in ({"limit": True}, {"limit": 201}, {"end": "2027-01-01T00:00:00Z"},
                        {"start": self.arguments["end"]}, {"resource_uid": "not-a-uuid"},
-                       {"upper_bound": True}, {"upper_bound": -1}):
+                       {"upper_bound": True}, {"upper_bound": -1},
+                       {"event_class": "unknown"}):
             with self.assertRaises(ContractError):
                 self.reader.list(**{**self.arguments, **change})
+
+    def test_named_log_categories_filter_updates_and_permissions(self):
+        with self.connection.cursor() as sql:
+            sql.executemany(
+                "INSERT INTO cf_audit_event(repo_id,object_type,object_id,operation,operator,source,result,occurred_at,source_path) "
+                "VALUES(%s,'file','',%s,'writer','hub','succeeded','2026-09-15',%s)",
+                [(self.repo, action, "/categorized") for action in
+                 ("file.download", "file.upload", "acl.created", "admin.created", "audit.export.download")])
+        def actions(category):
+            return {row["operation"] for row in self.reader.list(
+                **self.arguments, event_class=category)["items"]}
+        self.assertEqual(actions("access"), {"file.download"})
+        self.assertEqual(actions("updates"), {"file.upload", "file.updated"})
+        self.assertEqual(actions("permissions"), {"acl.created", "admin.created"})
+        self.assertEqual(actions("operations"),
+                         {"file.upload", "file.updated", "acl.created", "admin.created", "audit.export.download"})
 
     def test_export_with_real_reader_filters_and_redacts(self):
         def redact(actor, row):

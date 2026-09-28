@@ -35,6 +35,15 @@ class SearchEventDispositionTest(TestCase):
         del incomplete["policy_revision"]
         self.assertTrue(projection_required(incomplete))
 
+    def test_library_share_audit_is_not_a_file_index_mutation(self):
+        fact = dict(event_id="11111111-1111-4111-8111-111111111111", occurred_at="2026-09-27T00:00:00Z",
+            request_id="request", actor_user_id="admin@example.com", actor_kind="user", source="hub",
+            action="library.share.added", result="succeeded", repo_id="22222222-2222-4222-8222-222222222222",
+            path="/", resource_kind="dir", reason="external_group_id=dept-1;permission=rw")
+        self.assertFalse(projection_required(fact))
+        self.assertTrue(projection_required({**fact, "result": "failed"}))
+        self.assertTrue(projection_required({**fact, "target_path": "/other"}))
+
     def test_managed_reads_and_new_unbound_definition_do_not_need_indexing(self):
         self.assertFalse(projection_required(dict(source="fileserver", action="file.download", resource_kind="file")))
         self.assertFalse(projection_required(dict(source="hub", action="tags.definition.created", result="succeeded", reason="tag_id:11111111-1111-4111-8111-111111111111")))

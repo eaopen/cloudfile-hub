@@ -36,15 +36,17 @@ class AuditHTTPTest(unittest.TestCase):
             finally:
                 self.closed = True
 
-        self.view = AuditEventsView.as_view(service_factory=factory)
+        self.view = AuditEventsView.as_view(service_factory=factory,
+                                             scope="object", event_class="access")
         self.query = dict(repo_id="11111111-1111-4111-8111-111111111111",
-            start="2026-09-01T00:00:00Z", end="2026-09-02T00:00:00Z")
+            start="2026-09-01T00:00:00Z", end="2026-09-02T00:00:00Z",
+            path="/docs/a.txt", kind="file")
 
     def request(self, **changes):
         return self.requests.get("/audit/v1/events/", data={**self.query, **changes}, secure=True)
 
     def test_query_route_uses_worker_owned_service(self):
-        target = resolve("/v1/events/", urlconf="cloudfile_extensions.events.urls")
+        target = resolve("/v1/events/object/access/", urlconf="cloudfile_extensions.events.urls")
         self.assertIs(target.func.view_class, AuditEventsView)
         self.assertIs(target.func.view_initkwargs["service_factory"], gunicorn.audit_service)
 
@@ -52,16 +54,29 @@ class AuditHTTPTest(unittest.TestCase):
         response = self.view(self.request(limit="25", cursor="signed-cursor"))
         self.assertEqual(response.status_code, 200)
         self.assertEqual(json.loads(response.content), {"items": [], "next_cursor": None})
-        self.service.events.assert_called_once_with(self.query, limit=25, cursor="signed-cursor")
+        expected = {key: value for key, value in self.query.items() if key != "kind"}
+        self.service.events.assert_called_once_with(expected, limit=25, cursor="signed-cursor",
+            scope="object", resource_kind="file", event_class="access")
         self.assertTrue(self.closed)
         self.assertIn("no-store", response["Cache-Control"])
 
     def test_invalid_input_does_not_allocate_audit_scope(self):
-        for request in (self.requests.get("/audit/v1/events/?repo_id=x&repo_id=y", secure=True),
+        for request in (self.requests.get("/audit/v1/events/object/access/?repo_id=x&repo_id=y", secure=True),
                 self.request(limit="201"), self.request(actor="forged"),
                 self.requests.get("/audit/v1/events/", data=self.query, secure=False)):
             self.assertIn(self.view(request).status_code, (400, 401))
         self.service.events.assert_not_called()
+
+    def test_library_query_uses_distinct_management_route(self):
+        target = resolve("/v1/events/library/operations/", urlconf="cloudfile_extensions.events.urls")
+        self.assertEqual(target.func.view_initkwargs["scope"], "library")
+        self.assertEqual(target.func.view_initkwargs["event_class"], "operations")
+        missing_kind = self.requests.get("/v1/events/object/access/", data={
+            key: value for key, value in self.query.items() if key != "kind"}, secure=True)
+        self.assertEqual(self.view(missing_kind).status_code, 400)
+        library = AuditEventsView.as_view(service_factory=lambda *_: None,
+                                          scope="library", event_class="operations")
+        self.assertEqual(library(self.request()).status_code, 400)
 
     def test_revocation_and_failure_are_not_empty_logs(self):
         self.service.events.side_effect = ContractError("ACCESS_DENIED", "Denied", 403)
