@@ -58,10 +58,11 @@ class ContentReadAuthority(DirectoryManagement):
     def consume(self, reference, reader):
         return self._consume(reference, reader, diagnostic=False)
 
-    def consume_many(self, references):
-        """Evaluate one directory page in groups of 50 within the existing policy authority."""
-        if type(self) is not ContentReadAuthority or not isinstance(references, (list, tuple)):
-            raise ValueError("content-read references required")
+    def consume_many(self, references, *, batch_size=20):
+        """Evaluate a directory list in bounded groups; HTTP callers cannot set the size."""
+        if (type(self) is not ContentReadAuthority or not isinstance(references, (list, tuple)) or
+                type(batch_size) is not int or not 1 <= batch_size <= 50):
+            raise ValueError("bounded content-read batch required")
         if not references:
             return []
         refs = [resource_ref(reference) for reference in references]
@@ -75,8 +76,8 @@ class ContentReadAuthority(DirectoryManagement):
                   dict(type="repo", provider="cloudfile", external_id=repo)]
         permissions = []
         try:
-            for start in range(0, len(refs), 50):
-                group = refs[start:start + 50]
+            for start in range(0, len(refs), batch_size):
+                group = refs[start:start + batch_size]
                 self.native_permission = None
                 self.effective_access = None
                 self._management_diagnostic = False

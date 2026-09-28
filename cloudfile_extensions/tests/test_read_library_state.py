@@ -60,7 +60,7 @@ class ReadLibraryStateTests(unittest.TestCase):
             with self.assertRaises(ContractError):
                 authority.inspect_policy(ref)
 
-    def test_directory_page_reuses_qualification_and_queries_rules_per_50(self):
+    def test_directory_page_reuses_qualification_and_queries_rules_per_20(self):
         authority = object.__new__(ContentReadAuthority)
         authority.actor = 'user-1'
         authority.preparation = Mock(contexts=SimpleNamespace(allowlist=frozenset()))
@@ -85,8 +85,15 @@ class ReadLibraryStateTests(unittest.TestCase):
         self.assertEqual(len(permissions), 101)
         self.assertEqual(permissions[50], 'rw')
         self.assertTrue(all(value == 'r' for index, value in enumerate(permissions) if index != 50))
-        self.assertEqual(authority.authorize.call_count, 3)
-        self.assertEqual(authority.rules.candidates_many.call_count, 3)
+        self.assertEqual(authority.authorize.call_count, 6)
+        self.assertEqual(authority.rules.candidates_many.call_count, 6)
         self.assertEqual([len(call.args[0]) for call in authority.rules.candidates_many.call_args_list],
-                         [50, 50, 1])
-        self.assertEqual(authority.state.connection.commit.call_count, 3)
+                         [20, 20, 20, 20, 20, 1])
+        self.assertEqual(authority.state.connection.commit.call_count, 6)
+
+    def test_directory_batch_size_is_internal_and_bounded(self):
+        authority = object.__new__(ContentReadAuthority)
+        with self.assertRaises(ValueError):
+            authority.consume_many([], batch_size=51)
+        with self.assertRaises(ValueError):
+            authority.consume_many([], batch_size=True)
