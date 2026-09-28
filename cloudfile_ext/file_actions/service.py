@@ -172,8 +172,13 @@ def _agent_session_descriptor(mode, repo_id, path, ticket, ttl, now,
     """Return only browser-safe claim data; never expose content capability URLs.
 
     repo_id / path / file_id / size / mtime are included so the web page can
-    query the local agent's cached copy (hash compare) and render a
+    query the local agent's cached copy (existence + size/mtime) and render a
     "which is newer / larger" conflict dialog before dispatching a session.
+    file_id is the Seafile object ID (obj_id) -- a content-addressed version
+    fingerprint: it changes whenever file content changes, and stays stable
+    otherwise. The web page compares it against the file_id it recorded when
+    the file was last downloaded (NOT against a raw content SHA1, which is a
+    different hash space).
     """
     return {
         'protocol': 'cloudfile-local/v2',
@@ -196,7 +201,11 @@ def _issue_agent_session(mode, repo_id, path, username, generation=''):
     session_id = str(uuid.uuid4())
     ticket = secrets.token_urlsafe(32)
     # Content identity + size + mtime drive the local-cache reuse / conflict
-    # decision on the client. file_id is Seafile's content SHA1 (obj_id).
+    # decision on the client. file_id is the Seafile object ID (obj_id) -- a
+    # content-addressed version fingerprint (it is the SHA1 of the file's
+    # metadata JSON object, not of the raw file bytes), so the client compares
+    # it against the file_id recorded at download time, never against a raw
+    # content SHA1.
     from seaserv import seafile_api
     dirent = seafile_api.get_dirent_by_path(repo_id, path)
     file_id = getattr(dirent, 'obj_id', '') or ''
