@@ -89,6 +89,11 @@ class DirectoryPolicyService:
         return self.management.list_target(reference, limit=limit, after=after)
 
     @safe_errors
+    def list_library(self, repo_id, *, limit=50, after=None):
+        reference = resource_ref(dict(repo_id=repo_id, path="/", kind="dir"))
+        return self.management.list_library(reference["repo_id"], limit=limit, after=after)
+
+    @safe_errors
     def create(self, domain, request, *, idempotency_key):
         return self._mutate(domain, request, idempotency_key=idempotency_key)
 

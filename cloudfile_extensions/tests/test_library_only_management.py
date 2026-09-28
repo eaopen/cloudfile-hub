@@ -1,8 +1,9 @@
 """Legacy directory grants never confer policy/tag/lock management."""
 import unittest
+from types import SimpleNamespace
 from unittest.mock import Mock
 
-from cloudfile_extensions.authorization.management import DirectoryManagement
+from cloudfile_extensions.authorization.management import DirectoryManagement, LibraryOwnerManagement
 from cloudfile_extensions.authorization.read import LibraryWideManagementAuthority
 from cloudfile_extensions.locks.authority import LockManagementAuthority
 
@@ -49,3 +50,46 @@ class LibraryOnlyManagementTests(unittest.TestCase):
         content = object.__new__(ContentReadAuthority)
         content.is_owner = True
         self.assertFalse(content.decision_allowed(denied))
+
+    def test_library_administrator_can_manage_rules_without_content_bypass(self):
+        from cloudfile_extensions.authorization.read import ContentReadAuthority
+        management = object.__new__(DirectoryManagement)
+        management.actor = 'manager'
+        management.is_owner = False
+        management.is_library_admin = True
+        root = dict(repo_id='repo', path='/', kind='dir')
+        self.assertTrue(management.scope_allowed(root))
+        self.assertTrue(management.authorize_change(None, 'manager', root, None, {}))
+        denied = dict(visible=False, read=False, write=False)
+        self.assertTrue(management.decision_allowed(denied))
+        content = object.__new__(ContentReadAuthority)
+        content.is_owner = False
+        content.is_library_admin = True
+        self.assertFalse(content.decision_allowed(denied))
+
+    def test_library_administrator_marker_is_read_for_current_repo_only(self):
+        authority = object.__new__(LibraryOwnerManagement)
+        authority.state = SimpleNamespace(identity_schema='seahub_db', native_schema='ccnet_db')
+
+        class Cursor:
+            def __init__(self):
+                self.rows = ()
+                self.queries = []
+
+            def execute(self, query, params):
+                self.queries.append((query, params))
+                if 'information_schema' in query:
+                    self.rows = (('InnoDB',),)
+                elif 'share_extrasharepermission' in query:
+                    self.rows = (('admin',),) if params == ('repo', 'manager@example.com') else ()
+                else:
+                    self.rows = ()
+
+            def fetchall(self):
+                return self.rows
+
+        cursor = Cursor()
+        self.assertTrue(authority._library_admin(cursor, 'repo', 'manager@example.com'))
+        self.assertFalse(authority._library_admin(cursor, 'other', 'manager@example.com'))
+        self.assertTrue(all('repo_id=%s' in query for query, _ in cursor.queries
+                            if 'share_extra' in query))

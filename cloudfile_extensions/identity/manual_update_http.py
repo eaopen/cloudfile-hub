@@ -22,7 +22,7 @@ from .read_ticket_http import native_download_actor
 from .resources import LoginResources
 from .session_authority import OIDCSessionAuthority
 from .ticket_transport import _call
-from .transfer_audit import record_transfer
+from .transfer_audit import record_transfer, audit_peer_ip
 
 
 class OIDCManualUpdateView(View):
@@ -64,7 +64,8 @@ class OIDCManualUpdateView(View):
             uploaded = request.FILES["file"]
             if uploaded.size > 512 * 1024 * 1024:
                 raise ContractError("REQUEST_TOO_LARGE", "Manual update exceeds 512 MiB", 413)
-            record_transfer(self.resources.resources, actor.user_id, reference, request_id, action, 'attempted')
+            record_transfer(self.resources.resources, actor.user_id, reference, request_id, action, 'attempted',
+                client_ip=audit_peer_ip(request))
             audited = True
             with self.resources.resources.preparation(actor.user_id, request_id) as preparation:
                 preparation.prepare(actor.user_id)
@@ -121,7 +122,8 @@ class OIDCManualUpdateView(View):
             if not isinstance(object_id, str) or not re.fullmatch(r"[0-9a-f]{40}", object_id):
                 raise ContractError("PUBLICATION_UNCONFIRMED", "Native completion is unconfirmed", 503)
             record_transfer(self.resources.resources, actor.user_id, reference, request_id, action, 'succeeded',
-                reason='NATIVE_COMPLETION_ACKNOWLEDGED', content_version=object_id)
+                reason='NATIVE_COMPLETION_ACKNOWLEDGED', content_version=object_id,
+                client_ip=audit_peer_ip(request))
             audited = False
             response = JsonResponse(dict(object_id=object_id, request_id=request_id), status=201 if self.create else 200)
         except ContractError as error:
@@ -129,7 +131,8 @@ class OIDCManualUpdateView(View):
                 try:
                     result = 'interrupted' if submitted else 'denied' if error.status == 403 else 'failed'
                     record_transfer(self.resources.resources, actor.user_id, reference, request_id, action, result,
-                        reason='PUBLICATION_UNCONFIRMED' if submitted else error.code)
+                        reason='PUBLICATION_UNCONFIRMED' if submitted else error.code,
+                        client_ip=audit_peer_ip(request))
                 except ContractError:
                     error = ContractError('AUDIT_UNAVAILABLE', 'Transfer audit is unavailable; completion may be unknown', 503)
             response = JsonResponse(error.response(request_id), status=error.status)
@@ -137,7 +140,9 @@ class OIDCManualUpdateView(View):
             if audited:
                 try:
                     record_transfer(self.resources.resources, actor.user_id, reference, request_id, action,
-                        'interrupted' if submitted else 'failed', reason='PUBLICATION_UNCONFIRMED' if submitted else 'POLICY_UNAVAILABLE')
+                        'interrupted' if submitted else 'failed',
+                        reason='PUBLICATION_UNCONFIRMED' if submitted else 'POLICY_UNAVAILABLE',
+                        client_ip=audit_peer_ip(request))
                 except ContractError:
                     pass  # No terminal fact is invented; the durable attempt remains unresolved.
             error = ContractError("POLICY_UNAVAILABLE", "Manual upload/update runtime is unavailable", 503)

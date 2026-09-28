@@ -106,6 +106,16 @@ class ACLRulesTest(DatabaseTestCase):
         self.assertEqual(len(self.rules.candidates(self.ref("/parts/a.prt", "dir"))), 1)
         self.assertEqual(deny["permission"], "none")
 
+    def test_batch_candidates_match_single_target_sets(self):
+        self.rules.mutate(self.ref("/"), value=self.value("/"))
+        self.rules.mutate(self.ref("/parts"), value=self.value("/parts"))
+        self.rules.mutate(self.ref("/parts/a.prt", "file"),
+            value=self.value("/parts/a.prt", kind="file", permission="none", inherit=False))
+        refs = [self.ref("/parts/a.prt", "file"), self.ref("/parts/other", "dir"),
+                self.ref("/parts2/other", "dir")]
+        expected = [self.rules.candidates(ref) for ref in refs]
+        self.assertEqual(self.rules.candidates_many(refs), expected)
+
     def test_target_pagination_reauthorizes_and_rejects_foreign_or_deleted_anchor(self):
         created = []
         for external in ("one", "two", "three"):

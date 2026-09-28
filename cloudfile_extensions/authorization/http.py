@@ -128,3 +128,37 @@ class DirectoryEffectiveView(View):
         response['Vary'] = 'Cookie, Authorization'
         response['X-Request-ID'] = request_id
         return response
+
+
+class LibraryRulesView(View):
+    service_factory = None
+    http_method_names = ['get']
+
+    def get(self, request):
+        request_id = str(uuid4())
+        try:
+            if not request.is_secure():
+                raise ContractError('AUTHENTICATION_REQUIRED', 'Secure authentication is required', 401)
+            if not {'repo_id'} <= set(request.GET) or set(request.GET) - {'repo_id', 'limit', 'after'} or request.read(1):
+                raise invalid('A library reference is required')
+            if any(len(request.GET.getlist(key)) != 1 for key in request.GET):
+                raise invalid('Duplicate policy query')
+            limit = request.GET.get('limit', '50')
+            if not re.fullmatch(r'[1-9][0-9]{0,2}', limit) or int(limit) > 100:
+                raise invalid('Invalid policy page limit')
+            if not callable(self.service_factory):
+                raise ContractError('POLICY_UNAVAILABLE', 'Policy service is unavailable', 503)
+            with self.service_factory(request, request_id) as service:
+                if not isinstance(service, DirectoryPolicyService):
+                    raise RuntimeError('invalid authenticated policy assembly')
+                result = service.list_library(request.GET['repo_id'], limit=int(limit), after=request.GET.get('after'))
+                response = JsonResponse(result)
+        except ContractError as error:
+            response = JsonResponse(error.response(request_id), status=error.status)
+        except Exception:
+            error = ContractError('POLICY_UNAVAILABLE', 'Policy service is unavailable', 503)
+            response = JsonResponse(error.response(request_id), status=503)
+        response['Cache-Control'] = 'no-store, max-age=0'
+        response['Vary'] = 'Cookie, Authorization'
+        response['X-Request-ID'] = request_id
+        return response

@@ -24,6 +24,8 @@ SITE_ROOT_URLCONF = "cloudfile_extensions.root_urls"
 
 能力实现注册与配置请求分离。受信应用启动代码可以调用 `registry.register_extension(namespace, name, CapabilityImplementation(...))` 注册自有能力，不得覆盖内建能力或核心路由。未知实现、缺依赖、版本/provider 不匹配时最终 enabled=false。WebDAV 默认关闭声明，只有已启用服务的显式部署标记才允许声明。
 
+受保护的 `GET /api/v2.1/repos/{repo_id}/dir/` 在响应中返回 `acl_enforced: true`，并将 `dirent_list[].permission` 设为当前用户逐项有效权限 `r`/`rw`；不可读项不返回。分页仍以原生 `start`、`limit`、`has_more`、`next_start` 为准，权限过滤不会改写原生游标。CloudFile 在一次请求中按 50 项分组，合并读取共同祖先规则；未启用受保护浏览的 CE 响应没有 `acl_enforced` 标记，调用方仍须沿用原有权限检查。标记存在但逐项权限缺失或策略不可用时，调用方必须拒绝结果，不得回退到父目录权限。
+
 ## 公共开发基础
 
 `common/` 提供严格 DTO、条件版本和签名分页；`directory/protocol.py` 仅验证目录 DTO，不负责认证。`resources/` 提供不预建文件全集的稀疏属性存储：空读取不建行，首次写通过路径桶锁与完整路径核对防重复，属性和事件同事务，删除重建不能复用旧条件版本。调用方必须提供可信生命周期检查、覆盖 SQL 提交的 Server 写保护区及同事务事件钩子；这些适配未完成前不装载属性 API。

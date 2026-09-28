@@ -18,7 +18,7 @@ from .resources import LoginResources
 from .session_authority import OIDCSessionAuthority
 from .native_backend import CloudFileOIDCBackend
 from .native_session import BACKEND
-from .transfer_audit import record_transfer
+from .transfer_audit import record_transfer, audit_peer_ip
 
 
 def native_download_actor(request):
@@ -101,7 +101,8 @@ class OIDCReadTicketView(DirectoryPolicyView):
                 except ContractError as error:
                     if error.code == 'ACCESS_DENIED':
                         record_transfer(issuer.authority.resources.resources, issuer.preparation.actor,
-                            reference, request_id, 'file.' + operation, 'denied', reason=error.code)
+                            reference, request_id, 'file.' + operation, 'denied', reason=error.code,
+                            client_ip=audit_peer_ip(request))
                     raise
                 result = issuer.issue(request, reference, operation=operation)
             response = JsonResponse(result, status=201)

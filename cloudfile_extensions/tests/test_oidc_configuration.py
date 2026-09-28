@@ -140,6 +140,9 @@ class OIDCHostConfigurationTests(unittest.TestCase):
             base = types.ModuleType("seahub.api2.base")
             base.APIView = APIView
             sys.modules[base.__name__] = base
+            configuration = types.ModuleType("cloudfile_extensions.library_configuration")
+            configuration.LibraryConfiguration = type("LibraryConfiguration", (APIView,), {})
+            sys.modules[configuration.__name__] = configuration
             native = types.ModuleType("seahub.urls")
             native.urlpatterns = []
             sys.modules[native.__name__] = native

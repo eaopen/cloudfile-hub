@@ -5,6 +5,7 @@ No public route, administrator bypass, other-connection permission RPC or UI.
 """
 from ..common.errors import ContractError
 from ..directory.preparation import SubjectPreparation
+from ..directory.project import qualified
 from .core import PolicyCore
 from .rules import ACLRules
 from .qualification import NativeLibraryQualification
@@ -20,6 +21,8 @@ class LibraryOwnerManagement:
         self.epoch = None
         self.current_subject = None
         self.is_owner = False
+        self.is_library_admin = False
+        self.is_global_library_admin = False
         self.hard_readonly = False
         self.rules = ACLRules(self.state.connection, provider=self.state.provider,
             actor=self.actor, request_id=request_id, authorize=self.authorize,
@@ -28,6 +31,9 @@ class LibraryOwnerManagement:
 
     def authorize(self, cursor, actor, reference):
         self.hard_readonly = False
+        self.is_owner = False
+        self.is_library_admin = False
+        self.is_global_library_admin = False
         if actor != self.actor:
             return False
         current = self.preparation.contexts.current(actor)
@@ -36,8 +42,10 @@ class LibraryOwnerManagement:
         self.epoch = current["context_epoch"]
         self.current_subject = current["subject"]
         username = self.state.username(actor)
-        cursor.execute("SELECT email,is_active FROM " + self.state.accounts + " WHERE email=%s FOR UPDATE", (username,))
-        if cursor.fetchall() != ((username, 1),):
+        cursor.execute("SELECT email,is_active,is_staff FROM " + self.state.accounts + " WHERE email=%s FOR UPDATE", (username,))
+        accounts = cursor.fetchall()
+        if (len(accounts) != 1 or len(accounts[0]) != 3 or
+                accounts[0][0] != username or accounts[0][1] != 1 or accounts[0][2] not in (0, 1)):
             return False
         cursor.execute("SELECT user,login_id FROM " + self.state.profiles + " WHERE user=%s OR login_id=%s FOR UPDATE", (username, actor))
         if cursor.fetchall() != ((username, actor),):
@@ -71,7 +79,14 @@ class LibraryOwnerManagement:
             if cursor.fetchall() != (("InnoDB",),):
                 raise ContractError("POLICY_UNAVAILABLE", "Management library is unavailable", 503)
         self._barriers(repo)
+        if accounts[0][2] == 1 and self.requires_system_admin():
+            self.is_global_library_admin = self._global_library_admin(cursor, username)
         permission = self.qualification(cursor, reference, username, owner)
+        if permission is None and self.is_global_library_admin and self.system_admin_qualification_override():
+            permission = "rw"  # Management-only qualification; content read subclasses disable this.
+        if (permission is not None and not self.is_owner and not self.is_global_library_admin
+                and self.requires_library_admin()):
+            self.is_library_admin = self._library_admin(cursor, repo, username)
         if permission is None or not self.scope_allowed(reference):
             return False
         decision = self.core.evaluate(reference, provider=self.state.provider,
@@ -83,6 +98,64 @@ class LibraryOwnerManagement:
 
     def decision_allowed(self, decision):
         return decision["visible"] and decision["read"]
+
+    def _library_admin(self, cursor, repo, username):
+        """Read the native management markers in this policy transaction."""
+        schema = self.state.identity_schema
+        for table in ("share_extrasharepermission", "share_extragroupssharepermission"):
+            cursor.execute("SELECT ENGINE FROM information_schema.tables WHERE table_schema=%s AND table_name=%s", (schema, table))
+            if cursor.fetchall() != (("InnoDB",),):
+                raise ContractError("POLICY_UNAVAILABLE", "Library management storage is unavailable", 503)
+        user_grants = qualified(schema, "share_extrasharepermission")
+        group_grants = qualified(schema, "share_extragroupssharepermission")
+        members = qualified(self.state.native_schema, "GroupUser")
+        cursor.execute("SELECT permission FROM " + user_grants + " WHERE repo_id=%s AND share_to=%s FOR UPDATE", (repo, username))
+        personal = cursor.fetchall()
+        if any(len(row) != 1 or row[0] != "admin" for row in personal):
+            raise ContractError("POLICY_UNAVAILABLE", "Invalid library management grant", 503)
+        if personal:
+            return True
+        cursor.execute("SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=%s", ("RepoGroup",))
+        if cursor.fetchall() != (("InnoDB",),):
+            raise ContractError("POLICY_UNAVAILABLE", "Native group shares are unavailable", 503)
+        cursor.execute("SELECT g.permission FROM " + group_grants + " g JOIN " + members +
+                       " m ON m.group_id=g.group_id JOIN RepoGroup s ON s.group_id=g.group_id AND s.repo_id=g.repo_id"
+                       " WHERE g.repo_id=%s AND m.user_name=%s AND m.is_staff=1 AND s.permission IN ('r','rw') FOR UPDATE",
+                       (repo, username))
+        groups = cursor.fetchall()
+        if any(len(row) != 1 or row[0] != "admin" for row in groups):
+            raise ContractError("POLICY_UNAVAILABLE", "Invalid library management grant", 503)
+        return bool(groups)
+
+    def _global_library_admin(self, cursor, username):
+        """Resolve the account's administrator role under the same transaction."""
+        from seahub.constants import SYSTEM_ADMIN
+        from seahub.role_permissions.utils import get_enabled_admin_role_permissions_by_role
+        schema = self.state.identity_schema
+        cursor.execute("SELECT ENGINE FROM information_schema.tables WHERE table_schema=%s AND table_name=%s",
+                       (schema, "role_permissions_adminrole"))
+        if cursor.fetchall() != (("InnoDB",),):
+            raise ContractError("POLICY_UNAVAILABLE", "Administrator roles are unavailable", 503)
+        roles = qualified(schema, "role_permissions_adminrole")
+        cursor.execute("SELECT role FROM " + roles + " WHERE email=%s FOR UPDATE", (username,))
+        assigned = cursor.fetchall()
+        if len(assigned) > 1 or any(len(row) != 1 or not isinstance(row[0], str) for row in assigned):
+            raise ContractError("POLICY_UNAVAILABLE", "Administrator role is invalid", 503)
+        role = assigned[0][0] if assigned else SYSTEM_ADMIN
+        return get_enabled_admin_role_permissions_by_role(role)["can_manage_library"] is True
+
+    def can_manage_library(self):
+        return (self.is_owner or getattr(self, "is_library_admin", False) or
+                getattr(self, "is_global_library_admin", False))
+
+    def requires_library_admin(self):
+        return True
+
+    def requires_system_admin(self):
+        return True
+
+    def system_admin_qualification_override(self):
+        return True
 
     def library_status_allowed(self, status):
         # Management and mutations retain the native normal-state gate.
@@ -116,6 +189,20 @@ class LibraryOwnerManagement:
             self.epoch = None
             self.current_subject = None
             self.is_owner = False
+            self.is_library_admin = False
+            self.is_global_library_admin = False
+
+    def list_library(self, repo_id, *, limit=50, after=None):
+        self.preparation.prepare(self.actor)
+        self.epoch = None
+        try:
+            return self.rules.list_library(repo_id, limit=limit, after=after)
+        finally:
+            self.epoch = None
+            self.current_subject = None
+            self.is_owner = False
+            self.is_library_admin = False
+            self.is_global_library_admin = False
 
     def mutate(self, reference, **arguments):
         # Refresh outside the rule transaction; projection must not start/commit
@@ -128,6 +215,8 @@ class LibraryOwnerManagement:
             self.epoch = None
             self.current_subject = None
             self.is_owner = False
+            self.is_library_admin = False
+            self.is_global_library_admin = False
 
 
 
@@ -148,12 +237,12 @@ class DirectoryManagement(LibraryOwnerManagement):
     def decision_allowed(self, decision):
         # A library owner must be able to repair an ACL deny. This authority only
         # mutates policy; ContentReadAuthority overrides this and still enforces C read/write.
-        return self.is_owner
+        return self.can_manage_library()
 
     # Directory ACL administration inherits library ownership, never stored directory grants.
     # Keeping obsolete rows cannot re-enable delegated authority.
     def scope_allowed(self, reference):
-        return self.is_owner
+        return self.can_manage_library()
 
     def authorize_change(self, cursor, actor, reference, previous, value):
-        return actor == self.actor and self.is_owner
+        return actor == self.actor and self.can_manage_library()

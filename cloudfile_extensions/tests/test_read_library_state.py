@@ -1,7 +1,8 @@
 """State-domain contracts only, not native DB/ACL integration evidence."""
 import unittest
 from contextlib import nullcontext
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
+from types import SimpleNamespace
 from uuid import uuid4
 from cloudfile_extensions.common.errors import ContractError
 
@@ -58,3 +59,34 @@ class ReadLibraryStateTests(unittest.TestCase):
             authority.authorize.side_effect = lambda *args: False
             with self.assertRaises(ContractError):
                 authority.inspect_policy(ref)
+
+    def test_directory_page_reuses_qualification_and_queries_rules_per_50(self):
+        authority = object.__new__(ContentReadAuthority)
+        authority.actor = 'user-1'
+        authority.preparation = Mock(contexts=SimpleNamespace(allowlist=frozenset()))
+        authority.state = SimpleNamespace(provider='directory', connection=MagicMock())
+        authority.rules = SimpleNamespace(candidates_many=Mock(
+            side_effect=lambda group, **kwargs: [[] for _ in group]))
+        authority.core = SimpleNamespace(evaluate=Mock(side_effect=lambda ref, **kwargs: dict(
+            visible=True, read=True, write=ref['path'] == '/item-50')))
+        authority.finalize = Mock()
+        def qualify(cursor, actor, ref):
+            authority.native_permission = 'r'
+            authority.current_subject = dict(userId=actor)
+            authority.hard_readonly = False
+            authority.epoch = 'epoch'
+            return True
+        authority.authorize = Mock(side_effect=qualify)
+        repo = str(uuid4())
+        references = [dict(repo_id=repo, path=f'/item-{index}', kind='dir')
+                      for index in range(101)]
+        with patch('cloudfile_extensions.authorization.read.scope_locks', return_value=nullcontext()):
+            permissions = authority.consume_many(references)
+        self.assertEqual(len(permissions), 101)
+        self.assertEqual(permissions[50], 'rw')
+        self.assertTrue(all(value == 'r' for index, value in enumerate(permissions) if index != 50))
+        self.assertEqual(authority.authorize.call_count, 3)
+        self.assertEqual(authority.rules.candidates_many.call_count, 3)
+        self.assertEqual([len(call.args[0]) for call in authority.rules.candidates_many.call_args_list],
+                         [50, 50, 1])
+        self.assertEqual(authority.state.connection.commit.call_count, 3)

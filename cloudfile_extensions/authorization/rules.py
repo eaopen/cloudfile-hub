@@ -97,7 +97,8 @@ class ACLRules:
                     indexes.setdefault(name, []).append((column, order, prefix, non_unique))
                 for name, names, unique in (("PRIMARY", ("id",), 0),
                         ("acl_target_subject", ("repo_id", "path_hash", "kind", "subject_hash"), 0),
-                        ("acl_ancestors", ("repo_id", "path_hash", "id"), 1)):
+                        ("acl_ancestors", ("repo_id", "path_hash", "id"), 1),
+                        ("acl_library_page", ("repo_id", "id"), 1)):
                     if indexes.get(name) != [(column, index + 1, None, unique) for index, column in enumerate(names)]:
                         raise ValueError()
         except Exception:
@@ -155,6 +156,65 @@ class ACLRules:
                    (value["kind"] == "file" and value["path"] != ref["path"]) for value in values):
                 raise ValueError("candidate identity mismatch")
             return values
+        except ContractError:
+            raise
+        except Exception:
+            raise ContractError("POLICY_UNAVAILABLE", "ACL rules are unavailable", 503) from None
+
+    def candidates_many(self, references, *, locking=False):
+        """Load one library's page of ancestor rules with shared paths queried once."""
+        if not isinstance(references, (list, tuple)) or not 1 <= len(references) <= 50:
+            raise ValueError("ACL batch must contain 1..50 references")
+        refs = [resource_ref(reference) for reference in references]
+        repo = refs[0]["repo_id"]
+        if any(ref["repo_id"] != repo or len(ref["path"].encode()) > 4096 for ref in refs):
+            raise ValueError("ACL batch must belong to one library")
+        paths_by_ref = []
+        all_paths = set()
+        file_paths = set()
+        for ref in refs:
+            parts = ref["path"].split("/")[1:] if ref["path"] != "/" else []
+            if len(parts) > 128:
+                raise invalid("ACL path is too deep")
+            paths = {"/"}
+            paths.update("/" + "/".join(parts[:index]) for index in range(1, len(parts) + 1))
+            paths_by_ref.append(paths)
+            all_paths.update(paths)
+            if ref["kind"] == "file":
+                file_paths.add(ref["path"])
+        hashes = sorted(digest(path) for path in all_paths)
+        file_hashes = sorted(digest(path) for path in file_paths)
+        kind_clause = "kind='dir'"
+        if file_hashes:
+            kind_clause += " OR (kind='file' AND path_hash IN (" + ",".join(["%s"] * len(file_hashes)) + "))"
+        # Bound memory before Python partitions the indexed result into per-target sets.
+        row_limit = 16385
+        try:
+            if locking:
+                with self.connection.cursor() as cursor:
+                    cursor.execute("SELECT id FROM " + self.TABLE + " LIMIT 0 FOR UPDATE")
+                    cursor.fetchall()
+                self._require_storage()
+            with self.connection.cursor() as cursor:
+                cursor.execute("SELECT " + self.FIELDS + " FROM " + self.TABLE +
+                    " WHERE repo_id=%s AND path_hash IN (" + ",".join(["%s"] * len(hashes)) +
+                    ") AND (" + kind_clause + ") ORDER BY path_hash,id LIMIT " + str(row_limit) +
+                    (" FOR UPDATE" if locking else ""), (repo, *hashes, *file_hashes))
+                rows = cursor.fetchall()
+            if len(rows) >= row_limit:
+                raise ValueError("batch candidate budget exceeded")
+            values = [self._decode(row) for row in rows]
+            if any(value["repo_id"] != repo or value["path"] not in all_paths or
+                   (value["kind"] == "file" and value["path"] not in file_paths) for value in values):
+                raise ValueError("batch candidate identity mismatch")
+            result = []
+            for ref, paths in zip(refs, paths_by_ref):
+                candidates = [value for value in values if value["path"] in paths and
+                    (value["kind"] == "dir" or value["path"] == ref["path"] and ref["kind"] == "file")]
+                if len(candidates) > 4096:
+                    raise ValueError("candidate budget exceeded")
+                result.append(candidates)
+            return result
         except ContractError:
             raise
         except Exception:
@@ -221,6 +281,50 @@ class ACLRules:
             raise
         except Exception:
             raise ContractError("POLICY_UNAVAILABLE", "Policy page is unavailable", 503) from None
+
+    def list_library(self, repo_id, *, limit=50, after=None):
+        """Authorize once at the library root, then page only indexed ACL rows."""
+        ref = resource_ref(dict(repo_id=repo_id, path="/", kind="dir"))
+        if type(limit) is not int or not 1 <= limit <= 100:
+            raise invalid("Invalid policy page limit")
+        if after is not None:
+            try:
+                if str(UUID(after)) != after:
+                    raise ValueError()
+            except (ValueError, TypeError, AttributeError):
+                raise invalid("Invalid policy cursor") from None
+        scopes = [dict(type="provider", provider=self.provider, external_id=self.provider),
+                  dict(type="user", provider=self.provider, external_id=self.actor),
+                  dict(type="repo", provider="cloudfile", external_id=repo_id)]
+        try:
+            with scope_locks(self.connection, scopes):
+                self.connection.begin()
+                try:
+                    with self.connection.cursor() as cursor:
+                        if self.authorize(cursor, self.actor, ref) is not True:
+                            raise ContractError("ACCESS_DENIED", "Library policy management is not allowed", 403)
+                        self._require_storage()
+                        query = "SELECT " + self.FIELDS + " FROM " + self.TABLE + " FORCE INDEX (acl_library_page) WHERE repo_id=%s"
+                        arguments = [repo_id]
+                        if after is not None:
+                            query += " AND id>%s"
+                            arguments.append(after)
+                        query += " ORDER BY id LIMIT %s"
+                        arguments.append(limit + 1)
+                        cursor.execute(query, tuple(arguments))
+                        values = [self._decode(row) for row in cursor.fetchall()]
+                        if any(value["repo_id"] != repo_id for value in values):
+                            raise ValueError("policy page identity mismatch")
+                        if self.finalize is not None:
+                            self.finalize(cursor)
+                    self.connection.commit()
+                    return dict(items=values[:limit], next_after=values[limit - 1]["id"] if len(values) > limit else None)
+                finally:
+                    self.connection.rollback()
+        except ContractError:
+            raise
+        except Exception:
+            raise ContractError("POLICY_UNAVAILABLE", "Library policy page is unavailable", 503) from None
 
     def mutate(self, reference, *, value=None, rule_id=None, if_match=None, idempotency_key=None):
         """Create, replace or delete one rule; no implicit management bypass.

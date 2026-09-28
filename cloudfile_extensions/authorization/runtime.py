@@ -61,5 +61,6 @@ class PolicyServiceFactory:
                 management.epoch = None
                 management.current_subject = None
                 management.is_owner = False
+                management.is_library_admin = False
                 # preparation_scope owns rollback/close on every exit, including
                 # failed assembly; the factory never borrows a global connection.

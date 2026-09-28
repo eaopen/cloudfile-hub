@@ -6,6 +6,16 @@ from .management import DirectoryManagement
 
 
 class ContentReadAuthority(DirectoryManagement):
+    def requires_library_admin(self):
+        # Ordinary file reads do not depend on Seahub's management tables.
+        return bool(getattr(self, "_management_diagnostic", False))
+
+    def requires_system_admin(self):
+        return bool(getattr(self, "_management_diagnostic", False))
+
+    def system_admin_qualification_override(self):
+        return False
+
     def library_status_allowed(self, status):
         # Native read-only affects writes, not otherwise-authorized reads.
         # Suspended/unknown states never qualify.
@@ -42,11 +52,72 @@ class ContentReadAuthority(DirectoryManagement):
             permission = ('invisible' if not self.effective_visible else 'rw' if decision['write']
                           else 'r' if decision['read'] else 'none')
             return dict(native_permission=self.native_permission, effective_permission=permission,
-                        can_manage=self.is_owner)
+                        can_manage=self.can_manage_library())
         return self._consume(reference, diagnostic, diagnostic=True)
 
     def consume(self, reference, reader):
         return self._consume(reference, reader, diagnostic=False)
+
+    def consume_many(self, references):
+        """Evaluate one directory page in groups of 50 within the existing policy authority."""
+        if type(self) is not ContentReadAuthority or not isinstance(references, (list, tuple)):
+            raise ValueError("content-read references required")
+        if not references:
+            return []
+        refs = [resource_ref(reference) for reference in references]
+        repo = refs[0]["repo_id"]
+        if any(ref["repo_id"] != repo for ref in refs):
+            raise ValueError("content-read batch must belong to one library")
+        self.preparation.prepare(self.actor)
+        connection = self.state.connection
+        scopes = [dict(type="provider", provider=self.state.provider, external_id=self.state.provider),
+                  dict(type="user", provider=self.state.provider, external_id=self.actor),
+                  dict(type="repo", provider="cloudfile", external_id=repo)]
+        permissions = []
+        try:
+            for start in range(0, len(refs), 50):
+                group = refs[start:start + 50]
+                self.native_permission = None
+                self.effective_access = None
+                self._management_diagnostic = False
+                with scope_locks(connection, scopes):
+                    connection.begin()
+                    try:
+                        with connection.cursor() as cursor:
+                            # Qualification and the subject epoch are library-wide; the
+                            # existing single-target path establishes them for this group.
+                            self.authorize(cursor, self.actor, group[0])
+                            if self.native_permission in ("r", "rw") and self.current_subject is not None:
+                                candidates = self.rules.candidates_many(group, locking=True)
+                                for ref, rules in zip(group, candidates):
+                                    decision = self.core.evaluate(ref, provider=self.state.provider,
+                                        subject=self.current_subject, rules=rules,
+                                        ce_permission=self.native_permission,
+                                        attribute_allowlist=self.preparation.contexts.allowlist,
+                                        hard_readonly=self.hard_readonly)
+                                    allowed = self.decision_allowed(decision) and self.scope_allowed(ref)
+                                    permissions.append(("rw" if self.effective_access["write"] else "r") if allowed else None)
+                            else:
+                                permissions.extend([None] * len(group))
+                            self.finalize(cursor)
+                        connection.commit()
+                    finally:
+                        connection.rollback()
+            return permissions
+        except ContractError:
+            raise
+        except Exception:
+            raise ContractError("POLICY_UNAVAILABLE", "Resource read authority is unavailable", 503) from None
+        finally:
+            self.epoch = None
+            self.current_subject = None
+            self.is_owner = False
+            self.is_library_admin = False
+            self.is_global_library_admin = False
+            self.effective_access = None
+            self.effective_visible = None
+            self.native_permission = None
+            self._management_diagnostic = False
 
     def _consume(self, reference, reader, *, diagnostic):
         """Trusted bounded metadata reader(cursor, reference) in this transaction.
@@ -63,6 +134,7 @@ class ContentReadAuthority(DirectoryManagement):
         self.effective_access = None
         self.effective_visible = None
         self.native_permission = None
+        self._management_diagnostic = diagnostic
         self.preparation.prepare(self.actor)
         connection = self.state.connection
         scopes = [dict(type="provider", provider=self.state.provider, external_id=self.state.provider),
@@ -90,9 +162,12 @@ class ContentReadAuthority(DirectoryManagement):
             self.epoch = None
             self.current_subject = None
             self.is_owner = False
+            self.is_library_admin = False
+            self.is_global_library_admin = False
             self.effective_access = None
             self.effective_visible = None
             self.native_permission = None
+            self._management_diagnostic = False
 
 
 class ContentMetadataWriteAuthority(ContentReadAuthority):
@@ -111,8 +186,21 @@ class ContentMetadataWriteAuthority(ContentReadAuthority):
 
 class LibraryWideManagementAuthority(ContentReadAuthority):
     """Whole-library management, not an exact root or subdirectory grant."""
+    def requires_library_admin(self):
+        return True
+
+    def requires_system_admin(self):
+        return True
+
+    def system_admin_qualification_override(self):
+        return True
+
     def library_status_allowed(self, status):
         return status == 0
+
+    def decision_allowed(self, decision):
+        # Management may repair a content deny without gaining content access.
+        return self.can_manage_library()
 
     def _scopes(self, reference):
         # Job coordination scopes are locks, not former directory grants.
@@ -122,7 +210,7 @@ class LibraryWideManagementAuthority(ContentReadAuthority):
 
     def scope_allowed(self, reference):
         # Tag definitions require library authority; a former directory grant is ignored.
-        return reference["kind"] == "dir" and reference["path"] == "/" and self.is_owner
+        return reference["kind"] == "dir" and reference["path"] == "/" and self.can_manage_library()
 
 
 class LibraryTagManagementAuthority(LibraryWideManagementAuthority):

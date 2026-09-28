@@ -33,6 +33,21 @@ def filter_entries(authority, entries, reference):
     return result
 
 
+def filter_entries_batch(authority, entries, reference):
+    """Return the page's effective permissions after grouped policy evaluation."""
+    permissions = authority.consume_many([reference(entry) for entry in entries])
+    if len(permissions) != len(entries):
+        raise ContractError('POLICY_UNAVAILABLE', 'Incomplete browsing authority', 503)
+    result = []
+    for entry, permission in zip(entries, permissions):
+        if permission is None:
+            continue
+        item = dict(entry)
+        item['permission'] = permission
+        result.append(item)
+    return result
+
+
 def web_list(kind):
     """Opt in with the existing OIDC host resources; ordinary CE stays unchanged."""
     def decorate(view):
@@ -80,11 +95,11 @@ def web_list(kind):
                                 data['repos'] = filter_entries(authority, data['repos'],
                                     lambda item: dict(repo_id=item['repo_id'], path='/', kind='dir'))
                             else:
-                                data['dirent_list'] = filter_entries(authority, data['dirent_list'],
+                                data['dirent_list'] = filter_entries_batch(authority, data['dirent_list'],
                                     lambda item: dict(repo_id=repo, kind=item['type'],
                                         path=posixpath.join(item['parent_dir'], item['name'])))
-                                if parent_permission == 'r':
-                                    data['user_perm'] = 'r'
+                                data['user_perm'] = parent_permission
+                                data['acl_enforced'] = True
                                 data['head_id'] = head_id
                                 # CE metadata enrichment is outside the v0.2 browse contract.
                                 data.pop('metadata', None)
