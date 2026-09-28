@@ -132,3 +132,24 @@ def annotation_implementation_registry(host, *, annotations_enabled, oidc_enable
             'resource.description', 'resource.local-open-type', 'tag.extended'):
         implementations[name] = replace(implementations[name], implemented=True, default_enabled=True)
     return SimpleNamespace(implementations=implementations)
+
+
+def management_implementation_registry(base, host, *, authorization_enabled):
+    """Directory CRUD readiness is separate from data-plane ACL capability.
+
+    Library policy publishing and stable administrator mapping remain closed;
+    mounting directory CRUD does not claim they are implemented.
+    """
+    import os
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from .authorization.host import PolicyHost
+    from .authorization.runtime import PolicyServiceFactory
+    if (authorization_enabled is not True or not isinstance(host, PolicyHost)
+            or host.pid != os.getpid() or host.closed or host.draining
+            or not isinstance(host.deployment.factory, PolicyServiceFactory)):
+        return base
+    implementations = dict(base.implementations)
+    for name in ('directory.acl.manage', 'directory.acl.effective'):
+        implementations[name] = replace(implementations[name], implemented=True, default_enabled=True)
+    return SimpleNamespace(implementations=implementations)

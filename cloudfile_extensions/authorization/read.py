@@ -11,7 +11,12 @@ class ContentReadAuthority(DirectoryManagement):
         # Suspended/unknown states never qualify.
         return status in (0, 1)
 
+    def qualification(self, cursor, reference, username, owner):
+        self.native_permission = super().qualification(cursor, reference, username, owner)
+        return self.native_permission
+
     def decision_allowed(self, decision):
+        self.effective_visible = bool(decision["visible"])
         self.effective_access = {"read": bool(decision["visible"] and decision["read"]),
             "write": bool(decision["visible"] and decision["write"])}
         return self.effective_access["read"]
@@ -27,13 +32,23 @@ class ContentReadAuthority(DirectoryManagement):
     def mutate(self, *args, **kwargs):
         raise ContractError("ACCESS_DENIED", "Read authority cannot change policy", 403)
 
-    def mutate_admin(self, *args, **kwargs):
-        raise ContractError("ACCESS_DENIED", "Read authority cannot change delegation", 403)
-
     def list_target(self, *args, **kwargs):
         raise ContractError("ACCESS_DENIED", "Read authority cannot inspect management rules", 403)
 
+    def inspect_policy(self, reference):
+        """Inspect this authenticated actor's C decision, never target metadata or another user."""
+        def diagnostic(cursor, ref):
+            decision = self.effective_access
+            permission = ('invisible' if not self.effective_visible else 'rw' if decision['write']
+                          else 'r' if decision['read'] else 'none')
+            return dict(native_permission=self.native_permission, effective_permission=permission,
+                        can_manage=self.is_owner)
+        return self._consume(reference, diagnostic, diagnostic=True)
+
     def consume(self, reference, reader):
+        return self._consume(reference, reader, diagnostic=False)
+
+    def _consume(self, reference, reader, *, diagnostic):
         """Trusted bounded metadata reader(cursor, reference) in this transaction.
 
         Reader must not commit, reconnect, perform DDL, stream files or issue
@@ -45,6 +60,9 @@ class ContentReadAuthority(DirectoryManagement):
         if not callable(reader):
             raise ValueError("transactional metadata reader required")
         ref = resource_ref(reference)
+        self.effective_access = None
+        self.effective_visible = None
+        self.native_permission = None
         self.preparation.prepare(self.actor)
         connection = self.state.connection
         scopes = [dict(type="provider", provider=self.state.provider, external_id=self.state.provider),
@@ -55,7 +73,8 @@ class ContentReadAuthority(DirectoryManagement):
                 connection.begin()
                 try:
                     with connection.cursor() as cursor:
-                        if self.authorize(cursor, self.actor, ref) is not True:
+                        allowed = self.authorize(cursor, self.actor, ref)
+                        if allowed is not True and (not diagnostic or self.effective_access is None):
                             raise ContractError("ACCESS_DENIED", "Resource read is not allowed", 403)
                         result = reader(cursor, ref)
                         self.finalize(cursor)
@@ -72,6 +91,8 @@ class ContentReadAuthority(DirectoryManagement):
             self.current_subject = None
             self.is_owner = False
             self.effective_access = None
+            self.effective_visible = None
+            self.native_permission = None
 
 
 class ContentMetadataWriteAuthority(ContentReadAuthority):
@@ -93,14 +114,15 @@ class LibraryWideManagementAuthority(ContentReadAuthority):
     def library_status_allowed(self, status):
         return status == 0
 
+    def _scopes(self, reference):
+        # Job coordination scopes are locks, not former directory grants.
+        return [dict(type="provider", provider=self.state.provider, external_id=self.state.provider),
+                dict(type="user", provider=self.state.provider, external_id=self.actor),
+                dict(type="repo", provider="cloudfile", external_id=reference["repo_id"])]
+
     def scope_allowed(self, reference):
-        from .admins import DirectoryAdmins
-        if reference["kind"] != "dir" or reference["path"] != "/":
-            return False
-        # Require an inherited root management grant; an exact root or any
-        # subdirectory grant cannot change labels shared by other resources.
-        return self.is_owner or DirectoryAdmins.permits(
-            self._scopes(reference), reference, inherit=True)
+        # Tag definitions require library authority; a former directory grant is ignored.
+        return reference["kind"] == "dir" and reference["path"] == "/" and self.is_owner
 
 
 class LibraryTagManagementAuthority(LibraryWideManagementAuthority):

@@ -1,4 +1,4 @@
-"""Authenticated directory policy domain service; no public route registration.
+"""Authenticated directory content policy and current-actor diagnosis service.
 
 Runtime actor comes from trusted host authentication, never request JSON.
 This service cannot replace whole-library policy or invoke recovery authority.
@@ -28,14 +28,22 @@ def safe_errors(method):
 class DirectoryPolicyService:
     def __init__(self, management):
         if not isinstance(management, DirectoryManagement):
-            raise ValueError("real delegated directory management required")
+            raise ValueError("real library authority required")
         self.management = management
+
+    @safe_errors
+    def effective(self, request):
+        from .read import ContentReadAuthority
+        object_fields(request, ("reference",))
+        reference = resource_ref(request["reference"])
+        authority = ContentReadAuthority(self.management.preparation, self.management.core,
+            request_id=self.management.rules.request_id, cloud_mode=self.management.native_qualification.cloud_mode)
+        return authority.inspect_policy(reference)
 
     @staticmethod
     def _domain(domain):
-        if not isinstance(domain, str) or domain not in {"acl", "admins"}:
+        if not isinstance(domain, str) or domain != "acl":
             raise invalid("Invalid policy domain")
-        return domain == "admins"
 
     @staticmethod
     def _key(key):
@@ -63,14 +71,12 @@ class DirectoryPolicyService:
             raise invalid("A strong If-Match validator is required")
         return value
 
-    def _request(self, request, admins, *, with_value):
+    def _request(self, request, *, with_value):
         object_fields(request, ("reference", "value") if with_value else ("reference",))
         reference = resource_ref(request["reference"])
-        if admins and reference["kind"] != "dir":
-            raise invalid("Directory delegation requires a directory")
         if not with_value:
             return reference, None
-        store = self.management.admins if admins else self.management.rules
+        store = self.management.rules
         value = store.validate(request["value"])
         if (reference["path"], reference["kind"]) != (value["path"], value["kind"]):
             raise invalid("Policy target mismatch")
@@ -78,9 +84,9 @@ class DirectoryPolicyService:
 
     @safe_errors
     def list(self, domain, request, *, limit=50, after=None):
-        admins = self._domain(domain)
-        reference, _ = self._request(request, admins, with_value=False)
-        return self.management.list_target(reference, admins=admins, limit=limit, after=after)
+        self._domain(domain)
+        reference, _ = self._request(request, with_value=False)
+        return self.management.list_target(reference, limit=limit, after=after)
 
     @safe_errors
     def create(self, domain, request, *, idempotency_key):
@@ -97,8 +103,8 @@ class DirectoryPolicyService:
             if_match=self._condition(if_match), idempotency_key=idempotency_key, deleting=True)
 
     def _mutate(self, domain, request, *, idempotency_key, rule_id=None, if_match=None, deleting=False):
-        admins = self._domain(domain)
+        self._domain(domain)
         key = self._key(idempotency_key)
-        reference, value = self._request(request, admins, with_value=not deleting)
-        mutate = self.management.mutate_admin if admins else self.management.mutate
+        reference, value = self._request(request, with_value=not deleting)
+        mutate = self.management.mutate
         return mutate(reference, value=value, rule_id=rule_id, if_match=if_match, idempotency_key=key)

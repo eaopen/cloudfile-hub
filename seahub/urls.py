@@ -162,6 +162,8 @@ from seahub.api2.endpoints.admin.device_trusted_ip import AdminDeviceTrustedIP
 from seahub.api2.endpoints.admin.libraries import AdminLibraries, AdminLibrary, \
         AdminSearchLibrary
 from seahub.api2.endpoints.admin.wikis import AdminWikis
+from seahub.api2.endpoints.admin.library_user_permission import AdminLibraryUserPermission
+from seahub.api2.endpoints.admin.library_administrator import AdminLibraryAdministrator
 from seahub.api2.endpoints.admin.library_dirents import AdminLibraryDirents, AdminLibraryDirent
 from seahub.api2.endpoints.admin.system_library import AdminSystemLibrary, \
         AdminSystemLibraryUploadLink
@@ -739,6 +741,8 @@ urlpatterns = [
     re_path(r'^api/v2.1/admin/libraries/$', AdminLibraries.as_view(), name='api-v2.1-admin-libraries'),
     re_path(r'^api/v2.1/admin/search-library/$', AdminSearchLibrary.as_view(), name='api-v2.1-admin-search-library'),
     re_path(r'^api/v2.1/admin/libraries/(?P<repo_id>[-0-9a-f]{36})/$', AdminLibrary.as_view(), name='api-v2.1-admin-library'),
+    re_path(r'^api/v2.1/admin/libraries/(?P<repo_id>[-0-9a-f]{36})/administrator/$', AdminLibraryAdministrator.as_view(), name='api-v2.1-admin-library-administrator'),
+    re_path(r'^api/v2.1/admin/libraries/(?P<repo_id>[-0-9a-f]{36})/user-permission/$', AdminLibraryUserPermission.as_view(), name='api-v2.1-admin-library-user-permission'),
     re_path(r'^api/v2.1/admin/libraries/(?P<repo_id>[-0-9a-f]{36})/history-limit/$', AdminLibraryHistoryLimit.as_view(), name="api-v2.1-admin-library-history-limit"),
     re_path(r'^api/v2.1/admin/libraries/(?P<repo_id>[-0-9a-f]{36})/history/$', AdminLibraryHistory.as_view(), name='api-v2.1-admin-library-history'),
     re_path(r'^api/v2.1/admin/libraries/(?P<repo_id>[-0-9a-f]{36})/commits/(?P<commit_id>[0-9a-f]{40})/dir/$', AdminLibraryCommitDir.as_view(), name='api-v2.1-admin-library-commit-dir'),

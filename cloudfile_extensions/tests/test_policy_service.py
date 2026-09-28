@@ -3,7 +3,6 @@ import unittest
 from unittest.mock import Mock
 from uuid import uuid4
 
-from cloudfile_extensions.authorization.admins import admin_value
 from cloudfile_extensions.authorization.management import DirectoryManagement
 from cloudfile_extensions.authorization.rules import rule_value
 from cloudfile_extensions.authorization.service import DirectoryPolicyService
@@ -14,9 +13,7 @@ class PolicyServiceTest(unittest.TestCase):
     def setUp(self):
         self.management = object.__new__(DirectoryManagement)
         self.management.rules = Mock(validate=rule_value)
-        self.management.admins = Mock(validate=admin_value)
         self.management.mutate = Mock(return_value={"fixture": True})
-        self.management.mutate_admin = Mock(return_value={"fixture": True})
         self.management.list_target = Mock(return_value={"items": [], "next_after": None})
         self.service = DirectoryPolicyService(self.management)
         self.ref = dict(repo_id=str(uuid4()), path="/parts", kind="dir")
@@ -28,8 +25,8 @@ class PolicyServiceTest(unittest.TestCase):
         self.service.create("acl", self.request, idempotency_key="one")
         self.management.mutate.assert_called_once_with(self.ref, value=self.value,
             rule_id=None, if_match=None, idempotency_key="one")
-        self.service.create("admins", {**self.request, "value": {**self.value, "permission": "manage"}}, idempotency_key="two")
-        self.management.mutate_admin.assert_called_once()
+        with self.assertRaises(ContractError):
+            self.service.create("admins", self.request, idempotency_key="two")
         with self.assertRaises(ContractError):
             self.service.create("acl", {**self.request, "actor": "other"}, idempotency_key="three")
 
@@ -49,4 +46,4 @@ class PolicyServiceTest(unittest.TestCase):
         with self.assertRaises(ContractError):
             self.service.list("admins", dict(reference={**self.ref, "kind": "file"}))
         self.service.list("acl", dict(reference=self.ref), limit=10, after=None)
-        self.management.list_target.assert_called_once_with(self.ref, admins=False, limit=10, after=None)
+        self.management.list_target.assert_called_once_with(self.ref, limit=10, after=None)

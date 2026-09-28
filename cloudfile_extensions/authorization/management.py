@@ -1,4 +1,4 @@
-"""Real owner/delegated directory management; recovery is not implicit.
+"""Library management of directory content rules; recovery is not implicit.
 
 Already authenticated actor, current subject and all effect rows share authority.
 No public route, administrator bypass, other-connection permission RPC or UI.
@@ -7,7 +7,6 @@ from ..common.errors import ContractError
 from ..directory.preparation import SubjectPreparation
 from .core import PolicyCore
 from .rules import ACLRules
-from .admins import DirectoryAdmins
 from .qualification import NativeLibraryQualification
 
 
@@ -25,9 +24,7 @@ class LibraryOwnerManagement:
         self.rules = ACLRules(self.state.connection, provider=self.state.provider,
             actor=self.actor, request_id=request_id, authorize=self.authorize,
             finalize=self.finalize, authorize_change=self.authorize_change)
-        self.admins = DirectoryAdmins(self.state.connection, provider=self.state.provider,
-            actor=self.actor, request_id=request_id, authorize=self.authorize, finalize=self.finalize,
-            authorize_change=self.authorize_change)
+
 
     def authorize(self, cursor, actor, reference):
         self.hard_readonly = False
@@ -110,14 +107,11 @@ class LibraryOwnerManagement:
         if current is None or self.epoch is None or current["context_epoch"] != self.epoch:
             raise ContractError("SUBJECT_UNAVAILABLE", "Management subject changed", 503)
 
-    def list_target(self, reference, *, admins=False, limit=50, after=None):
-        if type(admins) is not bool:
-            raise ValueError("explicit policy domain required")
+    def list_target(self, reference, *, limit=50, after=None):
         self.preparation.prepare(self.actor)
         self.epoch = None
         try:
-            store = self.admins if admins else self.rules
-            return store.list_target(reference, limit=limit, after=after)
+            return self.rules.list_target(reference, limit=limit, after=after)
         finally:
             self.epoch = None
             self.current_subject = None
@@ -135,19 +129,10 @@ class LibraryOwnerManagement:
             self.current_subject = None
             self.is_owner = False
 
-    def mutate_admin(self, reference, **arguments):
-        self.preparation.prepare(self.actor)
-        self.epoch = None
-        try:
-            return self.admins.mutate(reference, **arguments)
-        finally:
-            self.epoch = None
-            self.current_subject = None
-            self.is_owner = False
 
 
 class DirectoryManagement(LibraryOwnerManagement):
-    """Owner or current delegated scope; never a full-library policy API."""
+    """Library authority over content rules; no directory administrator assignments."""
     def __init__(self, preparation, core, *, request_id, cloud_mode):
         if not isinstance(preparation, SubjectPreparation):
             raise ValueError("real subject preparation required")
@@ -160,22 +145,15 @@ class DirectoryManagement(LibraryOwnerManagement):
         return self.native_qualification.read(cursor, repo_id=reference["repo_id"],
             username=username, owner=owner)
 
-    def _scopes(self, reference):
-        if self.current_subject is None:
-            return []
-        return self.admins.scopes(reference, subject=self.current_subject,
-            attribute_allowlist=self.preparation.contexts.allowlist, locking=True)
+    def decision_allowed(self, decision):
+        # A library owner must be able to repair an ACL deny. This authority only
+        # mutates policy; ContentReadAuthority overrides this and still enforces C read/write.
+        return self.is_owner
 
+    # Directory ACL administration inherits library ownership, never stored directory grants.
+    # Keeping obsolete rows cannot re-enable delegated authority.
     def scope_allowed(self, reference):
-        return self.is_owner or DirectoryAdmins.permits(self._scopes(reference), reference)
+        return self.is_owner
 
     def authorize_change(self, cursor, actor, reference, previous, value):
-        if actor != self.actor or self.current_subject is None:
-            return False
-        if self.is_owner:
-            return True
-        scopes = self._scopes(reference)
-        # Removing an old inherited rule changes descendants too. Check both
-        # sides, not only the new body; also protects delete and self-delegation.
-        inherited_effect = any(item is not None and item["inherit"] for item in (previous, value))
-        return DirectoryAdmins.permits(scopes, reference, inherit=inherited_effect)
+        return actor == self.actor and self.is_owner

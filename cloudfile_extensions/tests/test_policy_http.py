@@ -8,7 +8,7 @@ from uuid import uuid4
 from django.middleware.csrf import _get_new_csrf_string
 from django.test import RequestFactory
 
-from cloudfile_extensions.authorization.http import DirectoryPolicyView
+from cloudfile_extensions.authorization.http import DirectoryPolicyView, DirectoryEffectiveView
 from cloudfile_extensions.authorization.service import DirectoryPolicyService
 from cloudfile_extensions.common.errors import ContractError
 
@@ -36,6 +36,31 @@ class PolicyHTTPTest(unittest.TestCase):
                 self.closed = True
         self.view = DirectoryPolicyView.as_view(service_factory=factory)
         self.ref = dict(repo_id=str(uuid4()), path="/a%20b+图", kind="dir")
+
+    def test_real_routes_mount_collection_and_uuid_item_with_worker_factory(self):
+        from django.urls import resolve
+        from cloudfile_extensions.authorization.gunicorn import policy_service
+        prefix = '/v1/directory-rules/'
+        for url in (prefix, prefix + str(uuid4()) + '/'):
+            target = resolve(url, urlconf='cloudfile_extensions.authorization.urls')
+            self.assertIs(target.func.view_class, DirectoryPolicyView)
+            self.assertIs(target.func.view_initkwargs['service_factory'], policy_service)
+
+    def test_effective_route_only_queries_current_actor_and_fails_closed(self):
+        from django.urls import resolve
+        route = resolve('/v1/effective-permission/', urlconf='cloudfile_extensions.authorization.urls')
+        self.assertIs(route.func.view_class, DirectoryEffectiveView)
+        @contextmanager
+        def factory(request, request_id):
+            yield self.service
+        view = DirectoryEffectiveView.as_view(service_factory=factory)
+        self.service.effective.return_value = dict(native_permission='r', effective_permission='none', can_manage=False)
+        response = view(self.requests.get('/effective/', data=self.ref, secure=True))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('no-store', response['Cache-Control'])
+        self.service.effective.assert_called_once_with(dict(reference=self.ref))
+        self.assertEqual(view(self.requests.get('/effective/', data={**self.ref, 'user': 'another'}, secure=True)).status_code, 400)
+        self.assertEqual(DirectoryEffectiveView.as_view()(self.requests.get('/effective/', data=self.ref, secure=True)).status_code, 503)
 
     def write(self, data, *, csrf=True):
         request = self.requests.post("/policy/", data=data, content_type="application/json", secure=True,

@@ -51,7 +51,7 @@ class ACLRules:
     FIELDS = "id,repo_id,path,path_hash,kind,subject_type,provider,namespace,external_id,subject_hash,permission,inherit,revision"
 
     def __init__(self, connection, *, provider, actor, request_id, authorize, finalize=None, authorize_change=None):
-        if self.TABLE not in {"cf_dir_acl", "cf_dir_admin"}:
+        if self.TABLE != "cf_dir_acl":
             raise ValueError("fixed policy table required")
         if not connection.get_autocommit() or not callable(authorize):
             raise ValueError("dedicated connection and transactional management authorization required")

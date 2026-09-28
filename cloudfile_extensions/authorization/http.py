@@ -1,4 +1,4 @@
-"""Unregistered policy HTTP views; deployment must authenticate in the factory."""
+"""Policy HTTP views; the worker-owned factory authenticates the native session."""
 import json
 import re
 from uuid import uuid4
@@ -50,7 +50,7 @@ class DirectoryPolicyView(View):
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed", 405)
             if not request.is_secure():
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
-            rule_id = kwargs.get("rule_id")
+            rule_id = str(kwargs["rule_id"]) if kwargs.get("rule_id") is not None else None
             if ((request.method in {"GET", "POST"} and rule_id is not None) or
                     (request.method in {"PUT", "DELETE"} and rule_id is None)):
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed for this target", 405)
@@ -100,5 +100,31 @@ class DirectoryPolicyView(View):
         return response
 
 
-class DirectoryAdminView(DirectoryPolicyView):
-    domain = "admins"
+class DirectoryEffectiveView(View):
+    service_factory = None
+    http_method_names = ['get']
+
+    def get(self, request):
+        request_id = str(uuid4())
+        try:
+            if not request.is_secure():
+                raise ContractError('AUTHENTICATION_REQUIRED', 'Secure authentication is required', 401)
+            required = {'repo_id', 'path', 'kind'}
+            if set(request.GET) != required or any(len(request.GET.getlist(k)) != 1 for k in request.GET) or request.read(1):
+                raise invalid('A single resource reference is required')
+            if not callable(self.service_factory):
+                raise ContractError('POLICY_UNAVAILABLE', 'Policy worker is unavailable', 503)
+            with self.service_factory(request, request_id) as service:
+                if not isinstance(service, DirectoryPolicyService):
+                    raise RuntimeError('invalid policy assembly')
+                result = service.effective(dict(reference={k: request.GET[k] for k in required}))
+                response = JsonResponse(result)
+        except ContractError as error:
+            response = JsonResponse(error.response(request_id), status=error.status)
+        except Exception:
+            error = ContractError('POLICY_UNAVAILABLE', 'Policy service is unavailable', 503)
+            response = JsonResponse(error.response(request_id), status=503)
+        response['Cache-Control'] = 'no-store, max-age=0'
+        response['Vary'] = 'Cookie, Authorization'
+        response['X-Request-ID'] = request_id
+        return response

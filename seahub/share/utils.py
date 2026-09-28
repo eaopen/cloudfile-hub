@@ -36,7 +36,7 @@ def normalize_custom_permission_name(permission):
     return CUSTOM_PERMISSION_PREFIX + '-' + str(permission)
 
 
-def is_repo_admin(username, repo_id):
+def is_repo_admin(username, repo_id, *, strict=False):
 
     # repo is shared to user with admin permission
     try:
@@ -52,6 +52,9 @@ def is_repo_admin(username, repo_id):
                 return True
     except Exception as e:
         logger.error(e)
+        # Administrative diagnostics must distinguish storage failure from no management grant.
+        if strict:
+            raise
         return False
 
     repo_owner = seafile_api.get_repo_owner(repo_id) or seafile_api.get_org_repo_owner(repo_id)

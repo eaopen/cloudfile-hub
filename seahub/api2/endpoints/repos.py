@@ -391,6 +391,14 @@ class ReposView(APIView):
         except Exception as e:
             logger.error('Error when sending user-login message: %s' % str(e))
 
+        # Library administration is independent of directory readability; expose
+        # group-derived administration as well so clients need no per-root probes.
+        try:
+            for item in repo_info_list:
+                item['is_admin'] = bool(is_repo_admin(email, item['repo_id'], strict=True))
+        except Exception:
+            logger.exception('Library management lookup failed')
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Permission service unavailable.')
         return Response({'repos': repo_info_list})
 
 

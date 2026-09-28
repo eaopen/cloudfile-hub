@@ -135,3 +135,23 @@ class AnnotationRuntimeCapabilityTest(unittest.TestCase):
     def test_explicit_disable_and_dependency_disable_are_preserved(self):
         for configured in ({'tag.extended': False}, {'directory.acl': False}):
             self.assertFalse(self.document(self.host(), configured=configured)['tag.extended']['enabled'])
+
+
+class ManagementCapabilityTest(unittest.TestCase):
+    def test_directory_crud_does_not_manufacture_library_publish_readiness(self):
+        import os
+        from unittest.mock import Mock
+        from cloudfile_extensions.authorization.host import PolicyHost
+        from cloudfile_extensions.authorization.runtime import PolicyServiceFactory
+        from cloudfile_extensions.capabilities import management_implementation_registry
+        from cloudfile_extensions.registry import registry
+        host = Mock(spec=PolicyHost)
+        host.pid = os.getpid(); host.closed = False; host.draining = False
+        host.deployment = Mock(factory=Mock(spec=PolicyServiceFactory))
+        ready = management_implementation_registry(registry, host, authorization_enabled=True)
+        self.assertTrue(ready.implementations['directory.acl.manage'].implemented)
+        self.assertFalse(ready.implementations['library.shares.manage'].implemented)
+        self.assertFalse(ready.implementations['library.admin.manage'].implemented)
+        host.closed = True
+        closed = management_implementation_registry(registry, host, authorization_enabled=True)
+        self.assertFalse(closed.implementations['directory.acl.manage'].implemented)
