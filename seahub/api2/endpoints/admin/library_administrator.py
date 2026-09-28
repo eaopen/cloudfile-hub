@@ -12,7 +12,7 @@ from rest_framework.views import APIView
 from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
-from seahub.base.accounts import User
+from seahub.base.accounts import AuthBackend, User
 from seahub.auth.utils import get_virtual_id_by_email
 from seahub.profile.models import Profile
 from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
@@ -73,6 +73,11 @@ class AdminLibraryAdministrator(APIView):
                     seafile_api.get_group_shared_repo_by_path(repo_id, None, subject, is_org))
 
     @staticmethod
+    def _group_name(group_id):
+        group = ccnet_api.get_group(group_id)
+        return group.group_name if group else None
+
+    @staticmethod
     def _direct_share(repo_id, kind, subject, is_org):
         if kind == 'user':
             return seafile_api.get_shared_repo_by_path(repo_id, None, subject, is_org)
@@ -116,6 +121,7 @@ class AdminLibraryAdministrator(APIView):
                    'effective': self._effective(repo_id, 'user', user, is_org)}
                   for user in sorted(set(users))),
                 *({'subject_type': 'group', 'subject': str(group),
+                   'display_name': self._group_name(group),
                    'effective': self._effective(repo_id, 'group', group, is_org)}
                   for group in sorted(set(groups))),
             ]})
@@ -147,7 +153,10 @@ class AdminLibraryAdministrator(APIView):
                 try:
                     user = User.objects.get(email=target)
                 except User.DoesNotExist:
-                    return api_error(status.HTTP_404_NOT_FOUND, 'User not found.')
+                    try:
+                        user = AuthBackend().get_user_with_import(target)
+                    except User.DoesNotExist:
+                        return api_error(status.HTTP_404_NOT_FOUND, 'User not found.')
                 if not user.is_active:
                     return api_error(status.HTTP_409_CONFLICT, 'User is inactive.')
                 # An inherited group share is not a durable grant for this user.
