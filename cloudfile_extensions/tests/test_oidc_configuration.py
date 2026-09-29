@@ -137,12 +137,28 @@ class OIDCHostConfigurationTests(unittest.TestCase):
             assert settings.MIDDLEWARE[0] == GUARDED_MIDDLEWARE
             assert BACKEND in settings.AUTHENTICATION_BACKENDS
             from rest_framework.views import APIView
+            from rest_framework.authentication import BaseAuthentication
+            from rest_framework.throttling import BaseThrottle
             base = types.ModuleType("seahub.api2.base")
             base.APIView = APIView
             sys.modules[base.__name__] = base
+            authentication = types.ModuleType("seahub.api2.authentication")
+            authentication.TokenAuthentication = type("TokenAuthentication", (BaseAuthentication,), {
+                "authenticate": lambda self, request: None})
+            sys.modules[authentication.__name__] = authentication
+            throttling = types.ModuleType("seahub.api2.throttling")
+            throttling.UserRateThrottle = type("UserRateThrottle", (BaseThrottle,), {
+                "allow_request": lambda self, request, view: True})
+            sys.modules[throttling.__name__] = throttling
+            directory_sync = types.ModuleType("cloudfile_extensions.directory.sync_http")
+            directory_sync.DirectorySync = type("DirectorySync", (APIView,), {})
+            sys.modules[directory_sync.__name__] = directory_sync
             configuration = types.ModuleType("cloudfile_extensions.library_configuration")
             configuration.LibraryConfiguration = type("LibraryConfiguration", (APIView,), {})
             sys.modules[configuration.__name__] = configuration
+            shares = types.ModuleType("cloudfile_extensions.library_shares")
+            shares.LibrarySharesDesired = type("LibrarySharesDesired", (APIView,), {})
+            sys.modules[shares.__name__] = shares
             native = types.ModuleType("seahub.urls")
             native.urlpatterns = []
             sys.modules[native.__name__] = native

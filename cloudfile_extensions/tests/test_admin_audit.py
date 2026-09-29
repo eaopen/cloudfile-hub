@@ -43,7 +43,7 @@ class AdminAuditTests(DatabaseTestCase):
         self.scope = {"category": "access", "start": "2026-09-01T00:00:00Z",
                       "end": "2026-09-30T00:00:00Z", "repo_id": None, "actor": None}
         self.configuration = override_settings(
-            CLOUDFILE_POLICY_CONFIG={"database": {"host": "127.0.0.1", "port": self.options["port"],
+            CLOUDFILE_POLICY_CONFIG={"database": {"host": self.options["host"], "port": self.options["port"],
                 "user": "root", "password": "", "name": self.database}},
             CLOUDFILE_AUDIT_CURSOR_SECRET=b"test-only-admin-cursor-secret-with-32-bytes")
         self.configuration.enable()
