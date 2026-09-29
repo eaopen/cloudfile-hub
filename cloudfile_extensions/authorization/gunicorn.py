@@ -17,6 +17,12 @@ def post_worker_init(worker):
     oidc_enabled = getattr(settings, "CLOUDFILE_OIDC_ENABLED", False)
     annotations_enabled = getattr(settings, "CLOUDFILE_ANNOTATIONS_ENABLED", False)
     audit_query_enabled = getattr(settings, "CLOUDFILE_AUDIT_QUERY_ENABLED", False)
+    audit_export_enabled = getattr(settings, "CLOUDFILE_AUDIT_EXPORT_ENABLED", False)
+    if type(audit_export_enabled) is not bool:
+        raise RuntimeError("CLOUDFILE_AUDIT_EXPORT_ENABLED must be a boolean")
+    if audit_export_enabled:
+        from ..events.configuration import require_export_configuration
+        require_export_configuration(settings)
     if type(audit_query_enabled) is not bool:
         raise RuntimeError("CLOUDFILE_AUDIT_QUERY_ENABLED must be a boolean")
     if audit_query_enabled and (not oidc_enabled or not authorization_enabled or
