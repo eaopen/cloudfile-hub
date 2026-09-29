@@ -24,6 +24,7 @@ class PolicyDeployment:
     local_device_factory: object = None
     local_agent_runtime: object = None
     local_read_issuer: object = None
+    editing_factory: object = None
 
     def close(self):
         # The host invokes this only after draining all requests at shutdown.
@@ -36,7 +37,8 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
                      delegation_service_verifier=None, delegation_signing_keys=None,
                      oidc=None, oidc_jit_enabled=False, local_edit_instance=None,
                      local_edit_version_reader=None, local_edit_enabled=False,
-                     authorization_enabled=False, transfer_enabled=False):
+                     authorization_enabled=False, transfer_enabled=False,
+                     editing_enabled=False):
     """value is trusted host settings, not request JSON or an import path.
 
     Matches the current native authority adapter: private Redis TCP, DB0, password
@@ -55,6 +57,10 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
         raise ValueError("explicit authorization enablement required")
     if type(transfer_enabled) is not bool:
         raise ValueError("explicit transfer enablement required")
+    if type(editing_enabled) is not bool:
+        raise ValueError("explicit editing enablement required")
+    if editing_enabled and (resource_secret is None or oidc is None):
+        raise ValueError("editing requires resource and native OIDC runtimes")
     if oidc is not None:
         from ..identity.oidc import OIDCConfig
         if not isinstance(oidc, OIDCConfig):
@@ -174,6 +180,12 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
             prefix = factory.resources.prefix[:-len("subjects:")]
             login_resources = LoginResources(factory.resources, oidc=oidc,
                 jit_enabled=oidc_jit_enabled, prefix=prefix)
+        editing_factory = None
+        if editing_enabled:
+            from ..editing.runtime import EditingFactory, native_file_version, native_session_holder
+            editing_factory = EditingFactory(resources=resource_factory,
+                holder_reader=native_session_holder, version_reader=native_file_version,
+                source="web")
         local_session_factory = local_device_factory = local_agent_runtime = local_read_issuer = None
         if local_edit_instance is not None:
             from ..local_edit.agent_runtime import AgentClaimRuntime
@@ -193,6 +205,7 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
             delegation_issue_factory=delegation_issue_factory,
             delegated_read_factory=delegated_read_factory,
             login_resources=login_resources, local_session_factory=local_session_factory,
+            editing_factory=editing_factory,
             local_device_factory=local_device_factory, local_agent_runtime=local_agent_runtime,
             local_read_issuer=local_read_issuer)
     except Exception:

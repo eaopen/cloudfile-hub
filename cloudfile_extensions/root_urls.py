@@ -51,6 +51,9 @@ if getattr(settings, "CLOUDFILE_ANNOTATIONS_ENABLED", False):
 if getattr(settings, "CLOUDFILE_LOCAL_EDIT_ENABLED", False):
     urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/local-edit/",
         include("cloudfile_extensions.local_edit.urls")))
+if getattr(settings, "CLOUDFILE_EDITING_ENABLED", False):
+    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/editing/",
+        include("cloudfile_extensions.editing.urls")))
 if getattr(settings, "CLOUDFILE_TRANSFER_ENABLED", False):
     urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/transfer/",
         include("cloudfile_extensions.transfer.urls")))

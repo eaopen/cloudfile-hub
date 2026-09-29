@@ -10,8 +10,8 @@ hand and split the story between "code default off" and "test environment on";
 the guarantee that once justified default-off -- "all switches off == native
 CE" -- was abolished on 2026-09-22. Defaults do not weaken the isolation rule:
 unaccepted capabilities are still False by default and operators can override
-any switch through the compose .env. Legacy DIR_ACL, FILE_LOCK and CHECKOUT
-remain off because their v0.1 table shapes conflict with the current schema.
+any switch through the compose .env. DIR_ACL, FILE_LOCK and CHECKOUT remain
+off until their current native/host paths pass end-to-end acceptance.
 Full list and dependency boundary:
 cloudfile-docker's docs/configuration.md.
 

@@ -5,8 +5,8 @@ import unittest
 from django.middleware.csrf import _get_new_csrf_string
 from django.test import RequestFactory
 
-from cloudfile_extensions.locks.http import FileLockView
-from cloudfile_extensions.locks.routes import lock_routes
+from cloudfile_extensions.editing.http import EditingView
+from cloudfile_extensions.editing.routes import editing_routes
 from cloudfile_extensions.search.http import ResourceSearchView
 from cloudfile_extensions.search.routes import search_routes
 
@@ -23,7 +23,8 @@ class SearchLockHTTPTests(unittest.TestCase):
     def setUp(self):
         self.requests = RequestFactory()
         self.search = ResourceSearchView.as_view()
-        self.lock = FileLockView.as_view(operation="acquire")
+        self.lock = EditingView.as_view(operation="file-lock")
+        self.checkout = EditingView.as_view(operation="checkout")
 
     def post(self, body="{}", **headers):
         token = _get_new_csrf_string()
@@ -46,6 +47,11 @@ class SearchLockHTTPTests(unittest.TestCase):
             self.assertEqual(self.lock(self.post(HTTP_IDEMPOTENCY_KEY=key)).status_code, 400)
         self.assertEqual(self.lock(self.post(HTTP_IDEMPOTENCY_KEY="attempt-1")).status_code, 503)
 
+    def test_checkout_write_has_same_https_csrf_idempotency_boundary(self):
+        self.assertEqual(self.checkout(self.requests.post("/operation/")).status_code, 401)
+        self.assertEqual(self.checkout(self.post()).status_code, 428)
+        self.assertEqual(self.checkout(self.post(HTTP_IDEMPOTENCY_KEY="attempt-1")).status_code, 503)
+
     def test_invalid_json_and_budget_fail_before_runtime(self):
         for view in (self.search, self.lock):
             for body in ('{"q":1,"q":2}', '{"q":NaN}', '{} {}'):
@@ -53,7 +59,7 @@ class SearchLockHTTPTests(unittest.TestCase):
             self.assertEqual(view(self.post(" " * 16385)).status_code, 413)
 
     def test_missing_runtime_never_grants_or_caches(self):
-        for view in (self.search, FileLockView.as_view(operation="status")):
+        for view in (self.search, EditingView.as_view(operation="status")):
             response = view(self.post())
             self.assertEqual(response.status_code, 503)
             payload = json.loads(response.content)
@@ -64,7 +70,7 @@ class SearchLockHTTPTests(unittest.TestCase):
             self.assertTrue(response["X-Request-ID"])
 
     def test_generic_callable_cannot_replace_owned_factory(self):
-        for assemble in (search_routes, lock_routes):
+        for assemble in (search_routes, editing_routes):
             for factory in (None, lambda *_: None):
                 with self.assertRaises(ValueError):
                     assemble(service_factory=factory)

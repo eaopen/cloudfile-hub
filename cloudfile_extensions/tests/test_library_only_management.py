@@ -5,7 +5,7 @@ from unittest.mock import Mock
 
 from cloudfile_extensions.authorization.management import DirectoryManagement, LibraryOwnerManagement
 from cloudfile_extensions.authorization.read import LibraryWideManagementAuthority
-from cloudfile_extensions.locks.authority import LockManagementAuthority
+from cloudfile_extensions.editing.authority import LockManagementAuthority
 
 
 class LibraryOnlyManagementTests(unittest.TestCase):

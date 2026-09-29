@@ -19,12 +19,12 @@ class CloudFileConfig(AppConfig):
         from cloudfile_ext.registry import registry
 
         from cloudfile_ext import (
-            base, acl, sso, audit, metadata, search, checkout,
+            base, acl, sso, audit, metadata, search,
             external_sources, file_actions, fileops, office, storage,
         )
 
         for module in (base, acl, sso, audit, metadata, search,
-                       checkout, external_sources, file_actions, fileops,
+                       external_sources, file_actions, fileops,
                        office, storage):
             module.register(registry)
 

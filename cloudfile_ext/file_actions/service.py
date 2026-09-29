@@ -2,7 +2,6 @@
 """Small adapters around the pure action policy and local-software protocol."""
 
 import os
-import json
 import uuid
 import time
 import hashlib
@@ -14,7 +13,7 @@ from django.core.cache import cache
 from django.db import connections
 
 from cloudfile_ext.features import enabled_features
-from cloudfile_ext.file_actions.policy import actions_for, native_lock_request
+from cloudfile_ext.file_actions.policy import actions_for
 
 
 #: CloudFile's own write-lifecycle error code, mirroring common/cf-fileop.h.
@@ -47,36 +46,11 @@ def native_preview_url(repo_id, path):
     return _join_site('lib/%s/file%s' % (repo_id, quote(path, safe='/')))
 
 
-def _lock_rpc(method, payload):
-    """Call the CE-specific C lock backend without a Hub-side fallback."""
-    from seaserv import seafile_api
-
-    try:
-        response = getattr(seafile_api, method)(json.dumps(payload))
-        return json.loads(response or '{}')
-    except Exception:
-        return {'ok': False, 'reason': 'unavailable'}
 
 
 def lock_provider_ready(repo_id, path):
-    """Ask the authority that sync and WebDAV write paths consult.
-
-    A feature flag cannot prove that an upgraded server has the corresponding
-    C provider loaded.  The status RPC therefore gates write actions and an
-    unavailable/older server leaves them disabled rather than fail-open.
-    """
-    response = _lock_rpc('cf_lock_status', {'repo_id': repo_id, 'path': path})
-    return response.get('ok') is True
-
-
-def lock_status(repo_id, path, username=''):
-    """Return normalized lease state for the native Hub lock controls."""
-    result = _lock_rpc('cf_lock_status', {'repo_id': repo_id, 'path': path})
-    if result.get('ok') is not True:
-        return result
-    owner = result.get('owner', '')
-    result['locked_by_me'] = bool(result.get('locked') and username and owner == username)
-    return result
+    """No public editing assembler is enabled until native publication is ready."""
+    return False
 
 
 def lock_status_map(repo_id, paths, username=''):
@@ -86,15 +60,14 @@ def lock_status_map(repo_id, paths, username=''):
         return {}
     alias = getattr(settings, 'CF_DATABASE_ALIAS', 'cloudfile')
     placeholders = ', '.join(['%s'] * len(paths))
-    now = int(time.time())
     query = (
-        'SELECT normalized_path, owner, kind, lease_until '
-        'FROM cf_lock_lease WHERE repo_id = %s AND status = %s '
-        'AND lease_until > %s AND hard_expire_at > %s '
-        'AND normalized_path IN (' + placeholders + ')'
+        'SELECT r.path, g.owner_native_user, g.mode, g.lease_until '
+        'FROM cf_resource r JOIN cf_edit_guard g ON g.resource_uid=r.uid '
+        'WHERE r.repo_id = %s AND r.state = %s AND g.guard_id IS NOT NULL '
+        'AND r.path IN (' + placeholders + ')'
     )
     with connections[alias].cursor() as cursor:
-        cursor.execute(query, [repo_id, 'active', now, now] + list(paths))
+        cursor.execute(query, [repo_id, 'active'] + list(paths))
         rows = cursor.fetchall()
     return {
         row[0]: {
@@ -108,16 +81,6 @@ def lock_status_map(repo_id, paths, username=''):
     }
 
 
-def lock_file(repo_id, path, username, lease_seconds=12 * 60 * 60):
-    """Acquire the same authoritative lease enforced by all write paths."""
-    current = lock_status(repo_id, path, username)
-    if current.get('ok') and current.get('locked_by_me'):
-        # Retrying after a lost HTTP response must not turn an already-owned
-        # lock into a 423 conflict.
-        return current
-    request = native_lock_request(repo_id, path, username)
-    request['lease_seconds'] = lease_seconds
-    return _lock_rpc('cf_lock_acquire', request)
 
 
 def get_actions(repo_id, path, can_edit=False):
@@ -239,33 +202,6 @@ def issue_local_edit_session(repo_id, path, username):
     return _issue_agent_session('local-edit', repo_id, path, username)
 
 
-def issue_local_edit_exclusive_session(repo_id, path, username):
-    """Issue a locked local-edit session with automatic write-back.
-
-    This is the former `local-edit` behaviour, kept behind the future
-    「本地编辑(独占)」 button: a C lease fences the file and the agent
-    watches + auto-uploads the result before releasing the lease.
-    """
-    lock = _lock_rpc('cf_lock_acquire', {
-        'repo_id': repo_id,
-        'path': path,
-        'owner': username,
-        'kind': 'local-edit',
-        'lease_seconds': 30 * 60,
-        'hard_expire_seconds': 24 * 60 * 60,
-    })
-    if not lock.get('ok'):
-        return lock
-
-    try:
-        session = _issue_agent_session(
-            'local-edit-exclusive', repo_id, path, username, lock['generation'])
-    except Exception:
-        # A lease without a claimable session is a denial-of-service lock.
-        release_checkout(repo_id, path, username, lock['generation'])
-        return {'ok': False, 'reason': 'session_store_unavailable'}
-    session['ok'] = True
-    return session
 
 
 def _read_session(session_id):
@@ -305,20 +241,9 @@ def claim_agent_session(ticket, server_origin):
                 'updated_at = %s WHERE session_id = %s AND state = %s',
                 ['claimed', now, now, row[0], 'created'])
     session_id, mode, username, repo_id, path, base_file_id, generation, expires_at = row
-    if mode == 'local-edit-exclusive':
-        lock = _lock_rpc('cf_lock_status', {'repo_id': repo_id, 'path': path})
-        if not lock.get('locked') or lock.get('owner') != username \
-                or lock.get('kind') != 'local-edit' or lock.get('generation') != generation:
-            with connections[alias].cursor() as cursor:
-                cursor.execute(
-                    'UPDATE cf_edit_session SET state = %s, closed_at = %s, updated_at = %s '
-                    'WHERE session_id = %s AND state = %s',
-                    ['aborted', now, now, session_id, 'claimed'])
-            release_checkout(repo_id, path, username, generation)
-            return None
-    # Ticket expiry is intentionally one minute; claimed local-edit sessions
-    # use the C lease duration and must not inherit that short claim window.
-    capability_ttl = 30 * 60 if mode == 'local-edit-exclusive' else 5 * 60
+    if mode not in ('local-view', 'local-edit'):
+        return None
+    capability_ttl = 5 * 60
     content_token = uuid.uuid4().hex
     cache.set('thirdparty_editor_access_token_' + content_token, {
         'request_user': username,
@@ -346,92 +271,4 @@ def claim_agent_session(ticket, server_origin):
         'size': size,
         'mtime': mtime,
     }
-    if mode == 'local-edit-exclusive':
-        capability = secrets.token_urlsafe(32)
-        cache.set('cloudfile_local_writeback_' + capability, session_id, capability_ttl)
-        response['writeback'] = {
-            'content_url': server_origin.rstrip('/') + _join_site(
-                'api/v2.1/cloudfile/agent-sessions/%s/content/' % session_id),
-            'heartbeat_url': server_origin.rstrip('/') + _join_site(
-                'api/v2.1/cloudfile/agent-sessions/%s/heartbeat/' % session_id),
-            'capability': capability,
-        }
     return response
-
-
-def local_edit_session(session_id, capability):
-    if not capability or cache.get('cloudfile_local_writeback_' + capability) != session_id:
-        return None
-    session = _read_session(session_id)
-    if not session or session['mode'] != 'local-edit-exclusive' or session['state'] != 'claimed':
-        return None
-    return session
-
-
-def refresh_local_edit_session(session_id, capability):
-    session = local_edit_session(session_id, capability)
-    if not session:
-        return None
-    result = refresh_lock(
-        session['repo_id'], session['path'], session['username'],
-        session['generation'], lease_seconds=30 * 60)
-    if not result.get('ok'):
-        return None
-    # Keep the agent capability no longer than the renewed lock lease.
-    cache.set('cloudfile_local_writeback_' + capability, session_id, 30 * 60)
-    return result
-
-
-def consume_local_edit_session(session_id):
-    now = int(time.time())
-    alias = _session_alias()
-    with connections[alias].cursor() as cursor:
-        cursor.execute(
-            'UPDATE cf_edit_session SET state = %s, closed_at = %s, updated_at = %s '
-            'WHERE session_id = %s AND state = %s',
-            ['closed', now, now, session_id, 'claimed'])
-
-
-def checkout(repo_id, path, username, source):
-    """Create the authoritative lease used by manual and programmatic checkout."""
-    return _lock_rpc('cf_lock_acquire', {
-        'repo_id': repo_id,
-        'path': path,
-        'owner': username,
-        'kind': 'checkout',
-        'lease_seconds': 12 * 60 * 60,
-        'hard_expire_seconds': 72 * 60 * 60,
-        'source': source,
-    })
-
-
-def refresh_lock(repo_id, path, username, generation,
-                 lease_seconds=12 * 60 * 60):
-    """Renew an owned lease without extending its hard-expiry fence."""
-    return _lock_rpc('cf_lock_refresh', {
-        'repo_id': repo_id,
-        'path': path,
-        'owner': username,
-        'generation': generation,
-        'lease_seconds': lease_seconds,
-    })
-
-
-def release_checkout(repo_id, path, username, generation=''):
-    payload = {'repo_id': repo_id, 'path': path, 'owner': username}
-    if generation:
-        payload['generation'] = generation
-    return _lock_rpc('cf_lock_release', payload)
-
-
-def force_release_lock(repo_id, path, actor, generation, reason=''):
-    """Release exactly the generation an administrator reviewed."""
-    payload = {
-        'repo_id': repo_id,
-        'path': path,
-        'actor': actor,
-        'generation': generation,
-    }
-    if reason:
-        payload['reason'] = reason
-    return _lock_rpc('cf_lock_force_release', payload)

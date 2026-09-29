@@ -11,7 +11,9 @@ def _call(function, arguments, deadline):
     from seaserv.service import seafile_pipe_path
     counts = {"seafile_get_repo": 1, "seafile_get_file_id_by_commit_and_path": 3,
         "seafile_cloudfile_issue_read_ticket": 7,
-        "seafile_cloudfile_put_file_with_barriers": 6}
+        "seafile_cloudfile_put_file_with_barriers": 6,
+        "seafile_cloudfile_publish_edit": 6,
+        "seafile_cloudfile_checkin_edit": 4}
     if function not in counts or len(arguments) != counts[function] or any(
             not isinstance(value, str) or "\x00" in value for value in arguments):
         raise ValueError("fixed native ticket arguments required")

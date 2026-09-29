@@ -16,7 +16,6 @@ from ..common.validation import object_fields
 from ..common.validation import sequence
 from ..authorization.runtime import AuthenticatedPolicyActor
 from ..events.outbox import EventWriter, Outbox
-from ..locks.service import FileLockService
 from ..migration.native_status import _object
 from ..resources.paths import resource_ref
 from ..resources.service import ResourceService
@@ -42,8 +41,8 @@ class LocalSessionService:
     def __init__(self, resources, *, actor, instance, version_reader, locks=None):
         if not isinstance(resources, ResourceService) or not callable(version_reader):
             raise ValueError("actual resource service and protected native version reader required")
-        if locks is not None and (not isinstance(locks, FileLockService) or locks.resources is not resources):
-            raise ValueError("actual same-resource lock service required")
+        if locks is not None:
+            raise ValueError('Legacy local editing locks are no longer supported')
         if not isinstance(actor, AuthenticatedPolicyActor) or actor.user_id != resources.read_authority.actor:
             raise ValueError("actual authenticated native browser actor required")
         DeviceChallenge(instance, "11111111-1111-4111-8111-111111111111",
@@ -123,15 +122,7 @@ class LocalSessionService:
         version = self.version_reader(sql, ref, evidence)
         lease = None
         if mode == "exclusive-edit":
-            if self.locks is None or expected_lease is None:
-                raise ContractError("LOCK_UNAVAILABLE", "Exclusive session authority is unavailable", 503)
-            active = self.locks.leases._load(sql, row["uid"], ref["repo_id"])
-            if (active is None or not active[7] or active[2] != self.resources.write_authority.actor or
-                    active[3] != self.locks.holder or active[5] != version or
-                    str(active[1]) != expected_lease["fencing"] or
-                    not hmac.compare_digest(active[4], expected_lease["token_digest"])):
-                raise conflict()
-            lease = dict(expected_lease)
+            raise ContractError('EDIT_UNAVAILABLE', 'Exclusive Agent integration is not enabled', 503)
         result = dict(resource=ref, resource_uid=row["uid"], lifecycle_ref=evidence.lifecycle_ref,
             base_version=version, resource_revision=value["revision"], local_open_type=value["local_open_type"],
             mode=mode, lease=lease)
@@ -155,13 +146,9 @@ class LocalSessionService:
         authority = self._authority(mode)
         lease = value.get("lease")
         if mode == "exclusive-edit":
-            object_fields(lease, ("fencing", "token"))
-            if not isinstance(lease["token"], str) or not re.fullmatch(r"[0-9a-f]{64}", lease["token"]):
-                raise ValueError("valid lease token required")
-            import hashlib
-            lease = dict(fencing=lease["fencing"], token_digest=hashlib.sha256(lease["token"].encode("ascii")).hexdigest())
-        elif lease is not None:
-            raise ValueError("non-exclusive mode does not accept a lease")
+            raise ContractError('EDIT_UNAVAILABLE', 'Exclusive Agent integration is not enabled', 503)
+        if lease is not None:
+            raise ValueError('This mode does not accept a lease')
         def effect(sql, reference):
             snapshot = self._snapshot(sql, reference, mode=mode, allocate=True, expected_lease=lease)
             issued = self.sessions.create(sql, provider=authority.state.provider, actor=authority.actor,

@@ -14,7 +14,12 @@ def post_worker_init(worker):
     local_edit_enabled = getattr(settings, "CLOUDFILE_LOCAL_EDIT_ENABLED", False)
     authorization_enabled = getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False)
     transfer_enabled = getattr(settings, "CLOUDFILE_TRANSFER_ENABLED", False)
+    editing_enabled = getattr(settings, "CLOUDFILE_EDITING_ENABLED", False)
+    if type(editing_enabled) is not bool:
+        raise RuntimeError("CLOUDFILE_EDITING_ENABLED must be a boolean")
     oidc_enabled = getattr(settings, "CLOUDFILE_OIDC_ENABLED", False)
+    if editing_enabled and not oidc_enabled:
+        raise RuntimeError("editing requires the native OIDC host")
     annotations_enabled = getattr(settings, "CLOUDFILE_ANNOTATIONS_ENABLED", False)
     audit_query_enabled = getattr(settings, "CLOUDFILE_AUDIT_QUERY_ENABLED", False)
     audit_export_enabled = getattr(settings, "CLOUDFILE_AUDIT_EXPORT_ENABLED", False)
@@ -38,7 +43,7 @@ def post_worker_init(worker):
         raise RuntimeError("annotations require OIDC, a fixed resource secret and a trusted native lifecycle reader")
     config = getattr(settings, "CLOUDFILE_POLICY_CONFIG", None)
     if config is None:
-        if local_edit_enabled or authorization_enabled or transfer_enabled or oidc_enabled or annotations_enabled or audit_query_enabled:
+        if local_edit_enabled or authorization_enabled or transfer_enabled or oidc_enabled or annotations_enabled or audit_query_enabled or editing_enabled:
             raise RuntimeError("enabled CloudFile routes require the post-fork policy worker")
         _host = None
         return
@@ -65,7 +70,7 @@ def post_worker_init(worker):
             local_edit_version_reader=getattr(settings, "CLOUDFILE_LOCAL_EDIT_VERSION_READER", None),
             local_edit_enabled=local_edit_enabled,
             authorization_enabled=authorization_enabled,
-            transfer_enabled=transfer_enabled)
+            transfer_enabled=transfer_enabled, editing_enabled=editing_enabled)
         if oidc_enabled and _host.deployment.login_resources is None:
             _host.close()
             _host = None
@@ -93,6 +98,12 @@ def resource_service(request, request_id):
     if _host is None or _host.pid != os.getpid():
         raise ContractError("RESOURCE_UNAVAILABLE", "Resource worker is unavailable", 503)
     return _host.resource_service(request, request_id)
+
+
+def editing_service(request, request_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("EDIT_UNAVAILABLE", "Editing worker is unavailable", 503)
+    return _host.editing_service(request, request_id)
 
 
 def audit_service(request, request_id):

@@ -1,0 +1,15 @@
+{
+  "version": "029_editing_core",
+  "steps": [
+    {
+      "sql": "CREATE TABLE cf_edit_guard (resource_uid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,lifecycle_ref VARCHAR(512) COLLATE utf8mb4_bin NOT NULL,guard_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,generation BIGINT UNSIGNED NOT NULL,mode VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NULL,owner VARCHAR(225) COLLATE utf8mb4_bin NULL,owner_native_user VARCHAR(255) COLLATE utf8mb4_bin NULL,source VARCHAR(32) COLLATE utf8mb4_bin NULL,holder VARCHAR(128) COLLATE utf8mb4_bin NULL,credential_epoch BIGINT UNSIGNED NOT NULL,proof_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NULL,base_file_id CHAR(40) CHARACTER SET ascii COLLATE ascii_bin NULL,pending_intent CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,lease_until DATETIME(6) NULL,hard_expire_at DATETIME(6) NULL,PRIMARY KEY(resource_uid),UNIQUE KEY guard_identity(guard_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+      "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_edit_guard')='InnoDB' AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_edit_guard')=16 AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_edit_guard' AND index_name='PRIMARY')='resource_uid',1,0)",
+      "expected": 1
+    },
+    {
+      "sql": "CREATE TABLE cf_commit_intent (intent_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,resource_uid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,guard_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,generation BIGINT UNSIGNED NOT NULL,credential_epoch BIGINT UNSIGNED NOT NULL,request_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,expected_file_id CHAR(40) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,staged_file_id CHAR(40) CHARACTER SET ascii COLLATE ascii_bin NULL,content_digest CHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,snapshot JSON NULL,action VARCHAR(24) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,state VARCHAR(16) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,result_file_id CHAR(40) CHARACTER SET ascii COLLATE ascii_bin NULL,result_commit_id CHAR(40) CHARACTER SET ascii COLLATE ascii_bin NULL,created_at DATETIME(6) NOT NULL,PRIMARY KEY(intent_id),KEY resource_intents(resource_uid,intent_id)) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin",
+      "verify": "SELECT IF((SELECT ENGINE FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_commit_intent')='InnoDB' AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_commit_intent')=15 AND (SELECT GROUP_CONCAT(column_name ORDER BY seq_in_index) FROM information_schema.statistics WHERE table_schema=DATABASE() AND table_name='cf_commit_intent' AND index_name='PRIMARY')='intent_id',1,0)",
+      "expected": 1
+    }
+  ]
+}

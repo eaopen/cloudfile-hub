@@ -15,19 +15,6 @@ from cloudfile_ext.file_actions.contracts import (
 )
 
 
-def native_lock_request(repo_id, path, username):
-    """Build the C provider contract used by the native lock button."""
-    return {
-        'repo_id': repo_id,
-        'path': path,
-        'owner': username,
-        'kind': 'pro-compatible',
-        'lease_seconds': 12 * 60 * 60,
-        'hard_expire_seconds': 72 * 60 * 60,
-        'source': 'web',
-    }
-
-
 def extension(path):
     """Return a lower-case extension without a dot, or an empty string."""
     return os.path.splitext(path or '')[1].lower().lstrip('.')
