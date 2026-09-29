@@ -158,7 +158,11 @@ def onlyoffice_editor_callback(request):
         # Defines the link to the edited document to be saved with the document storage service.
         # The link is present when the status value is equal to 2 or 3 only.
         url = post_data.get('url')
-        onlyoffice_resp = requests.get(url, verify=VERIFY_ONLYOFFICE_CERTIFICATE)
+        try:
+            onlyoffice_resp = requests.get(url, verify=VERIFY_ONLYOFFICE_CERTIFICATE, timeout=60)
+        except requests.RequestException:
+            logger.error('[OnlyOffice] Could not retrieve document content.')
+            return HttpResponse('{"error": 1}')
         if not onlyoffice_resp:
             logger.error('[OnlyOffice] No response from file content url.')
             return HttpResponse('{"error": 1}')
@@ -179,12 +183,14 @@ def onlyoffice_editor_callback(request):
 
         # update file
         update_url = gen_inner_file_upload_url('update-api', update_token)
-        resp = requests.post(update_url, files=files, data=data)
+        try:
+            resp = requests.post(update_url, files=files, data=data, timeout=120)
+        except requests.RequestException:
+            logger.error('[OnlyOffice] Document publication result is unavailable.')
+            return HttpResponse('{"error": 1}')
         if resp.status_code != 200:
-            logger.error('update_url: {}'.format(update_url))
-            logger.error('repo_id: {}, file_path: {}, content size: {}'.format(
-                repo_id, file_path, len(onlyoffice_resp.content)))
-            logger.error('response: {}'.format(resp.__dict__))
+            logger.error('[OnlyOffice] Document publication failed with status %s.', resp.status_code)
+            return HttpResponse('{"error": 1}')
 
         # 2 - document is ready for saving,
         if status == 2:
