@@ -30,8 +30,11 @@ EXTRA_INSTALLED_APPS = [
 #
 # ON by default (capability and code both live in this stack; METADATA/TAGS ride
 # the official seafile-md-server, which now starts in the default compose stack):
-#   DIR_ACL, AUDIT, METADATA, TAGS, FILE_PREVIEW, FILE_LOCK, CHECKOUT,
-#   FAVORITES_ID, WATCH, FILEOPS, SHARE_RESTRICT
+#   AUDIT, METADATA, TAGS, FILE_PREVIEW, FAVORITES_ID, WATCH, FILEOPS,
+#   SHARE_RESTRICT
+# Legacy DIR_ACL, FILE_LOCK, and CHECKOUT use the v0.1 table shapes. Keep them
+# closed while the current versioned schema and authorization endpoints own
+# those names; enabling them against current tables would reject valid traffic.
 # OFF by default (third-party service, host mount or client install -- see the
 # per-switch comment below):
 #   SSO, SEARCH, ONLYOFFICE, CONVERT_EXPORT, S3_STORAGE, EXTERNAL_SOURCES,
@@ -40,13 +43,13 @@ EXTRA_INSTALLED_APPS = [
 # Operators can invert any switch through the compose .env; these defaults only
 # apply when nothing is configured. Per-switch list: cloudfile-docker's
 # docs/configuration.md.
-CF_ENABLE_DIR_ACL = True
+CF_ENABLE_DIR_ACL = False
 CF_ENABLE_AUDIT = True
 CF_ENABLE_METADATA = True
 CF_ENABLE_TAGS = True
 CF_ENABLE_FILE_PREVIEW = True
-CF_ENABLE_FILE_LOCK = True
-CF_ENABLE_CHECKOUT = True
+CF_ENABLE_FILE_LOCK = False
+CF_ENABLE_CHECKOUT = False
 CF_ENABLE_FAVORITES_ID = True
 CF_ENABLE_WATCH = True
 CF_ENABLE_FILEOPS = True
