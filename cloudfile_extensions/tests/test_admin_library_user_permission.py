@@ -52,7 +52,8 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
             'seahub.auth.utils': dict(get_virtual_id_by_email=self.resolve_email),
             'seahub.profile.models': dict(Profile=self.profile),
             'seahub.share.utils': dict(is_repo_admin=self.management,
-                share_dir_to_user=Mock(), share_dir_to_group=Mock()),
+                share_dir_to_user=Mock(), share_dir_to_group=Mock(),
+                update_user_dir_permission=Mock(), update_group_dir_permission=Mock()),
             'seahub.utils': dict(is_valid_email=valid_email, send_perm_audit_msg=Mock()),
         }.items():
             module = ModuleType(name)
@@ -148,7 +149,7 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         view = module.AdminLibraryAdministrator.as_view()
         self.users.objects.get.side_effect = self.users.DoesNotExist()
         self.target.username = 'imported@auth.local'
-        self.native.get_shared_repo_by_path.return_value = object()
+        self.native.get_shared_repo_by_path.return_value = SimpleNamespace(permission='rw')
         user_grants.objects.get_or_create.return_value = (SimpleNamespace(permission='admin'), True)
 
         def grant():
@@ -164,7 +165,8 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         self.import_user.assert_called_once_with('directory-user@example.com')
         user_grants.objects.get_or_create.assert_called_once_with(
             repo_id='repo', share_to='imported@auth.local',
-            defaults={'permission': 'admin', 'auto_granted_read': False})
+            defaults={'permission': 'admin', 'auto_granted_access': False,
+                      'auto_granted_permission': '', 'auto_grant_previous_permission': ''})
 
         user_grants.objects.get_or_create.reset_mock()
         self.import_user.side_effect = self.users.DoesNotExist()
@@ -175,6 +177,74 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         self.target.is_active = False
         self.assertEqual(grant().status_code, 409)
         user_grants.objects.get_or_create.assert_not_called()
+
+    def test_legacy_administrator_endpoint_keeps_read_only_auto_grant(self):
+        user_grants = Mock()
+        models = ModuleType('seahub.share.models')
+        models.ExtraSharePermission = user_grants
+        models.ExtraGroupsSharePermission = Mock()
+        path = Path(__file__).resolve().parents[2] / 'seahub/api2/endpoints/admin/library_administrator.py'
+        spec = importlib.util.spec_from_file_location('administrator_legacy_fixture', path)
+        module = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, {**self.modules, 'seahub.share.models': models}):
+            spec.loader.exec_module(module)
+        view = module.AdminLibraryAdministrator.as_view()
+        self.native.check_permission.return_value = 'r'
+        self.native.get_shared_repo_by_path.side_effect = [None, SimpleNamespace(permission='r')]
+        user_grants.objects.get_or_create.return_value = (SimpleNamespace(permission='admin'), True)
+        request = self.requests.post('/administrator/', {'subject_type': 'user',
+            'subject': 'alice@example.com'}, format='json')
+        force_authenticate(request, self.actor)
+        with patch.object(module.transaction, 'atomic', nullcontext):
+            result = view(request, repo_id='repo')
+        self.assertEqual(result.status_code, 200)
+        self.modules['seahub.share.utils'].share_dir_to_user.assert_called_once_with(
+            self.native.get_repo.return_value, '/', self.native.get_repo_owner.return_value,
+            self.actor.username, 'alice@example.com', 'r', org_id=None)
+        user_grants.objects.get_or_create.assert_called_once_with(
+            repo_id='repo', share_to='alice@example.com',
+            defaults={'permission': 'admin', 'auto_granted_access': True,
+                      'auto_granted_permission': 'r', 'auto_grant_previous_permission': ''})
+
+        user_grants.objects.select_for_update.return_value.filter.return_value.first.return_value = (
+            SimpleNamespace(auto_granted_access=True, auto_granted_permission='r',
+                            auto_grant_previous_permission=''))
+        self.native.get_shared_repo_by_path.side_effect = None
+        self.native.get_shared_repo_by_path.return_value = SimpleNamespace(permission='r')
+        revoke = self.requests.delete(
+            '/administrator/?subject_type=user&subject=alice%40example.com')
+        force_authenticate(revoke, self.actor)
+        with patch.object(module.transaction, 'atomic', nullcontext):
+            self.assertEqual(view(revoke, repo_id='repo').status_code, 200)
+        self.native.remove_share.assert_called_once_with(
+            'repo', 'owner@example.com', 'alice@example.com')
+
+    def test_one_call_administrator_route_uses_cloudfile_namespace(self):
+        features = ModuleType('cloudfile_ext.views')
+        features.CloudFileFeaturesView = Mock()
+        features.cloudfile_admin_page = Mock()
+        upload = ModuleType('cloudfile_ext.upload_resume.apis')
+        upload.UploadTempFileView = Mock()
+        administrator = ModuleType('seahub.api2.endpoints.admin.library_administrator')
+        administrator.AdminLibraryAdministratorWithAccess = Mock()
+        path = Path(__file__).resolve().parents[2] / 'cloudfile_ext/base.py'
+        spec = importlib.util.spec_from_file_location('cloudfile_base_fixture', path)
+        module = importlib.util.module_from_spec(spec)
+        with patch.dict(sys.modules, {
+                'cloudfile_ext.views': features,
+                'cloudfile_ext.upload_resume.apis': upload,
+                'seahub.api2.endpoints.admin.library_administrator': administrator,
+        }):
+            spec.loader.exec_module(module)
+            registry = Mock()
+            module.register(registry)
+        patterns = registry.register_urls.call_args.args[0]
+        routes = {pattern.name: pattern for pattern in patterns}
+        route = routes['cloudfile-admin-library-administrator-with-access']
+        self.assertIsNotNone(route.pattern.match(
+            'api/v2.1/admin/cloudfile/libraries/11111111-1111-4111-8111-111111111111/'
+            'administrator-with-access/'))
+        administrator.AdminLibraryAdministratorWithAccess.as_view.assert_called_once_with()
 
     def test_administrator_removal_preserves_native_content_shares(self):
         user_grants, group_grants = Mock(), Mock()
@@ -188,7 +258,7 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {**self.modules, 'seahub.share.models': models}):
             spec.loader.exec_module(module)
-        view = module.AdminLibraryAdministrator.as_view()
+        view = module.AdminLibraryAdministratorWithAccess.as_view()
         for kind, subject in [('user', 'alice@example.com'), ('group', '42')]:
             request = self.requests.delete('/administrator/?subject_type=' + kind + '&subject=' + subject)
             force_authenticate(request, self.actor)
@@ -203,6 +273,7 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         self.assertEqual(audit.call_count, 2)
 
         user_grants.objects.get_or_create.return_value = (SimpleNamespace(permission='admin'), True)
+        self.native.get_shared_repo_by_path.return_value = SimpleNamespace(permission='rw')
         request = self.requests.post('/administrator/', {'subject_type': 'user',
             'subject': 'alice@example.com'}, format='json')
         force_authenticate(request, self.actor)
@@ -212,14 +283,15 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         self.assertTrue(granted.data['granted'])
         user_grants.objects.get_or_create.assert_called_once_with(
             repo_id='repo', share_to='alice@example.com',
-            defaults={'permission': 'admin', 'auto_granted_read': False})
+            defaults={'permission': 'admin', 'auto_granted_access': False,
+                      'auto_granted_permission': '', 'auto_grant_previous_permission': ''})
         self.native.share_repo.assert_not_called()
         self.modules['seahub.share.utils'].share_dir_to_user.assert_not_called()
 
-        # Granting an administrator to an unshared user adds only read access.
+        # Granting an administrator to an unshared user adds read-write access.
         user_grants.objects.get_or_create.reset_mock()
         self.native.get_shared_repo_by_path.return_value = None
-        self.native.check_permission.return_value = 'r'
+        self.native.check_permission.return_value = 'rw'
         request = self.requests.post('/administrator/', {'subject_type': 'user',
             'subject': 'alice@example.com'}, format='json')
         force_authenticate(request, self.actor)
@@ -227,15 +299,33 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
             self.assertEqual(view(request, repo_id='repo').status_code, 200)
         self.modules['seahub.share.utils'].share_dir_to_user.assert_called_once_with(
             self.native.get_repo.return_value, '/', self.native.get_repo_owner.return_value,
-            self.actor.username, 'alice@example.com', 'r', org_id=None)
+            self.actor.username, 'alice@example.com', 'rw', org_id=None)
         self.native.get_org_id_by_repo_id.assert_not_called()
         user_grants.objects.get_or_create.assert_called_once_with(
             repo_id='repo', share_to='alice@example.com',
-            defaults={'permission': 'admin', 'auto_granted_read': True})
+            defaults={'permission': 'admin', 'auto_granted_access': True,
+                      'auto_granted_permission': 'rw', 'auto_grant_previous_permission': ''})
+
+        # A direct read-only share is upgraded, then restored when its admin role is removed.
+        self.native.get_shared_repo_by_path.return_value = SimpleNamespace(permission='r')
+        self.native.check_permission.return_value = 'rw'
+        self.modules['seahub.share.utils'].update_user_dir_permission.reset_mock()
+        request = self.requests.post('/administrator/', {'subject_type': 'user',
+            'subject': 'alice@example.com'}, format='json')
+        force_authenticate(request, self.actor)
+        with patch.object(module.transaction, 'atomic', nullcontext):
+            self.assertEqual(view(request, repo_id='repo').status_code, 200)
+        self.modules['seahub.share.utils'].update_user_dir_permission.assert_called_once_with(
+            'repo', '/', self.native.get_repo_owner.return_value,
+            'alice@example.com', 'rw', org_id=None)
+        user_grants.objects.get_or_create.assert_called_with(
+            repo_id='repo', share_to='alice@example.com',
+            defaults={'permission': 'admin', 'auto_granted_access': True,
+                      'auto_granted_permission': 'rw', 'auto_grant_previous_permission': 'r'})
         self.native.get_shared_repo_by_path.return_value = Mock(permission='r')
 
         user_grants.objects.get_or_create.reset_mock()
-        self.native.get_shared_repo_by_path.side_effect = [None, SimpleNamespace(permission='r')]
+        self.native.get_shared_repo_by_path.side_effect = [None, SimpleNamespace(permission='rw')]
         self.native.check_permission.return_value = None
         request = self.requests.post('/administrator/', {'subject_type': 'user',
             'subject': 'alice@example.com'}, format='json')
@@ -249,8 +339,27 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         self.native.get_shared_repo_by_path.return_value = Mock(permission='r')
         self.native.check_permission.return_value = 'rw'
 
+        # If an upgrade RPC succeeds but verification fails, restore the old read share.
+        self.modules['seahub.share.utils'].update_user_dir_permission.reset_mock()
+        self.native.get_shared_repo_by_path.side_effect = [
+            SimpleNamespace(permission='r'), SimpleNamespace(permission='rw')]
+        self.native.check_permission.return_value = None
+        request = self.requests.post('/administrator/', {'subject_type': 'user',
+            'subject': 'alice@example.com'}, format='json')
+        force_authenticate(request, self.actor)
+        with patch.object(module.transaction, 'atomic', nullcontext), self.assertLogs(module.logger, level='ERROR'):
+            self.assertEqual(view(request, repo_id='repo').status_code, 503)
+        self.modules['seahub.share.utils'].update_user_dir_permission.assert_any_call(
+            'repo', '/', 'owner@example.com', 'alice@example.com', 'rw', org_id=None)
+        self.modules['seahub.share.utils'].update_user_dir_permission.assert_any_call(
+            'repo', '/', 'owner@example.com', 'alice@example.com', 'r', org_id=None)
+        self.native.get_shared_repo_by_path.side_effect = None
+        self.native.get_shared_repo_by_path.return_value = Mock(permission='r')
+        self.native.check_permission.return_value = 'rw'
+
         group_grants.objects.get_or_create.return_value = (SimpleNamespace(permission='admin'), True)
-        self.native.get_group_shared_repo_by_path.side_effect = [None, object()]
+        self.native.get_group_shared_repo_by_path.side_effect = [
+            None, SimpleNamespace(permission='rw')]
         self.native.get_org_repo_owner.return_value = None
         request = self.requests.post('/administrator/', {'subject_type': 'group',
             'subject': '42'}, format='json')
@@ -259,11 +368,13 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
             self.assertEqual(view(request, repo_id='repo').status_code, 200)
         self.modules['seahub.share.utils'].share_dir_to_group.assert_called_once_with(
             self.native.get_repo.return_value, '/', self.native.get_repo_owner.return_value,
-            self.actor.username, 42, 'r', org_id=None)
+            self.actor.username, 42, 'rw', org_id=None)
         group_grants.objects.get_or_create.assert_called_once_with(
             repo_id='repo', group_id=42,
-            defaults={'permission': 'admin', 'auto_granted_read': True})
+            defaults={'permission': 'admin', 'auto_granted_access': True,
+                      'auto_granted_permission': 'rw', 'auto_grant_previous_permission': ''})
         self.native.get_group_shared_repo_by_path.side_effect = None
+        self.native.get_group_shared_repo_by_path.return_value = SimpleNamespace(permission='rw')
 
         user_grants.objects.get_admin_users_by_repo.return_value = ['alice@example.com']
         group_grants.objects.get_admin_groups_by_repo.return_value = [42]
@@ -285,12 +396,14 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         force_authenticate(request, self.actor)
         self.assertEqual(view(request, repo_id='repo').status_code, 403)
 
-    def test_administrator_removal_revokes_only_auto_created_read_shares(self):
+    def test_administrator_removal_revokes_only_auto_created_access_shares(self):
         user_grants, group_grants = Mock(), Mock()
         user_grants.objects.select_for_update.return_value.filter.return_value.first.return_value = (
-            SimpleNamespace(auto_granted_read=True))
+            SimpleNamespace(auto_granted_access=True, auto_granted_permission='rw',
+                            auto_grant_previous_permission=''))
         group_grants.objects.select_for_update.return_value.filter.return_value.first.return_value = (
-            SimpleNamespace(auto_granted_read=True))
+            SimpleNamespace(auto_granted_access=True, auto_granted_permission='rw',
+                            auto_grant_previous_permission=''))
         models = ModuleType('seahub.share.models')
         models.ExtraSharePermission = user_grants
         models.ExtraGroupsSharePermission = group_grants
@@ -299,10 +412,10 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         module = importlib.util.module_from_spec(spec)
         with patch.dict(sys.modules, {**self.modules, 'seahub.share.models': models}):
             spec.loader.exec_module(module)
-        view = module.AdminLibraryAdministrator.as_view()
+        view = module.AdminLibraryAdministratorWithAccess.as_view()
         self.native.get_org_repo_owner.return_value = None
-        self.native.get_shared_repo_by_path.return_value = SimpleNamespace(permission='r')
-        self.native.get_group_shared_repo_by_path.return_value = SimpleNamespace(permission='r')
+        self.native.get_shared_repo_by_path.return_value = SimpleNamespace(permission='rw')
+        self.native.get_group_shared_repo_by_path.return_value = SimpleNamespace(permission='rw')
         for kind, subject in [('user', 'alice@example.com'), ('group', '42')]:
             request = self.requests.delete('/administrator/?subject_type=' + kind + '&subject=' + subject)
             force_authenticate(request, self.actor)
@@ -312,12 +425,25 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         self.native.unset_group_repo.assert_called_once_with('repo', 42, 'owner@example.com')
 
         self.native.remove_share.reset_mock()
+        user_grants.objects.select_for_update.return_value.filter.return_value.first.return_value = (
+            SimpleNamespace(auto_granted_access=False))
         self.native.get_shared_repo_by_path.return_value = SimpleNamespace(permission='rw')
         request = self.requests.delete('/administrator/?subject_type=user&subject=alice%40example.com')
         force_authenticate(request, self.actor)
         with patch.object(module.transaction, 'atomic', nullcontext):
             self.assertEqual(view(request, repo_id='repo').status_code, 200)
         self.native.remove_share.assert_not_called()
+
+        user_grants.objects.select_for_update.return_value.filter.return_value.first.return_value = (
+            SimpleNamespace(auto_granted_access=True, auto_granted_permission='rw',
+                            auto_grant_previous_permission='r'))
+        self.native.get_shared_repo_by_path.return_value = SimpleNamespace(permission='rw')
+        request = self.requests.delete('/administrator/?subject_type=user&subject=alice%40example.com')
+        force_authenticate(request, self.actor)
+        with patch.object(module.transaction, 'atomic', nullcontext):
+            self.assertEqual(view(request, repo_id='repo').status_code, 200)
+        self.modules['seahub.share.utils'].update_user_dir_permission.assert_called_once_with(
+            'repo', '/', 'owner@example.com', 'alice@example.com', 'r', org_id=None)
 
     def test_native_management_strict_mode_propagates_storage_errors(self):
         # Load the existing native helper's actual source, without requiring a live Seahub DB.

@@ -16,7 +16,8 @@ from seahub.base.accounts import AuthBackend, User
 from seahub.auth.utils import get_virtual_id_by_email
 from seahub.profile.models import Profile
 from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
-from seahub.share.utils import is_repo_admin, share_dir_to_user, share_dir_to_group
+from seahub.share.utils import (is_repo_admin, share_dir_to_user, share_dir_to_group,
+                                update_user_dir_permission, update_group_dir_permission)
 from seahub.utils import is_valid_email, send_perm_audit_msg
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,10 @@ def _org_repo_owner(repo_id):
 
 
 class AdminLibraryAdministrator(APIView):
+    # Keep the original endpoint's auto-read behavior for existing extensions.
+    # New clients that need a one-call read-write grant use the explicit subclass
+    # registered at /administrator-with-access/.
+    admin_content_permission = 'r'
     authentication_classes = (TokenAuthentication, SessionAuthentication)
     permission_classes = (IsAuthenticated,)
     throttle_classes = (UserRateThrottle,)
@@ -62,15 +67,20 @@ class AdminLibraryAdministrator(APIView):
         return result
 
     @staticmethod
-    def _effective(repo_id, kind, subject, is_org):
+    def _effective(repo_id, kind, subject, is_org, minimum_permission='r'):
         if kind == 'user':
             try:
                 user = User.objects.get(email=subject)
             except User.DoesNotExist:
                 return False
-            return bool(user.is_active and seafile_api.check_permission(repo_id, user.username) in ('r', 'rw'))
-        return bool(ccnet_api.get_group(subject) and
-                    seafile_api.get_group_shared_repo_by_path(repo_id, None, subject, is_org))
+            permission = seafile_api.check_permission(repo_id, user.username)
+            return bool(user.is_active and permission in ('r', 'rw') and
+                        (minimum_permission == 'r' or permission == 'rw'))
+        if not ccnet_api.get_group(subject):
+            return False
+        share = seafile_api.get_group_shared_repo_by_path(repo_id, None, subject, is_org)
+        return bool(share and share.permission in ('r', 'rw') and
+                    (minimum_permission == 'r' or share.permission == 'rw'))
 
     @staticmethod
     def _group_name(group_id):
@@ -84,17 +94,30 @@ class AdminLibraryAdministrator(APIView):
         return seafile_api.get_group_shared_repo_by_path(repo_id, None, subject, is_org)
 
     @classmethod
-    def _remove_auto_read(cls, repo_id, kind, subject):
+    def _restore_auto_access(cls, repo_id, kind, subject, granted_permission,
+                             previous_permission):
         org_owner = _org_repo_owner(repo_id)
         is_org = bool(org_owner)
         share = cls._direct_share(repo_id, kind, subject, is_org)
-        # Preserve an independently upgraded rw share and already absent shares.
-        if not share or share.permission != 'r':
+        # An owner may have changed the share after the automatic grant. Keep that
+        # independent change instead of undoing a permission that no longer matches.
+        if not share or share.permission != granted_permission:
             return
         owner = (org_owner if is_org
                  else seafile_api.get_repo_owner(repo_id))
         if not owner:
             raise RuntimeError('Library owner is unavailable')
+        if previous_permission:
+            if previous_permission != 'r':
+                raise RuntimeError('Unsupported previous library permission')
+            org_id = seafile_api.get_org_id_by_repo_id(repo_id) if is_org else None
+            if kind == 'user':
+                update_user_dir_permission(repo_id, '/', owner, subject, previous_permission,
+                                           org_id=org_id)
+            else:
+                update_group_dir_permission(repo_id, '/', owner, subject, previous_permission,
+                                            org_id=org_id)
+            return
         if is_org:
             org_id = seafile_api.get_org_id_by_repo_id(repo_id)
             if kind == 'user':
@@ -118,11 +141,13 @@ class AdminLibraryAdministrator(APIView):
             is_org = bool(_org_repo_owner(repo_id))
             result = Response({'repo_id': repo_id, 'administrators': [
                 *({'subject_type': 'user', 'subject': Profile.objects.get_contact_email_by_user(user),
-                   'effective': self._effective(repo_id, 'user', user, is_org)}
+                   'effective': self._effective(repo_id, 'user', user, is_org,
+                                                self.admin_content_permission)}
                   for user in sorted(set(users))),
                 *({'subject_type': 'group', 'subject': str(group),
                    'display_name': self._group_name(group),
-                   'effective': self._effective(repo_id, 'group', group, is_org)}
+                   'effective': self._effective(repo_id, 'group', group, is_org,
+                                                self.admin_content_permission)}
                   for group in sorted(set(groups))),
             ]})
             result['Cache-Control'] = 'no-store'
@@ -144,9 +169,11 @@ class AdminLibraryAdministrator(APIView):
                 return denied
             if kind == 'user':
                 target = get_virtual_id_by_email(target)
-            # A library administrator must be able to open the library. Grant
-            # the minimum native read access only when no access already exists.
+            # The legacy API only auto-grants read. The explicit one-call API
+            # overrides this to rw and upgrades a prior direct read-only share.
+            required_permission = self.admin_content_permission
             access_missing = False
+            direct_share = None
             org_owner = _org_repo_owner(repo_id)
             is_org = bool(org_owner)
             if kind == 'user':
@@ -162,7 +189,8 @@ class AdminLibraryAdministrator(APIView):
                 if not user.is_active:
                     return api_error(status.HTTP_409_CONFLICT, 'User is inactive.')
                 # An inherited group share is not a durable grant for this user.
-                access_missing = not self._direct_share(repo_id, kind, user.username, is_org)
+                direct_share = self._direct_share(repo_id, kind, user.username, is_org)
+                access_missing = direct_share is None
                 owner = (org_owner if is_org
                          else seafile_api.get_repo_owner(repo_id))
                 if user.username == owner:
@@ -171,46 +199,78 @@ class AdminLibraryAdministrator(APIView):
             else:
                 if not ccnet_api.get_group(target):
                     return api_error(status.HTTP_404_NOT_FOUND, 'Group not found.')
-                access_missing = not self._direct_share(repo_id, kind, target, is_org)
-            native_created = False
+                direct_share = self._direct_share(repo_id, kind, target, is_org)
+                access_missing = direct_share is None
+            access_needs_upgrade = bool(required_permission == 'rw' and direct_share and
+                                        direct_share.permission == 'r')
+            if direct_share and direct_share.permission not in ('r', 'rw'):
+                return api_error(status.HTTP_409_CONFLICT,
+                                 'Existing library permission cannot be upgraded automatically.')
+            access_needs_change = access_missing or access_needs_upgrade
+            previous_permission = direct_share.permission if direct_share else ''
+            native_access_changed = False
             with transaction.atomic():
                 try:
-                    if access_missing:
+                    if access_needs_change:
                         owner = (org_owner if is_org
                                  else seafile_api.get_repo_owner(repo_id))
                         if not owner:
                             return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Library owner is unavailable.')
                         org_id = seafile_api.get_org_id_by_repo_id(repo_id) if is_org else None
-                        if kind == 'user':
+                        # RPC may fail after applying the share; compensation reads
+                        # back the exact state before restoring or removing it.
+                        native_access_changed = True
+                        if access_missing and kind == 'user':
                             share_dir_to_user(seafile_api.get_repo(repo_id), '/', owner,
-                                              request.user.username, target, 'r', org_id=org_id)
-                        else:
+                                              request.user.username, target, required_permission,
+                                              org_id=org_id)
+                        elif access_missing:
                             share_dir_to_group(seafile_api.get_repo(repo_id), '/', owner,
-                                               request.user.username, target, 'r', org_id=org_id)
-                        native_created = True
-                        if not self._effective(repo_id, kind, target, is_org):
-                            raise RuntimeError('Native library access did not become effective')
+                                               request.user.username, target, required_permission,
+                                               org_id=org_id)
+                        elif kind == 'user':
+                            update_user_dir_permission(repo_id, '/', owner, target,
+                                                       required_permission, org_id=org_id)
+                        else:
+                            update_group_dir_permission(repo_id, '/', owner, target,
+                                                        required_permission, org_id=org_id)
+                        if not self._effective(repo_id, kind, target, is_org,
+                                               required_permission):
+                            raise RuntimeError('Required native library access did not become effective')
                     lookup = {'repo_id': repo_id, 'share_to' if kind == 'user' else 'group_id': target}
                     marker, created = store.objects.get_or_create(
-                        **lookup, defaults={'permission': 'admin', 'auto_granted_read': access_missing})
+                        **lookup, defaults={
+                            'permission': 'admin',
+                            'auto_granted_access': access_needs_change,
+                            'auto_granted_permission': required_permission if access_needs_change else '',
+                            'auto_grant_previous_permission': previous_permission if access_needs_change else '',
+                        })
                     changed = created or marker.permission != 'admin'
                     fields = []
                     if not created:
                         if changed:
                             marker.permission = 'admin'
                             fields.append('permission')
-                        if access_missing and marker.auto_granted_read is not True:
-                            marker.auto_granted_read = True
-                            fields.append('auto_granted_read')
+                        if access_needs_change and marker.auto_granted_access is not True:
+                            marker.auto_granted_access = True
+                            marker.auto_granted_permission = required_permission
+                            marker.auto_grant_previous_permission = previous_permission
+                            fields.extend(['auto_granted_access', 'auto_granted_permission',
+                                           'auto_grant_previous_permission'])
+                        elif access_needs_change and marker.auto_granted_access is True:
+                            if marker.auto_granted_permission != required_permission:
+                                marker.auto_granted_permission = required_permission
+                                fields.append('auto_granted_permission')
                         if fields:
                             marker.save(update_fields=fields)
-                    if changed or access_missing:
+                    if changed or access_needs_change:
                         send_perm_audit_msg('add-repo-perm', request.user.username, str(target),
                                             repo_id, '/', 'grant-admin')
                 except Exception:
-                    if native_created:
+                    if native_access_changed:
                         try:
-                            self._remove_auto_read(repo_id, kind, target)
+                            self._restore_auto_access(repo_id, kind, target, required_permission,
+                                                      previous_permission)
                         except Exception:
                             logger.exception('Failed to compensate library administrator native share')
                     raise
@@ -220,6 +280,7 @@ class AdminLibraryAdministrator(APIView):
         except Exception:
             logger.exception('Library administrator grant failed')
             return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Administrator service unavailable.')
+
 
     def delete(self, request, repo_id):
         if set(request.GET) != {'subject_type', 'subject'} or any(len(request.GET.getlist(k)) != 1 for k in request.GET):
@@ -237,8 +298,11 @@ class AdminLibraryAdministrator(APIView):
             with transaction.atomic():
                 lookup = {'repo_id': repo_id, 'share_to' if kind == 'user' else 'group_id': target}
                 marker = store.objects.select_for_update().filter(**lookup).first()
-                if marker and marker.auto_granted_read is True:
-                    self._remove_auto_read(repo_id, kind, target)
+                if marker and marker.auto_granted_access is True:
+                    self._restore_auto_access(
+                        repo_id, kind, target,
+                        marker.auto_granted_permission or 'r',
+                        marker.auto_grant_previous_permission or '')
                 store.objects.delete_share_permission(repo_id, target)
                 send_perm_audit_msg('modify-repo-perm', request.user.username, str(target),
                                     repo_id, '/', 'revoke-admin')
@@ -246,3 +310,8 @@ class AdminLibraryAdministrator(APIView):
         except Exception:
             logger.exception('Library administrator removal failed')
             return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Administrator service unavailable.')
+
+
+class AdminLibraryAdministratorWithAccess(AdminLibraryAdministrator):
+    """One-call administrator grant that guarantees direct read-write access."""
+    admin_content_permission = 'rw'

@@ -341,7 +341,9 @@ class ExtraGroupsSharePermission(models.Model):
     repo_id = models.CharField(max_length=36, db_index=True)
     group_id = models.IntegerField(db_index=True)
     permission = models.CharField(max_length=30)
-    auto_granted_read = models.BooleanField(default=False)
+    auto_granted_access = models.BooleanField(default=False)
+    auto_granted_permission = models.CharField(max_length=15, blank=True, default='')
+    auto_grant_previous_permission = models.CharField(max_length=15, blank=True, default='')
     objects = ExtraGroupsSharePermissionManager()
 
     class Meta:
@@ -352,7 +354,9 @@ class ExtraSharePermission(models.Model):
     repo_id = models.CharField(max_length=36, db_index=True)
     share_to = models.CharField(max_length=255, db_index=True)
     permission = models.CharField(max_length=30)
-    auto_granted_read = models.BooleanField(default=False)
+    auto_granted_access = models.BooleanField(default=False)
+    auto_granted_permission = models.CharField(max_length=15, blank=True, default='')
+    auto_grant_previous_permission = models.CharField(max_length=15, blank=True, default='')
     objects = ExtraSharePermissionManager()
 
     class Meta:
