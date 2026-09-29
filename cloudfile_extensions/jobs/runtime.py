@@ -13,6 +13,7 @@ import threading
 from uuid import uuid4
 
 from ..migration.dry_run import ImportDryRun
+from ..migration.scan_limits import ScanLimits
 from ..migration.stage import ImportStage
 from ..migration.working_copy import WorkingCopyBuilder
 from ..migration.verify_copy import WorkingCopyVerifier
@@ -41,7 +42,8 @@ def configured_handlers(environment):
     # No import string, shell command or handler path is accepted from the job or
     # environment. Native mutations remain unavailable until their guard exists.
     handlers = {"migration.scan": Handler(ImportDryRun(
-        sources=sources, report_root=environment.get("CLOUDFILE_IMPORT_REPORT_ROOT", "")))}
+        sources=sources, report_root=environment.get("CLOUDFILE_IMPORT_REPORT_ROOT", ""),
+        limits=ScanLimits.from_environment(environment)))}
     work_root = environment.get("CLOUDFILE_IMPORT_WORK_ROOT")
     if work_root is not None:
         handlers["migration.stage"] = Handler(ImportStage(builder=WorkingCopyBuilder(
@@ -100,7 +102,8 @@ def main(argv=None):
         connection = connect_database(os.environ)
         SchemaRunner(connection).require_current()
         worker = JobWorker(JobStore(connection), owner="worker-" + uuid4().hex,
-                           handlers=handlers, lease_seconds=arguments.lease_seconds)
+                           handlers=handlers, lease_seconds=arguments.lease_seconds,
+                           observe=lambda value: print(json.dumps(value), flush=True))
         stop = threading.Event()
         # Finish the active handler before shutdown. A supervisor-enforced kill
         # leaves a recoverable leased attempt and never releases its barrier.

@@ -126,8 +126,10 @@ class ImportDryRunTests(DatabaseTestCase):
             result = self.run_native_worker(source, reports)
             self.assertEqual(result.returncode, 0, result.stderr)
             messages = [json.loads(line) for line in result.stdout.splitlines()]
-            self.assertEqual(messages, [{"state": "ready"}, {"state": "job_processed", "job_id": job_id},
-                                        {"state": "stopped"}])
+            self.assertEqual(messages[0], {"state": "ready"})
+            self.assertEqual(messages[-2:], [{"state": "job_processed", "job_id": job_id}, {"state": "stopped"}])
+            self.assertIn("job_succeeded", [message["state"] for message in messages])
+            self.assertNotIn(source, result.stdout)
             self.assertEqual(self.store.get(job_id)["status"], "succeeded")
             self.assertEqual(len(list(Path(reports).iterdir())), 1)
 
