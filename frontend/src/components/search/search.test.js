@@ -1,5 +1,13 @@
 import Search from './search';
 
+// Icons use Webpack's require.context, which is unavailable in Jest.
+jest.mock('@/components/icon', () => ({
+  __esModule: true,
+  default: () => null,
+}));
+// This test exercises visited-item storage without loading editor renderers.
+jest.mock('./details', () => () => null);
+
 describe('Search visited results', () => {
   beforeEach(() => {
     localStorage.clear();
