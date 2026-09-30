@@ -10,6 +10,8 @@ from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from cloudfile_extensions.authorization.browsing import web_list
+from cloudfile_ext.directory_page import (
+    read_directory_page, DirectoryPageError, DirectoryRevisionChanged)
 from rest_framework.views import APIView
 from rest_framework import status
 from urllib.parse import quote
@@ -56,13 +58,17 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
 
     # get dirent(folder and file) list
     parent_dir_id = dir_id or seafile_api.get_dir_id_by_path(repo_id, parent_dir)
-    dir_file_list = seafile_api.list_dir_with_perm(repo_id,
-            parent_dir, parent_dir_id, username, offset,
-            page_size + 1 if page_size is not None else -1)
-    # Count before invisible/ACL filtering: continuation follows native offsets.
-    has_more = page_size is not None and len(dir_file_list) > page_size
-    if has_more:
-        dir_file_list = dir_file_list[:page_size]
+    page = None
+    if page_size is not None:
+        # Server filters after scanning. Only its raw cursor can survive a
+        # short/empty authorized window, so do not probe with page_size + 1.
+        page = read_directory_page(seafile_api, repo_id, parent_dir,
+                                   parent_dir_id, username, offset, page_size)
+        dir_file_list = page.items
+    else:
+        # Preserve the unlimited objlist API for existing non-paged callers.
+        dir_file_list = seafile_api.list_dir_with_perm(
+            repo_id, parent_dir, parent_dir_id, username, offset, -1)
 
     try:
         starred_items = UserStarredFiles.objects.filter(email=username,
@@ -240,7 +246,7 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
     dir_info_list.sort(key=lambda x: x['name'].lower())
     file_info_list.sort(key=lambda x: x['name'].lower())
 
-    return dir_info_list, file_info_list, has_more
+    return dir_info_list, file_info_list, page
 
 
 class DirView(APIView):
@@ -400,15 +406,19 @@ class DirView(APIView):
         try:
             for parent_dir in parent_dir_list:
                 # get dir file info list
-                dir_info_list, file_info_list, page_has_more = get_dir_file_info_list(username,
+                dir_info_list, file_info_list, page_state = get_dir_file_info_list(username,
                         request_type, repo, parent_dir, with_thumbnail, thumbnail_size,
                         start if paged else -1, limit if paged else None,
                         dir_id if paged else None)
-                if paged:
-                    has_more = page_has_more
                 all_dir_info_list.extend(dir_info_list)
                 all_file_info_list.extend(file_info_list)
                 current_dir_info_list = dir_info_list  # Save last iteration for metadata
+        except DirectoryRevisionChanged:
+            # Also catches a change between Hub's precheck and the native RPC.
+            return api_error(status.HTTP_409_CONFLICT, 'Folder changed; restart paging.')
+        except DirectoryPageError:
+            # An old server or malformed envelope must not silently truncate.
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Directory pagination unavailable.')
         except Exception as e:
             logger.error(e)
             error_msg = 'Internal Server Error'
@@ -418,8 +428,13 @@ class DirView(APIView):
         response_dict["user_perm"] = permission
         response_dict["dir_id"] = dir_id
         if paged:
-            response_dict['has_more'] = has_more
-            response_dict['next_start'] = start + limit if has_more else None
+            # Mapping preserves the existing HTTP fields; later authorization
+            # and type filtering may remove items without changing this state.
+            response_dict['dir_id'] = page_state.dir_revision
+            response_dict['has_more'] = not page_state.scan_exhausted
+            response_dict['next_start'] = page_state.next_scan_position
+            response_dict['scanned_count'] = page_state.scanned_count
+            response_dict['scan_exhausted'] = page_state.scan_exhausted
 
         # Check if metadata is enabled for this repo
         repo_metadata = RepoMetadata.objects.filter(repo_id=repo_id).first()
