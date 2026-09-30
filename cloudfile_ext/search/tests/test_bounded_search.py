@@ -42,7 +42,7 @@ def test_empty_index_result_does_not_trigger_fallback():
 def test_backend_fault_reads_one_directory_page_without_children():
     client=Mock();client._call.side_effect=MeilisearchError('offline')
     listing=Mock(return_value=[entry('drawing.txt'),entry('drawing-folder',True),entry('other.txt')])
-    result,args=invoke(client=client,list_directory=listing)
+    result,args=invoke(client=client,list_directory=listing,can_read=lambda p:p!='/a/drawing-folder')
     listing.assert_called_once_with('/a',0,500)
     assert [x['path'] for x in result['data']]==['/a/drawing.txt']
     assert result['scope']=='directory' and result['fallback'] is True
@@ -59,6 +59,17 @@ def test_large_directory_continuation_reads_one_page_and_is_not_silently_cut_off
     result, _ = invoke(provider='native', client=None, offset=10000, list_directory=listing)
     listing.assert_called_once_with('/a', 10000, 500)
     assert result['next_offset'] == 10500
+
+
+def test_fallback_includes_direct_folders_but_checks_each_target_without_descending():
+    listing = Mock(return_value=[entry('drawing-folder', True), entry('drawing.txt')])
+    resolve = Mock(side_effect=lambda p: entry(directory=p.endswith('folder')))
+    result, _ = invoke(client=None, list_directory=listing, resolve_item=resolve)
+    assert [(item['path'], item['type']) for item in result['data']] == [
+        ('/a/drawing-folder', 'folder'), ('/a/drawing.txt', 'file')]
+    listing.assert_called_once_with('/a', 0, 500)
+    result, _ = invoke(client=None, list_directory=listing, can_read=lambda p:p!='/a/drawing.txt')
+    assert [item['path'] for item in result['data']] == ['/a/drawing-folder']
 
 
 def test_index_cursor_does_not_switch_provider_on_fault():

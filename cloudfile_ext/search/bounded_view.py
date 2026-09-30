@@ -11,13 +11,13 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
-from seahub.views import check_folder_permission
-from seahub.search.utils import get_invisible_repos_info_by_username, is_invisible_path
-from seahub.utils import is_org_context
+from cloudfile_ext.hooks import check_permission
 from seahub.utils.timeutils import timestamp_to_isoformat_timestr
 from seaserv import seafile_api
 from .backends.meilisearch import client_from_settings
 from .bounded import SearchFailure, query_page, validate
+from .access import SearchAccess
+from .access_runtime import read_snapshot
 
 
 class BoundedSearch(APIView):
@@ -32,8 +32,17 @@ class BoundedSearch(APIView):
             repo = seafile_api.get_repo(repo_id)
             if repo is None:
                 raise SearchFailure('NOT_FOUND', 'Library not found', 404)
-            scope = dict(user=request.user.username, repo=repo_id, q=q, path=path, limit=limit,
-                head=repo.head_cmmt_id)
+            username = request.user.username
+            def native_permission(target):
+                native = seafile_api.check_permission_by_path(repo_id, target, username)
+                if native not in ('r', 'rw'):
+                    return None
+                # Preserve all registered narrowing hooks without the upstream
+                # readonly-status shortcut that can bypass native eligibility.
+                return check_permission(username, repo_id, target, native)
+            access = SearchAccess(lambda: read_snapshot(username, repo_id), native_permission)
+            scope = dict(user=username, repo=repo_id, q=q, path=path, limit=limit,
+                head=repo.head_cmmt_id, policy=access.version)
             offset, provider = 0, None
             cursor = request.GET.get('cursor')
             if cursor:
@@ -43,17 +52,14 @@ class BoundedSearch(APIView):
                 if saved.get('scope') != scope:
                     raise signing.BadSignature()
                 offset, provider = saved['offset'], saved['provider']
-            invisible = get_invisible_repos_info_by_username(scope['user'],
-                request.user.org.org_id if is_org_context(request) else None)
-            def can_read(target):
-                return bool(check_folder_permission(request, repo_id, target)) and not is_invisible_path(invisible, repo_id, target)
             client = client_from_settings() if getattr(settings, 'CF_PROVIDER_SEARCH', '') == 'meilisearch' else None
             result = query_page(repo_id=repo_id, q=q, path=path, limit=limit, offset=offset,
-                provider=provider, client=client, can_read=can_read,
+                provider=provider, client=client, can_read=access,
                 list_directory=lambda p, start, size: seafile_api.list_dir_by_path(repo_id, p, start, size),
                 resolve_item=lambda p: seafile_api.get_dirent_by_path(repo_id, p))
+            access.assert_current()
             current = seafile_api.get_repo(repo_id)
-            if current is None or current.head_cmmt_id != scope['head'] or not can_read(path):
+            if current is None or current.head_cmmt_id != scope['head']:
                 raise SearchFailure('SEARCH_CHANGED', 'Library or permissions changed; search again')
             for item in result['data']:
                 item['mtime'] = timestamp_to_isoformat_timestr(item['mtime'])

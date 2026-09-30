@@ -38,7 +38,7 @@ def query_page(*, repo_id, q, path, limit, offset, provider, client,
     """Candidates never grant permission; resolve current native items per hit.
 
     One Meili request or one native directory page, at most 100 returned items.
-    Native mode searches file names in this directory, without entering children.
+    Native mode searches file/folder names here, without entering children.
     """
     deadline = time.monotonic() + 10
     repo_id, q, path, limit = validate(repo_id, q, path, limit)
@@ -75,7 +75,7 @@ def query_page(*, repo_id, q, path, limit, offset, provider, client,
         if time.monotonic() >= deadline or len(entries) > 500:
             raise SearchFailure('SEARCH_UNAVAILABLE', 'Invalid directory page')
         candidates = [dict(repo_id=repo_id, path=posixpath.join(path, e.obj_name))
-            for e in entries if stat.S_ISREG(e.mode) and q.casefold() in e.obj_name.casefold()]
+            for e in entries if (stat.S_ISREG(e.mode) or stat.S_ISDIR(e.mode)) and q.casefold() in e.obj_name.casefold()]
         next_offset = offset + len(entries) if len(entries) == 500 else None
     else:
         provider = 'meilisearch'
@@ -95,14 +95,12 @@ def query_page(*, repo_id, q, path, limit, offset, provider, client,
         seen.add(candidate_path)
         # Current CE/C existence and current read permission replace index metadata.
         parent = posixpath.dirname(candidate_path) or '/'
-        if not can_read(parent):
+        if not can_read(parent) or not can_read(candidate_path):
             continue
         entry = resolve_item(candidate_path)
         if entry is None:
             continue
         directory = stat.S_ISDIR(entry.mode)
-        if directory and not can_read(candidate_path):
-            continue
         tags = hit.get('tags') or []
         if not isinstance(tags, list) or any(not isinstance(t, str) for t in tags):
             raise SearchFailure('SEARCH_UNAVAILABLE', 'Invalid indexed tags')
