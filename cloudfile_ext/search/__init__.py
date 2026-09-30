@@ -52,10 +52,13 @@ def register(registry):
 
     from cloudfile_ext.search.views import Search, PublishedRepoSearchView
 
+    from cloudfile_ext.search.bounded_view import BoundedSearch
+
     # Always shadow both Pro-gated endpoints once the capability is on,
     # regardless of which backend answers -- the gate and the backend
     # selection are orthogonal (see module docstring).
     registry.register_urls([
+        path('api/v2.1/cloudfile/search/', BoundedSearch.as_view(), name='cloudfile-bounded-search'),
         path('api2/search/', Search.as_view(), name='cloudfile-search'),
         path('api/v2.1/published-repo-search/',
              PublishedRepoSearchView.as_view(),

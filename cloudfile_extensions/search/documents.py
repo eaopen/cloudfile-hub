@@ -10,11 +10,12 @@ from ..common.errors import invalid
 from ..common.validation import identifier, sequence
 from ..resources.paths import resource_ref
 from ..tags.definitions import label_value, uuid_value
+from .scope import ancestor_dirs
 
 
 INDEX_SETTINGS = {
     "searchableAttributes": ["name", "path", "description", "tag_labels", "tag_codes"],
-    "filterableAttributes": ["repo_id", "kind", "tag_ids"],
+    "filterableAttributes": ["repo_id", "kind", "tag_ids", "dirs"],
     "displayedAttributes": ["repo_id", "path", "kind"],
 }
 
@@ -67,5 +68,6 @@ def resource_document(reference, *, source_sequence, annotation=None):
                 tag_ids.append(tag_id)
                 labels.append(label)
                 codes.append(code)
-    return dict(id=key, **ref, name=ref["path"].rsplit("/", 1)[-1], description=description,
+    return dict(id=key, **ref, dirs=ancestor_dirs(ref["path"], ref["kind"]),
+        name=ref["path"].rsplit("/", 1)[-1], description=description,
         tag_ids=tag_ids, tag_labels=labels, tag_codes=codes, resource_uid=uid, source_sequence=source_sequence)

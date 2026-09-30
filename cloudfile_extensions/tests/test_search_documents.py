@@ -20,6 +20,16 @@ class SearchDocumentsTest(TestCase):
         self.assertNotEqual(document_key(self.ref), document_key({**self.ref, "path": "/b.prt"}))
         self.assertNotEqual(document_key(self.ref), document_key({**self.ref, "kind": "dir"}))
 
+    def test_directory_tokens_preserve_boundaries_and_literal_path_names(self):
+        for path, kind, expected in (
+                ('/a/b/c.txt', 'file', ['/', '/a', '/a/b']),
+                ('/ab/c.txt', 'file', ['/', '/ab']),
+                ('/中文/%2F+_"/c', 'file', ['/', '/中文', '/中文/%2F+_"']),
+                ('/a/b', 'dir', ['/', '/a']), ('/', 'dir', [])):
+            result = resource_document({**self.ref, 'path': path, 'kind': kind}, source_sequence='1')
+            self.assertEqual(result['dirs'], expected)
+        self.assertIn('dirs', INDEX_SETTINGS['filterableAttributes'])
+
     def test_only_enabled_tags_and_no_project_or_permission_attributes(self):
         tag = dict(tag_id="22222222-2222-2222-2222-222222222222", kind="user", enabled=True,
             label="工艺", code="drawing", scope_repo_id=self.ref["repo_id"], color="#FF0000")

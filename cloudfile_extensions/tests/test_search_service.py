@@ -38,6 +38,12 @@ class SearchServiceTest(TestCase):
             self.service.query(dict(q="drawing", repo_id=self.repo))
         self.cursors.issue.assert_not_called()
 
+    def test_scope_is_passed_to_candidate_query_not_only_filtered_afterwards(self):
+        self.service.query(dict(q='drawing', repo_id=self.repo, path='/a/', kind='file'))
+        self.backend.page.assert_called_once_with(q='drawing', repo_id=self.repo,
+            path='/a', kind='file', tag_ids=[], offset=0, limit=50)
+        self.resources.batch_resolve.assert_not_called()
+
     def test_subject_change_discards_results(self):
         self.resources.read_authority.preparation.contexts.current.side_effect = [dict(context_epoch="old"), dict(context_epoch="new")]
         with self.assertRaises(ContractError):

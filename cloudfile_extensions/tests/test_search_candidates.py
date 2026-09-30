@@ -41,6 +41,20 @@ class SearchCandidatesTest(TestCase):
                 self.backend.page(q="x", repo_id=self.repo)
             self.assertEqual(caught.exception.code, "SEARCH_UNAVAILABLE")
 
+    def test_directory_and_kind_filters_are_sent_before_pagination(self):
+        path = '/中文/%2F+_"'
+        self.response(dict(hits=[dict(repo_id=self.repo, path=path + '/drawing', kind='file')]))
+        self.backend.page(q='drawing', repo_id=self.repo, path=path, kind='file')
+        payload = json.loads(self.backend.opener.open.call_args.args[0].data)
+        self.assertIn('dirs = ' + json.dumps(path, ensure_ascii=False), payload['filter'])
+        self.assertIn('kind = "file"', payload['filter'])
+
+    def test_sibling_prefix_and_wrong_kind_cannot_escape_scope(self):
+        for path, kind in (('/ab/drawing', 'file'), ('/a/drawing', 'dir'), ('/a', 'dir')):
+            self.response(dict(hits=[dict(repo_id=self.repo, path=path, kind=kind)]))
+            with self.assertRaises(ContractError):
+                self.backend.page(q='drawing', repo_id=self.repo, path='/a', kind='file')
+
     def test_bad_input_never_calls_network(self):
         for q in ("", "x" * 513, "\ud800"):
             with self.assertRaises(ContractError):

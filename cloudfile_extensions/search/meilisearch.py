@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
 from ..common.errors import ContractError
-from ..resources.paths import resource_ref
+from ..resources.paths import normalize_path, resource_ref
 
 
 class _NoRedirect(HTTPRedirectHandler):
@@ -41,17 +41,26 @@ class MeilisearchCandidates:
         self.key, self.clock = key, clock
         self.opener = build_opener(ProxyHandler({}), _NoRedirect())
 
-    def page(self, *, q, repo_id, offset=0, limit=100, tag_ids=()):
+    def page(self, *, q, repo_id, path='/', kind=None, offset=0, limit=100, tag_ids=()):
         try:
             if (not isinstance(q, str) or not q.strip() or len(q) > 512 or
                     type(offset) is not int or not 0 <= offset <= 10000 or
                     type(limit) is not int or not 1 <= limit <= 100 or
-                    not isinstance(tag_ids, (list, tuple)) or len(tag_ids) > 32):
+                    not isinstance(tag_ids, (list, tuple)) or len(tag_ids) > 32 or kind not in (None, 'file', 'dir')):
+                raise ValueError()
+            path = normalize_path(path, 'dir')
+            if len(path.encode('utf-8')) > 4096:
                 raise ValueError()
             ref = resource_ref(dict(repo_id=repo_id, path="/", kind="dir"))
             from uuid import UUID
             tags = [str(UUID(tag)) for tag in tag_ids]
             filters = ["repo_id = " + json.dumps(ref["repo_id"])]
+            # Apply directory scope before ranking/pagination. Filtering a
+            # whole-library page afterwards wastes candidates and hides hits.
+            if path != '/':
+                filters.append('dirs = ' + json.dumps(path, ensure_ascii=False))
+            if kind is not None:
+                filters.append('kind = ' + json.dumps(kind))
             filters.extend("tag_ids = " + json.dumps(tag) for tag in tags)
             payload = json.dumps(dict(q=q, offset=offset, limit=limit, filter=filters,
                 attributesToRetrieve=["repo_id", "path", "kind"]), ensure_ascii=False).encode("utf-8")
@@ -82,7 +91,9 @@ class MeilisearchCandidates:
             candidates = []
             for hit in document["hits"]:
                 candidate = resource_ref(hit)
-                if candidate["repo_id"] != ref["repo_id"] or len(candidate["path"].encode("utf-8")) > 4096:
+                if (candidate["repo_id"] != ref["repo_id"] or len(candidate["path"].encode("utf-8")) > 4096 or
+                        (path != '/' and not candidate['path'].startswith(path + '/')) or
+                        (kind is not None and candidate['kind'] != kind)):
                     raise ValueError()
                 candidates.append(candidate)
             # Never return estimatedTotalHits/facets/highlight or index-provided grants.

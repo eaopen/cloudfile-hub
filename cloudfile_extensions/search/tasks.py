@@ -6,6 +6,7 @@ from urllib.request import Request
 
 from .documents import INDEX_SETTINGS, document_key
 from .meilisearch import MeilisearchCandidates, _object, unavailable
+from .scope import ancestor_dirs
 
 
 class MeilisearchTasks(MeilisearchCandidates):
@@ -45,13 +46,14 @@ class MeilisearchTasks(MeilisearchCandidates):
         return value["taskUid"]
 
     def replace_documents(self, documents):
-        fields = {"id", "repo_id", "path", "kind", "name", "description", "tag_ids", "tag_labels", "tag_codes", "resource_uid", "source_sequence"}
+        fields = {"id", "repo_id", "path", "kind", "dirs", "name", "description", "tag_ids", "tag_labels", "tag_codes", "resource_uid", "source_sequence"}
         if not isinstance(documents, list) or not 1 <= len(documents) <= 100:
             raise ValueError("bounded document batch required")
         seen = set()
         for document in documents:
             if (not isinstance(document, dict) or set(document) != fields or
-                    document["id"] != document_key({name: document[name] for name in ("repo_id", "path", "kind")}) or document["id"] in seen):
+                    document["id"] != document_key({name: document[name] for name in ("repo_id", "path", "kind")}) or document["id"] in seen or
+                    document['dirs'] != ancestor_dirs(document['path'], document['kind'])):
                 raise ValueError("trusted unique resource projections required")
             seen.add(document["id"])
         value = self._request(self.index_url + "/documents?primaryKey=id", method="POST", data=documents, status=202)

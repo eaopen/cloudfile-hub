@@ -1,6 +1,6 @@
 """Request-scoped candidate query with actual resource authorization.
 
-No route/factory is registered. Version reader must be a trusted durable index
+Version reader must be a trusted durable index
 and policy-state adapter; a caller-provided version is never accepted.
 """
 import time
@@ -61,7 +61,8 @@ class ResourceSearchService:
         scope = dict(user_id=authority.actor, context_epoch=current["context_epoch"],
             policy_revision=versions["policy_revision"], index_generation=versions["index_generation"], query=query)
         offset, expiry = (0, None) if request.get("cursor") is None else self.cursors.resolve(request["cursor"], scope=scope)
-        candidates = self.backend.page(q=q, repo_id=repo, tag_ids=tags, offset=offset, limit=limit)
+        candidates = self.backend.page(q=q, repo_id=repo, path=path, kind=query['kind'],
+            tag_ids=tags, offset=offset, limit=limit)
         references = [ref for ref in candidates["references"] if is_descendant_or_equal(ref["path"], path) and
             (query["kind"] is None or ref["kind"] == query["kind"])]
         if self.clock() >= deadline:
