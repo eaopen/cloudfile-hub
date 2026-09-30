@@ -19,6 +19,7 @@ django.conf.
 
 import errno
 import os
+import sys
 
 import pytest
 
@@ -177,10 +178,12 @@ def test_unreachable_mount_raises_source_error_not_not_found(share, monkeypatch,
     assert not isinstance(caught.value, SourceNotFound)
 
 
-def test_roots_default_when_nothing_is_injected():
+def test_roots_default_when_nothing_is_injected(monkeypatch):
     """No allow-list and no Django still means the restrictive default.
 
     Never "allow everything": that is the reading which turns a missing setting
     into an admin API that can register '/'.
     """
+    # Exercise the documented no-Django case even in a full Hub test environment.
+    monkeypatch.setitem(sys.modules, 'django.conf', None)
     assert LocalPathSource()._roots() == paths.DEFAULT_ROOTS

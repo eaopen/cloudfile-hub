@@ -83,6 +83,36 @@ class RoutingTest(unittest.TestCase):
             assert response.json()["capabilities"]["auth.oidc"]["enabled"] is False
             assert response.json()["capabilities"]["audit.log"]["enabled"] is False
             assert client.get("/api/v2.1/cloudfile/extensions/annotations/v1/resources/").status_code == 404
+            # Current .NET device/read routes and next-generation editing routes
+            # coexist by capability, never by client language or replacement URL.
+            from django.urls import Resolver404
+            agent_prefix = "/api/v2.1/cloudfile/extensions/local-edit/v1/agent/"
+            agent_operations = ("challenge", "claim", "read-challenge", "read-ticket",
+                "renew-challenge", "renew", "cancel-challenge", "cancel")
+            for operation in agent_operations:
+                assert resolve(agent_prefix + operation + "/").url_name == "local-agent-" + operation
+            edit_prefix = "/api/v2.1/cloudfile/extensions/editing/v1/"
+            try:
+                resolve(edit_prefix + "checkout/")
+            except Resolver404:
+                pass
+            else:
+                raise AssertionError("editing is mounted by default")
+            root = importlib.import_module("cloudfile_extensions.root_urls")
+            settings.CLOUDFILE_EDITING_ENABLED = True
+            importlib.reload(root)
+            clear_url_caches()
+            for operation in ("status", "checkout", "heartbeat", "resume", "abandon",
+                    "cancel", "checkin", "commit-file"):
+                assert resolve(edit_prefix + operation + "/").url_name == "editing-" + operation
+            for operation in agent_operations:
+                assert resolve(agent_prefix + operation + "/").url_name == "local-agent-" + operation
+            assert client.post(edit_prefix + "checkout/").status_code == 401
+            settings.CLOUDFILE_EDITING_ENABLED = False
+            importlib.reload(root)
+            clear_url_caches()
+            assert client.post(agent_prefix + "challenge/").status_code == 401
+            assert client.post(edit_prefix + "checkout/").status_code == 404
             from django.core.exceptions import ImproperlyConfigured
             from cloudfile_extensions.registry import RESERVED_DOMAINS
             root = importlib.import_module("cloudfile_extensions.root_urls")
