@@ -10,12 +10,12 @@ from cloudfile_extensions.directory.protocol import validate_subject
 from cloudfile_extensions.resources.paths import is_descendant_or_equal, normalize_path
 
 
-CONTRACTS = Path(__file__).resolve().parents[3] / "eap-cloudfile" / "contracts"
+CONTRACTS = Path(__file__).resolve().parent / "contracts" / "common.json"
 
 
 class PathContractTest(unittest.TestCase):
     def test_shared_path_vectors(self):
-        vectors = json.loads((CONTRACTS / "acceptance-vectors.json").read_text())
+        vectors = json.loads(CONTRACTS.read_text())
         for case in vectors["path_cases"]:
             with self.subTest(case=case["id"]):
                 source, expected = case["input"], case["expected"]
@@ -101,8 +101,7 @@ class CursorTest(unittest.TestCase):
 
 class SubjectProtocolTest(unittest.TestCase):
     def setUp(self):
-        examples = json.loads((CONTRACTS / "schema-examples.json").read_text())
-        self.subject = next(case["value"] for case in examples["cases"] if case["id"] == "schema-subject-valid")
+        self.subject = json.loads(CONTRACTS.read_text())["subject_snapshot"]
         self.allowed = {"employee_no", "display_name", "email"}
 
     def test_latest_typed_subject_and_disabled_are_distinct(self):
