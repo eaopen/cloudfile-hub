@@ -236,6 +236,10 @@ class AuthorizedAuditQuery:
                 self.cursor = self.repo_id = self.epoch = None
                 self.managed = False
                 self.whole_library = False
-                self.management.epoch = self.management.current_subject = self.management.effective_access = None
-                self.management.is_owner = False
+                # Whole-library queries consume this very management authority.
+                # Its outer transaction must still finalize the retained epoch
+                # and native qualification before the authority clears itself.
+                if scope_authority is not self.management:
+                    self.management.epoch = self.management.current_subject = self.management.effective_access = None
+                    self.management.is_owner = False
         return scope_authority.consume(root, read)

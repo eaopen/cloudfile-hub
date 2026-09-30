@@ -65,3 +65,12 @@ class SearchEventDispositionTest(TestCase):
     def test_unknown_identity_event_and_global_tag_update_are_not_ignored(self):
         self.assertTrue(projection_required(dict(source="hub", action="identity.unknown", result="succeeded")))
         self.assertTrue(projection_required(dict(source="hub", action="tags.definition.updated", result="succeeded", reason="tag_id:11111111-1111-4111-8111-111111111111")))
+
+    def test_exact_directory_membership_fact_is_not_indexed_as_file_metadata(self):
+        fact = dict(event_id="11111111-1111-4111-8111-111111111111", occurred_at="2026-09-30T00:00:00Z",
+            request_id="request", actor_user_id="employee", actor_kind="user", source="directory",
+            action="subject.memberships", result="succeeded", subject_revision="epoch")
+        self.assertFalse(projection_required(fact))
+        for changes in (dict(source="hub"), dict(result="failed"), dict(actor_kind="service"),
+                dict(resource_uid="unexpected"), dict(subject_revision="")):
+            self.assertTrue(projection_required({**fact, **changes}))

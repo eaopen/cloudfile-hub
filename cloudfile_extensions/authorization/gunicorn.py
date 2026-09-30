@@ -41,9 +41,11 @@ def post_worker_init(worker):
             len(settings.CLOUDFILE_RESOURCE_SECRET) < 32 or
             not callable(getattr(settings, "CLOUDFILE_RESOURCE_LIFECYCLE_READER", None))):
         raise RuntimeError("annotations require OIDC, a fixed resource secret and a trusted native lifecycle reader")
+    from ..search.configuration import require_configuration
+    search_config = require_configuration(settings)
     config = getattr(settings, "CLOUDFILE_POLICY_CONFIG", None)
     if config is None:
-        if local_edit_enabled or authorization_enabled or transfer_enabled or oidc_enabled or annotations_enabled or audit_query_enabled or editing_enabled:
+        if local_edit_enabled or authorization_enabled or transfer_enabled or oidc_enabled or annotations_enabled or audit_query_enabled or editing_enabled or search_config is not None:
             raise RuntimeError("enabled CloudFile routes require the post-fork policy worker")
         _host = None
         return
@@ -75,7 +77,15 @@ def post_worker_init(worker):
             _host.close()
             _host = None
             raise RuntimeError("enabled OIDC requires a configured login runtime")
+        if search_config is not None:
+            from ..search.host import SearchHost
+            _host.deployment.search_host = SearchHost(_host.deployment, search_config,
+                lifecycle_reader=settings.CLOUDFILE_RESOURCE_LIFECYCLE_READER,
+                resource_secret=settings.CLOUDFILE_RESOURCE_SECRET)
     except Exception:
+        if _host is not None:
+            _host.close()
+            _host = None
         raise RuntimeError("CloudFile policy worker initialization failed; check trusted configuration") from None
 
 
@@ -104,6 +114,12 @@ def editing_service(request, request_id):
     if _host is None or _host.pid != os.getpid():
         raise ContractError("EDIT_UNAVAILABLE", "Editing worker is unavailable", 503)
     return _host.editing_service(request, request_id)
+
+
+def search_service(request, request_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("SEARCH_UNAVAILABLE", "Search worker is unavailable", 503)
+    return _host.search_service(request, request_id)
 
 
 def audit_service(request, request_id):

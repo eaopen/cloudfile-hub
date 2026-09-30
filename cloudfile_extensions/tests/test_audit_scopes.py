@@ -63,3 +63,20 @@ class AuditScopeTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+    def test_library_query_keeps_management_epoch_until_transaction_finalizes(self):
+        query = AuthorizedAuditQuery.__new__(AuthorizedAuditQuery)
+        query.authority = Mock(actor="alice", epoch="epoch")
+        query.management = Mock(actor="alice", epoch="epoch", current_subject={"userId": "alice"}, is_owner=True)
+        query.management.authorize.return_value = True
+        query.service = Mock()
+        query.service.events.return_value = {"items": [], "next_cursor": None}
+        def consume(reference, reader):
+            value = reader(Mock(), reference)
+            self.assertEqual(query.management.epoch, "epoch")
+            self.assertTrue(query.management.is_owner)
+            query.management.epoch = None
+            return value
+        query.management.consume.side_effect = consume
+        query.events(WINDOW, scope="library", event_class="updates")
+        self.assertIsNone(query.management.epoch)

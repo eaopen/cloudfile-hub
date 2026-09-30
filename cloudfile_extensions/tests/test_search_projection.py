@@ -38,3 +38,8 @@ class AttributeSearchProjectionTest(TestCase):
         with self.assertRaises(ContractError):
             self.projector.plan(self.claim)
         self.reader.assert_not_called()
+
+    def test_user_and_system_binding_events_use_current_resource_projection(self):
+        for actor_kind in ("user", "service"):
+            self.claim.payload.update(action="tags.bindings.updated", actor_kind=actor_kind)
+            self.assertEqual(self.projector.plan(self.claim)[0]["payload"][0]["resource_uid"], self.uid)

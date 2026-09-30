@@ -57,6 +57,9 @@ if getattr(settings, "CLOUDFILE_EDITING_ENABLED", False):
 if getattr(settings, "CLOUDFILE_TRANSFER_ENABLED", False):
     urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/transfer/",
         include("cloudfile_extensions.transfer.urls")))
+if getattr(settings, "CLOUDFILE_RESOURCE_SEARCH_ENABLED", False):
+    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/search/",
+        include("cloudfile_extensions.search.urls")))
 if getattr(settings, "CLOUDFILE_AUDIT_QUERY_ENABLED", False):
     urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/audit/",
         include("cloudfile_extensions.events.urls")))

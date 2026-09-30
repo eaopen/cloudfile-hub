@@ -35,10 +35,14 @@ class GuardedSearchRequest:
 
 
 class SearchQueryFactory:
-    def __init__(self, *, resources, connection_factory, redis_scope, response_scope,
-                 endpoint, index, read_key, generation, cursor_secret):
+    def __init__(self, *, resources, connection_factory, redis_scope,
+                 endpoint, index, read_key, generation, cursor_secret,
+                 response_scope=None, request_response_scope=None):
         if (not isinstance(resources, ResourceServiceFactory) or not callable(connection_factory) or
-                not callable(redis_scope) or not callable(response_scope) or
+                not callable(redis_scope) or
+                (callable(response_scope) == callable(request_response_scope)) or
+                (response_scope is not None and not callable(response_scope)) or
+                (request_response_scope is not None and not callable(request_response_scope)) or
                 not isinstance(cursor_secret, bytes) or len(cursor_secret) < 32):
             raise ValueError("owned resource/SQL/Redis runtime and real response guard required")
         SearchGenerationStore._identity(generation, index)
@@ -47,6 +51,7 @@ class SearchQueryFactory:
             generation=generation, index=index)
         self.resources, self.redis_scope = resources, redis_scope
         self.response_scope, self.secret = response_scope, cursor_secret
+        self.request_response_scope = request_response_scope
 
     @contextmanager
     def __call__(self, request, request_id):
@@ -56,4 +61,7 @@ class SearchQueryFactory:
             with self.redis_scope() as redis:
                 service = ResourceSearchService(resources, self.backend,
                     SearchCursorStore(redis, secret=self.secret), version_reader=self.versions)
-                yield GuardedSearchRequest(service, self.response_scope)
+                scope = self.response_scope
+                if self.request_response_scope is not None:
+                    scope = lambda owned, repo: self.request_response_scope(request, owned, repo)
+                yield GuardedSearchRequest(service, scope)

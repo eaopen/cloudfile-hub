@@ -21,16 +21,15 @@ class RebuildCoordinatorTest(TestCase):
         self.held = False
         @contextmanager
         def read_page(**options):
-            self.held = True
-            try:
-                yield dict(items=[self.ref], next_offset=None)
-            finally:
-                self.held = False
+            self.assertTrue(self.held)
+            yield dict(items=[self.ref], next_offset=None)
         @contextmanager
         def scope(repo):
-            self.assertTrue(self.held)
-            yield object()
-            self.assertTrue(self.held)
+            self.held = True
+            try:
+                yield object()
+            finally:
+                self.held = False
         self.reader.read_page.side_effect = read_page
         self.source.scope.side_effect = scope
         self.source.read.return_value = dict(resource=self.ref, uid=None, description="", tags=[])

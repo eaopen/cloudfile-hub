@@ -1,4 +1,4 @@
-"""Project current sparse attribute events through a trusted native reader.
+"""Project current sparse attribute and tag-binding events through a trusted native reader.
 
 Native byte mutations/tag-definition fanout need their own bounded planners;
 unknown operations are never silently acknowledged as indexed.
@@ -25,7 +25,7 @@ class AttributeSearchProjection:
         seq = payload.get("sequence")
         sequence(seq)
         event = normalize_event({key: value for key, value in payload.items() if key not in {"schema_version", "stream", "sequence", "recorded_at"}})
-        if (event["action"] != "resource.attributes.updated" or event["source"] != "hub" or event["result"] != "succeeded" or
+        if (event["action"] not in {"resource.attributes.updated", "tags.bindings.updated"} or event["source"] != "hub" or event["result"] != "succeeded" or
                 not event.get("repo_id") or not event.get("path") or not event.get("resource_uid") or payload.get("stream") != "repo." + event["repo_id"]):
             raise ContractError("SEARCH_PROJECTION_PENDING", "Search operation requires another planner", 503)
         # Reader owns current native path/type/lifecycle and sparse annotation

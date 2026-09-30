@@ -20,6 +20,8 @@ class ResourceSearchView(DirectoryPolicyView):
                 raise ContractError("METHOD_NOT_ALLOWED", "Search requires POST", 405)
             if not request.is_secure():
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
+            if request.headers.get("Authorization") or request.headers.get("Content-Encoding"):
+                raise invalid("Search Web requests do not accept machine credentials or encoded bodies")
             if request.GET:
                 raise invalid("Search takes no URL query parameters")
             csrf = CsrfViewMiddleware(lambda _: None)

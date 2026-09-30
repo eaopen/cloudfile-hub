@@ -96,6 +96,8 @@ class SearchCatchupInspector:
                     baseline = sequence(job[0])
                 sql.execute("SELECT baseline,target_sequence,checked_sequence,state FROM " + table + " WHERE " + where + " FOR UPDATE", key)
                 checkpoint = sql.fetchone()
+                if global_scope and checkpoint is not None and len(checkpoint) == 4:
+                    baseline = checkpoint[0]
                 if (checkpoint is None or len(checkpoint) != 4 or any(type(value) is not int for value in checkpoint[:3]) or
                         checkpoint[0] != baseline or not baseline <= checkpoint[1] <= 2 ** 64 - 1 or
                         checkpoint[2] != checkpoint[1] or checkpoint[3] != "complete"):
@@ -123,7 +125,15 @@ class SearchCatchupInspector:
                 sql.execute("SELECT repo_id FROM cf_search_rebuild WHERE generation=%s AND state<>'scanned' LIMIT 1 FOR UPDATE", (generation,))
                 if sql.fetchone() is not None:
                     raise ContractError("SEARCH_REBUILD_PENDING", "Global catch-up waits for library scans", 503)
-                baseline = 0
+                # An actual host may capture the global definition boundary
+                # before its first directory read. Earlier facts are then
+                # covered by the full snapshot instead of another generation's
+                # receipts. Generic runtimes retain the conservative zero base.
+                sql.execute("SELECT baseline FROM cf_search_global_catchup WHERE generation=%s FOR UPDATE", (generation,))
+                captured = sql.fetchone()
+                baseline = captured[0] if captured is not None else 0
+                if type(baseline) is not int or not 0 <= baseline <= 2 ** 64 - 1:
+                    raise ContractError("SEARCH_PLAN_CONFLICT", "Invalid global snapshot boundary", 409)
             else:
                 sql.execute("SELECT source_sequence,state FROM cf_search_rebuild WHERE generation=%s AND repo_id=%s FOR UPDATE", key)
                 job = sql.fetchone()

@@ -90,6 +90,15 @@ def projection_required(value):
                 return False
         except (ValueError, TypeError, AttributeError):
             pass
+    membership_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind",
+        "source", "action", "result", "subject_revision"}
+    if (set(value) == membership_fields and value["source"] == "directory" and
+            value["action"] == "subject.memberships" and value["actor_kind"] == "user" and
+            value["result"] == "succeeded" and isinstance(value["subject_revision"], str) and
+            bool(value["subject_revision"])):
+        # Indexes contain no membership grants. Current CE/C authorization and
+        # the security stream token account for this exact projector fact.
+        return False
     if value["source"] == "hub":
         cancellation_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind", "source",
             "action", "result", "session_id", "device_id", "revision"}

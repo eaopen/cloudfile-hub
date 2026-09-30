@@ -23,11 +23,10 @@ class SearchRebuildCoordinator:
             return value
         ref = value["reference"]
         deadline, documents = self.clock() + 20, []
-        # Hold the commit/library guard until sparse SQL reads are rolled back.
-        # The real provider must reject lifecycle/commit drift, not merely pin
-        # historical directory blobs while permitting current objects to move.
-        with self.reader.read_page(repo_id=repo_id, commit_id=value["commit_id"], path=ref["path"], offset=value["offset"], limit=100) as page:
-            with self.source.scope(repo_id) as cursor:
+        # Establish source SQL ownership first. The directory adapter and sparse
+        # reader share its Branch lock; a second connection would deadlock.
+        with self.source.scope(repo_id) as cursor:
+            with self.reader.read_page(repo_id=repo_id, commit_id=value["commit_id"], path=ref["path"], offset=value["offset"], limit=100) as page:
                 for child in page["items"]:
                     if self.clock() >= deadline:
                         raise ContractError("SEARCH_REBUILD_PENDING", "Rebuild projection deadline exceeded", 503)
@@ -36,8 +35,8 @@ class SearchRebuildCoordinator:
                     raw = json.dumps(documents, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False).encode("utf-8")
                     if len(raw) > 1048576:
                         raise ContractError("SEARCH_REBUILD_PENDING", "Rebuild page exceeds byte budget", 503)
-            if self.clock() >= deadline:
-                raise ContractError("SEARCH_REBUILD_PENDING", "Rebuild projection deadline exceeded", 503)
+                if self.clock() >= deadline:
+                    raise ContractError("SEARCH_REBUILD_PENDING", "Rebuild projection deadline exceeded", 503)
         # All projections succeeded. Freeze after native/SQL source scopes close;
         # later incremental events must be replayed before index publication.
         self.execution.store.freeze(generation=generation, index=self.execution.client.index, repo_id=repo_id,

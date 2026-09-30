@@ -70,6 +70,9 @@ class PolicyHost:
     def editing_service(self, request, request_id):
         return self._service(request, request_id, resource=False, editing=True)
 
+    def search_service(self, request, request_id):
+        return self._service(request, request_id, resource=False, search=True)
+
     def audit_service(self, request, request_id):
         return self._service(request, request_id, resource=False, audit=True)
 
@@ -112,14 +115,17 @@ class PolicyHost:
     @contextmanager
     def _service(self, request, request_id, *, resource, audit=False, context=False, refresh=False,
                  machine_refresh=False, local_session=False, local_device=False,
-                 delegated_read=False, editing=False):
+                 delegated_read=False, editing=False, search=False):
         self._process()
         with self.lock:
             if self.draining or self.closed:
                 raise ContractError("POLICY_UNAVAILABLE", "Policy host is draining", 503)
             self.active += 1
         try:
-            if editing:
+            if search:
+                host = self.deployment.search_host
+                factory = host.query if host is not None else None
+            elif editing:
                 factory = self.deployment.editing_factory
             elif local_session:
                 factory = self.deployment.local_session_factory

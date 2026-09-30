@@ -74,7 +74,8 @@ class ResourceSearchService:
                 self._versions(repo) != versions or self.clock() >= deadline):
             raise unavailable()
         items = [dict(reference=item["reference"], annotation=item["snapshot"])
-            for item in batch["items"] if item["status"] == 200]
+            for item in batch["items"] if item["status"] == 200 and
+            set(tags).issubset({tag["tag_id"] for tag in item["snapshot"].get("tags", []) if tag.get("enabled") is True})]
         next_offset = candidates["next_offset"]
         cursor = self.cursors.issue(scope=scope, offset=next_offset, expires_at=expiry) if next_offset is not None and next_offset <= 10000 else None
         return dict(items=items, next_cursor=cursor, provider="meilisearch", fallback=False)

@@ -43,7 +43,7 @@ class SearchPolicyVersionReader:
             with connection.cursor() as sql:
                 # A single statement observes both streams in the same read
                 # view. FORCE INDEX avoids a library-wide or payload scan.
-                sql.execute("SELECT COALESCE((SELECT MAX(sequence) FROM cf_event_outbox FORCE INDEX(stream_sequence) WHERE stream=%s),0),COALESCE((SELECT MAX(sequence) FROM cf_event_outbox FORCE INDEX(stream_sequence) WHERE stream='security'),0)", ("repo." + repo,))
+                sql.execute("SELECT CAST(COALESCE((SELECT MAX(sequence) FROM cf_event_outbox FORCE INDEX(stream_sequence) WHERE stream=%s),0) AS UNSIGNED),CAST(COALESCE((SELECT MAX(sequence) FROM cf_event_outbox FORCE INDEX(stream_sequence) WHERE stream='security'),0) AS UNSIGNED)", ("repo." + repo,))
                 return change_token(repo, sql.fetchone())
         except Exception:
             raise unavailable() from None

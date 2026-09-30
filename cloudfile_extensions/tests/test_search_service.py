@@ -42,3 +42,11 @@ class SearchServiceTest(TestCase):
         self.resources.read_authority.preparation.contexts.current.side_effect = [dict(context_epoch="old"), dict(context_epoch="new")]
         with self.assertRaises(ContractError):
             self.service.query(dict(q="drawing", repo_id=self.repo))
+
+    def test_removed_or_disabled_tag_cannot_survive_stale_index_filter(self):
+        tag = "22222222-2222-4222-8222-222222222222"
+        self.resources.batch_resolve.return_value = dict(items=[dict(reference=self.ref, status=200,
+            snapshot=dict(tags=[dict(tag_id=tag, enabled=False)]))])
+        self.assertEqual(self.service.query(dict(q="drawing", repo_id=self.repo, tag_ids=[tag]))["items"], [])
+        self.resources.batch_resolve.return_value["items"][0]["snapshot"]["tags"][0]["enabled"] = True
+        self.assertEqual(len(self.service.query(dict(q="drawing", repo_id=self.repo, tag_ids=[tag]))["items"]), 1)

@@ -25,6 +25,7 @@ class PolicyDeployment:
     local_agent_runtime: object = None
     local_read_issuer: object = None
     editing_factory: object = None
+    search_host: object = None
 
     def close(self):
         # The host invokes this only after draining all requests at shutdown.

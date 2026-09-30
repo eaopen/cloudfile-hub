@@ -49,7 +49,11 @@ class SearchPublication:
                     if sql.fetchone() is not None:
                         raise ContractError("SEARCH_REBUILD_PENDING", "Generation scans are incomplete", 503)
                     self._checkpoint(sql, generation, ref["repo_id"], baseline)
-                    self._checkpoint(sql, generation, None, 0)
+                    sql.execute("SELECT baseline FROM cf_search_global_catchup WHERE generation=%s FOR UPDATE", (generation,))
+                    global_checkpoint = sql.fetchone()
+                    if global_checkpoint is None or type(global_checkpoint[0]) is not int or global_checkpoint[0] < 0:
+                        raise ContractError("SEARCH_CATCHUP_PENDING", "Global snapshot boundary is unavailable", 409)
+                    self._checkpoint(sql, generation, None, global_checkpoint[0])
                     sql.execute("SELECT event_id FROM cf_search_task FORCE INDEX(generation_pending) WHERE index_generation=%s AND state IN ('submitting','submitted') LIMIT 1 FOR UPDATE", (generation,))
                     if sql.fetchone() is not None:
                         raise ContractError("SEARCH_TASK_PENDING", "Index writes are unresolved", 409)

@@ -41,3 +41,15 @@ class PolicyVersionTest(TestCase):
             SearchPolicyVersionReader(lambda: connection)(self.REPO)
         connection.rollback.assert_not_called()
         connection.close.assert_not_called()
+
+
+from cloudfile_extensions.tests.test_schema import DatabaseTestCase
+
+
+class PolicyVersionSQLTest(DatabaseTestCase):
+    def test_mariadb_watermark_expression_returns_exact_integer_tokens(self):
+        import pymysql
+        from cloudfile_extensions.schema.runner import SchemaRunner
+        SchemaRunner(self.connection).apply()
+        reader = SearchPolicyVersionReader(lambda: pymysql.connect(**self.options, database=self.database))
+        self.assertEqual(reader(PolicyVersionTest.REPO), change_token(PolicyVersionTest.REPO, (0, 0)))
