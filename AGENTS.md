@@ -98,7 +98,6 @@ cloudfile_ext/
 ├── external_sources/    外部源、授权、shadow API 和扫描
 ├── file_actions/        预览动作、锁、签出和本地 Agent 会话
 ├── metadata/            元数据/标签占位，当前不登记有效行为
-├── checkout/            早期占位；实际签出入口已在 file_actions/
 ├── fileops/             复制/移动统一预检查与幂等
 ├── favorites/           收藏 obj_id 身份；经上游 star 端点接线
 └── office/              回调守卫，已随 CF_ENABLE_ONLYOFFICE 注册进 apps.py
@@ -189,3 +188,5 @@ python3 -m pytest tests/ -q
   `manage.py migrate` 永远不该管这些表。
 - **注册中心启动后会 `seal()`**，运行时注册会抛异常。所有注册都要在
   `CloudFileConfig.ready()` 里完成。
+
+锁与 Checkout 当前统一实现为 `cloudfile_extensions/editing/`；不再新增独立的 locks/checkout 状态服务。普通锁与 Checkout 共用 `cf_edit_guard`，提交事实进入 `cf_commit_intent`。原生发布未接通前不挂载写入入口。
