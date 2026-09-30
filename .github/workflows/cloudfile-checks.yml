@@ -46,8 +46,8 @@ jobs:
       - name: 安装 C 侧测试依赖
         run: |
           sudo apt-get update -qq
-          # Bounded native JSON transport tests require jansson.
-          sudo apt-get install -y -qq libglib2.0-dev libjansson-dev pkg-config
+          # Native directory paging tests compile the real Vala objects and JSON RPC.
+          sudo apt-get install -y -qq libglib2.0-dev libjansson-dev valac pkg-config
 
       - name: pytest
         run: pip install --quiet pytest
