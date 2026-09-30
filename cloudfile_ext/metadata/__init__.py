@@ -1,9 +1,5 @@
 # -*- coding: utf-8 -*-
-"""File properties and tags. Phase P2 -- not implemented yet.
-
-Gated by CF_ENABLE_METADATA and CF_ENABLE_TAGS. Metadata has to survive move
-and rename, so it will hang off a post file-op hook rather than off paths.
-"""
+"""Register legacy FileTag batch reads without changing other tag models."""
 
 
 def register(registry):
@@ -11,3 +7,10 @@ def register(registry):
 
     if not (is_enabled("CF_ENABLE_METADATA") or is_enabled("CF_ENABLE_TAGS")):
         return
+
+    if is_enabled("CF_ENABLE_TAGS"):
+        from django.urls import path
+        from cloudfile_ext.legacy_tags.views import LegacyFileTagsBatch
+        # Reuse the existing tags switch; no upstream endpoint or schema patch.
+        registry.register_urls([path('api/v2.1/cloudfile/legacy-file-tags/batch/',
+            LegacyFileTagsBatch.as_view(), name='cloudfile-legacy-file-tags-batch')])
