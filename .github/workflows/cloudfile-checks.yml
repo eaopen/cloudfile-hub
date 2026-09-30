@@ -49,8 +49,8 @@ jobs:
           # Native directory paging tests compile the real Vala objects and JSON RPC.
           sudo apt-get install -y -qq libglib2.0-dev libjansson-dev valac pkg-config
 
-      - name: pytest
-        run: pip install --quiet pytest
+      - name: 安装检查依赖
+        run: pip install --quiet -r cloudfile-docker/tools/check-requirements.txt
 
       - name: 运行检查
         run: ./cloudfile-docker/tools/run-checks.sh
