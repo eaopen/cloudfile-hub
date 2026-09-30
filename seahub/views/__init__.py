@@ -164,11 +164,6 @@ def check_folder_permission(request, repo_id, path):
     - `repo_id`:
     - `path`:
     """
-    repo_status = seafile_api.get_repo_status(repo_id)
-    if repo_status == 1:
-        return _cf_check_permission(request.user.username, repo_id, path,
-                                    PERMISSION_READ)
-
     username = request.user.username
     if not username:
         return None
@@ -177,8 +172,14 @@ def check_folder_permission(request, repo_id, path):
     except SearpcError as e:
         logger.warning(e)
         return None
-    if permission == PERMISSION_INVISIBLE:
+    if not permission or permission == PERMISSION_INVISIBLE:
         return None
+
+    # A read-only repository makes every existing permission read-only; it
+    # must not grant access to users who have no permission for the repository.
+    if seafile_api.get_repo_status(repo_id) == 1:
+        permission = PERMISSION_READ
+
     return _cf_check_permission(username, repo_id, path, permission)
 
 def get_seadoc_file_uuid(repo, path):
@@ -1254,15 +1255,6 @@ def check_metric_auth(auth_header):
     return False
 
 
-def _format_metrics(metric_name: str, metric_value: int, metric_type="gauge", help_txt=""):
-    metrics = [
-        f"# HELP {metric_name} {help_txt}",
-        f"# TYPE {metric_name} {metric_type}",
-        f"{metric_name}{{}} {metric_value}"
-    ]
-    return "\n".join(metrics) + "\n"
-    
-
 def get_metrics(request):
     if not ENABLE_METRIC:
         raise Http404
@@ -1270,34 +1262,4 @@ def get_metrics(request):
     if not auth_header or not check_metric_auth(auth_header):
         return HttpResponseForbidden('Invalid Authentication')
     metrics = get_seafevents_metrics()
-    
-    metrics_text = metrics.content.decode()
-    total_repos_count = seafile_api.count_repos()
-    total_files_count = seafile_api.get_total_file_number()
-    
-    active_db_users = ccnet_api.count_emailusers('DB')
-    inactive_db_users = ccnet_api.count_inactive_emailusers('DB')
-    
-    total_users_count = active_db_users + inactive_db_users
-    
-    repos_count_metric = _format_metrics(
-        "seafile_total_repos",
-        total_repos_count,
-        help_txt="Total librarie numbers in seafile"
-    )
-    files_count_metric = _format_metrics(
-        "seafile_total_files",
-        total_files_count,
-        help_txt="Total file numbers in seafile"
-    )
-    
-    users_count_metric = _format_metrics(
-        "seafile_total_users",
-        total_users_count,
-        help_txt="Total user numbers in seafile including active and inactive users"
-    )
-    
-    metrics_text += repos_count_metric
-    metrics_text += files_count_metric
-    metrics_text += users_count_metric
-    return HttpResponse(metrics_text)
+    return HttpResponse(metrics.content.decode())

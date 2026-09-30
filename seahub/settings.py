@@ -1488,7 +1488,7 @@ if ENABLE_LDAP:
 #####################
 # an example:
 # CUSTOM_NAV_ITEMS = [
-#     {'icon': 'sf2-icon-star',
+#     {'icon': 'icon html class',
 #      'desc': 'test custom name',
 #      'link': 'http://127.0.0.1:8000/shared-libs/',
 #      },

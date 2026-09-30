@@ -409,10 +409,6 @@ img[src=""], img:not([src]) {
   flex-shrink: 1;
 }
 
-.path-container .op-btn .sf3-font {
-  color: #444;
-}
-
 .dir-tool {
   height: 1.5rem;
   display: flex;
@@ -445,6 +441,13 @@ img[src=""], img:not([src]) {
 .sf-tip-default {
   font-size: 13px;
   color: var(--bs-body-secondary-color);
+}
+
+.sys-admin .main-panel .nav-item,
+.sys-admin .main-panel .nav-link,
+.org-admin .main-panel .nav-item,
+.org-admin .main-panel .nav-link {
+  min-width: fit-content;
 }
 
 .nav-indicator-container .nav-item {

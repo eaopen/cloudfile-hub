@@ -1,8 +1,9 @@
 import React, { Component } from 'react';
 import { Input, Popover } from 'reactstrap';
+import { uniqueId } from 'lodash-es';
 import PropTypes from 'prop-types';
 import Icon from '@/components/icon';
-import SearchEmptyTip from '@/components/search-empty-tip';
+import OpIcon from '@/components/op-icon';
 import toaster from '@/components/toast';
 import { gettext } from '@/utils/constants';
 import { Utils } from '@/utils/utils';
@@ -30,6 +31,7 @@ class LogUserSelector extends Component {
       isLoading: false
     };
     this.finalValue = '';
+    this.selectorId = uniqueId('log-user-selector-');
   }
 
   onQueryChange = (e) => {
@@ -38,10 +40,18 @@ class LogUserSelector extends Component {
     this.handleSearchUser(value);
   };
 
+  clearQuery = (e) => {
+    e.stopPropagation();
+    this.setState({ query: '' }, () => this.searchInput.focus());
+    this.handleSearchUser('');
+  };
+
   handleSearchUser = (value) => {
+    this.finalValue = value;
     if (!value.trim()) {
       this.setState({
-        searchResults: []
+        searchResults: [],
+        isLoading: false
       });
       return;
     }
@@ -50,12 +60,11 @@ class LogUserSelector extends Component {
       isLoading: true
     });
 
-    this.finalValue = value;
-
     setTimeout(() => {
       if (this.finalValue === value) {
         if (this.props.searchUsersFunc) {
           this.props.searchUsersFunc(value).then((res) => {
+            if (this.finalValue !== value) return;
             const users = res.data.user_list || res.data.users || [];
             this.setState({
               searchResults: users,
@@ -63,6 +72,7 @@ class LogUserSelector extends Component {
             }, () => {
               if (this.props.searchGroupsFunc) {
                 this.props.searchGroupsFunc(value).then((res) => {
+                  if (this.finalValue !== value) return;
                   const groups = res.data.group_list || res.data.groups || [];
                   this.setState({
                     searchResults: [...users, ...groups]
@@ -71,6 +81,7 @@ class LogUserSelector extends Component {
               }
             });
           }).catch((error) => {
+            if (this.finalValue !== value) return;
             this.setState({
               isLoading: false
             });
@@ -80,6 +91,7 @@ class LogUserSelector extends Component {
         }
         if (this.props.searchGroupsFunc && !this.props.searchUsersFunc) {
           this.props.searchGroupsFunc(value).then((res) => {
+            if (this.finalValue !== value) return;
             const groups = res.data.group_list || res.data.groups || [];
             this.setState({
               searchResults: groups,
@@ -105,7 +117,7 @@ class LogUserSelector extends Component {
       <>
         <span id="log-user-selector-trigger">
           <span
-            className="cur-activity-modifiers p-2 rounded"
+            className="cur-activity-modifiers"
             onClick={onToggle}
             aria-label={gettext('Toggle user selector')}
             role="button"
@@ -117,7 +129,7 @@ class LogUserSelector extends Component {
                 <span className="d-inline-block ml-1">{selectedItems.map(item => item.name).join(', ')}</span>
               </>
             ) : this.props.componentName}
-            <Icon symbol="down" className="ml-2 toggle-icon" />
+            <Icon symbol="down" className="ml-1 toggle-icon" />
           </span>
         </span>
         <Popover
@@ -128,55 +140,73 @@ class LogUserSelector extends Component {
           hideArrow={true}
           fade={false}
           trigger="legacy"
-          popperClassName="activity-user-selector-popover"
+          popperClassName="activity-user-selector-popover log-user-selector-popover"
+          innerClassName="activity-user-selector-content"
         >
-          <ul className="activity-selected-modifiers px-3 py-1 list-unstyled">
+          <ul className="activity-selected-modifiers">
             {selectedItems.map((item, index) => {
               return (
                 <li key={index} className="activity-selected-modifier">
-                  <img src={item.avatar_url} className="avatar w-5 h-5" alt="" />
-                  <span className="activity-user-name ml-2">{item.name}</span>
-                  <span className="unselect-activity-user ml-2" onClick={(e) => { this.toggleSelectItem(e, item); }}>
-                    <Icon symbol="close" />
-                  </span>
+                  <img src={item.avatar_url} className="avatar" alt="" />
+                  <span className="activity-user-name" title={item.name}>{item.name}</span>
+                  <OpIcon
+                    id={`${this.selectorId}-remove-${index}`}
+                    symbol="close"
+                    className="unselect-activity-user"
+                    tooltip={gettext('Remove')}
+                    op={(e) => { this.toggleSelectItem(e, item); }}
+                  />
                 </li>
               );
             })}
           </ul>
-          <div className="px-3 pt-3">
+          <div className="activity-user-selector-search">
             <Input
               type="text"
+              className="activity-user-selector-input"
+              innerRef={ref => this.searchInput = ref}
               placeholder={gettext('Find users')}
               value={query}
               onChange={this.onQueryChange}
             />
+            {query && (
+              <OpIcon
+                id={`${this.selectorId}-clear`}
+                symbol="close"
+                className="activity-user-selector-clear"
+                tooltip={gettext('Clear')}
+                op={this.clearQuery}
+              />
+            )}
           </div>
-          <ul className={`activity-user-list list-unstyled o-auto ${!isLoading && displayItems.length > 0 ? 'p-3' : ''}`}>
-            {isLoading ? (
-              <li className="activity-user-loading">{gettext('Loading...')}</li>
-            ) : displayItems.length === 0 ? (
-              <li><SearchEmptyTip text={query ? gettext('User not found') : gettext('Enter characters to start searching')} /></li>
-            ) : (
-              displayItems.map((item, index) => {
+          {isLoading ? (
+            <div className="activity-user-loading">{gettext('Loading...')}</div>
+          ) : displayItems.length === 0 ? (
+            <div className="activity-user-selector-empty" role="status">
+              {query.trim() ? gettext('User not found') : gettext('Enter characters to start searching')}
+            </div>
+          ) : (
+            <ul className="activity-user-list">
+              {displayItems.map((item, index) => {
                 const isSelected = selectedItems.some(selected =>
                   (item.email && selected.email === item.email) ||
                   (item.id && selected.id === item.id)
                 );
                 return (
                   <li key={index}
-                    className="activity-user-item h-6 p-1 rounded d-flex justify-content-between align-items-center"
+                    className="activity-user-item d-flex justify-content-between align-items-center"
                     onClick={(e) => { this.toggleSelectItem(e, item); }}
                   >
                     <span className="avatar-name-wrapper">
-                      <img src={item.avatar_url} className="avatar w-5 h-5" alt="" />
-                      <span className="activity-user-name ml-2">{item.name}</span>
+                      <img src={item.avatar_url} className="avatar" alt="" />
+                      <span className="activity-user-name" title={item.name}>{item.name}</span>
                     </span>
-                    {isSelected && <Icon symbol="check" className="text-gray font-weight-bold" />}
+                    {isSelected && <Icon symbol="check" className="activity-user-selector-check" />}
                   </li>
                 );
-              })
-            )}
-          </ul>
+              })}
+            </ul>
+          )}
         </Popover>
       </>
     );

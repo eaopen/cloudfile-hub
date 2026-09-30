@@ -3,11 +3,11 @@ import classnames from 'classnames';
 import dayjs from 'dayjs';
 import PropTypes from 'prop-types';
 import { seafileAPI } from '@/api/seafile-api';
+import Icon from '@/components/icon';
 import Loading from '@/components/loading';
 import Switch from '@/components/switch';
 import toaster from '@/components/toast';
 import { gettext, historyRepoID, PER_PAGE } from '@/utils/constants';
-import editUtilities from '@/utils/editor-utilities';
 import { Utils } from '@/utils/utils';
 import { getCurrentAndLastVersion, getLastVersion } from './helper';
 import HistoryVersion from './history-version';
@@ -115,7 +115,7 @@ class SidePanel extends Component {
 
   restoreVersion = (currentItem) => {
     const { commit_id, path } = currentItem;
-    editUtilities.revertFile(path, commit_id).then(res => {
+    seafileAPI.revertFile(historyRepoID, path, commit_id).then(res => {
       if (res.data.success) {
         this.props.reloadDocContent();
       }
@@ -271,7 +271,7 @@ class SidePanel extends Component {
             {gettext('History Versions')}
           </div>
           <div className='sdoc-side-panel-close'>
-            <i className="sf3-font sf3-font-close" onClick={this.props.onClose}></i>
+            <Icon symbol="close" className="sdoc-file-history-close-icon" onClick={this.props.onClose} />
           </div>
         </div>
         <div
