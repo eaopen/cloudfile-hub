@@ -63,8 +63,18 @@ class ResourceSearchService:
         offset, expiry = (0, None) if request.get("cursor") is None else self.cursors.resolve(request["cursor"], scope=scope)
         candidates = self.backend.page(q=q, repo_id=repo, path=path, kind=query['kind'],
             tag_ids=tags, offset=offset, limit=limit)
-        references = [ref for ref in candidates["references"] if is_descendant_or_equal(ref["path"], path) and
-            (query["kind"] is None or ref["kind"] == query["kind"])]
+        references, seen = [], set()
+        for ref in candidates["references"]:
+            if ref["repo_id"] != repo:
+                raise unavailable()
+            key = (ref["repo_id"], ref["kind"], ref["path"])
+            # Search emits unique hits in candidate order; annotations preserve
+            # duplicate slots by contract. Deduplicate here without changing the
+            # provider's scanned offset or creating a second authority loader.
+            if (key not in seen and is_descendant_or_equal(ref["path"], path) and
+                    (query["kind"] is None or ref["kind"] == query["kind"])):
+                seen.add(key)
+                references.append(ref)
         if self.clock() >= deadline:
             raise unavailable()
         # Actual ResourceService performs CE/C read qualification and authoritative

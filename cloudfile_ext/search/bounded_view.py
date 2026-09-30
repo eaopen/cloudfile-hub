@@ -1,7 +1,7 @@
 """Authenticated compatibility search for current CE installations.
 
-This is separate from the OIDC resource-search contract and never advertises
-that unfinished v0.3 contract as ready. It removes EAP's recursive searches.
+This keeps the native identity/ACL contract separate from OIDC resource search.
+Its result proof lets EAP consume exact object decisions without parent grants.
 """
 from django.conf import settings
 from django.core import signing
@@ -17,6 +17,7 @@ from seaserv import seafile_api
 from .backends.meilisearch import client_from_settings
 from .bounded import SearchFailure, query_page, validate
 from .access import SearchAccess
+from .native_many import NativePermissionMany
 from .access_runtime import read_snapshot
 
 
@@ -33,14 +34,12 @@ class BoundedSearch(APIView):
             if repo is None:
                 raise SearchFailure('NOT_FOUND', 'Library not found', 404)
             username = request.user.username
-            def native_permission(target):
-                native = seafile_api.check_permission_by_path(repo_id, target, username)
-                if native not in ('r', 'rw'):
-                    return None
-                # Preserve all registered narrowing hooks without the upstream
-                # readonly-status shortcut that can bypass native eligibility.
-                return check_permission(username, repo_id, target, native)
-            access = SearchAccess(lambda: read_snapshot(username, repo_id), native_permission)
+            # The native transport retains every C provider; Hub hooks remain
+            # per-path narrowing checks here, in both independent passes.
+            native_many = NativePermissionMany(repo_id, username,
+                seafile_api.cf_check_permissions_many, check_permission)
+            access = SearchAccess(lambda: read_snapshot(username, repo_id), None,
+                native_many=native_many)
             scope = dict(user=username, repo=repo_id, q=q, path=path, limit=limit,
                 head=repo.head_cmmt_id, policy=access.version)
             offset, provider = 0, None
@@ -54,19 +53,35 @@ class BoundedSearch(APIView):
                 offset, provider = saved['offset'], saved['provider']
             client = client_from_settings() if getattr(settings, 'CF_PROVIDER_SEARCH', '') == 'meilisearch' else None
             result = query_page(repo_id=repo_id, q=q, path=path, limit=limit, offset=offset,
-                provider=provider, client=client, can_read=access,
+                provider=provider, client=client, can_read=access, prepare_paths=access.prepare_many,
                 list_directory=lambda p, start, size: seafile_api.list_dir_by_path(repo_id, p, start, size),
                 resolve_item=lambda p: seafile_api.get_dirent_by_path(repo_id, p))
-            access.assert_current()
-            current = seafile_api.get_repo(repo_id)
-            if current is None or current.head_cmmt_id != scope['head']:
-                raise SearchFailure('SEARCH_CHANGED', 'Library or permissions changed; search again')
             for item in result['data']:
                 item['mtime'] = timestamp_to_isoformat_timestr(item['mtime'])
+                # This proof is private until serialization and both final
+                # checks succeed. Failure discards the entire prepared response;
+                # a parent grant never stands in for an exact object decision.
+                item['authorization'] = dict(repo_id=repo_id, path=item['path'],
+                    kind='dir' if item['type'] == 'folder' else 'file', visible=True, read=True)
+            result['authorization'] = dict(version=1, repo_id=repo_id,
+                policy_revision=access.version, head=scope['head'])
             next_offset = result.pop('next_offset')
             result['next_cursor'] = signing.dumps(dict(scope=scope, offset=next_offset, provider=result['provider']),
                 salt='cloudfile-bounded-search', compress=True) if next_offset is not None else None
             response = Response(result)
+            # DRF normally renders after get() returns. Eagerly render with the
+            # already negotiated renderer so metadata/serialization mutations
+            # precede the second real native pass. No bytes are published yet.
+            response.accepted_renderer = request.accepted_renderer
+            response.accepted_media_type = request.accepted_media_type
+            response.renderer_context = self.get_renderer_context()
+            response.render()
+            access.assert_current()
+            current = seafile_api.get_repo(repo_id)
+            if current is None or current.head_cmmt_id != scope['head']:
+                raise SearchFailure('SEARCH_CHANGED', 'Library or permissions changed; search again')
+            # This bounds preparation, not writers: changes after the final
+            # snapshot/head reads remain outside any legacy consistency lease.
         except (signing.BadSignature, KeyError, TypeError, ValueError):
             response = Response(dict(error_code='INVALID_CURSOR', error_msg='Invalid search parameters or expired cursor'), status=400)
         except SearchFailure as exc:

@@ -46,7 +46,7 @@ def test_backend_fault_reads_one_directory_page_without_children():
     listing.assert_called_once_with('/a',0,500)
     assert [x['path'] for x in result['data']]==['/a/drawing.txt']
     assert result['scope']=='directory' and result['fallback'] is True
-    args['resolve_item'].assert_called_once_with('/a/drawing.txt')
+    args['resolve_item'].assert_not_called()
 
 
 def test_native_page_resumes_before_unreturned_matches():

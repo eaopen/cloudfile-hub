@@ -60,8 +60,12 @@ def checked_path(path):
 
 
 class SearchAccess:
-    def __init__(self, snapshot_reader, native_permission, *, clock=time.monotonic):
+    def __init__(self, snapshot_reader, native_permission, *, native_many=None, clock=time.monotonic):
         self.reader, self.native_permission, self.clock = snapshot_reader, native_permission, clock
+        # Optional seam preserves existing scalar callers. Production legacy
+        # Search supplies a strict batch transport; neither pass shares results.
+        self.native_many = native_many
+        self.native_inputs = {}
         self.deadline = clock() + 10
         self.snapshot = self._snapshot()
         self.version = hashlib.sha256(json.dumps(self.snapshot, sort_keys=True,
@@ -99,11 +103,42 @@ class SearchAccess:
         self._budget()
         return permission if permission in ('r', 'rw') else None
 
+    def _read_many(self, paths):
+        self._budget()
+        try:
+            values = self.native_many(paths)
+            if not isinstance(values, list) or len(values) != len(paths) or any(
+                    value not in (None, 'r', 'rw') for value in values):
+                raise ValueError()
+        except Exception:
+            raise unavailable() from None
+        self._budget()
+        return values
+
+    def prepare_many(self, targets):
+        """Load unique exact paths and configured ancestors, never parent grants.
+
+        These inputs live only in the first pass. Object decisions still apply
+        native folder rules and sparse ACL independently for every target.
+        """
+        if self.native_many is None:
+            return
+        paths = {}
+        for target in targets:
+            target = checked_path(target)
+            boundaries = [ancestor for ancestor in resolver.ancestors(target)
+                          if ancestor in self.boundaries]
+            for path in [*boundaries, target]:
+                if path not in self.native_inputs:
+                    paths[path] = None
+        if paths:
+            self.native_inputs.update(zip(paths, self._read_many(list(paths))))
+
     def _decision(self, path):
         if path not in self.decisions:
             candidates = [rule for ancestor in resolver.ancestors(path)
                 for rule in self.rules_by_path.get(ancestor, ())]
-            native = self._native(path)
+            native = self.native_inputs[path] if self.native_many is not None else self._native(path)
             native_rules = [rule for ancestor in resolver.ancestors(path)
                 for rule in self.native_rules_by_path.get(ancestor, ())]
             # CE installations may not enforce Pro folder records in every
@@ -119,6 +154,7 @@ class SearchAccess:
     def __call__(self, target):
         self._budget()
         target = checked_path(target)
+        self.prepare_many([target])
         for ancestor in resolver.ancestors(target):
             # Inspect configured boundaries, not every unconfigured directory.
             # A hidden ancestor must not leak through a deeper readable grant.
@@ -131,9 +167,15 @@ class SearchAccess:
             raise unavailable()
         # Request-local reuse is never a response-time authority. Revalidate
         # every accepted path once; rejected paths cannot become new results.
-        for path, allowed in self.decisions.items():
-            if allowed and self._native(path) is None:
-                raise unavailable()
+        # 4A's OIDC provider/user/repo guards do not cover this native-token
+        # identity and every legacy ACL/hook writer. Keep this pass until an
+        # equivalent producer-coordinated scope can prove the same boundary.
+        paths = [path for path, allowed in self.decisions.items() if allowed]
+        # The second transport is deliberately independent of native_inputs:
+        # it executes the scalar engine and Hub hooks again for every path.
+        values = self._read_many(paths) if self.native_many is not None else [self._native(p) for p in paths]
+        if any(value is None for value in values):
+            raise unavailable()
         if self._snapshot() != self.snapshot:
             raise unavailable()
         self._budget()

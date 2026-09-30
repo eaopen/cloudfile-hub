@@ -34,7 +34,7 @@ def validate(repo_id, q, path, limit):
 
 
 def query_page(*, repo_id, q, path, limit, offset, provider, client,
-               list_directory, resolve_item, can_read):
+               list_directory, resolve_item, can_read, prepare_paths=None):
     """Candidates never grant permission; resolve current native items per hit.
 
     One Meili request or one native directory page, at most 100 returned items.
@@ -53,6 +53,7 @@ def query_page(*, repo_id, q, path, limit, offset, provider, client,
         # A changed provider configuration invalidates an existing cursor too.
         raise SearchFailure('SEARCH_UNAVAILABLE', 'Search index unavailable')
     candidates = None
+    native_entries = {}
     if provider != 'native' and client is not None:
         clauses = ['repo_id = ' + json.dumps(repo_id)]
         if path != '/':
@@ -76,11 +77,18 @@ def query_page(*, repo_id, q, path, limit, offset, provider, client,
             raise SearchFailure('SEARCH_UNAVAILABLE', 'Invalid directory page')
         candidates = [dict(repo_id=repo_id, path=posixpath.join(path, e.obj_name))
             for e in entries if (stat.S_ISREG(e.mode) or stat.S_ISDIR(e.mode)) and q.casefold() in e.obj_name.casefold()]
+        # The bounded listing already contains these dirents. The HTTP adapter
+        # still rechecks the repository head before publishing, so rereading
+        # every match adds RPCs without supplying a newer usable snapshot.
+        native_entries = {posixpath.join(path, e.obj_name): e for e in entries}
         next_offset = offset + len(entries) if len(entries) == 500 else None
     else:
         provider = 'meilisearch'
         next_offset = offset + len(candidates) if len(candidates) == limit else None
-    items, seen = [], set()
+    # Normalize and deduplicate before loading permission inputs. Native pages
+    # may contain 500 matches; bounded windows avoid authorizing a whole page
+    # when the first result window already fills the requested limit.
+    normalized, seen = [], set()
     for hit in candidates:
         if time.monotonic() >= deadline:
             raise SearchFailure('SEARCH_UNAVAILABLE', 'Search time budget exceeded')
@@ -93,11 +101,19 @@ def query_page(*, repo_id, q, path, limit, offset, provider, client,
         if candidate_path in seen or (path != '/' and not candidate_path.startswith(path + '/')):
             continue
         seen.add(candidate_path)
+        normalized.append((hit, candidate_path))
+    items = []
+    for index, (hit, candidate_path) in enumerate(normalized):
+        if time.monotonic() >= deadline:
+            raise SearchFailure('SEARCH_UNAVAILABLE', 'Search time budget exceeded')
+        if prepare_paths is not None and index % limit == 0:
+            prepare_paths([target for _, candidate in normalized[index:index + limit]
+                for target in (posixpath.dirname(candidate) or '/', candidate)])
         # Current CE/C existence and current read permission replace index metadata.
         parent = posixpath.dirname(candidate_path) or '/'
         if not can_read(parent) or not can_read(candidate_path):
             continue
-        entry = resolve_item(candidate_path)
+        entry = native_entries.get(candidate_path) if provider == 'native' else resolve_item(candidate_path)
         if entry is None:
             continue
         directory = stat.S_ISDIR(entry.mode)
