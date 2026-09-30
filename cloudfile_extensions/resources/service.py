@@ -3,6 +3,8 @@
 Native lifecycle reader remains a required trusted data-plane adapter, not a
 request field. Strong revisions do not themselves prove authorization.
 """
+from copy import deepcopy
+
 from ..authorization.read import ContentReadAuthority, ContentMetadataWriteAuthority, LibraryTagManagementAuthority
 from ..common.errors import ContractError, invalid
 from ..common.validation import object_fields
@@ -36,12 +38,22 @@ class ResourceService:
     def batch_resolve(self, request):
         """Bounded read-only list enrichment, never allocation or tag scanning."""
         import time
+        from contextlib import ExitStack
         from ..jobs.authority import scope_locks
         object_fields(request, ("references",))
         values = request["references"]
         if not isinstance(values, list) or not 1 <= len(values) <= 100:
             raise invalid("Resource batch requires one to one hundred references")
         references = [resource_ref(value) for value in values]
+        # The service fixes actor/provider/context for the entire request. Only
+        # repositories split groups; normalized duplicates share one decision
+        # and snapshot, then expand back to the caller's original slot order.
+        def key(ref):
+            return (ref["repo_id"], ref["kind"], ref["path"])
+        unique = {key(ref): ref for ref in references}
+        groups = {}
+        for ref in unique.values():
+            groups.setdefault(ref["repo_id"], []).append(ref)
         authority = self.read_authority
         authority.preparation.prepare(authority.actor)
         current = authority.preparation.contexts.current(authority.actor)
@@ -53,23 +65,33 @@ class ResourceService:
         scopes.extend(dict(type="repo", provider="cloudfile", external_id=repo)
             for repo in sorted({ref["repo_id"] for ref in references}))
         deadline = time.monotonic() + 20
-        items = []
-        with authority.preparation.no_refresh_scope(), scope_locks(authority.state.connection, scopes):
-            for reference in references:
-                if time.monotonic() >= deadline:
-                    raise ContractError("RESOURCE_UNAVAILABLE", "Resource batch deadline exceeded", 503)
-                try:
-                    snapshot = self.resolve(dict(reference=reference))
-                    items.append(dict(reference=reference, status=200, snapshot=snapshot))
-                except ContractError as error:
-                    if error.status not in (403, 404):
-                        raise
-                    items.append(dict(reference=reference, status=404))
+        def check_deadline():
+            if time.monotonic() >= deadline:
+                raise ContractError("RESOURCE_UNAVAILABLE", "Resource batch deadline exceeded", 503)
+        snapshots = {}
+        with authority.preparation.no_refresh_scope(), ExitStack() as guards:
+            # Retain all repository guards until publication, including earlier
+            # committed groups. Chunk only lock acquisition (the helper caps
+            # it at 16); global provider/user/repo order stays unchanged.
+            for start in range(0, len(scopes), 16):
+                check_deadline()
+                guards.enter_context(scope_locks(authority.state.connection, scopes[start:start + 16]))
+            for repo in sorted(groups):
+                check_deadline()
+                group = groups[repo]
+                results = self.store.resolve_many_authorized(group, authority=authority,
+                    lifecycle_reader=self.reader, include_tags=True, check_boundary=check_deadline)
+                if len(results) != len(group):
+                    raise ContractError("RESOURCE_UNAVAILABLE", "Incomplete resource batch", 503)
+                snapshots.update((key(ref), result) for ref, result in zip(group, results))
                 current = authority.preparation.contexts.current(authority.actor)
                 if current is None or current["context_epoch"] != epoch:
                     raise ContractError("SUBJECT_UNAVAILABLE", "Batch subject changed", 503)
-            if time.monotonic() >= deadline:
-                raise ContractError("RESOURCE_UNAVAILABLE", "Resource batch deadline exceeded", 503)
+            check_deadline()
+            # Deduplicated reads share internal snapshots, but each output slot
+            # owns its nested DTO so one consumer cannot mutate another slot.
+            items = [dict(reference=ref, status=404) if snapshots[key(ref)] is None else
+                dict(reference=ref, status=200, snapshot=deepcopy(snapshots[key(ref)])) for ref in references]
         return dict(items=items)
 
     def update_attributes(self, request, *, idempotency_key=None):

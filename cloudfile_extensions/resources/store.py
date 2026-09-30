@@ -66,6 +66,44 @@ class ResourceStore:
             return None
         return self._decode_row(reference, rows[0])
 
+    def resource_rows_many(self, cursor, references, evidences):
+        """Bounded exact locations on the caller's authorization transaction.
+
+        Sparse misses remain None; reads never allocate identities. Include the
+        exact path as well as its indexed hash so collisions cannot alias rows.
+        """
+        if not 1 <= len(references) <= 50 or len(references) != len(evidences):
+            raise ValueError("bounded resource references and lifecycle evidence required")
+        refs = [resource_ref(ref) for ref in references]
+        repo = refs[0]["repo_id"]
+        keys = [(ref["kind"], ref["path"]) for ref in refs]
+        if len(set(keys)) != len(keys) or any(ref["repo_id"] != repo for ref in refs):
+            raise ValueError("unique single-library resource references required")
+        evidence_by_key = dict(zip(keys, [self._validate_evidence(value) for value in evidences]))
+        self._storage(cursor)
+        # At most 151 bound values and 51 returned rows; each OR arm is a
+        # resource_location index lookup, never a whole resource-table read.
+        predicates = ["(path_hash=%s AND kind=%s AND path=%s)" for ref in refs]
+        parameters = [repo]
+        for ref in refs:
+            parameters.extend((self._hash(ref["path"]), ref["kind"], ref["path"]))
+        cursor.execute("SELECT kind,uid,path,lifecycle_ref,revision,description,local_open_type "
+            "FROM cf_resource WHERE repo_id=%s AND state='active' AND (" +
+            " OR ".join(predicates) + ") ORDER BY path_hash,kind LIMIT " + str(len(refs) + 1) +
+            " FOR UPDATE", tuple(parameters))
+        rows = cursor.fetchall()
+        found = {}
+        if len(rows) > len(refs):
+            raise ContractError("PATH_STATE_PENDING", "Resource lifecycle requires reconciliation", 503)
+        for row in rows:
+            if len(row) != 7:
+                raise ContractError("RESOURCE_UNAVAILABLE", "Resource state requires reconciliation", 503)
+            key = (row[0], row[2])
+            if key not in evidence_by_key or key in found or row[3] != evidence_by_key[key].lifecycle_ref:
+                raise ContractError("PATH_STATE_PENDING", "Resource lifecycle requires reconciliation", 503)
+            found[key] = self._decode_row(dict(repo_id=repo, kind=key[0], path=key[1]), row[1:])
+        return [found.get(key) for key in keys]
+
     @staticmethod
     def _storage(cursor):
         # Pin table metadata before checking constraints. Missing/prefix/extra
@@ -146,6 +184,55 @@ class ResourceStore:
                 result["tags"] = bound_tags(cursor, resource_uid=row["uid"], repo_id=ref["repo_id"]) if row else []
             return result
         return authority.consume(reference, read)
+
+    def resolve_many_authorized(self, references, *, authority, lifecycle_reader, include_tags=False,
+                                check_boundary=None):
+        """Batch metadata only after each target passed C, before finalization.
+
+        Lifecycle remains the existing per-object native reader. Only its
+        concealment errors become missing slots; all other failures abort.
+        """
+        from ..authorization.read import ContentReadAuthority
+        if (type(authority) is not ContentReadAuthority or authority.state.connection is not self.connection
+                or not callable(lifecycle_reader) or type(include_tags) is not bool
+                or (check_boundary is not None and not callable(check_boundary))):
+            raise ValueError("same-connection read authority and lifecycle reader required")
+        def read(cursor, refs, accesses):
+            results = [None] * len(refs)
+            positions, live_refs, evidences = [], [], []
+            for index, ref in enumerate(refs):
+                if check_boundary is not None:
+                    check_boundary()
+                try:
+                    evidence = self._validate_evidence(lifecycle_reader(cursor, ref))
+                except ContractError as error:
+                    if error.status not in (403, 404):
+                        raise
+                    continue
+                positions.append(index)
+                live_refs.append(ref)
+                evidences.append(evidence)
+            if live_refs:
+                rows = self.resource_rows_many(cursor, live_refs, evidences)
+                tags = {}
+                if include_tags:
+                    from ..tags.read import bound_tags_many
+                    tags = bound_tags_many(cursor, resources={row["uid"]: ref["repo_id"]
+                        for ref, row in zip(live_refs, rows) if row is not None})
+                for index, ref, evidence, row in zip(positions, live_refs, evidences, rows):
+                    access = accesses[index]
+                    if (not isinstance(access, dict) or access.get("read") is not True
+                            or type(access.get("write")) is not bool):
+                        raise ContractError("POLICY_UNAVAILABLE", "Resource access result is unavailable", 503)
+                    result = self._snapshot(ref, evidence, row)
+                    result["access"] = dict(access)
+                    if include_tags:
+                        result["tags"] = tags[row["uid"]] if row else []
+                    results[index] = result
+            if check_boundary is not None:
+                check_boundary()
+            return results
+        return authority.consume_many(references, reader=read)
 
     def replace_user_tags_authorized(self, reference, tag_ids, *, expected_revision,
                                     authority, lifecycle_reader, request_id, tag_values=None, idempotency_key=None):

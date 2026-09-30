@@ -75,8 +75,9 @@ class ReadLibraryStateTests(unittest.TestCase):
             authority.current_subject = dict(userId=actor)
             authority.hard_readonly = False
             authority.epoch = 'epoch'
-            return True
-        authority.authorize = Mock(side_effect=qualify)
+            return 'r'
+        authority.prepare_authorization = Mock(side_effect=qualify)
+        authority._barriers = Mock()
         repo = str(uuid4())
         references = [dict(repo_id=repo, path=f'/item-{index}', kind='dir')
                       for index in range(101)]
@@ -85,7 +86,8 @@ class ReadLibraryStateTests(unittest.TestCase):
         self.assertEqual(len(permissions), 101)
         self.assertEqual(permissions[50], 'rw')
         self.assertTrue(all(value == 'r' for index, value in enumerate(permissions) if index != 50))
-        self.assertEqual(authority.authorize.call_count, 6)
+        self.assertEqual(authority.prepare_authorization.call_count, 6)
+        self.assertEqual(authority.core.evaluate.call_count, 101)
         self.assertEqual(authority.rules.candidates_many.call_count, 6)
         self.assertEqual([len(call.args[0]) for call in authority.rules.candidates_many.call_args_list],
                          [20, 20, 20, 20, 20, 1])

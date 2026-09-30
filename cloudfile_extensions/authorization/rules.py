@@ -167,8 +167,11 @@ class ACLRules:
             raise ValueError("ACL batch must contain 1..50 references")
         refs = [resource_ref(reference) for reference in references]
         repo = refs[0]["repo_id"]
-        if any(ref["repo_id"] != repo or len(ref["path"].encode()) > 4096 for ref in refs):
+        if any(ref["repo_id"] != repo for ref in refs):
             raise ValueError("ACL batch must belong to one library")
+        # Batch consumers retain candidates()'s invalid-path response contract.
+        if any(len(ref["path"].encode()) > 4096 for ref in refs):
+            raise invalid("ACL path is too long")
         paths_by_ref = []
         all_paths = set()
         file_paths = set()

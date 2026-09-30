@@ -5,7 +5,7 @@ from uuid import uuid4
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.schema.runner import SchemaRunner
 from cloudfile_extensions.tags.bindings import replace_user_tags
-from cloudfile_extensions.tags.read import bound_tags, FIELDS
+from cloudfile_extensions.tags.read import bound_tags, bound_tags_many, FIELDS
 from cloudfile_extensions.tags.write import create_user, patch_user
 from cloudfile_extensions.tags.definitions import system_definition
 from cloudfile_extensions.tests.test_schema import DatabaseTestCase
@@ -50,6 +50,27 @@ class TagBindingTest(DatabaseTestCase):
         self.assertEqual(self.replace([], 2), (3, True))
         with self.connection.cursor() as cursor:
             self.assertEqual([item["tag_id"] for item in bound_tags(cursor, resource_uid=self.uid, repo_id=self.repo)], [self.system["tag_id"]])
+
+    def test_batch_matches_single_order_and_shares_only_bound_definitions(self):
+        self.replace([self.user["tag_id"]])
+        # Exercise the collection limit with real SQL and shared definitions.
+        uids = [self.uid] + [str(uuid4()) for _ in range(49)]
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as cursor:
+                for resource in uids[1:-1]:
+                    cursor.execute("INSERT INTO cf_tag_binding(resource_uid,tag_id) VALUES(%s,%s)",
+                        (resource, self.system["tag_id"]))
+                result = bound_tags_many(cursor, resources={resource: self.repo for resource in uids})
+                self.assertEqual(result, {resource: bound_tags(cursor, resource_uid=resource, repo_id=self.repo)
+                    for resource in uids})
+                self.assertEqual(result[uids[-1]], [])
+                self.assertEqual([tag["kind"] for tag in result[self.uid]], ["system", "user"])
+                with self.assertRaises(ContractError) as caught:
+                    bound_tags_many(cursor, resources={self.uid: str(uuid4())})
+                self.assertEqual(caught.exception.code, "TAGS_UNAVAILABLE")
+        finally:
+            self.connection.rollback()
 
     def test_disabled_new_binding_and_stale_revision_rejected(self):
         self.connection.begin()

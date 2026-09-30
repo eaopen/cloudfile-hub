@@ -63,6 +63,28 @@ class ResourceStoreTest(DatabaseTestCase):
         self.assertEqual(caught.exception.status, 409)
         self.assertEqual(self.store.resolve(self.reference, actor="u1")["description"], "CAD")
 
+    def test_bounded_rows_match_single_reads_and_never_allocate_sparse_uid(self):
+        # Real parameterized SQL, including long multibyte paths and sparse misses.
+        refs = [{**self.reference, "path": "/路径/" + str(index) + "字" * 400} for index in range(50)]
+        for ref in refs[:3]:
+            old = self.store.resolve(ref, actor="u1")
+            self.store.write(ref, {"description": "CAD"}, expected_revision=old["revision"], actor="u1")
+        evidence = ResourceEvidence(self.lifecycle)
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as cursor:
+                rows = self.store.resource_rows_many(cursor, refs, [evidence] * len(refs))
+                self.assertEqual(rows, [self.store._row(ref, evidence, locking=True) for ref in refs])
+                self.assertTrue(all(row is None for row in rows[3:]))
+                with self.assertRaises(ValueError):
+                    self.store.resource_rows_many(cursor, refs + refs[:1], [evidence] * 51)
+                with self.assertRaises(ContractError) as caught:
+                    self.store.resource_rows_many(cursor, refs[:1], [ResourceEvidence("reborn")])
+                self.assertEqual(caught.exception.code, "PATH_STATE_PENDING")
+        finally:
+            self.connection.rollback()
+        self.assertEqual(self.count("cf_resource"), 3)
+
     def test_event_failure_rolls_back_metadata(self):
         def unavailable(cursor, event):
             raise RuntimeError("event writer unavailable")

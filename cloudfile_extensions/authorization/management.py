@@ -30,12 +30,31 @@ class LibraryOwnerManagement:
 
 
     def authorize(self, cursor, actor, reference):
+        permission = self.prepare_authorization(cursor, actor, reference)
+        if permission is None or not self.scope_allowed(reference):
+            return False
+        decision = self.core.evaluate(reference, provider=self.state.provider,
+            subject=self.current_subject, rules=self.rules.candidates(reference, locking=True),
+            ce_permission=permission, attribute_allowlist=self.preparation.contexts.allowlist,
+            hard_readonly=self.hard_readonly)
+        # Single-target callers retain their scope and final policy decision.
+        return self.decision_allowed(decision)
+
+    def prepare_authorization(self, cursor, actor, reference):
+        """Load locked identity/library inputs, never authorize a target path.
+
+        Separating qualification avoids evaluating a group's first object twice.
+        Only the exact content-read authority shares these inputs across targets;
+        management/write callers still use authorize and their object scope.
+        """
+        self.epoch = None
+        self.current_subject = None
         self.hard_readonly = False
         self.is_owner = False
         self.is_library_admin = False
         self.is_global_library_admin = False
         if actor != self.actor:
-            return False
+            return None
         current = self.preparation.contexts.current(actor)
         if current is None:
             raise ContractError("SUBJECT_UNAVAILABLE", "Current subject must be prepared", 503)
@@ -46,10 +65,10 @@ class LibraryOwnerManagement:
         accounts = cursor.fetchall()
         if (len(accounts) != 1 or len(accounts[0]) != 3 or
                 accounts[0][0] != username or accounts[0][1] != 1 or accounts[0][2] not in (0, 1)):
-            return False
+            return None
         cursor.execute("SELECT user,login_id FROM " + self.state.profiles + " WHERE user=%s OR login_id=%s FOR UPDATE", (username, actor))
         if cursor.fetchall() != ((username, actor),):
-            return False
+            return None
         for schema, table in ((self.state.native_schema, "EmailUser"),
                               (self.state.identity_schema, "profile_profile")):
             cursor.execute("SELECT ENGINE FROM information_schema.tables WHERE table_schema=%s AND table_name=%s", (schema, table))
@@ -58,20 +77,20 @@ class LibraryOwnerManagement:
         repo = reference["repo_id"]
         cursor.execute("SELECT repo_id FROM Repo WHERE repo_id=%s FOR UPDATE", (repo,))
         if cursor.fetchall() != ((repo,),):
-            return False
+            return None
         cursor.execute("SELECT status FROM RepoInfo WHERE repo_id=%s FOR UPDATE", (repo,))
         statuses = cursor.fetchall()
         if (len(statuses) != 1 or len(statuses[0]) != 1
                 or type(statuses[0][0]) is not int or not self.library_status_allowed(statuses[0][0])):
-            return False
+            return None
         self.hard_readonly = statuses[0][0] == 1
         cursor.execute("SELECT repo_id FROM VirtualRepo WHERE repo_id=%s FOR UPDATE", (repo,))
         if cursor.fetchall():
-            return False
+            return None
         cursor.execute("SELECT owner_id FROM RepoOwner WHERE repo_id=%s FOR UPDATE", (repo,))
         owners = cursor.fetchall()
         if len(owners) != 1 or not isinstance(owners[0][0], str) or not owners[0][0]:
-            return False
+            return None
         owner = owners[0][0]
         self.is_owner = owner == username
         for table in ("Repo", "RepoInfo", "VirtualRepo", "RepoOwner"):
@@ -87,14 +106,7 @@ class LibraryOwnerManagement:
         if (permission is not None and not self.is_owner and not self.is_global_library_admin
                 and self.requires_library_admin()):
             self.is_library_admin = self._library_admin(cursor, repo, username)
-        if permission is None or not self.scope_allowed(reference):
-            return False
-        decision = self.core.evaluate(reference, provider=self.state.provider,
-            subject=current["subject"], rules=self.rules.candidates(reference, locking=True),
-            ce_permission=permission, attribute_allowlist=self.preparation.contexts.allowlist,
-            hard_readonly=self.hard_readonly)
-        # Manage is separate but cannot reveal/override explicit content denial.
-        return self.decision_allowed(decision)
+        return permission
 
     def decision_allowed(self, decision):
         return decision["visible"] and decision["read"]

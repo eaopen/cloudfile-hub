@@ -58,10 +58,17 @@ class ContentReadAuthority(DirectoryManagement):
     def consume(self, reference, reader):
         return self._consume(reference, reader, diagnostic=False)
 
-    def consume_many(self, references, *, batch_size=20):
-        """Evaluate a directory list in bounded groups; HTTP callers cannot set the size."""
+    def consume_many(self, references, *, batch_size=20, reader=None):
+        """Evaluate bounded groups, optionally consuming metadata before commit.
+
+        Without reader, preserve the ordered permission/None list. A trusted
+        reader(cursor, references, accesses) receives only readable targets and
+        must return equally ordered values; denied slots remain None. It obeys
+        consume's same-connection/no-commit contract, not a deferred grant.
+        """
         if (type(self) is not ContentReadAuthority or not isinstance(references, (list, tuple)) or
-                type(batch_size) is not int or not 1 <= batch_size <= 50):
+                type(batch_size) is not int or not 1 <= batch_size <= 50 or
+                (reader is not None and not callable(reader))):
             raise ValueError("bounded content-read batch required")
         if not references:
             return []
@@ -85,23 +92,38 @@ class ContentReadAuthority(DirectoryManagement):
                     connection.begin()
                     try:
                         with connection.cursor() as cursor:
-                            # Qualification and the subject epoch are library-wide; the
-                            # existing single-target path establishes them for this group.
-                            self.authorize(cursor, self.actor, group[0])
-                            if self.native_permission in ("r", "rw") and self.current_subject is not None:
+                            # No first-object decision is used as a group grant.
+                            permission = self.prepare_authorization(cursor, self.actor, group[0])
+                            group_results = [None] * len(group)
+                            authorized, accesses, positions = [], [], []
+                            if permission in ("r", "rw") and self.current_subject is not None:
                                 candidates = self.rules.candidates_many(group, locking=True)
-                                for ref, rules in zip(group, candidates):
+                                if len(candidates) != len(group):
+                                    raise ContractError("POLICY_UNAVAILABLE", "Incomplete batch candidates", 503)
+                                for index, (ref, rules) in enumerate(zip(group, candidates)):
                                     decision = self.core.evaluate(ref, provider=self.state.provider,
                                         subject=self.current_subject, rules=rules,
-                                        ce_permission=self.native_permission,
+                                        ce_permission=permission,
                                         attribute_allowlist=self.preparation.contexts.allowlist,
                                         hard_readonly=self.hard_readonly)
                                     allowed = self.decision_allowed(decision) and self.scope_allowed(ref)
-                                    permissions.append(("rw" if self.effective_access["write"] else "r") if allowed else None)
-                            else:
-                                permissions.extend([None] * len(group))
+                                    if allowed:
+                                        group_results[index] = "rw" if self.effective_access["write"] else "r"
+                                        authorized.append(dict(ref))
+                                        accesses.append(dict(self.effective_access))
+                                        positions.append(index)
+                            if reader is not None and authorized:
+                                values = reader(cursor, authorized, accesses)
+                                if not isinstance(values, (list, tuple)) or len(values) != len(authorized):
+                                    raise ContractError("POLICY_UNAVAILABLE", "Incomplete batch metadata", 503)
+                                for index, value in zip(positions, values):
+                                    group_results[index] = value
+                            # Recheck at the effect boundary, while the same repo
+                            # guard and transaction still protect every read.
+                            self._barriers(repo)
                             self.finalize(cursor)
                         connection.commit()
+                        permissions.extend(group_results)
                     finally:
                         connection.rollback()
             return permissions
