@@ -78,7 +78,8 @@ jobs:
 
         # tmate ssh debug when failed
       - name: Setup tmate session for debugging
-        if: failure()
+        if: ${{ failure() && runner.debug == '1' }}
+        timeout-minutes: 15
         uses: mxschmitt/action-tmate@v3
         with:
           limit-access-to-actor: true
