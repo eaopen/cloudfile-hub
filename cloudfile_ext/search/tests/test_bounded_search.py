@@ -112,3 +112,29 @@ def test_denied_scope_and_wrong_library_fail_without_fallback():
     client._call.return_value={'hits':[{'repo_id':'other','path':'/a/x.txt'}]}
     with pytest.raises(SearchFailure): invoke(client=client,list_directory=listing)
     listing.assert_not_called()
+
+# An indexed folder hit must be emitted after native existence and permissions
+# are rechecked; folders do not justify a fallback directory/tree scan.
+def test_indexed_search_returns_folders_and_files_together():
+    client = Mock()
+    client._call.return_value = {'hits': [
+        dict(repo_id=REPO, path='/a/drawing-folder', tags=[]),
+        dict(repo_id=REPO, path='/a/drawing.txt', tags=[])]}
+    resolve = Mock(side_effect=lambda p: entry(directory=p.endswith('folder')))
+    result, args = invoke(client=client, resolve_item=resolve)
+    assert [item['type'] for item in result['data']] == ['folder', 'file']
+    args['list_directory'].assert_not_called()
+    denied, _ = invoke(client=client, resolve_item=resolve, can_read=lambda p: p != '/a/drawing-folder')
+    assert [item['type'] for item in denied['data']] == ['file']
+
+
+def test_directory_tag_hit_retains_folder_type_and_matching_label():
+    # A tag on a folder follows the same candidate/permission path as its name.
+    client = Mock()
+    client._call.return_value = {'hits': [dict(repo_id=REPO, path='/a/archive',
+        tags=['班组内部文件'], _formatted=dict(tags=['<em>班组内部文件</em>']))]}
+    result, args = invoke(client=client, q='班组内部文件',
+                          resolve_item=Mock(return_value=entry(directory=True)))
+    assert result['data'][0]['type'] == 'folder'
+    assert result['data'][0]['matched_tags'] == ['班组内部文件']
+    args['list_directory'].assert_not_called()

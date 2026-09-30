@@ -8,8 +8,8 @@ persists file/directory changes there, so consuming it here means not forking
 seafevents for a second index (docs/search.md section four: "索引侧走
 cf-worker，不 fork seafevents").
 
-Scope (v1, see docs/search.md): files only, not directories. Content is
-indexed for plain-text files up to CF_SEARCH_INDEX_TEXT_MAX_BYTES; every other
+File and directory names share the index; directories never fetch content.
+Content is indexed for plain-text files up to CF_SEARCH_INDEX_TEXT_MAX_BYTES; every other
 type is indexed by filename/path/metadata only. Binary content extraction
 (docx/pdf/xlsx...) is what SeaSearch already does through seafevents --
 duplicating that pipeline for the one backend that exists specifically for
@@ -34,7 +34,7 @@ BATCH_SIZE = 500
 
 #: Activity.op_type values that touch a file's content or existence. Activity
 #: also carries library lifecycle rows (see cloudfile_ext.audit.views); those
-#: fall outside this set and outside obj_type == 'file', so they are skipped
+#: fall outside this set and supported file/directory object types, so they are skipped
 #: by the same filter without needing a separate check.
 _FILE_OPS = frozenset(('create', 'edit', 'delete', 'rename', 'move', 'recover'))
 
@@ -107,6 +107,19 @@ def _fetch_tags(repo_id, path):
         return []
 
 
+def _fetch_directory_tags(repo_id, path):
+    """Read legacy directory bindings; the file-tag path API forces is_dir=False.
+
+    Propagate lookup failures so a repair cannot checkpoint a folder with lost
+    tags. Ordinary file lookup behavior stays unchanged.
+    """
+    from seahub.tags.models import FileTag
+    parent, name = path.rsplit('/', 1)
+    rows = FileTag.objects.get_all_file_tag_by_path(
+        repo_id, parent or '/', name, True)
+    return sorted({row.tag.name for row in rows.select_related('tag')})
+
+
 def _ancestor_dirs(path):
     """Ancestor directory paths of a file, shallow-to-deep order.
 
@@ -123,20 +136,24 @@ def _ancestor_dirs(path):
     return out
 
 
-def _build_document(repo_id, path, op_user, timestamp, max_bytes):
+def _build_document(repo_id, path, op_user, timestamp, max_bytes, object_type='file'):
     from seaserv import seafile_api
 
     repo = seafile_api.get_repo(repo_id)
     if not repo:
         return None
-    file_id = seafile_api.get_file_id_by_path(repo_id, path)
+    # Directory events were silently discarded after EAP adopted indexed search.
+    # Resolve the native kind explicitly; folders need names/tags, never byte reads.
+    directory = object_type in ('dir', 'folder')
+    file_id = (seafile_api.get_dir_id_by_path(repo_id, path) if directory
+               else seafile_api.get_file_id_by_path(repo_id, path))
     if not file_id:
         # Deleted or moved again since this Activity row was written -- the
         # row for whatever happened next supersedes this one.
         return None
-    size = seafile_api.get_file_size(repo.store_id, repo.version, file_id) or 0
+    size = 0 if directory else (seafile_api.get_file_size(repo.store_id, repo.version, file_id) or 0)
     name = path.rsplit('/', 1)[-1]
-    extension = name.rsplit('.', 1)[-1].lower() if '.' in name else ''
+    extension = name.rsplit('.', 1)[-1].lower() if not directory and '.' in name else ''
     try:
         creator = seafile_api.get_repo_owner(repo_id) or ''
     except Exception:
@@ -149,15 +166,16 @@ def _build_document(repo_id, path, op_user, timestamp, max_bytes):
         'path': path,
         'name': name,
         'extension': extension,
-        'object_type': 'file',
+        'object_type': 'dir' if directory else 'file',
         'size': size,
         'mtime': int(timestamp.timestamp())
                  if hasattr(timestamp, 'timestamp') else timestamp,
         'last_modifier': op_user,
         'creator': creator,
-        'tags': _fetch_tags(repo_id, path),
+        'tags': (_fetch_directory_tags(repo_id, path) if directory
+                 else _fetch_tags(repo_id, path)),
         'dirs': _ancestor_dirs(path),
-        'content': _fetch_content(repo, file_id, path, max_bytes),
+        'content': '' if directory else _fetch_content(repo, file_id, path, max_bytes),
     }
 
 
@@ -209,7 +227,7 @@ def index_tick(client=None, max_bytes=None):
     deletes = set()
     for event in events:
         op_type = _normalize_op(event['op_type'])
-        if op_type not in _FILE_OPS or event['obj_type'] != 'file':
+        if op_type not in _FILE_OPS or event['obj_type'] not in ('file', 'dir', 'folder'):
             continue
         repo_id = event['repo_id']
 
@@ -241,7 +259,7 @@ def index_tick(client=None, max_bytes=None):
                 upserts.pop(old_id, None)
 
             doc = _build_document(repo_id, path, event['op_user'],
-                                  event['timestamp'], max_bytes)
+                                  event['timestamp'], max_bytes, event['obj_type'])
             if doc is None:
                 deletes.add(_doc_id(repo_id, path))
             else:
