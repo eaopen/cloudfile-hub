@@ -14,13 +14,19 @@ from cloudfile_ext.search.backends.meilisearch import INDEX_NAME, client_from_se
 from cloudfile_ext.search.indexer import _build_document
 
 
+#: --kinds selects what one run indexes. The legacy index has no file-level
+#: backfill otherwise: only Activity rows exist, and they cover part of a library.
+_KINDS = {'dir': ('dir',), 'file': ('file',), 'all': ('dir', 'file')}
+
+
 class Command(BaseCommand):
-    help = 'Backfill directory names into the legacy Meili index in bounded resumable batches.'
+    help = 'Backfill directory and/or file metadata into the legacy Meili index in bounded resumable batches.'
 
     def add_arguments(self, parser):
         parser.add_argument('--repo-id', required=True)
         parser.add_argument('--checkpoint', required=True)
         parser.add_argument('--max-pages', type=int, default=10)
+        parser.add_argument('--kinds', choices=sorted(_KINDS), default='dir')
 
     def handle(self, *args, **options):
         from seaserv import seafile_api
@@ -32,6 +38,9 @@ class Command(BaseCommand):
             raise CommandError('Invalid library ID.') from None
         if not 1 <= options['max_pages'] <= 100:
             raise CommandError('max-pages must be between 1 and 100.')
+        kinds = _KINDS.get(options.get('kinds') or 'dir')
+        if kinds is None:
+            raise CommandError('kinds must be one of dir, file or all.')
         checkpoint = Path(options['checkpoint']).expanduser().resolve()
         checkpoint.parent.mkdir(parents=True, exist_ok=True)
         # A shared checkpoint must not be advanced by two operators concurrently.
@@ -44,14 +53,15 @@ class Command(BaseCommand):
             head = getattr(repo, 'head_cmmt_id', None)
             if not isinstance(head, str) or not re.fullmatch(r'[0-9a-f]{40}', head):
                 raise CommandError('Library snapshot is unavailable.')
-            state = dict(repo_id=repo_id, head=head, pending=[dict(path='/', offset=0)], pages=0, directories=0)
+            state = dict(repo_id=repo_id, head=head, pending=[dict(path='/', offset=0)],
+                         pages=0, directories=0, files=0)
             if checkpoint.exists():
                 try:
                     if checkpoint.stat().st_size > 1048576:
                         raise ValueError()
                     state = json.loads(checkpoint.read_text())
                     # Validate counters as well as paths before trusting operator progress.
-                    if (any(type(state.get(key)) is not int or state[key] < 0 for key in ('pages', 'directories'))
+                    if (any(type(state.get(key)) is not int or state[key] < 0 for key in ('pages', 'directories', 'files'))
                             or state['repo_id'] != repo_id or state['head'] != head or not isinstance(state['pending'], list)
                             or len(state['pending']) > 10000 or any(not isinstance(p, dict)
                             or not isinstance(p.get('path'), str) or not p['path'].startswith('/')
@@ -89,13 +99,16 @@ class Command(BaseCommand):
                     break
                 state = advance_page(state,
                     read_page=lambda path, offset, limit: seafile_api.list_dir_by_commit_and_path(repo_id, head, path, offset, limit),
-                    build_document=lambda path, mtime: _build_document(repo_id, path, '', mtime, 0, 'dir'),
-                    write_documents=write_documents, assert_current=assert_current)
+                    # max_bytes=0 keeps repair metadata-only: a page of file
+                    # bodies would blow the Meili payload limit and stall the
+                    # checkpoint. Files never carry an op_user here.
+                    build_document=lambda path, mtime, object_type: _build_document(repo_id, path, '', mtime, 0, object_type),
+                    write_documents=write_documents, assert_current=assert_current, kinds=kinds)
                 # Atomic progress records only paths/offsets, never credentials.
                 temp = checkpoint.with_name(checkpoint.name + '.tmp')
                 with open(temp, 'w') as output:
                     os.fchmod(output.fileno(), 0o600)
                     json.dump(state, output)
                 os.replace(temp, checkpoint)
-            self.stdout.write('pages=%d directories=%d complete=%s' %
-                (state['pages'], state['directories'], not state['pending']))
+            self.stdout.write('pages=%d directories=%d files=%d complete=%s' %
+                (state['pages'], state['directories'], state['files'], not state['pending']))
