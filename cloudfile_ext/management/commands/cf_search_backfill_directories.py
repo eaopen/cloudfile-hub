@@ -1,6 +1,7 @@
 """Explicit resumable repair; never enumerate a library inside a search request."""
 import fcntl
 import json
+import logging
 import os
 import re
 import time
@@ -11,7 +12,9 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from cloudfile_ext.search.backfill import advance_page
 from cloudfile_ext.search.backends.meilisearch import INDEX_NAME, client_from_settings
-from cloudfile_ext.search.indexer import _build_document
+from cloudfile_ext.search.indexer import _build_document, preload_tags
+
+logger = logging.getLogger(__name__)
 
 
 #: --kinds selects what one run indexes. The legacy index has no file-level
@@ -86,6 +89,30 @@ class Command(BaseCommand):
             client = client_from_settings()
             client.ensure_index()
 
+            # One preload replaces the per-document tag lookup, which measured
+            # ~26 ms a call against a few dozen tag rows -- the whole backfill
+            # ran at ~20 files/s because of it. A failure here falls back to
+            # exactly the old per-path lookups rather than indexing documents
+            # with silently empty tags.
+            try:
+                file_tags, dir_tags = preload_tags(repo_id)
+            except Exception:
+                logger.warning('search backfill: tag preload failed for %s; '
+                               'falling back to per-path lookups', repo_id,
+                               exc_info=True)
+                file_tags = dir_tags = None
+
+            # `advance_page` hands canonical paths ('/a/b', no trailing slash),
+            # which is exactly what the preloaded map is keyed by.
+            def build_document(path, mtime, object_type):
+                if file_tags is None:
+                    return _build_document(repo_id, path, '', mtime, 0, object_type)
+                if object_type in ('dir', 'folder'):
+                    tags = dir_tags.get(path, [])
+                else:
+                    tags = file_tags.get(path, [])
+                return _build_document(repo_id, path, '', mtime, 0, object_type, tags=tags)
+
             def assert_current():
                 current = seafile_api.get_repo(repo_id)
                 if current is None or current.head_cmmt_id != head:
@@ -133,7 +160,7 @@ class Command(BaseCommand):
                     # max_bytes=0 keeps repair metadata-only: a page of file
                     # bodies would blow the Meili payload limit and stall the
                     # checkpoint. Files never carry an op_user here.
-                    build_document=lambda path, mtime, object_type: _build_document(repo_id, path, '', mtime, 0, object_type),
+                    build_document=build_document,
                     write_documents=write_documents, assert_current=assert_current, kinds=kinds)
                 if len(buffer) >= flush_docs:
                     flush()

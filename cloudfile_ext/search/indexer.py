@@ -18,6 +18,7 @@ sites not running SeaSearch would be the tail wagging the dog.
 
 import json
 import logging
+import posixpath
 import urllib.error
 import urllib.request
 
@@ -120,6 +121,92 @@ def _fetch_directory_tags(repo_id, path):
     return sorted({row.tag.name for row in rows.select_related('tag')})
 
 
+def _tag_storage(repo_id, seafile_api):
+    """(repo_id, origin_path) the tag tables key one library's objects under.
+
+    Virtual libraries store tags against the origin repo under an
+    origin-path-prefixed parent -- the same rewrite
+    ``FileUUIDMapManager.get_origin_repo_id_and_parent_path`` applies to every
+    lookup. Preloading has to key rows the same way or a virtual library would
+    silently resolve no tags.
+    """
+    repo = seafile_api.get_repo(repo_id)
+    if repo is not None and getattr(repo, 'is_virtual', False):
+        return repo.origin_repo_id, (getattr(repo, 'origin_path', '') or '').rstrip('/')
+    return repo_id, ''
+
+
+def _tag_lookup_path(parent_path, filename, prefix, normalize):
+    """The normalized path a FileUUIDMap row is looked up by, or None.
+
+    `prefix` is the virtual library's origin path ('' for a normal library);
+    rows whose storage parent falls outside it belong to another library on
+    the same origin repo and are skipped.
+    """
+    parent = parent_path or '/'
+    if prefix:
+        if parent == prefix:
+            parent = ''
+        elif parent.startswith(prefix + '/'):
+            parent = parent[len(prefix):]
+        else:
+            return None
+    return normalize(posixpath.join(parent, filename))
+
+
+def preload_tags(repo_id):
+    """Tag names for every tagged object of one library, keyed by path.
+
+    The per-path lookups (`_fetch_tags` / `_fetch_directory_tags`) cost a
+    FileUUIDMap point lookup plus a tag join for *every* document -- measured
+    at ~26 ms per call, which dominates a full-library backfill even though
+    the tag tables hold a few dozen rows. Loading the library's uuid maps
+    once and then both tag tables by uuid answers every path from three
+    bounded queries.
+
+    Returns `(file_tags, dir_tags)`: dicts mapping a normalized path to
+    exactly the list the per-path lookup would return -- insertion order for
+    files, sorted/deduplicated for directories -- with the same is_dir split.
+    Untagged paths are simply absent; callers default to [].
+    """
+    from seahub.file_tags.models import FileTags
+    from seahub.tags.models import FileTag, FileUUIDMap
+    from seahub.utils import normalize_file_path
+    from seaserv import seafile_api
+
+    storage_repo_id, prefix = _tag_storage(repo_id, seafile_api)
+    uuid_path = {}
+    file_uuids, dir_uuids, seen = [], [], set()
+    for uuid_map in FileUUIDMap.objects.filter(repo_id=storage_repo_id):
+        path = _tag_lookup_path(uuid_map.parent_path, uuid_map.filename, prefix,
+                                normalize_file_path)
+        if path is None:
+            continue
+        # A lookup takes the first row for (md5, filename, is_dir); keep the
+        # first row per path too instead of merging duplicate bindings.
+        key = (path, bool(uuid_map.is_dir))
+        if key in seen:
+            continue
+        seen.add(key)
+        uuid_path[uuid_map.pk] = path
+        (dir_uuids if uuid_map.is_dir else file_uuids).append(uuid_map.pk)
+
+    file_tags = {}
+    if file_uuids:
+        for row in FileTags.objects.filter(
+                file_uuid_id__in=file_uuids).select_related('repo_tag'):
+            names = file_tags.setdefault(uuid_path[row.file_uuid_id], [])
+            names.append(row.repo_tag.name)
+    dir_tags = {}
+    if dir_uuids:
+        collected = {}
+        for row in FileTag.objects.filter(
+                uuid_id__in=dir_uuids).select_related('tag'):
+            collected.setdefault(uuid_path[row.uuid_id], set()).add(row.tag.name)
+        dir_tags = {path: sorted(names) for path, names in collected.items()}
+    return file_tags, dir_tags
+
+
 def _ancestor_dirs(path):
     """Ancestor directory paths of a file, shallow-to-deep order.
 
@@ -136,7 +223,8 @@ def _ancestor_dirs(path):
     return out
 
 
-def _build_document(repo_id, path, op_user, timestamp, max_bytes, object_type='file'):
+def _build_document(repo_id, path, op_user, timestamp, max_bytes, object_type='file',
+                    tags=None):
     from seaserv import seafile_api
 
     repo = seafile_api.get_repo(repo_id)
@@ -160,6 +248,12 @@ def _build_document(repo_id, path, op_user, timestamp, max_bytes, object_type='f
         logger.warning('meilisearch indexer: could not read owner for %s',
                        repo_id, exc_info=True)
         creator = ''
+    # `tags` is a preloaded snapshot for bulk callers; when absent the
+    # per-path lookup runs exactly as before, so the incremental indexer is
+    # unaffected.
+    if tags is None:
+        tags = (_fetch_directory_tags(repo_id, path) if directory
+                else _fetch_tags(repo_id, path))
     return {
         'id': _doc_id(repo_id, path),
         'repo_id': repo_id,
@@ -172,8 +266,7 @@ def _build_document(repo_id, path, op_user, timestamp, max_bytes, object_type='f
                  if hasattr(timestamp, 'timestamp') else timestamp,
         'last_modifier': op_user,
         'creator': creator,
-        'tags': (_fetch_directory_tags(repo_id, path) if directory
-                 else _fetch_tags(repo_id, path)),
+        'tags': tags,
         'dirs': _ancestor_dirs(path),
         'content': '' if directory else _fetch_content(repo, file_id, path, max_bytes),
     }

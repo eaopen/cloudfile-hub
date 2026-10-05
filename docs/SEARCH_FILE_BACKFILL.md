@@ -86,6 +86,20 @@ pages=<页数> directories=<目录文档数> files=<文件文档数> complete=<T
 - 绝不把“已遍历页的文档还在缓冲、尚未写入”的进度写进检查点；否则重跑会从检查点之后开始，这批文档成为永久缺口。
 - PUT 被拒、task `failed`、task 在 30 秒内仍是 `enqueued/processing`、或库 head 变化时：缓冲中的文档不写检查点，上一版磁盘检查点保持原样，命令以非零退出（`Index write failed; checkpoint was not advanced.` / `Index write pending; rerun the same checkpoint to retry safely.` / `Library changed; restart with a new checkpoint.`）。重跑同一检查点会重读同样的页，文档 id 稳定，幂等覆盖。
 
+## 标签预加载与快照语义
+
+实测 `_fetch_tags(repo_id, path)` 单次约 25.65 ms（同期 `get_file_id_by_path` 3.94 ms、`get_file_size` 0.77 ms、`_ancestor_dirs` 约 0 ms），而全站标签表规模极小（`tags_fileuuidmap` 63 行、`tags_filetag` 33 行、`tags_tags` 27 行）。于是“每份文档一次标签查询”成了补索引的唯一瓶颈，吞吐被压到约 20 文件/秒。
+
+命令现在在资料库/head/索引校验通过之后、进入分页循环之前，用 `preload_tags(repo_id)` 一次性加载本次运行的标签快照：
+
+- **有界查询**：先取该资料库的 `FileUUIDMap` 行，再分别按 uuid 取 `FileTags`（文件，join `repo_tag`）与 `FileTag`（目录，join `tag`），共 3 条查询覆盖整库全部路径，不再随文档数增长。虚拟资料库按 `FileUUIDMapManager` 的同一套 origin repo / origin path 改写取行，保证与逐路径查询命中同一批绑定。
+- **取值一致**：返回两个按规范化路径（`seahub.utils.normalize_file_path`，即 parent_path + filename）索引的字典（文件标签、目录标签）；文件保留查询顺序，目录去重后排序，`is_dir` 拆分与 `_fetch_tags` / `_fetch_directory_tags` 完全相同。未打标签的路径不在字典里，取 `[]`。
+- **构建入口**：`_build_document(..., tags=...)` 新增可选关键字，传入时直接使用快照；`tags=None` 时仍走原来的逐路径查询，行为逐字不变，增量索引链完全不受影响。
+- **快照语义**：映射只反映预加载那一刻的标签状态。长时间运行期间新增/删除的标签不会回溯到本次已写入的文档，这些变更由既有的增量标签扇出负责，补索引不追赶它们；重跑一次补索引即可刷新快照。
+- **失败回退**：预加载查询失败时命令记录告警并退回逐路径查询（即改动前的行为），不会把文档 `tags` 静默写成空。该回退路径同时保证 `tags=None` 的旧语义始终可用。
+
+改动只落在补索引路径上；`cloudfile_ext/search/backfill.py` 仍然只 import `stat`，纯算法部分保持 Django-free。
+
 ## 固定 head 与断点续跑语义
 
 - **固定 head**：命令启动时记录资料库 `head_cmmt_id`，之后所有分页读取都用 `list_dir_by_commit_and_path(repo_id, head, ...)`。若期间 head 变化，`assert_current()` 抛错，命令拒绝继续，必须换新检查点重跑。要求补索引期间库内容稳定。
@@ -111,6 +125,9 @@ pages=<页数> directories=<目录文档数> files=<文件文档数> complete=<T
 - flush 失败或长时间 pending 时，上一版磁盘检查点逐字节不变，命令以非零退出（`SystemExit` 非 0）；
 - `--flush-docs` 为 0、负数、大于 2000 或非整数时报错，且不触碰资料库与索引；
 - 命令 `--kinds all` 持久化 `files` 计数器、输出含 `files=`，并拒绝被破坏或缺少 `files` 的检查点；
-- Meili 写入失败或异步任务长时间 pending 时都不推进检查点。
+- Meili 写入失败或异步任务长时间 pending 时都不推进检查点；
+- 标签预加载：在隔离的真实 ORM（SQLite）上，`preload_tags` 的映射对文件、目录、未打标签路径、同名文件/目录与虚拟资料库都与 `_fetch_tags` / `_fetch_directory_tags` 逐路径结果一致，且整库只发 3 条 SELECT；
+- 补索引运行期间不再发生任何逐路径标签查询（预加载失败以外的路径）；
+- `_build_document(tags=None)` 仍调用逐路径查询，显式传入（含空列表）时不再查询。
 
 代码测试不等于生产补索引已完成。生产验收应选一个既有文件（仅存在于原生树、不在 Activity 覆盖内）、一个目录和同名文件，在“全库 / 所在目录”分别搜索，确认文件命中且未授权对象不出现。
