@@ -98,7 +98,7 @@ def test_unknown_kind_is_rejected():
 # Exercise the real operator command: --kinds all must build file documents
 # without fetching bytes, report the files counter, and refuse a checkpoint that
 # lost or corrupted that counter.
-def _configure_command(monkeypatch, entries):
+def _configure_command(monkeypatch, entries, on_write=None, write_status='succeeded'):
     from cloudfile_ext.management.commands import cf_search_backfill_directories as command
     api = Mock()
     api.get_repo.return_value = SimpleNamespace(head_cmmt_id='a' * 40)
@@ -106,8 +106,15 @@ def _configure_command(monkeypatch, entries):
     monkeypatch.setitem(sys.modules, 'seaserv', SimpleNamespace(seafile_api=api))
     monkeypatch.setattr(command, 'settings', SimpleNamespace(CF_PROVIDER_SEARCH='meilisearch'))
     client = Mock()
-    client._call.side_effect = lambda method, path, *args: (
-        dict(taskUid=1) if method == 'PUT' else dict(status='succeeded'))
+
+    def call(method, path, *args):
+        if method == 'PUT':
+            if on_write is not None:
+                on_write(list(args[0]))
+            return dict(taskUid=1)
+        return dict(status=write_status)
+
+    client._call.side_effect = call
     monkeypatch.setattr(command, 'client_from_settings', lambda: client)
     return command, api
 
@@ -161,3 +168,158 @@ def test_backfill_command_does_not_checkpoint_a_pending_async_write(monkeypatch,
         command.Command().handle(repo_id='11111111-1111-4111-8111-111111111111',
             checkpoint=str(checkpoint), max_pages=1, kinds='all')
     assert not checkpoint.exists()
+
+
+# Batching: a directory-heavy library fills one Meili payload from many small
+# native pages. The buffer bounds memory; the checkpoint may only describe
+# documents that are already durable in Meilisearch.
+def _chain_entries(count):
+    """`count` native pages holding one nested directory document each."""
+    pages = {}
+    path = '/'
+    for index in range(count):
+        if index + 1 == count:
+            pages[path] = []
+            continue
+        name = 'd%d' % (index + 1)
+        pages[path] = [native_entry(name)]
+        path = ('' if path == '/' else path) + '/' + name
+    return pages
+
+
+def test_backfill_command_batches_small_pages_into_one_write(monkeypatch, tmp_path):
+    checkpoint = tmp_path / 'cursor.json'
+    writes, checkpoint_at_write = [], []
+
+    def on_write(documents):
+        writes.append([row['path'] for row in documents])
+        checkpoint_at_write.append(checkpoint.read_text() if checkpoint.exists() else None)
+
+    command, _ = _configure_command(monkeypatch, {
+        '/': [native_entry('a'), native_entry('b')],
+        '/a': [native_entry('x.txt', False)],
+        '/b': [native_entry('y.txt', False)]}, on_write=on_write)
+    monkeypatch.setattr(command, '_build_document', lambda r, p, *args: dict(path=p))
+    out = StringIO()
+    command.Command(stdout=out).handle(repo_id='11111111-1111-4111-8111-111111111111',
+        checkpoint=str(checkpoint), max_pages=10, kinds='all', flush_docs=5)
+    # Three small pages, four documents, exactly one Meili write.
+    assert writes == [['/a', '/b', '/a/x.txt', '/b/y.txt']]
+    # Those documents were still buffered when the run ran out of pages, so the
+    # leftover flush had to happen before any checkpoint existed.
+    assert checkpoint_at_write == [None]
+    assert json.loads(checkpoint.read_text()) == dict(
+        repo_id='11111111-1111-4111-8111-111111111111', head='a' * 40, pending=[],
+        pages=3, directories=2, files=2)
+    assert out.getvalue().strip() == 'pages=3 directories=2 files=2 complete=True'
+
+
+def test_backfill_command_flushes_at_threshold_and_checkpoints_only_after(monkeypatch, tmp_path):
+    checkpoint = tmp_path / 'cursor.json'
+    writes, checkpoint_at_write = [], []
+
+    def on_write(documents):
+        writes.append([row['path'] for row in documents])
+        checkpoint_at_write.append(checkpoint.read_text() if checkpoint.exists() else None)
+
+    command, _ = _configure_command(monkeypatch, _chain_entries(5), on_write=on_write)
+    monkeypatch.setattr(command, '_build_document', lambda r, p, *args: dict(path=p))
+    command.Command().handle(repo_id='11111111-1111-4111-8111-111111111111',
+        checkpoint=str(checkpoint), max_pages=10, kinds='dir', flush_docs=2)
+    # One document per page: two pages fill the threshold, so four documents go
+    # out as two writes of two instead of four writes of one.
+    assert writes == [['/d1', '/d1/d2'], ['/d1/d2/d3', '/d1/d2/d3/d4']]
+    assert checkpoint_at_write[0] is None
+    # The second write can only see the checkpoint of the first successful flush
+    # (pages 1-2), never pages 3-4 whose documents are still in the buffer.
+    assert json.loads(checkpoint_at_write[1])['pages'] == 2
+    assert json.loads(checkpoint.read_text())['pages'] == 5
+
+
+def test_backfill_command_flushes_leftovers_before_final_checkpoint(monkeypatch, tmp_path):
+    checkpoint = tmp_path / 'cursor.json'
+    seeded = dict(repo_id='11111111-1111-4111-8111-111111111111', head='a' * 40,
+                  pending=[dict(path='/d1', offset=0)], pages=1, directories=1, files=0)
+    checkpoint.write_text(json.dumps(seeded))
+    snapped = []
+
+    def on_write(documents):
+        snapped.append(([row['path'] for row in documents], checkpoint.read_text()))
+
+    command, _ = _configure_command(monkeypatch, _chain_entries(5), on_write=on_write)
+    monkeypatch.setattr(command, '_build_document', lambda r, p, *args: dict(path=p))
+    command.Command().handle(repo_id=seeded['repo_id'], checkpoint=str(checkpoint),
+                             max_pages=10, kinds='dir', flush_docs=2)
+    assert [paths for paths, _ in snapped] == [['/d1/d2', '/d1/d2/d3'], ['/d1/d2/d3/d4']]
+    # The first batch is written while the on-disk checkpoint is still the one
+    # this run resumed from.
+    assert snapped[0][1] == json.dumps(seeded)
+    # The trailing document is flushed before the final checkpoint claims it.
+    assert json.loads(snapped[1][1])['pages'] == 3
+    assert json.loads(checkpoint.read_text()) == dict(
+        repo_id=seeded['repo_id'], head='a' * 40, pending=[], pages=5, directories=4, files=0)
+
+
+@pytest.mark.parametrize('status, message', [('failed', 'not advanced'), ('enqueued', 'pending')])
+def test_backfill_command_failed_flush_keeps_previous_checkpoint(monkeypatch, tmp_path, status, message):
+    from django.core.management.base import CommandError
+    command, _ = _configure_command(monkeypatch, _chain_entries(5))
+    monkeypatch.setattr(command, '_build_document', lambda r, p, *args: dict(path=p))
+    checkpoint = tmp_path / 'cursor.json'
+    # One durable page first: the next run must not move this file on failure.
+    command.Command().handle(repo_id='11111111-1111-4111-8111-111111111111',
+        checkpoint=str(checkpoint), max_pages=1, kinds='dir', flush_docs=2)
+    before = checkpoint.read_text()
+    assert json.loads(before)['pages'] == 1
+    command.client_from_settings()._call.side_effect = lambda method, path, *args: (
+        dict(taskUid=1) if method == 'PUT' else dict(status=status))
+    if status == 'enqueued':
+        ticks = iter([0.0, 0.0, 31.0])
+        monkeypatch.setattr(command, 'time', SimpleNamespace(
+            monotonic=lambda: next(ticks), sleep=lambda seconds: None))
+    with pytest.raises(CommandError, match=message):
+        command.Command().handle(repo_id='11111111-1111-4111-8111-111111111111',
+            checkpoint=str(checkpoint), max_pages=10, kinds='dir', flush_docs=1)
+    assert checkpoint.read_text() == before
+
+
+def test_backfill_command_exits_non_zero_on_failed_flush(monkeypatch, tmp_path):
+    command, _ = _configure_command(monkeypatch, _chain_entries(5))
+    monkeypatch.setattr(command, '_build_document', lambda r, p, *args: dict(path=p))
+    checkpoint = tmp_path / 'cursor.json'
+    command.Command().handle(repo_id='11111111-1111-4111-8111-111111111111',
+        checkpoint=str(checkpoint), max_pages=1, kinds='dir', flush_docs=2)
+    before = checkpoint.read_text()
+    command.client_from_settings()._call.side_effect = lambda method, path, *args: (
+        dict(taskUid=1) if method == 'PUT' else dict(status='failed'))
+    # The operator-facing entry point must report the failure as a non-zero exit.
+    with pytest.raises(SystemExit) as exit_info:
+        command.Command().run_from_argv(['manage.py', 'cf_search_backfill_directories',
+            '--skip-checks', '--repo-id', '11111111-1111-4111-8111-111111111111',
+            '--checkpoint', str(checkpoint), '--max-pages', '10', '--kinds', 'dir',
+            '--flush-docs', '1'])
+    assert exit_info.value.code != 0
+    assert checkpoint.read_text() == before
+
+
+@pytest.mark.parametrize('flush_docs', [0, -1, 2001, 10 ** 9, None, '500'])
+def test_backfill_command_rejects_out_of_range_flush_docs(monkeypatch, tmp_path, flush_docs):
+    from django.core.management.base import CommandError
+    command, api = _configure_command(monkeypatch, {'/': []})
+    checkpoint = tmp_path / 'cursor.json'
+    with pytest.raises(CommandError, match='flush-docs'):
+        command.Command().handle(repo_id='11111111-1111-4111-8111-111111111111',
+            checkpoint=str(checkpoint), max_pages=1, kinds='dir', flush_docs=flush_docs)
+    assert not checkpoint.exists()
+    # Rejected before the library or the index is touched.
+    assert api.get_repo.call_count == 0
+
+
+@pytest.mark.parametrize('flush_docs', [1, 2000])
+def test_backfill_command_accepts_flush_docs_bounds(monkeypatch, tmp_path, flush_docs):
+    command, _ = _configure_command(monkeypatch, {'/': [native_entry('empty')], '/empty': []})
+    monkeypatch.setattr(command, '_build_document', lambda r, p, *args: dict(path=p))
+    out = StringIO()
+    command.Command(stdout=out).handle(repo_id='11111111-1111-4111-8111-111111111111',
+        checkpoint=str(tmp_path / 'cursor.json'), max_pages=5, kinds='dir', flush_docs=flush_docs)
+    assert out.getvalue().strip() == 'pages=2 directories=1 files=0 complete=True'

@@ -1,6 +1,7 @@
 """Regression: indexed search must cover folders, including empty ones."""
 import stat
 import sys
+from io import StringIO
 from types import SimpleNamespace
 from unittest.mock import Mock
 
@@ -131,6 +132,39 @@ def test_backfill_command_resumes_and_waits_for_index_task(monkeypatch, tmp_path
     command.Command().handle(**options)
     assert json.loads(checkpoint.read_text())['pending'] == []
     assert [call.args[2] for call in api.list_dir_by_commit_and_path.call_args_list] == ['/', '/empty']
+
+
+def test_backfill_command_directory_writes_are_batched_not_per_page(monkeypatch, tmp_path):
+    import json
+    from cloudfile_ext.management.commands import cf_search_backfill_directories as command
+    api = Mock()
+    api.get_repo.return_value = SimpleNamespace(head_cmmt_id='a' * 40)
+    pages = {'/': [native_entry('a'), native_entry('b')], '/a': [], '/b': []}
+    api.list_dir_by_commit_and_path.side_effect = lambda r, h, p, o, n: pages.get(p, [])
+    monkeypatch.setitem(sys.modules, 'seaserv', SimpleNamespace(seafile_api=api))
+    monkeypatch.setattr(command, 'settings', SimpleNamespace(CF_PROVIDER_SEARCH='meilisearch'))
+    monkeypatch.setattr(command, '_build_document', lambda r, p, *args: dict(path=p))
+    writes = []
+    client = Mock()
+
+    def call(method, path, *args):
+        if method == 'PUT':
+            writes.append([row['path'] for row in args[0]])
+            return dict(taskUid=1)
+        return dict(status='succeeded')
+
+    client._call.side_effect = call
+    monkeypatch.setattr(command, 'client_from_settings', lambda: client)
+    checkpoint = tmp_path / 'cursor.json'
+    out = StringIO()
+    command.Command(stdout=out).handle(repo_id='11111111-1111-4111-8111-111111111111',
+        checkpoint=str(checkpoint), max_pages=10, flush_docs=500)
+    # Three directory pages, two documents, one Meili write instead of three.
+    assert writes == [['/a', '/b']]
+    assert out.getvalue().strip() == 'pages=3 directories=2 files=0 complete=True'
+    assert json.loads(checkpoint.read_text()) == dict(
+        repo_id='11111111-1111-4111-8111-111111111111', head='a' * 40, pending=[],
+        pages=3, directories=2, files=0)
 
 
 def test_backfill_command_does_not_checkpoint_a_failed_async_write(monkeypatch, tmp_path):

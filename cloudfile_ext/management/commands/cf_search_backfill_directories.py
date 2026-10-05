@@ -18,6 +18,14 @@ from cloudfile_ext.search.indexer import _build_document
 #: backfill otherwise: only Activity rows exist, and they cover part of a library.
 _KINDS = {'dir': ('dir',), 'file': ('file',), 'all': ('dir', 'file')}
 
+#: Documents held in memory before one Meili write. Directory-heavy libraries
+#: average only a handful of documents per native page, so waiting for one
+#: async task per page makes the write round-trip the whole cost. The buffer is
+#: also the memory bound: it never exceeds this plus one page of 100 documents.
+_FLUSH_DOCS = 500
+_FLUSH_DOCS_MIN = 1
+_FLUSH_DOCS_MAX = 2000
+
 
 class Command(BaseCommand):
     help = 'Backfill directory and/or file metadata into the legacy Meili index in bounded resumable batches.'
@@ -27,6 +35,7 @@ class Command(BaseCommand):
         parser.add_argument('--checkpoint', required=True)
         parser.add_argument('--max-pages', type=int, default=10)
         parser.add_argument('--kinds', choices=sorted(_KINDS), default='dir')
+        parser.add_argument('--flush-docs', type=int, default=_FLUSH_DOCS)
 
     def handle(self, *args, **options):
         from seaserv import seafile_api
@@ -38,6 +47,9 @@ class Command(BaseCommand):
             raise CommandError('Invalid library ID.') from None
         if not 1 <= options['max_pages'] <= 100:
             raise CommandError('max-pages must be between 1 and 100.')
+        flush_docs = options.get('flush_docs', _FLUSH_DOCS)
+        if type(flush_docs) is not int or not _FLUSH_DOCS_MIN <= flush_docs <= _FLUSH_DOCS_MAX:
+            raise CommandError('flush-docs must be between 1 and 2000.')
         kinds = _KINDS.get(options.get('kinds') or 'dir')
         if kinds is None:
             raise CommandError('kinds must be one of dir, file or all.')
@@ -79,8 +91,18 @@ class Command(BaseCommand):
                 if current is None or current.head_cmmt_id != head:
                     raise CommandError('Library changed; restart with a new checkpoint.')
 
+            # The buffer is the only place documents live until a flush lands.
+            # advance_page hands us each page's documents; batching them here
+            # turns one Meili PUT+wait per page into one per --flush-docs.
+            buffer = []
+
             def write_documents(documents):
-                task = client._call('PUT', '/indexes/%s/documents' % INDEX_NAME, documents)
+                buffer.extend(documents)
+
+            def flush():
+                if not buffer:
+                    return
+                task = client._call('PUT', '/indexes/%s/documents' % INDEX_NAME, list(buffer))
                 uid = task.get('taskUid') if isinstance(task, dict) else None
                 if type(uid) is not int or uid < 0:
                     raise CommandError('Index write was not acknowledged.')
@@ -88,11 +110,20 @@ class Command(BaseCommand):
                 while time.monotonic() < deadline:
                     result = client._call('GET', '/tasks/%d' % uid)
                     if result.get('status') == 'succeeded':
+                        del buffer[:]
                         return
                     if result.get('status') not in ('enqueued', 'processing'):
                         raise CommandError('Index write failed; checkpoint was not advanced.')
                     time.sleep(0.1)
                 raise CommandError('Index write pending; rerun the same checkpoint to retry safely.')
+
+            def save_checkpoint():
+                # Atomic progress records only paths/offsets, never credentials.
+                temp = checkpoint.with_name(checkpoint.name + '.tmp')
+                with open(temp, 'w') as output:
+                    os.fchmod(output.fileno(), 0o600)
+                    json.dump(state, output)
+                os.replace(temp, checkpoint)
 
             for _ in range(options['max_pages']):
                 if not state['pending']:
@@ -104,11 +135,14 @@ class Command(BaseCommand):
                     # checkpoint. Files never carry an op_user here.
                     build_document=lambda path, mtime, object_type: _build_document(repo_id, path, '', mtime, 0, object_type),
                     write_documents=write_documents, assert_current=assert_current, kinds=kinds)
-                # Atomic progress records only paths/offsets, never credentials.
-                temp = checkpoint.with_name(checkpoint.name + '.tmp')
-                with open(temp, 'w') as output:
-                    os.fchmod(output.fileno(), 0o600)
-                    json.dump(state, output)
-                os.replace(temp, checkpoint)
+                if len(buffer) >= flush_docs:
+                    flush()
+                    # Durable only now: the on-disk checkpoint must never claim
+                    # pages whose documents are still buffered or unwritten.
+                    save_checkpoint()
+            # Whatever the last pages produced is flushed before the checkpoint
+            # that reports it, including a run that ended on max-pages.
+            flush()
+            save_checkpoint()
             self.stdout.write('pages=%d directories=%d files=%d complete=%s' %
                 (state['pages'], state['directories'], state['files'], not state['pending']))
