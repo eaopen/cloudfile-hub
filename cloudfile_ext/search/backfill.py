@@ -4,6 +4,14 @@ Repair runs outside user queries. Each page is pinned to one native commit,
 includes empty directories and advances only after the index write succeeds.
 Files are leaves: their document is built from the native entry alone, and they
 are never queued for descent.
+
+`build_document(path, mtime, object_type, entry)` is the callback contract. The
+validated native listing `entry` is handed to it alongside the path/kind so the
+callback can build the document from values the listing already returned
+(`obj_id`, `obj_name`, `mode`, `mtime`, `size`) instead of paying a native RPC
+per file. `mtime` is still passed for callers that only need the timestamp, and
+entries that lack what such a fast path reads simply make the caller fall back
+to its RPC-based builder.
 """
 import stat
 
@@ -46,14 +54,14 @@ def advance_page(state, *, read_page, build_document, write_documents, assert_cu
             children.append(dict(path=path, offset=0))
             if 'dir' not in kinds:
                 continue
-            document = build_document(path, getattr(entry, 'mtime', 0), 'dir')
+            document = build_document(path, getattr(entry, 'mtime', 0), 'dir', entry)
             if document is None:
                 raise ValueError('directory changed during backfill')
             documents.append(document)
         else:
             if 'file' not in kinds:
                 continue
-            document = build_document(path, getattr(entry, 'mtime', 0), 'file')
+            document = build_document(path, getattr(entry, 'mtime', 0), 'file', entry)
             if document is None:
                 raise ValueError('file changed during backfill')
             documents.append(document)

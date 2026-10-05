@@ -272,6 +272,60 @@ def _build_document(repo_id, path, op_user, timestamp, max_bytes, object_type='f
     }
 
 
+def backfill_entry_is_usable(entry, object_type):
+    """Whether a native listing entry carries what the fast backfill builder reads.
+
+    The repair already holds the entry the native directory listing returned for
+    this exact object -- the page is pinned to one commit and the head is
+    re-checked around it, so `obj_id`/`name`/`mode`/`mtime`/`size` describe the
+    object being indexed. A file entry without an integral, non-negative size is
+    the one shape that cannot be trusted; the caller must then fall back to the
+    RPC-based `_build_document`. Directories carry no size at all, so their
+    `mtime` alone is enough.
+    """
+    if entry is None:
+        return False
+    if object_type in ('dir', 'folder'):
+        return True
+    size = getattr(entry, 'size', None)
+    return type(size) is int and size >= 0
+
+
+def build_backfill_document(repo_id, path, entry, object_type, tags, creator):
+    """Build a backfill document from the native listing entry, with no RPC.
+
+    Produces exactly the dict
+    `_build_document(repo_id, path, '', entry.mtime, 0, object_type, tags=tags)`
+    would, minus the four native calls that capped the live backfill at ~26
+    files/s: `get_repo` / `get_file_id_by_path` / `get_file_size` come from the
+    entry the listing already returned, and `get_repo_owner` is resolved once
+    per command run by the caller instead of once per document.
+
+    `content` is always '': the repair runs with `max_bytes=0`, so it never reads
+    bodies and `_fetch_content` returns '' for every input at that ceiling.
+    Only call this when `backfill_entry_is_usable` returned True.
+    """
+    directory = object_type in ('dir', 'folder')
+    name = path.rsplit('/', 1)[-1]
+    extension = name.rsplit('.', 1)[-1].lower() if not directory and '.' in name else ''
+    mtime = getattr(entry, 'mtime', 0)
+    return {
+        'id': _doc_id(repo_id, path),
+        'repo_id': repo_id,
+        'path': path,
+        'name': name,
+        'extension': extension,
+        'object_type': 'dir' if directory else 'file',
+        'size': 0 if directory else (getattr(entry, 'size', 0) or 0),
+        'mtime': int(mtime.timestamp()) if hasattr(mtime, 'timestamp') else mtime,
+        'last_modifier': '',
+        'creator': creator,
+        'tags': tags,
+        'dirs': _ancestor_dirs(path),
+        'content': '',
+    }
+
+
 def _activities_since(cursor, limit):
     with connection.cursor() as db_cursor:
         db_cursor.execute(

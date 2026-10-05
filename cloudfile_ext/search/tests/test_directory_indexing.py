@@ -80,7 +80,7 @@ def test_backfill_indexes_empty_and_nested_directories_without_indexing_file_byt
     while state['pending']:
         state = advance_page(state,
             read_page=lambda p, o, n: (reads.append((p, o, n)) or pages[p]),
-            build_document=lambda p, t, kind: dict(path=p), write_documents=lambda rows: written.extend(rows), assert_current=lambda: None)
+            build_document=lambda p, t, kind, entry: dict(path=p), write_documents=lambda rows: written.extend(rows), assert_current=lambda: None)
     assert [row['path'] for row in written] == ['/empty', '/nested', '/nested/child']
     assert state['pages'] == 4 and state['directories'] == 3
     assert all(limit == 101 for _, _, limit in reads)
@@ -96,7 +96,7 @@ def test_backfill_failed_write_and_snapshot_change_do_not_advance_original_check
             raise ValueError('write failed')
         with pytest.raises(ValueError):
             advance_page(state, read_page=lambda *args: [native_entry('folder')],
-                build_document=lambda p, t, kind: dict(path=p), write_documents=write, assert_current=assert_current)
+                build_document=lambda p, t, kind, entry: dict(path=p), write_documents=write, assert_current=assert_current)
         assert state == dict(pending=[dict(path='/', offset=0)])
 
 

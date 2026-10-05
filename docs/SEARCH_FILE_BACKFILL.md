@@ -14,19 +14,35 @@
 
 ## 为什么不抓正文（`max_bytes=0`）
 
-文件文档通过
+文件文档默认由原生目录项直接构建（`build_backfill_document`，见下一节），不读取正文；无法从目录项构建时退回
 
 ```python
 _build_document(repo_id, path, '', mtime, max_bytes=0, object_type='file')
 ```
 
-构建，`max_bytes=0` 是硬要求：
+两条路径都以“不读正文”为硬要求：
 
 - 每页 100 个直接子项。若按增量索引的上限（`CF_SEARCH_INDEX_TEXT_MAX_BYTES`，默认 1 MiB）抓正文，100 个文档最坏 100 MiB，超过 Meilisearch 单次写入载荷上限，写入会被拒或长时间挂起。
 - 写入失败/挂起时不推进检查点，于是每次重跑都在同一页失败，补索引**永远卡在起始页**，看起来像死循环而没有进度。
 - `op_user` 传空串：补索引代表系统，不代表任何用户，与 cf-worker 后台任务一致。
+- 快速路径干脆把 `content` 固定为 `''`：`max_bytes=0` 时 `_fetch_content` 对任何输入都返回 `''`，所以固定空串与 `_build_document(..., max_bytes=0)` 逐字段一致。
 
 正文索引仍由 Activity 增量链负责；本命令只保证“文件至少存在一条可检索的元数据文档”。
+
+## 基于原生目录项的快速路径（无逐文件原生 RPC）
+
+实测 `_build_document(...)` 即使标签已预加载仍需 10.86 ms/文档，且几乎全部来自每份文档四次原生 RPC：`get_repo`（约 3.5 ms）、`get_file_id_by_path`（约 3.9 ms）、`get_file_size`（约 0.8 ms）、`get_repo_owner`（约 2.4 ms），整库吞吐被压到约 26 文件/秒。但原生命中本就已经返回这些信息：目录项带 `obj_id`、`obj_name`、`mode`、`mtime`、`size`。
+
+因此：
+
+- `advance_page` 的回调契约变为 `build_document(path, mtime, object_type, entry)`：把校验过的那一条原生目录项原样交给回调。路径、`mtime` 与 `object_type` 仍单独传入，回调用不上 `entry` 时不受影响。
+- 命令用 `build_backfill_document(repo_id, path, entry, object_type, tags, creator)` 构建文档：`id` 仍走 `_doc_id`，`size` 取 `entry.size`（文件）/ `0`（目录），`name`、`extension`、`object_type`、`mtime`、`dirs`、`tags` 全部本地计算，`content` 恒为 `''`。其返回字典与 `_build_document(repo_id, path, '', entry.mtime, 0, object_type, tags=tags)` 完全相同（有回归测试逐字段比对文件与目录两种情况）。
+- `creator`（资料库所有者）在进入分页循环之前解析一次，而不是每份文档解析一次；解析失败仍记录告警并退化为 `''`，与 `_build_document` 内的异常处理一致。
+- **失败回退**：只有 `backfill_entry_is_usable` 判定目录项够用（目录项只要存在；文件项必须带非负整数 `size`）时才走快速路径。文件项缺少可用 `size` 时退回 `_build_document`，绝不把来源不明的 `size` 写进索引。标签预加载失败时整条链路也照旧退回逐路径查询。
+- 增量索引链（`cloudfile_ext/search/indexer.py` 的 `index_tick` / `_build_document`）行为不变，仍走原生 RPC。
+
+**为什么安全**：`advance_page` 每页都用 `list_dir_by_commit_and_path(repo_id, head, ...)` 读固定提交 `head`，并在每页前后调用 `assert_current()` 复核 `head_cmmt_id`。因此回调拿到的目录项描述的就是正在索引的那个对象；head 一旦变化命令立即报错退出，不会用旧目录项给新对象写文档。文件是叶子，从不如栈下降；目录仍然是唯一进入 `pending` 的东西，预算与检查点语义都不变。
+
 
 ## 运维命令
 
@@ -94,7 +110,7 @@ pages=<页数> directories=<目录文档数> files=<文件文档数> complete=<T
 
 - **有界查询**：先取该资料库的 `FileUUIDMap` 行，再分别按 uuid 取 `FileTags`（文件，join `repo_tag`）与 `FileTag`（目录，join `tag`），共 3 条查询覆盖整库全部路径，不再随文档数增长。虚拟资料库按 `FileUUIDMapManager` 的同一套 origin repo / origin path 改写取行，保证与逐路径查询命中同一批绑定。
 - **取值一致**：返回两个按规范化路径（`seahub.utils.normalize_file_path`，即 parent_path + filename）索引的字典（文件标签、目录标签）；文件保留查询顺序，目录去重后排序，`is_dir` 拆分与 `_fetch_tags` / `_fetch_directory_tags` 完全相同。未打标签的路径不在字典里，取 `[]`。
-- **构建入口**：`_build_document(..., tags=...)` 新增可选关键字，传入时直接使用快照；`tags=None` 时仍走原来的逐路径查询，行为逐字不变，增量索引链完全不受影响。
+- **构建入口**：快速路径 `build_backfill_document(..., tags=...)` 直接使用快照；回退路径 `_build_document(..., tags=...)` 也接收同一个快照；`tags=None` 时仍走原来的逐路径查询，行为逐字不变，增量索引链完全不受影响。
 - **快照语义**：映射只反映预加载那一刻的标签状态。长时间运行期间新增/删除的标签不会回溯到本次已写入的文档，这些变更由既有的增量标签扇出负责，补索引不追赶它们；重跑一次补索引即可刷新快照。
 - **失败回退**：预加载查询失败时命令记录告警并退回逐路径查询（即改动前的行为），不会把文档 `tags` 静默写成空。该回退路径同时保证 `tags=None` 的旧语义始终可用。
 
@@ -128,6 +144,9 @@ pages=<页数> directories=<目录文档数> files=<文件文档数> complete=<T
 - Meili 写入失败或异步任务长时间 pending 时都不推进检查点；
 - 标签预加载：在隔离的真实 ORM（SQLite）上，`preload_tags` 的映射对文件、目录、未打标签路径、同名文件/目录与虚拟资料库都与 `_fetch_tags` / `_fetch_directory_tags` 逐路径结果一致，且整库只发 3 条 SELECT；
 - 补索引运行期间不再发生任何逐路径标签查询（预加载失败以外的路径）；
-- `_build_document(tags=None)` 仍调用逐路径查询，显式传入（含空列表）时不再查询。
+- `_build_document(tags=None)` 仍调用逐路径查询，显式传入（含空列表）时不再查询；
+- 原生目录项快速路径：`build_backfill_document` 对文件与目录返回的字典与 `_build_document(..., max_bytes=0, tags=...)` **逐键逐值相同**，且自身不发起任何原生 RPC；
+- 命令的整页文件索引不再调用 `get_file_id_by_path` / `get_dir_id_by_path` / `get_file_size`，`get_repo` 只用于固定 head 与逐页复核（次数随页数而非文件数增长）；
+- `backfill_entry_is_usable` 拒绝缺失/负数/非整数的文件 `size` 与 `None` 目录项；命令遇到这种目录项时回退到 `_build_document`，快速构建器一次都不会被调用。
 
 代码测试不等于生产补索引已完成。生产验收应选一个既有文件（仅存在于原生树、不在 Activity 覆盖内）、一个目录和同名文件，在“全库 / 所在目录”分别搜索，确认文件命中且未授权对象不出现。

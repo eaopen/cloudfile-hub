@@ -16,8 +16,12 @@ import pytest
 from cloudfile_ext.search.backfill import advance_page
 
 
-def native_entry(name, directory=True, mtime=10):
-    return SimpleNamespace(obj_name=name, mode=stat.S_IFDIR if directory else stat.S_IFREG, mtime=mtime)
+def native_entry(name, directory=True, mtime=10, size=None):
+    # `size` is only set by tests that drive the entry-based fast path; leaving
+    # it None keeps a fixture entry looking like one the fast path must reject
+    # (a file without an integral size), which exercises the RPC fallback.
+    return SimpleNamespace(obj_name=name, mode=stat.S_IFDIR if directory else stat.S_IFREG,
+                           mtime=mtime, size=size)
 
 
 def test_default_kinds_still_indexes_directories_only():
@@ -28,9 +32,9 @@ def test_default_kinds_still_indexes_directories_only():
     while state['pending']:
         state = advance_page(state,
             read_page=lambda p, o, n: pages[p],
-            build_document=lambda p, t, kind: (built.append((p, t, kind)) or dict(path=p)),
+            build_document=lambda p, t, kind, entry: (built.append((p, t, kind, entry)) or dict(path=p)),
             write_documents=lambda rows: written.extend(rows), assert_current=lambda: None)
-    assert built == [('/sub', 10, 'dir')]
+    assert built == [('/sub', 10, 'dir', pages['/'][1])]
     assert [row['path'] for row in written] == ['/sub']
     assert state['directories'] == 1 and state['files'] == 0
 
@@ -44,11 +48,14 @@ def test_all_kinds_index_files_with_object_type_and_never_descend_them():
     while state['pending']:
         state = advance_page(state, kinds=('dir', 'file'),
             read_page=lambda p, o, n: pages[p],
-            build_document=lambda p, t, kind: (built.append((p, t, kind)) or dict(path=p, object_type=kind)),
+            build_document=lambda p, t, kind, entry: (built.append((p, t, kind, entry)) or dict(path=p, object_type=kind)),
             write_documents=lambda rows: written.extend(rows), assert_current=lambda: None)
         seen_pending.extend(position['path'] for position in state['pending'])
-    assert built == [('/doc.txt', 7, 'file'), ('/sub', 10, 'dir'),
-                     ('/photo.png', 10, 'file'), ('/sub/inner.txt', 10, 'file')]
+    # The callback receives the exact native entry the page was validated from.
+    assert built == [('/doc.txt', 7, 'file', pages['/'][0]),
+                     ('/sub', 10, 'dir', pages['/'][1]),
+                     ('/photo.png', 10, 'file', pages['/'][2]),
+                     ('/sub/inner.txt', 10, 'file', pages['/sub'][0])]
     assert [row['object_type'] for row in written] == ['file', 'dir', 'file', 'file']
     # Only directories are ever queued for descent, so a file-heavy tree cannot
     # grow the continuation stack beyond what directories justify.
@@ -64,12 +71,13 @@ def test_file_kinds_walks_directories_for_nested_files_without_dir_documents():
     while state['pending']:
         state = advance_page(state, kinds=('file',),
             read_page=lambda p, o, n: pages[p],
-            build_document=lambda p, t, kind: (built.append((p, t, kind)) or dict(path=p, object_type=kind)),
+            build_document=lambda p, t, kind, entry: (built.append((p, t, kind, entry)) or dict(path=p, object_type=kind)),
             write_documents=lambda rows: written.extend(rows), assert_current=lambda: None)
         seen_pending.extend(position['path'] for position in state['pending'])
     # A file-only run still walks through directories to reach nested files; it
     # just builds no directory documents, and still queues only directories.
-    assert built == [('/only.txt', 10, 'file'), ('/sub/deep.txt', 10, 'file')]
+    assert built == [('/only.txt', 10, 'file', pages['/'][1]),
+                     ('/sub/deep.txt', 10, 'file', pages['/sub'][0])]
     assert [row['object_type'] for row in written] == ['file', 'file']
     assert set(seen_pending) == {'/sub'}
     assert state['directories'] == 0 and state['files'] == 2 and state['pending'] == []
@@ -120,24 +128,127 @@ def _configure_command(monkeypatch, entries, on_write=None, write_status='succee
 
 
 def test_backfill_command_all_kinds_builds_metadata_only_file_documents(monkeypatch, tmp_path):
-    command, _ = _configure_command(monkeypatch, {
+    writes = []
+    command, api = _configure_command(monkeypatch, {
         '/': [native_entry('sub'), native_entry('report.txt', False, mtime=42)],
-        '/sub': []})
-    build = Mock(side_effect=lambda r, p, op_user, mtime, max_bytes, object_type:
+        '/sub': []}, on_write=lambda documents: writes.append(documents))
+    api.get_repo_owner.return_value = 'owner'
+    # Pin the tag snapshot so the directory entry reaches the fast builder
+    # instead of the preload-failure fallback (which the test DB blocks anyway).
+    monkeypatch.setattr(command, 'preload_tags', lambda repo: ({}, {}))
+    build = Mock(side_effect=lambda r, p, op_user, mtime, max_bytes, object_type, **kwargs:
                  dict(path=p, object_type=object_type))
     monkeypatch.setattr(command, '_build_document', build)
     checkpoint = tmp_path / 'cursor.json'
     out = StringIO()
     command.Command(stdout=out).handle(repo_id='11111111-1111-4111-8111-111111111111',
         checkpoint=str(checkpoint), max_pages=5, kinds='all')
-    # path, mtime, max_bytes, object_type: files must never carry bytes or a user.
+    # The directory came from the entry-based fast builder (a mock document
+    # would carry no name), while this file's entry has no usable size, so it
+    # must fall back to the RPC builder: path, op_user, mtime, max_bytes, kind.
+    assert [row['path'] for row in writes[0]] == ['/sub', '/report.txt']
+    assert writes[0][0]['name'] == 'sub' and writes[0][0]['content'] == ''
     assert [(call.args[1], call.args[2], call.args[3], call.args[4], call.args[5])
             for call in build.call_args_list] == [
-        ('/sub', '', 10, 0, 'dir'), ('/report.txt', '', 42, 0, 'file')]
+        ('/report.txt', '', 42, 0, 'file')]
     assert json.loads(checkpoint.read_text()) == dict(
         repo_id='11111111-1111-4111-8111-111111111111', head='a' * 40, pending=[],
         pages=2, directories=1, files=1)
     assert out.getvalue().strip() == 'pages=2 directories=1 files=1 complete=True'
+
+
+def test_backfill_command_builds_documents_from_native_entries_without_per_file_rpc(monkeypatch, tmp_path):
+    # 50 file entries in one page: every document must come from entry.size /
+    # entry.mtime, so the four per-document native calls disappear entirely.
+    entries = {'/': [native_entry('f%02d.txt' % i, False, mtime=1000 + i, size=i * 7)
+                     for i in range(50)]}
+    writes = []
+    command, api = _configure_command(monkeypatch, entries,
+                                      on_write=lambda documents: writes.append(documents))
+    api.get_repo_owner.return_value = 'owner'
+    # Deterministic fast path: an empty snapshot is enough, no per-path lookups.
+    monkeypatch.setattr(command, 'preload_tags', lambda repo: ({}, {}))
+    out = StringIO()
+    command.Command(stdout=out).handle(repo_id='11111111-1111-4111-8111-111111111111',
+        checkpoint=str(tmp_path / 'cursor.json'), max_pages=5, kinds='all')
+    documents = {row['path']: row for row in writes[0]}
+    assert len(documents) == 50
+    assert documents['/f00.txt']['size'] == 0
+    assert documents['/f07.txt']['size'] == 49
+    assert documents['/f07.txt']['mtime'] == 1007
+    assert documents['/f07.txt']['creator'] == 'owner'
+    assert all(row['content'] == '' for row in documents.values())
+    # No per-file RPC at all. get_repo is only the head pin (once) plus the
+    # per-page re-checks, so it stays bounded by pages, not by file count.
+    api.get_file_id_by_path.assert_not_called()
+    api.get_dir_id_by_path.assert_not_called()
+    api.get_file_size.assert_not_called()
+    assert api.get_repo.call_count <= 10
+    assert out.getvalue().strip() == 'pages=1 directories=0 files=50 complete=True'
+
+
+def test_backfill_command_falls_back_when_entry_lacks_a_usable_size(monkeypatch, tmp_path):
+    command, api = _configure_command(monkeypatch, {
+        '/': [native_entry('report.txt', False, mtime=42, size=None)]})
+    api.get_repo_owner.return_value = 'owner'
+    fast = Mock(side_effect=AssertionError('fast path must not run on a sizeless entry'))
+    slow = Mock(return_value=dict(id='x', path='/report.txt', object_type='file', size=99))
+    monkeypatch.setattr(command, 'build_backfill_document', fast)
+    monkeypatch.setattr(command, '_build_document', slow)
+    checkpoint = tmp_path / 'cursor.json'
+    command.Command().handle(repo_id='11111111-1111-4111-8111-111111111111',
+        checkpoint=str(checkpoint), max_pages=5, kinds='all')
+    fast.assert_not_called()
+    slow.assert_called_once()
+    # The RPC builder is handed the pinned snapshot's mtime and max_bytes=0, and
+    # the fallback document is still what gets checkpointed as durable.
+    assert slow.call_args.args == ('11111111-1111-4111-8111-111111111111',
+                                   '/report.txt', '', 42, 0, 'file')
+    assert json.loads(checkpoint.read_text())['files'] == 1
+
+
+def test_backfill_entry_is_usable_rejects_missing_and_non_integral_sizes():
+    from cloudfile_ext.search.indexer import backfill_entry_is_usable
+    assert backfill_entry_is_usable(native_entry('f.txt', False, size=0), 'file') is True
+    assert backfill_entry_is_usable(native_entry('f.txt', False, size=123), 'file') is True
+    assert backfill_entry_is_usable(native_entry('f.txt', False, size=None), 'file') is False
+    assert backfill_entry_is_usable(native_entry('f.txt', False, size=-1), 'file') is False
+    assert backfill_entry_is_usable(native_entry('f.txt', False, size='12'), 'file') is False
+    assert backfill_entry_is_usable(SimpleNamespace(), 'file') is False
+    assert backfill_entry_is_usable(None, 'file') is False
+    # Directories read no size, so an entry with nothing but mtime is enough.
+    assert backfill_entry_is_usable(SimpleNamespace(mtime=1), 'dir') is True
+    assert backfill_entry_is_usable(None, 'dir') is False
+
+
+def test_backfill_fast_builder_matches_the_rpc_builder_for_files_and_directories(monkeypatch):
+    from cloudfile_ext.search import indexer
+    api = Mock()
+    api.get_repo.return_value = SimpleNamespace(store_id='store', version=1)
+    api.get_file_id_by_path.return_value = 'file-id'
+    api.get_dir_id_by_path.return_value = 'dir-id'
+    api.get_file_size.return_value = 4321
+    api.get_repo_owner.return_value = 'owner'
+    monkeypatch.setitem(sys.modules, 'seaserv', SimpleNamespace(seafile_api=api))
+    monkeypatch.setattr(indexer, '_fetch_content', lambda *args: '')
+
+    for entry, object_type, path, tags in [
+            (native_entry('report.txt', False, mtime=42, size=4321), 'file',
+             '/a/report.txt', ['file-tag']),
+            (native_entry('folder', True, mtime=42), 'dir', '/a/folder', ['dir-tag'])]:
+        slow = indexer._build_document(
+            'repo', path, '', entry.mtime, 0, object_type, tags=tags)
+        api.reset_mock()
+        fast = indexer.build_backfill_document(
+            'repo', path, entry, object_type, tags, 'owner')
+        assert fast == slow, (path, fast, slow)
+        assert list(fast) == list(slow)
+        # The fast builder itself performs no native RPC.
+        api.get_file_id_by_path.assert_not_called()
+        api.get_dir_id_by_path.assert_not_called()
+        api.get_file_size.assert_not_called()
+        api.get_repo.assert_not_called()
+        api.get_repo_owner.assert_not_called()
 
 
 def test_backfill_command_rejects_checkpoint_without_valid_files_counter(monkeypatch, tmp_path):

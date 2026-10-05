@@ -12,7 +12,10 @@ from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from cloudfile_ext.search.backfill import advance_page
 from cloudfile_ext.search.backends.meilisearch import INDEX_NAME, client_from_settings
-from cloudfile_ext.search.indexer import _build_document, preload_tags
+from cloudfile_ext.search.indexer import (
+    _build_document, backfill_entry_is_usable, build_backfill_document,
+    preload_tags,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,15 +105,34 @@ class Command(BaseCommand):
                                exc_info=True)
                 file_tags = dir_tags = None
 
+            # `_build_document` resolves the owner per document; a run indexes
+            # one library, so one lookup at the start is enough for every
+            # document built from a native entry. Failure degrades to '' exactly
+            # as the per-document path does.
+            try:
+                creator = seafile_api.get_repo_owner(repo_id) or ''
+            except Exception:
+                logger.warning('search backfill: could not read owner for %s',
+                               repo_id, exc_info=True)
+                creator = ''
+
             # `advance_page` hands canonical paths ('/a/b', no trailing slash),
             # which is exactly what the preloaded map is keyed by.
-            def build_document(path, mtime, object_type):
+            def build_document(path, mtime, object_type, entry):
                 if file_tags is None:
                     return _build_document(repo_id, path, '', mtime, 0, object_type)
                 if object_type in ('dir', 'folder'):
                     tags = dir_tags.get(path, [])
                 else:
                     tags = file_tags.get(path, [])
+                # The native entry already carries obj_id/size/mtime, so the
+                # common case needs no per-file RPC at all. A file entry missing
+                # a usable size is the one shape that cannot be trusted, and it
+                # falls back to the RPC-based builder rather than indexing a
+                # wrong size.
+                if backfill_entry_is_usable(entry, object_type):
+                    return build_backfill_document(
+                        repo_id, path, entry, object_type, tags, creator)
                 return _build_document(repo_id, path, '', mtime, 0, object_type, tags=tags)
 
             def assert_current():
