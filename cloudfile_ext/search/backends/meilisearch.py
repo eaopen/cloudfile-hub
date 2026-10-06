@@ -164,6 +164,33 @@ class MeilisearchClient(object):
         self._call('POST', '/indexes/%s/documents/delete' % INDEX_NAME,
                    {'filter': 'repo_id = %s' % _quote(repo_id)})
 
+    def fetch_documents(self, ids, limit=None):
+        """Batch document fetch by id -- POST /indexes/<index>/documents/fetch.
+
+        Returns ``{'results': [...], 'offset': int, 'limit': int, 'total': int}``.
+        Meilisearch only returns matches, so callers learn existence from the
+        returned ids; ``total`` is how many of the requested ids matched. The
+        reconcile command probes this route once and falls back to
+        ``document_exists`` when a deployment does not expose it.
+        """
+        payload = {'ids': list(ids)}
+        if limit is not None:
+            payload['limit'] = limit
+        return self._call('POST', '/indexes/%s/documents/fetch' % INDEX_NAME, payload)
+
+    def documents_for_repo(self, repo_id, offset, limit, fields=None):
+        """One filtered page of this library's documents, for a stale sweep."""
+        payload = {'filter': 'repo_id = %s' % _quote(repo_id),
+                   'offset': offset, 'limit': limit}
+        if fields is not None:
+            payload['fields'] = list(fields)
+        return self._call('POST', '/indexes/%s/documents/fetch' % INDEX_NAME, payload)
+
+    def document_exists(self, document_id):
+        """Per-document fallback: a 404 is a normal 'missing' answer, not an error."""
+        return bool(self._call('GET', '/indexes/%s/documents/%s' % (INDEX_NAME, document_id),
+                               ignore_status=(404,)))
+
     def search(self, query, filter_expr, offset, limit, filename_only=False):
         payload = {'q': query or '', 'offset': offset, 'limit': limit,
                    'attributesToHighlight': ['tags']}
