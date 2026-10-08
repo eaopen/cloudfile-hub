@@ -3,6 +3,7 @@ import stat
 from types import SimpleNamespace
 
 from rest_framework.authentication import SessionAuthentication
+from rest_framework.parsers import BaseParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -17,7 +18,7 @@ from cloudfile_ext.hooks import check_permission
 from cloudfile_ext.search.access import SearchAccess
 from cloudfile_ext.search.access_runtime import read_snapshot
 from cloudfile_ext.search.native_many import NativePermissionMany
-from .contract import capability, request_body, MAX_RESPONSE_BYTES
+from .contract import capability, request_body, MAX_BYTES, MAX_RESPONSE_BYTES
 from .service import resolve
 from .store import tags_many
 
@@ -28,8 +29,19 @@ def _stamp(repo):
             repo.origin_path if repo.is_virtual else None)
 
 
+class LegacyTagBatchJSONParser(BaseParser):
+    media_type = 'application/json'
+
+    def parse(self, stream, media_type=None, parser_context=None):
+        # SessionAuthentication's CSRF check can parse request.POST before the
+        # view runs. Cache bounded raw bytes as request.data so that validation
+        # still sees duplicate JSON keys, instead of rereading a consumed body.
+        return stream.read(MAX_BYTES + 1)
+
+
 class LegacyFileTagsBatch(APIView):
     authentication_classes = (TokenAuthentication, SessionAuthentication)
+    parser_classes = (LegacyTagBatchJSONParser,)
     permission_classes = (IsAuthenticated,)
     throttle_classes = (UserRateThrottle,)
 
@@ -47,7 +59,7 @@ class LegacyFileTagsBatch(APIView):
             return Response(dict(error='LEGACY_TAG_BATCH_UNAVAILABLE'), status=503,
                             headers={'Cache-Control': 'no-store'})
         try:
-            repo_id, items = request_body(request.body)
+            repo_id, items = request_body(request.data)
         except Exception:
             return Response(dict(error='INVALID_LEGACY_TAG_BATCH'), status=400,
                             headers={'Cache-Control': 'no-store'})

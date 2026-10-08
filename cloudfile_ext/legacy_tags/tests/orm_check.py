@@ -46,7 +46,7 @@ from cloudfile_ext.legacy_tags.store import tags_many
 from cloudfile_ext.search.tests.test_search_access import snapshot, rule
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.throttling import BaseThrottle
-from rest_framework.authentication import BaseAuthentication
+from rest_framework.authentication import BaseAuthentication, SessionAuthentication
 
 state = snapshot()
 reader = Mock(side_effect=lambda *args: state)
@@ -95,6 +95,48 @@ class OrmTests(unittest.TestCase):
         api.get_dirent_by_path.return_value = SimpleNamespace(mode=stat.S_IFREG)
         api.cf_check_permissions_many.side_effect = rpc
         reader.side_effect = lambda *args: state
+
+    def session_post(self, raw, csrf=True):
+        # Exercise the real CSRF parser path; force_authenticate would hide the
+        # consumed-body regression seen through EAP's forwarded user Cookie.
+        token = 'x' * 32
+        request = APIRequestFactory(enforce_csrf_checks=True).post(
+            '/api/v2.1/cloudfile/legacy-file-tags/batch/', raw,
+            content_type='application/json', HTTP_X_CSRFTOKEN=token if csrf else '')
+        request.user = SimpleNamespace(username='alice', is_active=True, is_authenticated=True)
+        request.COOKIES[settings.CSRF_COOKIE_NAME] = token
+        with patch.object(LegacyFileTagsBatch, 'authentication_classes', (SessionAuthentication,)):
+            return LegacyFileTagsBatch.as_view()(request)
+
+    def test_cookie_session_csrf_keeps_mixed_batch_body_and_tag_results(self):
+        seed([('/文件.txt', False), ('/目录', True)])
+        api.get_dirent_by_path.side_effect = lambda r, p: SimpleNamespace(
+            mode=stat.S_IFDIR if p == '/目录' else stat.S_IFREG)
+        raw = json.dumps(dict(version=1, repo_id=REPO, items=[
+            dict(path='/文件.txt', is_dir=False), dict(path='/目录', is_dir=True)
+        ]), ensure_ascii=False).encode('utf-8')
+        response = self.session_post(raw)
+        self.assertEqual(response.status_code, 200, response.data)
+        self.assertEqual([i['status'] for i in response.data['items']], ['OK', 'OK'])
+        self.assertEqual([len(i['tags']) for i in response.data['items']], [2, 2])
+        self.assertEqual(response['Cache-Control'], 'no-store')
+
+    def test_cookie_session_still_requires_csrf_before_any_lookup(self):
+        raw = json.dumps(dict(version=1, repo_id=REPO, items=[dict(path='/a', is_dir=False)])).encode()
+        response = self.session_post(raw, csrf=False)
+        self.assertEqual(response.status_code, 403)
+        api.get_repo.assert_not_called()
+
+    def test_cookie_session_preserves_strict_raw_json_and_byte_budget(self):
+        from cloudfile_ext.legacy_tags.contract import MAX_BYTES
+        raw = json.dumps(dict(version=1, repo_id=REPO, items=[dict(path='/a', is_dir=False)])).encode()
+        for invalid in (raw.replace(b'"version": 1', b'"version": 1, "version": 1'),
+                        raw + b' {}', b'{', raw + b' ' * MAX_BYTES):
+            with self.subTest(raw=invalid[:80]):
+                response = self.session_post(invalid)
+                self.assertEqual(response.status_code, 400, response.data)
+                self.assertEqual(response.data, dict(error='INVALID_LEGACY_TAG_BATCH'))
+        api.get_repo.assert_not_called()
 
     def test_counts_scalar_equivalence_and_no_hidden_definition_n_plus_one(self):
         for count in (1, 20, 50, 100, 200):
