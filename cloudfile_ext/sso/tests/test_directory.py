@@ -178,7 +178,7 @@ def test_selecting_external_service_without_a_url_says_so(cf):
 
 def test_v2_single_user_uses_scoped_context_and_direct_groups(cf):
     service = FakeService({
-        '/users/by-login/10220942/context': {
+        '/users/by-login/employee-001/context': {
             'userId': 'user-42', 'status': 'active',
             'organizations': [{'namespace': 'directory', 'external_id': 'dept-1',
                                'is_primary': True}],
@@ -188,8 +188,8 @@ def test_v2_single_user_uses_scoped_context_and_direct_groups(cf):
     })
     service.auth_mode = 'v2'
     source = cf.directory.ExternalServiceDirectory(service)
-    assert source.groups_for_user('10220942') == ['dept-1', 'role:99']
-    assert service.calls == [('GET', '/users/by-login/10220942/context')]
+    assert source.groups_for_user('employee-001') == ['dept-1', 'role:99']
+    assert service.calls == [('GET', '/users/by-login/employee-001/context')]
 
 
 def test_v2_user_lookup_never_grants_incomplete_context(cf):

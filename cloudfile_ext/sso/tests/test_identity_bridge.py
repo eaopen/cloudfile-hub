@@ -32,9 +32,9 @@ def test_conflicting_bindings_are_rejected():
 def test_member_login_ids_survive_snapshot_normalization():
     entries = snapshot.validate([{
         'external_id': 'dept-1', 'name': 'Dev', 'subject_type': 'dept',
-        'member_user_ids': ['user-1'], 'member_login_ids': ['10220942'],
+        'member_user_ids': ['user-1'], 'member_login_ids': ['employee-001'],
         'member_accounts': ['alias@example.com']}])
-    assert entries[0]['member_login_ids'] == ['10220942']
+    assert entries[0]['member_login_ids'] == ['employee-001']
     assert entries[0]['members'] == ['user-1']
 
 
@@ -66,10 +66,10 @@ def directory_service(monkeypatch):
 
 def test_v2_member_resolution_uses_login_not_email(monkeypatch, directory_service):
     monkeypatch.setattr(directory_service, 'load_login_identities',
-                        lambda logins: {'10220942': 'native-42'})
+                        lambda logins: {'employee-001': 'native-42'})
     entries = snapshot.validate([{
         'external_id': 'dept-27', 'name': 'Dept 27', 'subject_type': 'dept',
-        'member_user_ids': ['u42'], 'member_login_ids': ['10220942'],
+        'member_user_ids': ['u42'], 'member_login_ids': ['employee-001'],
         'member_accounts': ['wrong-legacy-email@example.com']}])
     resolved, missing, quarantined = directory_service._resolve_members(entries)
     assert resolved[0]['members'] == ['native-42']
@@ -94,9 +94,9 @@ def test_v2_unprovisioned_identity_never_falls_back_to_email(monkeypatch, direct
     monkeypatch.setattr(directory_service, 'load_login_identities', lambda logins: {})
     entries = snapshot.validate([{
         'external_id': 'dept-27', 'name': 'Dept 27', 'subject_type': 'dept',
-        'member_user_ids': ['u42'], 'member_login_ids': ['10220942'],
+        'member_user_ids': ['u42'], 'member_login_ids': ['employee-001'],
         'member_accounts': ['some-existing-other-user@example.com']}])
     resolved, missing, quarantined = directory_service._resolve_members(entries)
     assert resolved[0]['members'] == []
-    assert '10220942' in missing
+    assert 'employee-001' in missing
     assert quarantined == {'dept-27'}
