@@ -23,10 +23,9 @@ def test_wrong_profile_login_is_not_accepted():
         load_login_identities(['employee-1'], fetch=lambda batch: [('wrong', 'opaque')])
 
 
-def test_conflicting_bindings_are_rejected():
-    with pytest.raises(IdentityBridgeError):
-        load_login_identities(['employee-1'],
-                              fetch=lambda batch: [('employee-1', 'a'), ('employee-1', 'b')])
+def test_conflicting_bindings_are_isolated_without_blocking_healthy_profiles():
+    assert load_login_identities(['employee-1', 'employee-2'], fetch=lambda batch: [
+        ('employee-1', 'a'), ('employee-1', 'b'), ('employee-2', 'healthy')]) == {'employee-2': 'healthy'}
 
 
 def test_member_login_ids_survive_snapshot_normalization():
@@ -106,21 +105,30 @@ def test_v2_unprovisioned_identity_never_falls_back_to_email(monkeypatch, direct
 from cloudfile_ext.sso.identity_bridge import resolve_eap_pairs
 
 
-def test_eap_uid_first_with_separately_bound_employee_account():
+def test_eap_uid_binding_never_uses_employee_only_profile():
     db = {'uid-1': 'native-1', 'emp-1': 'native-1', 'emp-2': 'native-2'}
     resolved = resolve_eap_pairs([
         {'user_id': 'uid-1', 'employee_no': 'emp-1'},
         {'user_id': 'uid-2', 'employee_no': 'emp-2'},
         {'user_id': 'uid-3', 'employee_no': None}],
         fetch=lambda keys: [(key, db[key]) for key in keys if key in db])
-    assert resolved == {'uid-1': 'native-1', 'uid-2': 'native-2'}
+    # Recycled employee numbers cannot inherit another native account's files.
+    assert resolved == {'uid-1': 'native-1'}
 
 
-def test_eap_uid_vs_employee_conflict_refused():
+def test_employee_profile_does_not_override_exact_uid_binding():
     db = {'uid-1': 'native-1', 'emp-1': 'someone-else'}
-    with pytest.raises(IdentityBridgeError, match='different CE'):
-        resolve_eap_pairs([{'user_id': 'uid-1', 'employee_no': 'emp-1'}],
-                          fetch=lambda keys: [(key, db[key]) for key in keys if key in db])
+    assert resolve_eap_pairs([{'user_id': 'uid-1', 'employee_no': 'emp-1'}],
+                            fetch=lambda keys: [(key, db[key]) for key in keys if key in db]) == {'uid-1': 'native-1'}
+
+
+@pytest.mark.parametrize('employee,native', [
+    ('cfadmin', 'native-admin'), ('CFADMIN', 'native-admin'),
+    ('emp-1', 'cfadmin@etech.com'), ('emp-1', 'cfadmin@auth.local')])
+def test_system_admin_is_excluded_from_employee_projection(employee, native):
+    # System administration remains independent even if a bad feed includes it.
+    assert resolve_eap_pairs([{'user_id': 'uid-1', 'employee_no': employee}],
+                             fetch=lambda keys: [('uid-1', native)]) == {}
 
 
 def test_employee_reused_for_different_uid_never_merges_native_accounts():
@@ -196,3 +204,46 @@ def test_eap_hutool_explicit_empty_employee_number_is_quarantinable():
         'member_identities': [{'user_id': 'uid-1', 'employee_no': ''}]}])
     assert normalized[0]['member_identities'] == [
         {'user_id': 'uid-1', 'employee_no': None}]
+
+
+@pytest.mark.parametrize('result,expected', [
+    ({'status': 'ok', 'applied': {'add': 2, 'remove': 1}}, 3),
+    ({'status': 'refused'}, None), ({'status': 'error'}, None)])
+def test_login_refresh_uses_uid_context_and_keeps_refusals_retryable(monkeypatch, directory_service, result, expected):
+    import sys
+    import types
+    from unittest.mock import Mock
+    # A refused v2 delta must never downgrade to the legacy additions-only query.
+    source = types.SimpleNamespace(context_for_user_id=Mock(), groups_for_user=Mock())
+    monkeypatch.setitem(sys.modules, 'seaserv', types.SimpleNamespace(ccnet_api=object()))
+    import cloudfile_ext.identity as identity
+    monkeypatch.setattr(identity, 'login_of', lambda native: 'uid-42')
+    monkeypatch.setattr(directory_service.directory, 'active', lambda registry: source)
+    monkeypatch.setattr(directory_service, 'resolve_user', lambda username: 'original-native@auth.local')
+    monkeypatch.setattr(directory_service, 'group_owner', lambda: 'cfadmin@etech.com')
+    delta = Mock(return_value=result)
+    monkeypatch.setattr(directory_service, 'sync_user_id', delta)
+    registry = object()
+    assert directory_service.sync_user('original-native@auth.local', registry=registry) == expected
+    delta.assert_called_once_with('uid-42', dry_run=False, registry=registry)
+    source.groups_for_user.assert_not_called()
+
+
+def test_conflicting_uid_in_other_group_is_quarantined_while_healthy_uid_runs(monkeypatch, directory_service):
+    entries = snapshot.validate([
+        {'external_id': 'a', 'name': 'A', 'member_user_ids': ['123'],
+         'member_identities': [{'user_id': '123', 'employee_no': 'emp-a'}]},
+        {'external_id': 'b', 'name': 'B', 'member_user_ids': ['123'],
+         'member_identities': [{'user_id': '123', 'employee_no': 'emp-b'}]},
+        {'external_id': 'c', 'name': 'C', 'member_user_ids': ['456'],
+         'member_identities': [{'user_id': '456', 'employee_no': 'healthy'}]}])
+    calls = []
+    def resolve(pairs):
+        calls.extend(pairs)
+        return {'456': 'healthy@auth.local'}
+    monkeypatch.setattr(directory_service, 'resolve_eap_pairs', resolve)
+    resolved, missing, quarantined = directory_service._resolve_members(entries)
+    assert calls == [{'user_id': '456', 'employee_no': 'healthy'}]
+    assert [row['members'] for row in resolved] == [[], [], ['healthy@auth.local']]
+    assert quarantined == {'a', 'b'}
+    assert missing

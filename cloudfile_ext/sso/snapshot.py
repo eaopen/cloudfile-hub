@@ -148,16 +148,17 @@ def validate(snapshot):
     snapshot = [entry for entry in snapshot if entry is not None]
     normalized = [normalize_entry(entry) for entry in snapshot]
 
-    # UID collisions are fatal. Duplicate employee numbers must never merge
+    # Identity collisions must never merge
     # accounts, but isolate only affected groups, leaving unrelated mappings
     # available for incremental repair of the enterprise directory data.
     seen_uid, seen_employee = {}, {}
     duplicate_employee = set()
+    conflicting_uid = set()
     for entry in normalized:
         for pair in entry.get(MEMBER_IDENTITIES, ()):
             uid, employee = pair['user_id'], pair['employee_no']
             if uid in seen_uid and seen_uid[uid] != employee:
-                raise SnapshotRejected('EAP UID has inconsistent employee number across groups')
+                conflicting_uid.add(uid)
             seen_uid[uid] = employee
             if employee is not None:
                 if employee in seen_employee and seen_employee[employee] != uid:
@@ -165,7 +166,7 @@ def validate(snapshot):
                 else:
                     seen_employee[employee] = uid
     for entry in normalized:
-        if any(pair['employee_no'] in duplicate_employee
+        if any(pair['employee_no'] in duplicate_employee or pair['user_id'] in conflicting_uid
                for pair in entry.get(MEMBER_IDENTITIES, ())):
             entry['identity_conflict'] = True
     seen = {}

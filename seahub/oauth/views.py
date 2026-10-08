@@ -112,6 +112,10 @@ def oauth_login(request):
     Redirect the user/resource owner to the OAuth provider (i.e. Github)
     using an URL with a few key OAuth parameters.
     """
+    # The deployed EAP bridge must validate the same UID contract before JIT.
+    if getattr(settings, 'CF_SSO_EAP_PROFILE_IDENTITY', False):
+        from cloudfile_ext.sso.eap_oauth import login
+        return login(request)
     session = OAuth2Session(client_id=CLIENT_ID,
                             scope=SCOPE,
                             redirect_uri=REDIRECT_URL)
@@ -136,6 +140,10 @@ def oauth_callback(request):
     callback URL. With this redirection comes an authorization code included
     in the redirect URL. We will use that to obtain an access token.
     """
+    # Keep the upstream entry point; isolate EAP identity logic in its extension.
+    if getattr(settings, 'CF_SSO_EAP_PROFILE_IDENTITY', False):
+        from cloudfile_ext.sso.eap_oauth import callback
+        return callback(request)
     session = OAuth2Session(client_id=CLIENT_ID,
                             scope=SCOPE,
                             state=request.session.get('oauth_state', None),

@@ -153,19 +153,21 @@ def _resolve_members(entries):
     # contact-email query per member occurrence (tens of thousands of repeats).
     logins = set()
     pairs = {}
+    conflicting_uids = set()
     for entry in entries:
         if snapshot.MEMBER_IDENTITIES in entry:
             for pair in entry[snapshot.MEMBER_IDENTITIES]:
                 uid = pair['user_id']
                 if uid in pairs and pairs[uid] != pair['employee_no']:
-                    raise SyncNotConfigured('EAP directory UID has conflicting employee numbers')
+                    conflicting_uids.add(uid)
                 pairs[uid] = pair['employee_no']
         elif snapshot.MEMBER_LOGIN_IDS in entry:
             logins.update(v for v in entry[snapshot.MEMBER_LOGIN_IDS]
                           if isinstance(v, str) and v.strip())
     try:
         pair_identities = resolve_eap_pairs(
-            [{'user_id': uid, 'employee_no': employee} for uid, employee in pairs.items()]
+            [{'user_id': uid, 'employee_no': employee} for uid, employee in pairs.items()
+             if uid not in conflicting_uids]
         ) if pairs else {}
         login_identities = load_login_identities(logins) if logins else {}
     except IdentityBridgeError as exc:
@@ -178,7 +180,7 @@ def _resolve_members(entries):
         if snapshot.MEMBER_IDENTITIES in group:
             if group.get('identity_conflict'):
                 broken = True
-                unresolved.append('%s: employee number reused across EAP UIDs' % group['external_id'])
+                unresolved.append('%s: conflicting EAP identity records' % group['external_id'])
             for pair in group[snapshot.MEMBER_IDENTITIES]:
                 uid = pair['user_id']
                 native = pair_identities.get(uid)
@@ -523,24 +525,14 @@ def sync_user(username, registry=None):
     a user to groups that already exist, because creating a group from one
     member's view of the directory would build it half-populated.
 
-    Two rules keep this optimisation from taking access away:
+    Scheme B maps the native identity back to Profile.login_id (EAP UID).
+    A v2 provider supplies a complete authenticated context to sync_user_id;
+    removals require both the apply switch and explicit removal guards. A
+    refusal remains retryable, because falling back to a partial legacy query
+    could bypass those guards. Providers without UID contexts retain
+    additions-only refresh.
 
-    * **Additions only.** Removal is never done here. The login signal knows
-      one thing -- that this person just authenticated -- and a negative
-      answer from the directory ("no groups") is indistinguishable from a
-      broken or wrong-keyed query; acting on it strips every group the person
-      has until the next full tick. Deciding who left is the full sync's job,
-      where a failed read is an error and not a fact.
-    * **Query by login account, not by identity.** The signal carries the
-      opaque Seafile identity (``...@auth.local``), which the external directory
-      may not recognize -- it keys users by login account. Asking it
-      with the identity would read "no such user" as "no groups" -- which is
-      exactly what the additions-only rule above then makes harmless, but the
-      refresh would simply never fire. The identity is mapped back to its
-      login account first; without one the refresh is skipped and the
-      periodic sync stays the contract.
-
-    Returns the number of memberships added, or ``None`` when the refresh could
+    Returns the number of memberships changed, or ``None`` when the refresh could
     not be attempted at all (no directory selected, identity unresolvable, no
     login account on the profile, or the directory lookup failed).
     **Callers rely on ``None`` vs ``0`` being different**: the login signal in
@@ -564,12 +556,20 @@ def sync_user(username, registry=None):
         logger.info('per-user sync for %s skipped: %s', username, exc)
         return None
 
-    # The directory is keyed by the login the IdP knows (employee number);
-    # the session is not.
+    # Scheme B stores the authoritative EAP UID in Profile.login_id.
     login_account = login_of(identity)
     if not login_account:
         logger.info('per-user sync for %s skipped: no login account on profile',
                     identity)
+        return None
+
+    if hasattr(source, 'context_for_user_id'):
+        # Only a complete authenticated UID context may remove stale memberships.
+        # A refusal keeps the login refresh retryable and never falls back to
+        # an ambiguous legacy empty group response.
+        result = sync_user_id(login_account, dry_run=False, registry=registry)
+        if result.get('status') == 'ok':
+            return sum(result['applied'].values())
         return None
 
     try:

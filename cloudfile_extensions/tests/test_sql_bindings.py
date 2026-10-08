@@ -204,3 +204,55 @@ class SQLBindingsTest(DatabaseTestCase):
         with self.connection.cursor() as cursor:
             cursor.execute("SELECT COUNT(*) FROM cf_audit_event WHERE operation='identity.created'")
             self.assertEqual(cursor.fetchone()[0], 1)
+
+    def test_scheme_b_employee_name_reuse_collision_and_disabled_account(self):
+        from datetime import datetime, timezone
+        from unittest.mock import Mock
+        from cloudfile_extensions.identity.jit import SQLJITProvisioner
+        from cloudfile_extensions.directory.provider import DirectoryProvider
+        from cloudfile_extensions.schema.runner import SchemaRunner
+        SchemaRunner(self.connection).apply()
+        with self.admin.cursor() as cursor:
+            cursor.execute("ALTER TABLE " + self.native + ".EmailUser ADD passwd VARCHAR(256),ADD is_staff INT NOT NULL DEFAULT 0,ADD ctime BIGINT")
+            cursor.execute("ALTER TABLE " + self.identity + ".profile_profile ADD nickname VARCHAR(64) NOT NULL DEFAULT '',ADD intro TEXT,ADD lang_code TEXT,ADD contact_email VARCHAR(225) UNIQUE,ADD is_manually_set_contact_email TINYINT DEFAULT 0,ADD institution VARCHAR(225),ADD list_in_address_book TINYINT NOT NULL DEFAULT 0")
+        transport = Mock()
+        def claims(uid, employee):
+            transport.get.return_value = dict(userId=uid, status="active", attributes={"employee_no": employee},
+                organizations=[], roles=[], etag="fresh",
+                generated_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"))
+            return dict(issuer=self.request["issuer"], sub="sub-" + uid, userId=uid)
+        directory = DirectoryProvider("https://directory.example.invalid/v2", authorization=lambda: "Bearer fixture",
+                                      attribute_allowlist={"employee_no"}, client=transport)
+        jit = SQLJITProvisioner(self.binding, issuer=self.request["issuer"], directory=directory,
+                               enabled=True, request_id="scheme-b-test")
+        # Employee numbers name only new accounts; UID remains the authority key.
+        new_identity = claims("new-uid", "10280993")
+        self.assertEqual(jit.ensure(new_identity), "10280993@auth.local")
+        self.assertEqual(jit.ensure(new_identity), "10280993@auth.local")
+        with self.admin.cursor() as cursor:
+            cursor.execute("SELECT login_id FROM " + self.identity + ".profile_profile WHERE user='10280993@auth.local'")
+            self.assertEqual(cursor.fetchone(), ("new-uid",))
+        # A new UID with the same employee number cannot take over existing files.
+        with self.assertRaises(ContractError) as caught:
+            jit.ensure(claims("replacement-uid", "10280993"))
+        self.assertEqual(caught.exception.status, 409)
+        # Existing UID profiles keep their native name and gain only an OIDC binding.
+        with self.admin.cursor() as cursor:
+            cursor.execute("UPDATE " + self.identity + ".profile_profile SET login_id='old-uid' WHERE user='actor@example.invalid'")
+        old_identity = claims("old-uid", "changed-employee")
+        self.assertEqual(jit.ensure(old_identity), "actor@example.invalid")
+        with self.admin.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM " + self.native + ".EmailUser")
+            self.assertEqual(cursor.fetchone()[0], 3)
+            cursor.execute("UPDATE " + self.native + ".EmailUser SET is_active=0 WHERE email='other@example.invalid'")
+            cursor.execute("UPDATE " + self.identity + ".profile_profile SET login_id='disabled-uid' WHERE user='other@example.invalid'")
+        with self.assertRaises(ContractError) as caught:
+            jit.ensure(claims("disabled-uid", "inactive-employee"))
+        self.assertEqual(caught.exception.status, 403)
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT operation FROM cf_audit_event")
+            self.assertEqual(sorted(row[0] for row in cursor.fetchall()), ["identity.bound", "identity.created"])
+        # The system administrator and unsafe employee strings never enter JIT.
+        for employee in ("cfadmin", "CFADMIN", "bad@employee", "", "../escape"):
+            with self.assertRaises(ContractError):
+                jit.ensure(claims("invalid-" + str(len(employee)), employee))
