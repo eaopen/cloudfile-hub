@@ -196,6 +196,33 @@ class ExternalServiceDirectory(Directory):
         # has nothing else in the payload, so this is a no-op for it.
         return payload
 
+    def context_for_user_id(self, user_id):
+        """Complete current business subject for one stable EAP UID.
+
+        A missing/unavailable context must never become empty membership.
+        This is only supported by the scoped v2 machine channel.
+        """
+        from cloudfile_ext.external_service import ExternalServiceError
+        from urllib.parse import quote
+        client = self._client()
+        if getattr(client, 'auth_mode', 'legacy') != 'v2':
+            raise DirectoryError('incremental UID context requires v2 directory auth')
+        if not isinstance(user_id, str) or not user_id or len(user_id) > 225 or '/' in user_id:
+            raise DirectoryError('invalid EAP business UID')
+        try:
+            payload = client.call('/users/%s/context' % quote(user_id, safe=''),
+                                  method='GET')
+        except ExternalServiceError as exc:
+            raise DirectoryError('directory UID context unavailable') from exc
+        if (not isinstance(payload, dict) or payload.get('userId') != user_id
+                or payload.get('status') not in ('active', 'disabled')
+                or not isinstance(payload.get('organizations'), list)
+                or not isinstance(payload.get('roles'), list)
+                or not isinstance(payload.get('attributes'), dict)
+                or not isinstance(payload.get('etag'), str) or not payload['etag']):
+            raise DirectoryError('incomplete or mismatched EAP UID context')
+        return payload
+
     def groups_for_user(self, login):
         from cloudfile_ext.external_service import ExternalServiceError
         from urllib.parse import quote

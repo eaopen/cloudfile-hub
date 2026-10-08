@@ -85,6 +85,16 @@ class AdminSSOSyncView(APIView):
         if not is_enabled('CF_ENABLE_SSO'):
             return _feature_off()
 
+        # Optional UID-scoped incremental synchronization, not a full rebuild.
+        # Administrative identity is already enforced by this view's DRF
+        # permission class. Apply is separately disabled by default.
+        body = request.data
+        if isinstance(body, dict) and 'user_id' in body:
+            if not isinstance(body.get('dry_run', True), bool):
+                return api_error(status.HTTP_400_BAD_REQUEST, 'dry_run must be boolean.')
+            result = service.sync_user_id(body['user_id'], dry_run=body.get('dry_run', True))
+            return Response(result)
+
         result = service.sync()
         # A refused or errored sync is reported as 200 with a status field
         # rather than as an HTTP error: the request itself was handled

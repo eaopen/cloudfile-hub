@@ -47,6 +47,7 @@ MEMBERS = 'members'
 MEMBER_ACCOUNTS = 'member_accounts'
 # EAP stable employee/account numbers; resolved only against Profile.login_id.
 MEMBER_LOGIN_IDS = 'member_login_ids'
+MEMBER_IDENTITIES = 'member_identities'
 
 
 class SnapshotRejected(Exception):
@@ -93,6 +94,32 @@ def normalize_entry(entry):
                 or any(not isinstance(v, str) or not v.strip() for v in login_ids)):
             raise SnapshotRejected('member_login_ids must be a list of nonempty strings')
         normalized[MEMBER_LOGIN_IDS] = list(login_ids)
+    if MEMBER_IDENTITIES in entry:
+        pairs = entry[MEMBER_IDENTITIES]
+        if not isinstance(pairs, list):
+            raise SnapshotRejected('member_identities must be a list')
+        by_uid = {}
+        for pair in pairs:
+            if not isinstance(pair, dict) or set(pair) != {'user_id', 'employee_no'}:
+                raise SnapshotRejected('invalid paired member identity')
+            uid, employee = pair['user_id'], pair['employee_no']
+            # EAP's Hutool JSON omits null fields; explicit empty string
+            # preserves the key and is normalized to a missing employee ID.
+            if employee == '':
+                employee = None
+            if not isinstance(uid, str) or not uid.strip() or uid != uid.strip():
+                raise SnapshotRejected('paired userId must be nonempty')
+            if employee is not None and (not isinstance(employee, str) or
+                    not employee.strip() or employee != employee.strip()):
+                raise SnapshotRejected('invalid paired employee number')
+            if uid in by_uid and by_uid[uid] != employee:
+                raise SnapshotRejected('same UID has conflicting employee number')
+            by_uid[uid] = employee
+        # No silent permission truncation from partially populated UID pairs.
+        if set(by_uid) != set(members) or len(members) != len(set(members)):
+            raise SnapshotRejected('member identities do not match authoritative user IDs')
+        normalized[MEMBER_IDENTITIES] = [{'user_id': uid, 'employee_no': by_uid[uid]}
+                                        for uid in sorted(by_uid)]
     return normalized
 
 
@@ -121,6 +148,26 @@ def validate(snapshot):
     snapshot = [entry for entry in snapshot if entry is not None]
     normalized = [normalize_entry(entry) for entry in snapshot]
 
+    # UID collisions are fatal. Duplicate employee numbers must never merge
+    # accounts, but isolate only affected groups, leaving unrelated mappings
+    # available for incremental repair of the enterprise directory data.
+    seen_uid, seen_employee = {}, {}
+    duplicate_employee = set()
+    for entry in normalized:
+        for pair in entry.get(MEMBER_IDENTITIES, ()):
+            uid, employee = pair['user_id'], pair['employee_no']
+            if uid in seen_uid and seen_uid[uid] != employee:
+                raise SnapshotRejected('EAP UID has inconsistent employee number across groups')
+            seen_uid[uid] = employee
+            if employee is not None:
+                if employee in seen_employee and seen_employee[employee] != uid:
+                    duplicate_employee.add(employee)
+                else:
+                    seen_employee[employee] = uid
+    for entry in normalized:
+        if any(pair['employee_no'] in duplicate_employee
+               for pair in entry.get(MEMBER_IDENTITIES, ())):
+            entry['identity_conflict'] = True
     seen = {}
     for entry in normalized:
         external_id = entry['external_id']

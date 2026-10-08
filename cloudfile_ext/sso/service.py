@@ -14,7 +14,7 @@ import logging
 
 from cloudfile_ext.identity import UnknownSubject, resolve_user
 from cloudfile_ext.sso import directory, reconcile, snapshot
-from cloudfile_ext.sso.identity_bridge import load_login_identities
+from cloudfile_ext.sso.identity_bridge import IdentityBridgeError, resolve_eap_pairs, load_login_identities
 from cloudfile_ext.sso.models import SSOGroupMap, SSOSyncState
 
 logger = logging.getLogger(__name__)
@@ -152,18 +152,49 @@ def _resolve_members(entries):
     # Stable login IDs allow an indexed 256-row lookup in place of one
     # contact-email query per member occurrence (tens of thousands of repeats).
     logins = set()
+    pairs = {}
     for entry in entries:
-        if snapshot.MEMBER_LOGIN_IDS in entry:
+        if snapshot.MEMBER_IDENTITIES in entry:
+            for pair in entry[snapshot.MEMBER_IDENTITIES]:
+                uid = pair['user_id']
+                if uid in pairs and pairs[uid] != pair['employee_no']:
+                    raise SyncNotConfigured('EAP directory UID has conflicting employee numbers')
+                pairs[uid] = pair['employee_no']
+        elif snapshot.MEMBER_LOGIN_IDS in entry:
             logins.update(v for v in entry[snapshot.MEMBER_LOGIN_IDS]
                           if isinstance(v, str) and v.strip())
     try:
+        pair_identities = resolve_eap_pairs(
+            [{'user_id': uid, 'employee_no': employee} for uid, employee in pairs.items()]
+        ) if pairs else {}
         login_identities = load_login_identities(logins) if logins else {}
+    except IdentityBridgeError as exc:
+        raise SyncNotConfigured('EAP directory UID/employee identity collision') from exc
     except Exception as exc:
-        raise SyncNotConfigured('EAP directory login identity mapping unavailable') from exc
+        raise SyncNotConfigured('EAP directory identity mapping unavailable') from exc
     for group in entries:
         members = []
         broken = False
-        if snapshot.MEMBER_LOGIN_IDS in group:
+        if snapshot.MEMBER_IDENTITIES in group:
+            if group.get('identity_conflict'):
+                broken = True
+                unresolved.append('%s: employee number reused across EAP UIDs' % group['external_id'])
+            for pair in group[snapshot.MEMBER_IDENTITIES]:
+                uid = pair['user_id']
+                native = pair_identities.get(uid)
+                if native is not None:
+                    members.append(native)
+                else:
+                    unresolved.append(uid)
+                    broken = True
+                # A missing employee number does not prevent an exact UID
+                # match, but it must not be treated as a complete revocation
+                # snapshot until the directory repairs the employee record.
+                if pair['employee_no'] is None:
+                    broken = True
+            if broken:
+                unresolved.append('%s: incomplete business identity' % group['external_id'])
+        elif snapshot.MEMBER_LOGIN_IDS in group:
             subjects = [v.strip() for v in group[snapshot.MEMBER_LOGIN_IDS]
                         if isinstance(v, str) and v.strip()]
             expected = {str(v).strip() for v in (group.get('members') or [])}
@@ -396,6 +427,93 @@ def sync(registry=None):
         detail['errors'] = errors[:20]
     status = STATUS_ERROR if errors else STATUS_OK
     return _record(status, _describe(detail))
+def sync_user_id(user_id, *, dry_run=True, registry=None):
+    """Incrementally compare exactly ONE EAP UID's direct CE group memberships.
+
+    This requires the authoritative v2 context, both business identity keys,
+    all desired EAP groups already mapped, and an explicit operator-controlled
+    apply flag. No synchronization of other employees or group creation occurs.
+    """
+    from django.conf import settings
+    from cloudfile_ext.registry import registry as default_registry
+    from cloudfile_ext.sso.incremental import IncrementalRefused, plan_uid_delta
+    from seaserv import ccnet_api, seafile_api
+    if not isinstance(user_id, str) or not user_id.strip() or len(user_id) > 225:
+        return {'status': 'refused', 'reason': 'invalid EAP UID'}
+    source = directory.active(registry or default_registry)
+    if source is None or not hasattr(source, 'context_for_user_id'):
+        return {'status': 'refused', 'reason': 'v2 UID provider unavailable'}
+    try:
+        context = source.context_for_user_id(user_id)
+        employee_no = context['attributes'].get('employee_no')
+        if employee_no is not None and not isinstance(employee_no, str):
+            raise IncrementalRefused('invalid employee number in EAP context')
+        native = resolve_eap_pairs([{'user_id': user_id, 'employee_no': None}]).get(user_id)
+        if native is None:
+            return {'status': 'unmapped', 'reason': 'native CE account not provisioned'}
+        native_user = ccnet_api.get_emailuser(native)
+        if native_user is None:
+            raise IncrementalRefused('native CE identity does not exist')
+        mapped = SSOGroupMap.objects.as_dict(PROVIDER)
+        # Native get_groups may include ancestor departments. Only direct
+        # memberships may be removed; confirm each candidate via members RPC.
+        linked = ccnet_api.get_groups(native)
+        if linked is None or len(linked) > 4096:
+            raise IncrementalRefused('native membership unavailable')
+        mapped_gids = {item['group_id'] for item in mapped.values()}
+        direct = set()
+        for group in linked:
+            if group.id not in mapped_gids:
+                continue
+            row = ccnet_api.get_group(group.id)
+            if row is None:
+                raise IncrementalRefused('native group disappeared')
+            members = ccnet_api.get_group_members(group.id)
+            if members is None:
+                raise IncrementalRefused('native group members unavailable')
+            if any(member.user_name == native for member in members):
+                direct.add(group.id)
+        configured = getattr(settings, 'CF_SSO_UID_DELTA_MAX_REMOVALS', 0)
+        maximum = int(configured)
+        # DEV full sync guard=0 also guards per-UID membership removals.
+        if max_removal_ratio() == 0:
+            maximum = 0
+        planned = plan_uid_delta(context, mapped, direct, max_removals=maximum)
+        counts = {key: len(value) for key, value in planned.items()}
+        if dry_run:
+            return {'status': 'planned', 'planned': counts, 'etag': context['etag']}
+        if str(getattr(settings, 'CF_SSO_UID_DELTA_APPLY_ENABLED', 'false')).lower() != 'true':
+            return {'status': 'refused', 'reason': 'UID delta mutation disabled', 'planned': counts}
+        owner = group_owner()
+        done = {'add': 0, 'remove': 0}
+        errors = []
+        for gid in planned['add']:
+            try:
+                ccnet_api.group_add_member(gid, owner, native)
+                done['add'] += 1
+            except Exception:
+                errors.append('add failed')
+        # Do not start removals after a failed add in the same user delta.
+        if not errors:
+            for gid in planned['remove']:
+                try:
+                    ccnet_api.group_remove_member(gid, owner, native)
+                    seafile_api.remove_group_repos_by_owner(gid, native)
+                    done['remove'] += 1
+                except Exception:
+                    errors.append('remove failed')
+        return {'status': 'error' if errors else 'ok', 'planned': counts,
+                'applied': done, 'errors': errors}
+    except (directory.DirectoryError, IdentityBridgeError, IncrementalRefused,
+            SyncNotConfigured, ValueError) as exc:
+        # No underlying SQL, JWT, employee name or access token in response.
+        logger.info('UID-scoped directory delta refused: %s', exc.__class__.__name__)
+        return {'status': 'refused', 'reason': 'directory UID delta unavailable'}
+    except Exception:
+        logger.exception('UID-scoped directory reconciliation failed')
+        return {'status': 'error', 'reason': 'directory UID delta failed'}
+
+
 def sync_user(username, registry=None):
     """Refresh one user's memberships, on login.
 
