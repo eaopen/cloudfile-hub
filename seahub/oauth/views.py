@@ -251,19 +251,19 @@ def oauth_callback(request):
         profile.nickname = name.strip()
         profile.save()
 
+    # CloudFile: a shared mailbox is optional metadata, never an identity key.
+    # Keep the native unique-email schema and skip conflicts without merging
+    # the independently authenticated provider/sub accounts.
+    from cloudfile_ext.sso.oauth_profile import update_optional_contact_email
     if contact_email:
-        profile.contact_email = contact_email.strip()
-        profile.save()
+        update_optional_contact_email(profile, contact_email)
 
-    # CloudFile: SSO 建号时 OAuthBackend 不传 email（新用户 remote_user=None），
-    # create_oauth_user 的 contact_email 落空；identity.resolve_user 依赖
-    # convert_login_str_to_username 查 profile_profile.contact_email 才能把
-    # 登录邮箱映射到 hash@auth.local 身份，否则目录同步成员全部 UnknownSubject。
-    # 这里在首次登录后回填一次，已手动设置过 contact_email 的不动。
+    # Legacy integrations may map email as their login field. Preserve optional
+    # contact metadata without replacing the employee login_id or provider/sub
+    # binding; skip shared mailboxes and retain manually set contact addresses.
     login_email = oauth_user_info.get('email', '')
     if login_email and not profile.contact_email:
-        profile.contact_email = login_email.strip()
-        profile.save()
+        update_optional_contact_email(profile, login_email)
 
     if login_id:
         profile.login_id = login_id.strip()
