@@ -23,8 +23,7 @@ from seahub.thumbnail.utils import get_thumbnail_src
 from seahub.base.models import UserStarredFiles
 from seahub.base.templatetags.seahub_tags import email2nickname, \
         email2contact_email
-from seahub.utils.star import resolve_obj_id, backfill_row_obj_id, \
-        is_favorites_id_enabled, star_file, locate_obj_id
+from seahub.utils.star import is_favorites_id_enabled, star_file
 from seahub.settings import ENABLE_VIDEO_THUMBNAIL, \
     THUMBNAIL_ROOT, THUMBNAIL_DEFAULT_SIZE
 from seahub.utils.file_types import IMAGE, VIDEO
@@ -60,20 +59,15 @@ class StarredItems(APIView):
         else:
             item_info['obj_name'] = os.path.basename(path.rstrip('/'))
             dirent = seafile_api.get_dirent_by_path(repo_id, path) if repo else ''
-            # CloudFile review: a favorite keyed by object id follows its
-            # object. When the stored path no longer resolves (moved/renamed),
-            # re-locate the object id instead of marking the item deleted.
-            if not dirent and starred_item.obj_id and \
-                    is_favorites_id_enabled():
-                found = locate_obj_id(repo_id, starred_item.obj_id)
-                if found:
-                    path = found
-                    item_info['path'] = path
-                    item_info['obj_name'] = os.path.basename(path.rstrip('/'))
-                    dirent = seafile_api.get_dirent_by_path(repo_id, path)
+            # Content ids do not prove a move: another resource may share the
+            # same id. Keep missing-path relationships unresolved, without a
+            # recursive repo scan or destructive read-time mutation.
+            if not dirent and repo and starred_item.obj_id and is_favorites_id_enabled():
+                item_info['resolution_status'] = 'unresolved'
             item_info['mtime'] = timestamp_to_isoformat_timestr(dirent.mtime) if \
                     dirent else ''
-            item_info['deleted'] = False if dirent else True
+            item_info['deleted'] = (None if item_info.get('resolution_status') == 'unresolved'
+                                    else not bool(dirent))
             if dirent and not starred_item.is_dir:
                 file_type, file_ext = get_file_type_and_ext(item_info['obj_name'])
                 if file_type == IMAGE or \
@@ -97,12 +91,9 @@ class StarredItems(APIView):
         email = request.user.username
         all_starred_items = UserStarredFiles.objects.filter(email=email)
 
-        # Lazily backfill rows that predate object-id favorites so the list
-        # below can rely on obj_id. Lossless: unresolved rows stay untouched.
-        if is_favorites_id_enabled():
-            for starred_item in all_starred_items:
-                backfill_row_obj_id(starred_item)
-            all_starred_items = UserStarredFiles.objects.filter(email=email)
+        # Metadata backfill belongs in its explicit maintenance command, not
+        # every GET: it previously resolved old rows and re-read the queryset.
+        all_starred_items = list(all_starred_items)
 
         repo_dict = {}
         for starred_item in all_starred_items:
@@ -179,7 +170,10 @@ class StarredItems(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if not check_folder_permission(request, repo_id, '/'):
+        # Directory favorites check themselves; files inherit their parent.
+        # A readable library root cannot authorize an invisible child.
+        permission_path = (path if is_dir else os.path.dirname(path)) if is_favorites_id_enabled() else '/'
+        if not check_folder_permission(request, repo_id, permission_path):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -192,16 +186,8 @@ class StarredItems(APIView):
         try:
             star_file(email, repo_id, path, is_dir, org_id or -1)
 
-            if is_favorites_id_enabled():
-                obj_id = resolve_obj_id(repo_id, path)
-                starred_item = UserStarredFiles.objects.get_starred_item(
-                    email, repo_id, path, obj_id=obj_id)
-            else:
-                starred_item = None
-
-            if not starred_item:
-                starred_item = UserStarredFiles.objects.get_starred_item(
-                    email, repo_id, path)
+            starred_item = UserStarredFiles.objects.get_starred_item(
+                email, repo_id, path, org_id=org_id or -1)
         except Exception as e:
             logger.error(e)
             error_msg = 'Internal Server Error'
@@ -238,32 +224,17 @@ class StarredItems(APIView):
             error_msg = 'path invalid.'
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
-        # handler path if item exist
-        try:
-            if seafile_api.get_dir_id_by_path(repo_id, path):
-                path = normalize_dir_path(path)
-            elif seafile_api.get_file_id_by_path(repo_id, path):
-                path = normalize_file_path(path)
-        except Exception as e:
-            pass
-
+        # The authenticated user owns the relationship; resource access is
+        # unnecessary so deleted/revoked favorites remain removable. Avoid all
+        # object-id RPCs, which could select another equal-content resource.
         email = request.user.username
-
-        obj_id = None
-        if is_favorites_id_enabled():
-            obj_id = resolve_obj_id(repo_id, path)
-
-        # database record check
-        if not UserStarredFiles.objects.get_starred_item(email, repo_id, path, obj_id=obj_id):
-            error_msg = 'Item %s not found.' % path
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        # unstar a item
+        org_id = request.user.org.org_id if is_org_context(request) else -1
+        if not UserStarredFiles.objects.get_starred_item(email, repo_id, path, org_id=org_id):
+            return api_error(status.HTTP_404_NOT_FOUND, 'Favorite not found.')
         try:
-            UserStarredFiles.objects.delete_starred_item(email, repo_id, path, obj_id=obj_id)
+            UserStarredFiles.objects.delete_starred_item(email, repo_id, path, org_id=org_id)
         except Exception as e:
             logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
+            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, 'Internal Server Error')
 
         return Response({'success': True})

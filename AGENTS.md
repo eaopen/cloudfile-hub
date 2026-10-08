@@ -99,12 +99,14 @@ cloudfile_ext/
 ├── file_actions/        预览动作、锁、签出和本地 Agent 会话
 ├── metadata/            元数据/标签占位，当前不登记有效行为
 ├── fileops/             复制/移动统一预检查与幂等
-├── favorites/           收藏 obj_id 身份；经上游 star 端点接线
+├── favorites/           路径收藏关系与内容 ID 辅助信息；经已登记上游 star 端点接线
 └── office/              回调守卫，已随 CF_ENABLE_ONLYOFFICE 注册进 apps.py
 ```
 
 能力分支在这里加自己的包（例如 `feature/dir-acl` 的 `acl/`），并在 `apps.py`
 的能力列表里加一行——**不需要再动任何上游文件**。
+
+修改原因（收藏优化）：内容 ID 随编辑变化且可被同内容资源共享，不能作为收藏关系身份；失效路径保留待定位状态，安全移动跟随需明确操作映射。
 
 ## 铁律
 

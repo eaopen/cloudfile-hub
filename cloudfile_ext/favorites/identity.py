@@ -5,10 +5,9 @@ No Django, database, or Seafile imports -- this module must stay importable
 without a running Seahub so it can be unit-tested directly and reused by
 server-side consumers (cloudfile-hub/AGENTS.md rule 4).
 
-A favorite ("starred item") is identified by the object's unique id: the
-Seafile file obj_id or the directory id. ``repo_id`` and ``path`` remain on the
-row only as the object's *current location*, so they can be refreshed on
-move/rename without changing the favorite's identity.
+A row's primary key identifies its favorite relationship. User/org/repo/path
+scope lookups; Seafile obj_id is only a content/version hint because equal
+content shares ids and edits change them. No rebind is inferred from content.
 """
 
 

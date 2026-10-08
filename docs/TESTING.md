@@ -69,7 +69,7 @@ npm run build
 | `cloudfile_ext/external_sources/tests/` | 授权决策、开关关闭无贡献、路径/符号链接边界、provider、扫描游标 |
 | `cloudfile_ext/file_actions/tests/` | 动作读写分类、锁 provider 门禁、generation 续租/强制释放 |
 | `cloudfile_ext/audit/tests/` | 操作/对象过滤契约 |
-| `cloudfile_ext/favorites/tests/` | 收藏 `obj_id` 身份、移动/重命名跟随纯规则 |
+| `cloudfile_ext/favorites/tests/` | 收藏路径关系、同内容跨库/同库隔离、编辑后星标保留、失效关系清理与定位预算；修改原因：不再以内容 ID 推断资源身份 |
 | `cloudfile_ext/fileops/tests/` | 复制/移动统一预检查、权限变化提示与幂等策略 |
 | `cloudfile_ext/tests/` | CE 14 身份转换、provider 注册/封存 |
 | `cloudfile_ext/office/tests/` | OnlyOffice 回调鉴权/幂等 key；模块已随开关注册进运行时 |

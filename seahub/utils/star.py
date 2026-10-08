@@ -1,8 +1,6 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 # -*- coding: utf-8 -*-
 import logging
-import posixpath
-import stat
 
 from django.db import IntegrityError
 from django.db.models import Q
@@ -12,40 +10,25 @@ from seaserv import seafile_api
 from seahub.base.models import UserStarredFiles
 from seahub.utils import normalize_file_path, normalize_dir_path
 from cloudfile_ext.favorites.identity import pick_obj_id, should_backfill
+from cloudfile_ext.favorites.lookup import LookupBudget, lookup_content_hint
 
 logger = logging.getLogger(__name__)
 
 
-def locate_obj_id(repo_id, obj_id, root='/', guard=512):
-    """Find the current path of an object id by walking the repo tree.
+def locate_obj_id(repo_id, obj_id, root='/', guard=512, budget=None):
+    """Return a bounded, unambiguous content hint for diagnostic callers only.
 
-    Used when a starred item's stored path no longer resolves (the object was
-    moved or renamed): favorites keyed by object id must keep pointing at the
-    same object, so the listing re-locates it instead of marking it deleted.
-    ``guard`` bounds the walk so a pathological tree cannot loop forever.
+    Favorites lists must never rebind from this hint: equal content is not
+    proof of a move. Callers can share a budget across multiple lookups.
     """
-    if guard <= 0:
-        return None
-    try:
-        entries = seafile_api.list_dir_by_path(repo_id, root) or []
-    except Exception as e:
-        logger.warning('locate obj_id %s in %s failed at %s: %s',
-                       obj_id, repo_id, root, e)
-        return None
-    for entry in entries:
-        if entry.obj_id == obj_id:
-            return posixpath.join(root, entry.obj_name)
-        if stat.S_ISDIR(entry.mode):
-            found = locate_obj_id(repo_id, obj_id,
-                                  posixpath.join(root, entry.obj_name),
-                                  guard - 1)
-            if found:
-                return found
-    return None
+    result = lookup_content_hint(seafile_api.list_dir_by_path, repo_id, obj_id,
+                                 root=root, max_depth=guard,
+                                 budget=budget or LookupBudget())
+    return result.path if result.status == 'unique' else None
 
 
 def is_favorites_id_enabled():
-    """Whether favorites are keyed by object id rather than repo_id + path.
+    """Whether favorites store a content-id hint alongside their path identity.
 
     Kept lazy so this module stays importable before Django settings are
     finalised, and so turning the switch off restores native CE behaviour.
@@ -74,7 +57,7 @@ def resolve_obj_id(repo_id, path):
 
 
 def backfill_row_obj_id(row):
-    """Fill a row's obj_id from its stored repo_id + path, if missing.
+    """Fill an auxiliary content-id hint from the stored repo_id + path.
 
     Lossless by design: it only *adds* the id and never deletes a row whose
     path no longer resolves. Returns True when the row was changed.
@@ -100,28 +83,22 @@ def star_file(email, repo_id, path, is_dir, org_id=-1):
     if is_favorites_id_enabled():
         obj_id = resolve_obj_id(repo_id, path)
 
-    if obj_id:
-        # Key by object identity. Starring the same object again re-homes the
-        # existing row (e.g. after a move/rename) instead of creating a
-        # duplicate, so a favorite follows its object rather than its path.
+    if is_favorites_id_enabled():
+        # The path relationship survives content edits; equal content at another
+        # path/repo must never overwrite it. obj_id is metadata, not identity.
+        paths = [normalize_file_path(path), normalize_dir_path(path)]
         existing = UserStarredFiles.objects.filter(
-            email=email, org_id=org_id, obj_id=obj_id).first()
+            email=email, org_id=org_id, repo_id=repo_id, path__in=paths).order_by('pk').first()
         if existing is not None:
-            if (existing.repo_id != repo_id or existing.path != path or
-                    existing.is_dir != is_dir):
-                existing.repo_id = repo_id
-                existing.path = path
-                existing.is_dir = is_dir
-                existing.save()
+            existing.is_dir = is_dir
+            if obj_id:
+                existing.obj_id = obj_id
+            existing.save()
             return
-
         try:
-            UserStarredFiles.objects.create(email=email,
-                                            org_id=org_id,
-                                            repo_id=repo_id,
-                                            path=path,
-                                            is_dir=is_dir,
-                                            obj_id=obj_id)
+            UserStarredFiles.objects.create(email=email, org_id=org_id,
+                                            repo_id=repo_id, path=path,
+                                            is_dir=is_dir, obj_id=obj_id)
         except IntegrityError as e:
             logger.warning(e)
         return
@@ -142,32 +119,28 @@ def star_file(email, repo_id, path, is_dir, org_id=-1):
 
 
 def unstar_file(email, repo_id, path, org_id=-1):
-    obj_id = None
+    # Removal targets the current user's exact relationship even after deletion
+    # or revocation. Never remove other paths/repos sharing a content id.
     if is_favorites_id_enabled():
-        obj_id = resolve_obj_id(repo_id, path)
-
-    if obj_id:
-        # Match the object id only: the legacy /api2/starredfiles/ endpoint
-        # hardcodes org_id=-1, so filtering on org_id here would silently fail
-        # to unstar for org users.
-        UserStarredFiles.objects.filter(email=email, obj_id=obj_id).delete()
-        return
-
-    # Native fallback: the path may not resolve (deleted/moved), so unstar by
-    # whatever the row stores.
-    result = UserStarredFiles.objects.filter(email=email,
-                                             repo_id=repo_id,
-                                             path=path)
-    for r in result:
-        r.delete()
+        paths = [normalize_file_path(path), normalize_dir_path(path)]
+        relationships = UserStarredFiles.objects.filter(email=email, repo_id=repo_id,
+                                                        path__in=paths)
+        if org_id != -1:
+            relationships = relationships.filter(org_id=org_id)
+        relationships.delete()
+    else:
+        # Preserve the original CE spelling/scope when the extension is off.
+        for relationship in UserStarredFiles.objects.filter(email=email, repo_id=repo_id, path=path):
+            relationship.delete()
 
 
 def is_file_starred(email, repo_id, path, org_id=-1):
     if is_favorites_id_enabled():
-        obj_id = resolve_obj_id(repo_id, path)
-        if obj_id:
-            return UserStarredFiles.objects.filter(
-                email=email, org_id=org_id, obj_id=obj_id).exists()
+        # Checking the relation needs no resource RPC and remains correct after
+        # file edits or directory-content changes alter the stored content id.
+        return UserStarredFiles.objects.filter(
+            email=email, org_id=org_id, repo_id=repo_id,
+            path__in=[normalize_file_path(path), normalize_dir_path(path)]).exists()
 
     # Native fallback (also covers a path that no longer resolves).
     path_list = [normalize_file_path(path), normalize_dir_path(path)]
@@ -199,9 +172,8 @@ def get_dir_starred_files(email, repo_id, parent_dir, org_id=-1):
 def get_dir_starred_obj_ids(email, repo_id, org_id=-1):
     '''Get the object ids the user has starred, optionally for one repo.
 
-    Used to mark directory-listing entries by object id rather than path, so a
-    renamed/moved item keeps its star even when the path-keyed rows have not
-    been re-homed yet. Only rows that already carry an obj_id participate.
+    These ids are diagnostic hints only, never directory-entry star flags:
+    multiple resources can share content, and edits change the content id.
     '''
     starred_items = UserStarredFiles.objects.filter(
         email=email, org_id=org_id, obj_id__isnull=False)

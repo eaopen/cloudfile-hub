@@ -36,7 +36,7 @@ from cloudfile_ext.settings_defaults import *
 | `CF_ENABLE_WATCH` | `True` | 验证中；复用 CE monitored-repos API 并放开非 Pro gate |
 | `CF_ENABLE_CONVERT_EXPORT` | `False` | 规划 |
 | `CF_ENABLE_CHECKOUT` | `True` | 验证中 |
-| `CF_ENABLE_FAVORITES_ID` | `True` | 验证中；`obj_id` 化收藏 |
+| `CF_ENABLE_FAVORITES_ID` | `True` | 验证中；路径关系与辅助内容 ID；修改原因：内容 ID 不能唯一标识资源，失效路径不再通过树扫描自动重绑 |
 | `CF_ENABLE_LOCAL_APP` | `False` | 部分完成 |
 | `CF_ENABLE_S3_STORAGE` | `False` | Hub 仅有维护脚本边界 |
 | `CF_ENABLE_EXTERNAL_SOURCES` | `False` | 验证中 |

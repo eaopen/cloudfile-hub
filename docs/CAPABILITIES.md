@@ -34,7 +34,7 @@
 | `CF_ENABLE_FILE_PREVIEW` | CE 补强 | CE 原生预览 URL 和渲染器 | 权限感知的统一文件动作列表 | **验证中**；策略测试通过，React 入口缺浏览器自动化测试；CloudFile 不实现渲染器 |
 | `CF_ENABLE_ONLYOFFICE` | CE 复用 | CE 文档配置、编辑器和回调链 | 回调鉴权/幂等守卫影子接管回调 URL | **部分完成**；`cloudfile_ext.office` 已注册进 `apps.py`（开关关闭时不注册任何路由）；容器门禁 `office-e2e.yml` 起真实 Document Server 验证路由挂载、convert 往返、无签名回调拒绝与重投递不 500；浏览器内编辑会话与真实保存去重的端到端仍待补 |
 | `CF_ENABLE_FILE_LOCK` | Pro 平替 | Seahub 权限与文件定位 | 锁状态/获取/续租/释放/管理员强制释放 API | **部分完成**；Hub 契约测试通过，锁/签入签出/续租/管理员恢复跨协议矩阵 21/21；WebDAV/REST 拒绝统一映射 423（searpc 透传 `CF_ERR_FILE_LOCKED`）；客户端兼容与锁语义未证明与 Pro 等价 |
-| `CF_ENABLE_FAVORITES_ID` | CE 补强 | CE 收藏 API/前端与 `UserStarredFiles` | `obj_id` 身份、移动/重命名跟随、旧记录无损回填 | **验证中**；`favorites/identity.py` 纯规则单测通过，`star.py`/`starred_items.py` 按 `obj_id` 判存与打星标，`backfill_starred_obj_ids` 幂等回填；容器 E2E（`favorites_matrix.py`）通过：星标后移动文件，列表按 `obj_id` 重定位到新路径（`locate_obj_id` 树遍历兜底）而非标记删除 |
+| `CF_ENABLE_FAVORITES_ID` | CE 补强 | CE 收藏 API/前端与 `UserStarredFiles` | 路径关系、辅助内容 ID、旧记录无损回填 | **验证中**；修改原因：内容 ID 随修改变化且同内容可共享，收藏按用户/组织/库/路径判存、添加与取消，目录列表按路径显示星标。GET 不再回填重读或递归定位；失效旧路径保留 `resolution_status=unresolved`，不误绑同内容资源、不删除关系。诊断定位有节点/RPC/时间预算，不能用于自动重绑；安全移动跟随须后续接入明确操作映射。 |
 | `CF_ENABLE_WATCH` | Pro 平替 | CE `UserMonitoredRepos` 与 monitored-repos API | 直接放开非 Pro gate（`monitored_repos.py` 上游补丁） | **部分完成**；运行时已接线，没有 CloudFile 专项测试；通知消费链与各格式写回无独立 E2E |
 | `CF_ENABLE_CONVERT_EXPORT` | 新应用扩展 | CE 下载/导出与 SeaDoc | 未发现注册模块 | **部分完成（Hub 边界）**；Hub 无自研渲染/转换，跨仓复用 CE/SeaDoc + Compose 配置与前端接线，各格式写回无独立 E2E |
 | `CF_ENABLE_CHECKOUT` | Pro 平替 | CE 文件权限和版本写入 | `file_actions` 中的带 generation 租约签出/释放 | **部分完成**；API 已接线，依赖 server 锁 provider；签出/释放跨协议矩阵同文件锁 21/21（`checkout/` 包内旧占位说明不是实际入口） |
