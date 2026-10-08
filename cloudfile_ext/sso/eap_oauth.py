@@ -182,7 +182,8 @@ def callback(request):
                                headers={'Authorization': 'Bearer ' + token['access_token']})
         config = SimpleNamespace(issuer=settings.CF_SSO_EAP_OIDC_ISSUER,
                                  client_id=settings.OAUTH_CLIENT_ID, user_id_claim='userId')
-        validated = IDTokenValidator(config, SigningKeys(settings.CF_SSO_EAP_OIDC_JWKS_URL, client=JsonClient())).validate(
+        validated = IDTokenValidator(config, SigningKeys(settings.CF_SSO_EAP_OIDC_JWKS_URL, client=JsonClient(),
+            allow_http=getattr(settings, "OAUTH_ENABLE_INSECURE_TRANSPORT", False) is True)).validate(
             token['id_token'], nonce=flow['nonce'], access_token=token['access_token'], userinfo=info)
         if validated['userId'] != info.get('userId'):
             raise IdentityConflict('missing business UID')

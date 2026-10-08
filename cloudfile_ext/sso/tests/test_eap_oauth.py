@@ -121,3 +121,46 @@ def test_callback_never_logs_in_on_protocol_or_identity_failure(callback_runtime
     assert callback(r.request) == 'refused'
     r.auth.login.assert_not_called()
     assert 'cf_eap_oidc' not in r.request.session
+
+
+def test_dev_jwks_transport_requires_explicit_opt_in():
+    from cloudfile_extensions.identity.oidc import SigningKeys
+    from cloudfile_ext.sso.eap_oauth import JsonClient
+    url = 'http://dev.test/ssoauth/jwks/'
+    with pytest.raises(ValueError):
+        SigningKeys(url, client=JsonClient())
+    assert SigningKeys(url, client=JsonClient(), allow_http=True).url == url
+    with pytest.raises(ValueError):
+        SigningKeys(url, allow_http=True)
+    for unsafe in ['http://user:pass@dev.test/jwks/', 'http://dev.test/jwks/?x=1',
+                   'http://dev.test/jwks/#fragment', 'http:///jwks/']:
+        with pytest.raises(ValueError):
+            SigningKeys(unsafe, client=JsonClient(), allow_http=True)
+
+
+def test_dev_http_keys_still_enforce_signed_identity():
+    import json
+    import time
+    import jwt
+    from types import SimpleNamespace
+    from cryptography.hazmat.primitives.asymmetric import rsa
+    from cloudfile_extensions.identity.oidc import SigningKeys, IDTokenValidator
+    from cloudfile_extensions.common.errors import ContractError
+    private = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    public = dict(json.loads(jwt.algorithms.RSAAlgorithm.to_jwk(private.public_key())), kid='key-1')
+    client = SimpleNamespace(get=lambda *args, **kwargs: {'keys': [public]})
+    validator = IDTokenValidator(SimpleNamespace(issuer='http://dev.test/idp/', client_id='files',
+        user_id_claim='userId'), SigningKeys('http://dev.test/jwks/', client=client, allow_http=True))
+    claims = dict(iss='http://dev.test/idp/', aud='files', sub='stable', userId='123',
+                  iat=int(time.time()), exp=int(time.time()) + 60, nonce='one-use')
+    def validate(payload, key=private):
+        token = jwt.encode(payload, key, algorithm='RS256', headers={'kid': 'key-1'})
+        return validator.validate(token, nonce='one-use', access_token='access',
+                                  userinfo={'sub': 'stable', 'userId': '123'})
+    assert validate(claims)['userId'] == '123'
+    for field, value in [('iss', 'http://other.test/'), ('aud', 'other'), ('nonce', 'wrong'),
+                         ('userId', '456'), ('exp', int(time.time()) - 120)]:
+        with pytest.raises(ContractError):
+            validate(dict(claims, **{field: value}))
+    with pytest.raises(ContractError):
+        validate(claims, rsa.generate_private_key(public_exponent=65537, key_size=2048))

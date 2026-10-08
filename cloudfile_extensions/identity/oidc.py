@@ -98,8 +98,16 @@ class OIDCConfig:
 
 class SigningKeys:
     """Fixed configured JWKS; one bounded refresh on an unknown rotating kid."""
-    def __init__(self, url, *, client=None, clock=time.monotonic):
-        self.url = trusted_https_url(url)
+    def __init__(self, url, *, client=None, clock=time.monotonic, allow_http=False):
+        # Only the legacy DEV bridge may opt into its already configured HTTP
+        # transport; all other identity runtimes remain HTTPS-only by default.
+        if allow_http and isinstance(url, str) and url.startswith("http://"):
+            trusted_https_url("https://" + url[len("http://"):])
+            if client is None:
+                raise ValueError("HTTP signing keys require an explicit transport")
+            self.url = url
+        else:
+            self.url = trusted_https_url(url)
         self.client = HttpsJsonClient(maximum_bytes=65536) if client is None else client
         self.clock = clock
         self.keys = {}
