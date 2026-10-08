@@ -1,0 +1,102 @@
+"""Stable EAP logins are resolved via indexed CE Profile.login_id, never email."""
+import pytest
+from cloudfile_ext.sso.identity_bridge import load_login_identities, IdentityBridgeError
+from cloudfile_ext.sso import snapshot
+
+
+def test_bulk_identity_queries_are_bounded_and_deduplicated():
+    calls = []
+    def fetch(batch):
+        calls.append(list(batch))
+        return [(login, 'opaque:' + login) for login in batch]
+    result = load_login_identities(['2', '1', '2', '3'], fetch=fetch, batch_size=2)
+    assert result == {'1': 'opaque:1', '2': 'opaque:2', '3': 'opaque:3'}
+    assert calls == [['1', '2'], ['3']]
+
+
+def test_missing_profile_is_not_implicitly_created_or_guessed():
+    assert load_login_identities(['employee-1'], fetch=lambda batch: []) == {}
+
+
+def test_wrong_profile_login_is_not_accepted():
+    with pytest.raises(IdentityBridgeError):
+        load_login_identities(['employee-1'], fetch=lambda batch: [('wrong', 'opaque')])
+
+
+def test_conflicting_bindings_are_rejected():
+    with pytest.raises(IdentityBridgeError):
+        load_login_identities(['employee-1'],
+                              fetch=lambda batch: [('employee-1', 'a'), ('employee-1', 'b')])
+
+
+def test_member_login_ids_survive_snapshot_normalization():
+    entries = snapshot.validate([{
+        'external_id': 'dept-1', 'name': 'Dev', 'subject_type': 'dept',
+        'member_user_ids': ['user-1'], 'member_login_ids': ['10220942'],
+        'member_accounts': ['alias@example.com']}])
+    assert entries[0]['member_login_ids'] == ['10220942']
+    assert entries[0]['members'] == ['user-1']
+
+
+def test_old_snapshots_do_not_gain_login_ids():
+    entries = snapshot.validate([{
+        'external_id': 'dept-1', 'name': 'Dev', 'members': ['alice@example.com']}])
+    assert 'member_login_ids' not in entries[0]
+
+
+def test_malformed_login_id_list_fails_closed():
+    with pytest.raises(snapshot.SnapshotRejected, match='member_login_ids'):
+        snapshot.validate([{
+            'external_id': 'dept-1', 'name': 'Dev', 'member_user_ids': ['u1'],
+            'member_login_ids': 'employee-1'}])
+
+
+@pytest.fixture
+def directory_service(monkeypatch):
+    import importlib
+    import sys
+    import types
+    models = types.ModuleType('cloudfile_ext.sso.models')
+    models.SSOGroupMap = object
+    models.SSOSyncState = object
+    monkeypatch.setitem(sys.modules, 'cloudfile_ext.sso.models', models)
+    monkeypatch.delitem(sys.modules, 'cloudfile_ext.sso.service', raising=False)
+    return importlib.import_module('cloudfile_ext.sso.service')
+
+
+def test_v2_member_resolution_uses_login_not_email(monkeypatch, directory_service):
+    monkeypatch.setattr(directory_service, 'load_login_identities',
+                        lambda logins: {'10220942': 'native-42'})
+    entries = snapshot.validate([{
+        'external_id': 'dept-27', 'name': 'Dept 27', 'subject_type': 'dept',
+        'member_user_ids': ['u42'], 'member_login_ids': ['10220942'],
+        'member_accounts': ['wrong-legacy-email@example.com']}])
+    resolved, missing, quarantined = directory_service._resolve_members(entries)
+    assert resolved[0]['members'] == ['native-42']
+    assert missing == []
+    assert quarantined == set()
+
+
+def test_v2_missing_login_mapping_quarantines_group(monkeypatch, directory_service):
+    monkeypatch.setattr(directory_service, 'load_login_identities',
+                        lambda logins: {'a': 'native-a'})
+    entries = snapshot.validate([{
+        'external_id': 'dept-27', 'name': 'Dept 27', 'subject_type': 'dept',
+        'member_user_ids': ['u1', 'u2'],
+        'member_login_ids': ['a']}])
+    resolved, missing, quarantined = directory_service._resolve_members(entries)
+    assert resolved[0]['members'] == ['native-a']
+    assert 'dept-27' in quarantined
+    assert any('incomplete' in msg for msg in missing)
+
+
+def test_v2_unprovisioned_identity_never_falls_back_to_email(monkeypatch, directory_service):
+    monkeypatch.setattr(directory_service, 'load_login_identities', lambda logins: {})
+    entries = snapshot.validate([{
+        'external_id': 'dept-27', 'name': 'Dept 27', 'subject_type': 'dept',
+        'member_user_ids': ['u42'], 'member_login_ids': ['10220942'],
+        'member_accounts': ['some-existing-other-user@example.com']}])
+    resolved, missing, quarantined = directory_service._resolve_members(entries)
+    assert resolved[0]['members'] == []
+    assert '10220942' in missing
+    assert quarantined == {'dept-27'}

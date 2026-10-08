@@ -174,3 +174,35 @@ def test_selecting_external_service_without_a_url_says_so(cf):
     with pytest.raises(cf.directory.DirectoryError) as exc:
         cf.directory.ExternalServiceDirectory().groups()
     assert 'CF_SERVICE_SSO_DIRECTORY_URL' in str(exc.value)
+
+
+def test_v2_single_user_uses_scoped_context_and_direct_groups(cf):
+    service = FakeService({
+        '/users/by-login/10220942/context': {
+            'userId': 'user-42', 'status': 'active',
+            'organizations': [{'namespace': 'directory', 'external_id': 'dept-1',
+                               'is_primary': True}],
+            'roles': [{'namespace': 'role', 'external_id': '99'}],
+            'organization_ancestors': [{'namespace': 'directory', 'external_id': 'root'}],
+        },
+    })
+    service.auth_mode = 'v2'
+    source = cf.directory.ExternalServiceDirectory(service)
+    assert source.groups_for_user('10220942') == ['dept-1', 'role:99']
+    assert service.calls == [('GET', '/users/by-login/10220942/context')]
+
+
+def test_v2_user_lookup_never_grants_incomplete_context(cf):
+    service = FakeService({'/users/by-login/a%2Fb/context': {
+        'status': 'active', 'organizations': [{'namespace': 'directory', 'external_id': 'A'}]}})
+    service.auth_mode = 'v2'
+    assert cf.directory.ExternalServiceDirectory(service).groups_for_user('a/b') is None
+    assert service.calls == [('GET', '/users/by-login/a%2Fb/context')]
+
+
+def test_v2_disabled_user_does_not_grant_groups(cf):
+    service = FakeService({'/users/by-login/disabled/context': {
+        'status': 'disabled', 'organizations': [{'namespace': 'directory', 'external_id': 'A'}],
+        'roles': []}})
+    service.auth_mode = 'v2'
+    assert cf.directory.ExternalServiceDirectory(service).groups_for_user('disabled') is None

@@ -14,6 +14,7 @@ import logging
 
 from cloudfile_ext.identity import UnknownSubject, resolve_user
 from cloudfile_ext.sso import directory, reconcile, snapshot
+from cloudfile_ext.sso.identity_bridge import load_login_identities
 from cloudfile_ext.sso.models import SSOGroupMap, SSOSyncState
 
 logger = logging.getLogger(__name__)
@@ -123,12 +124,14 @@ def max_removal_ratio():
 def _resolve_members(entries):
     """Map directory logins onto Seafile identities.
 
-    Contract v2.1: entries may carry ``member_accounts`` (login emails,
-    e.g. ``admin@example.com``) alongside ``member_user_ids``.
-    Accounts are preferred when present because they are what the SSO login
-    actually maps: the identity layer resolves the email onto the opaque
-    Seafile id via profile contact_email. External user IDs, being directory-specific,
-    are never a Seafile login and resolve to nothing.
+    Current EAP snapshots include member_login_ids (stable employee account_)
+    as well as member_user_ids and optional member_accounts (contact emails).
+    Resolve the login IDs via the indexed and unique Seahub Profile.login_id
+    field. Never silently substitute contact_email for an explicit missing
+    login_id: email can be absent, change, or belong to another person.
+
+    Older providers without member_login_ids retain the legacy identity
+    resolver and are isolated from this v2 behavior.
 
     Unresolvable members are dropped and *named* in the report rather than
     passed through: a login that does not exist yet is normal during a
@@ -146,22 +149,49 @@ def _resolve_members(entries):
     resolved = []
     unresolved = []
     quarantined = set()
+    # Stable login IDs allow an indexed 256-row lookup in place of one
+    # contact-email query per member occurrence (tens of thousands of repeats).
+    logins = set()
+    for entry in entries:
+        if snapshot.MEMBER_LOGIN_IDS in entry:
+            logins.update(v for v in entry[snapshot.MEMBER_LOGIN_IDS]
+                          if isinstance(v, str) and v.strip())
+    try:
+        login_identities = load_login_identities(logins) if logins else {}
+    except Exception as exc:
+        raise SyncNotConfigured('EAP directory login identity mapping unavailable') from exc
     for group in entries:
         members = []
         broken = False
-        accounts = group.get(snapshot.MEMBER_ACCOUNTS)
-        if accounts:
-            subjects = [str(a).strip() for a in accounts if str(a).strip()]
-        else:
-            subjects = group.get('members') or []
-        for login in subjects:
-            try:
-                members.append(resolve_user(login))
-            except UnknownSubject:
-                unresolved.append(login)
+        if snapshot.MEMBER_LOGIN_IDS in group:
+            subjects = [v.strip() for v in group[snapshot.MEMBER_LOGIN_IDS]
+                        if isinstance(v, str) and v.strip()]
+            expected = {str(v).strip() for v in (group.get('members') or [])}
+            # Mismatched cardinality means EAP omitted account_ for a member
+            # or reused a login_id. Refuse removals in this group.
+            if len(subjects) != len(expected) or len(set(subjects)) != len(subjects):
                 broken = True
+                unresolved.append('%s: incomplete employee login mapping' % group['external_id'])
+            for login in subjects:
+                native = login_identities.get(login)
+                if native is None:
+                    unresolved.append(login)
+                    broken = True
+                else:
+                    members.append(native)
+        else:
+            # Legacy provider: no explicit business login binding yet.
+            accounts = group.get(snapshot.MEMBER_ACCOUNTS)
+            subjects = ([str(a).strip() for a in accounts if str(a).strip()]
+                        if accounts else group.get('members') or [])
+            for login in subjects:
+                try:
+                    members.append(resolve_user(login))
+                except UnknownSubject:
+                    unresolved.append(login)
+                    broken = True
         entry = dict(group)
-        entry['members'] = members
+        entry['members'] = sorted(set(members))
         if broken:
             quarantined.add(entry['external_id'])
         resolved.append(entry)

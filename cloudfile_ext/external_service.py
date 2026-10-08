@@ -31,6 +31,7 @@ import logging
 import time
 import urllib.error
 import urllib.request
+import uuid
 
 from django.conf import settings
 
@@ -51,21 +52,26 @@ class ExternalServiceError(Exception):
 class ExternalService(object):
     """A configured HTTP endpoint belonging to the deployment's operator.
 
-    Authentication follows the convention Seahub already uses for its own
-    internal services: a short-lived HS256 JWT signed with a shared secret,
-    sent as ``Authorization: Token <jwt>``. Reusing it means an operator who
-    has already wired up seafevents has nothing new to learn, and we are not
-    inventing a second signing scheme for the same job.
+    Two explicit authentication modes. The default legacy mode preserves
+    existing Token HS256 senders while deployments migrate. V2 uses scoped,
+    short-lived Bearer HS256 with kid/sub/jti/iat and never falls back.
+    The operator configures both ends with matching credentials.
     """
 
     def __init__(self, name, url, secret='', timeout=DEFAULT_TIMEOUT,
-                 retries=DEFAULT_RETRIES, on_failure=FAIL_CLOSED):
+                 retries=DEFAULT_RETRIES, on_failure=FAIL_CLOSED,
+                 auth_mode='legacy', key_id='', service_id='cloudfile'):
         self.name = name
         self.url = url.rstrip('/')
         self.secret = secret
         self.timeout = timeout
         self.retries = retries
         self.on_failure = on_failure
+        if auth_mode not in ('legacy', 'v2'):
+            raise ValueError('Unsupported external-service auth mode: %s' % auth_mode)
+        self.auth_mode = auth_mode
+        self.key_id = key_id
+        self.service_id = service_id
 
     # -- construction ------------------------------------------------------
 
@@ -88,31 +94,49 @@ class ExternalService(object):
             timeout=getattr(settings, prefix + 'TIMEOUT', DEFAULT_TIMEOUT),
             retries=getattr(settings, prefix + 'RETRIES', DEFAULT_RETRIES),
             on_failure=getattr(settings, prefix + 'ON_FAILURE', on_failure),
+            auth_mode=getattr(settings, prefix + 'AUTH_MODE', 'legacy'),
+            key_id=getattr(settings, prefix + 'KEY_ID', ''),
+            service_id=getattr(settings, prefix + 'SERVICE_ID', 'cloudfile'),
         )
 
     # -- calling -----------------------------------------------------------
 
     def _headers(self):
         headers = {'Content-Type': 'application/json'}
-        if not self.secret:
+        # The EAP directory v2 channel is explicitly opt-in. Refuse incomplete
+        # credentials rather than silently issuing an unauthenticated request.
+        if self.auth_mode == 'v2':
+            if (not self.key_id or not self.service_id
+                    or len(self.secret.encode('utf-8')) < 32):
+                raise ExternalServiceError(
+                    '%s: v2 requires KEY_ID, SERVICE_ID and a >=32-byte SECRET'
+                    % self.name)
+        elif not self.secret:
             return headers
         try:
             import jwt
         except ImportError:                      # pragma: no cover
+            if self.auth_mode == 'v2':
+                raise ExternalServiceError(
+                    '%s: PyJWT is required for v2 service auth' % self.name)
             logger.error('PyJWT missing; calling %s unauthenticated',
                          self.name)
             return headers
-        # iss/aud bind the token to one purpose: a caller that holds the
-        # secret cannot reuse it against an unrelated endpoint on the far
-        # side (decision 2026-08-28 §8.1). The receiver verifies the same
-        # fixed pair -- one line each, both ends in the compose .env.
         now = int(time.time())
-        token = jwt.encode(
-            {'exp': now + 300,
-             'iss': 'cloudfile-sso',
-             'aud': 'eap-directory'},
-            self.secret, algorithm='HS256')
-        headers['Authorization'] = 'Token %s' % token
+        claims = {'exp': now + 300,
+                  'iss': 'cloudfile-sso',
+                  'aud': 'eap-directory'}
+        if self.auth_mode == 'v2':
+            claims.update({'iat': now, 'sub': self.service_id,
+                           'jti': str(uuid.uuid4()), 'scope': 'directory.read'})
+            token = jwt.encode(
+                claims, self.secret, algorithm='HS256',
+                headers={'kid': self.key_id, 'typ': 'JWT'})
+            headers['Authorization'] = 'Bearer %s' % token
+        else:
+            # Only for old integrations during the opt-in migration.
+            token = jwt.encode(claims, self.secret, algorithm='HS256')
+            headers['Authorization'] = 'Token %s' % token
         return headers
 
     def call(self, path, payload=None, method='POST'):

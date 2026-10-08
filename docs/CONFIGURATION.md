@@ -98,6 +98,8 @@ from cloudfile_ext.settings_defaults import *
 
 外部目录服务使用动态设置 `CF_SERVICE_SSO_DIRECTORY_{URL,SECRET,TIMEOUT,RETRIES,ON_FAILURE}`。URL 未设置时 external-service provider 拒绝工作；secret 同时用于出站 token 和 webhook 验证。生产值由部署密钥管理提供，不在仓库中定义。
 
+ETech directory machine auth v2: set CF_SERVICE_SSO_DIRECTORY_AUTH_MODE=v2 and configure CF_SERVICE_SSO_DIRECTORY_KEY_ID, CF_SERVICE_SSO_DIRECTORY_SECRET (32+ UTF-8 bytes) and optionally CF_SERVICE_SSO_DIRECTORY_SERVICE_ID (default cloudfile). Both sides must agree on kid/secret/service-id, iss=cloudfile-sso and aud=eap-directory. Uses 5-minute scoped Bearer HS256 JWT. Legacy Token remains an opt-in migration mode and v2 never silently falls back.
+
 ## 搜索与外部源
 
 | Setting | 默认值 | 说明 |

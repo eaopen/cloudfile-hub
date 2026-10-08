@@ -147,8 +147,10 @@ class ExternalServiceDirectory(Directory):
         GET <url>/groups              -> {"groups": [{external_id, name, members}]}
         GET <url>/users/<login>/groups -> {"groups": ["eng", ...]}
 
-    The second is optional; a service that does not implement it returns 404
-    and the user simply waits for the next full sync.
+    In v2, per-user refresh uses /users/by-login/<login>/context and parses
+    the canonical subject's direct organizations and roles. A missing context
+    or stale user is not treated as evidence to grant membership.
+    Legacy /users/<login>/groups remains optional during migration.
 
     Authentication, timeout, retry and failure policy all come from
     cloudfile_ext.external_service, which is where they belong -- this class
@@ -196,9 +198,43 @@ class ExternalServiceDirectory(Directory):
 
     def groups_for_user(self, login):
         from cloudfile_ext.external_service import ExternalServiceError
+        from urllib.parse import quote
+        client = self._client()
+        if getattr(client, 'auth_mode', 'legacy') == 'v2':
+            # V2 resolves the login to EAP's stable userId on the source
+            # side, then returns the canonical subject context. Ancestors
+            # are deliberately excluded: CE inherits them itself.
+            try:
+                payload = client.call(
+                    '/users/by-login/%s/context' % quote(login, safe=''),
+                    method='GET')
+                if not isinstance(payload, dict):
+                    raise DirectoryError('invalid v2 directory context')
+                if payload.get('status') != 'active':
+                    return None
+                orgs, roles = payload.get('organizations'), payload.get('roles')
+                if not isinstance(orgs, list) or not isinstance(roles, list):
+                    raise DirectoryError('v2 directory context is incomplete')
+                groups = []
+                for item in orgs:
+                    if (not isinstance(item, dict) or
+                            item.get('namespace') != 'directory' or
+                            not isinstance(item.get('external_id'), str)):
+                        raise DirectoryError('invalid directory organization')
+                    groups.append(item['external_id'])
+                for item in roles:
+                    if (not isinstance(item, dict) or
+                            item.get('namespace') != 'role' or
+                            not isinstance(item.get('external_id'), str)):
+                        raise DirectoryError('invalid directory role')
+                    groups.append('role:' + item['external_id'])
+                return list(dict.fromkeys(groups))
+            except (ExternalServiceError, DirectoryError) as exc:
+                logger.info('v2 per-user directory lookup failed: %s', exc)
+                return None
         try:
-            payload = self._client().call(
-                '/users/%s/groups' % login, method='GET')
+            payload = client.call(
+                '/users/%s/groups' % quote(login, safe=''), method='GET')
         except (ExternalServiceError, DirectoryError) as exc:
             # A per-user refresh is a nicety; the full sync is the contract.
             logger.info('per-user directory lookup for %s failed: %s',

@@ -42,13 +42,11 @@ REVISION = 'revision'
 MEMBER_USER_IDS = 'member_user_ids'
 MEMBERS = 'members'
 
-#: Contract v2.1: directory also sends the login account
-#: for each member (e.g. 'admin'). The identity layer
-#: turns account into {account}@<domain> and maps it onto the Seafile
-#: identity via contact_email, which is what SSO logins actually produce.
-#: Optional and additive -- absent means the resolver falls back to
-#: member_user_ids, same as before.
+#: Legacy optional contact emails; new EAP mappings use member_login_ids
+#: against Seahub Profile.login_id, not mutable contact_email.
 MEMBER_ACCOUNTS = 'member_accounts'
+# EAP stable employee/account numbers; resolved only against Profile.login_id.
+MEMBER_LOGIN_IDS = 'member_login_ids'
 
 
 class SnapshotRejected(Exception):
@@ -79,7 +77,7 @@ def normalize_entry(entry):
         members = list(entry.get(MEMBERS) or [])
     accounts = entry.get(MEMBER_ACCOUNTS)
     accounts = list(accounts) if accounts else None
-    return {
+    normalized = {
         'external_id': (entry.get('external_id') or '').strip(),
         'name': (entry.get('name') or '').strip(),
         'members': members,
@@ -87,6 +85,15 @@ def normalize_entry(entry):
         SUBJECT_TYPE: subject_type,
         PARENT_EXTERNAL_ID: parent,
     }
+    # Optional in legacy snapshots; do not manufacture a v2 identity mapping
+    # for sources that never supplied stable business login IDs.
+    if entry.get(MEMBER_LOGIN_IDS) is not None:
+        login_ids = entry[MEMBER_LOGIN_IDS]
+        if (not isinstance(login_ids, (list, tuple))
+                or any(not isinstance(v, str) or not v.strip() for v in login_ids)):
+            raise SnapshotRejected('member_login_ids must be a list of nonempty strings')
+        normalized[MEMBER_LOGIN_IDS] = list(login_ids)
+    return normalized
 
 
 def validate(snapshot):
