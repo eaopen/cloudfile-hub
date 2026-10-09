@@ -56,6 +56,10 @@ def web_list(kind):
             scope = getattr(settings, 'CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE', None)
             resources = getattr(settings, 'CLOUDFILE_OIDC_LOGIN_RESOURCES', None)
             if scope is None and resources is None:
+                # Explicit EAP opt-in keeps ordinary CE and OIDC paths unchanged.
+                if kind == 'directory' and request.GET.get('with_display_metadata') == 'true':
+                    from cloudfile_ext.legacy_tags.directory import directory_response
+                    return directory_response(view, self, request, *args, **kwargs)
                 return view(self, request, *args, **kwargs)
             request_id = str(uuid4())
             try:

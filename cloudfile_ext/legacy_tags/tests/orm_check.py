@@ -43,6 +43,10 @@ from django.db import connection, DatabaseError
 from django.test.utils import CaptureQueriesContext
 from seahub.tags.models import FileTag, FileUUIDMap, Tags
 from cloudfile_ext.legacy_tags.store import tags_many
+from cloudfile_ext.legacy_tags.display import tags_for_page
+from cloudfile_ext.legacy_tags.directory import directory_response
+from django.core.cache import cache
+from rest_framework.response import Response
 from cloudfile_ext.search.tests.test_search_access import snapshot, rule
 from rest_framework.test import APIRequestFactory, force_authenticate
 from rest_framework.throttling import BaseThrottle
@@ -89,12 +93,67 @@ class OrmTests(unittest.TestCase):
     def setUp(self):
         global state
         state = snapshot()
+        cache.clear()
         FileTag.objects.all().delete(); Tags.objects.all().delete(); FileUUIDMap.objects.all().delete()
         api.reset_mock(); api.get_repo.side_effect = None; api.get_repo.return_value = repo
         api.get_dirent_by_path.side_effect = None
         api.get_dirent_by_path.return_value = SimpleNamespace(mode=stat.S_IFREG)
         api.cf_check_permissions_many.side_effect = rpc
         reader.side_effect = lambda *args: state
+
+    # Actual ORM and cache exercise sparse/empty libraries, TTL and authorization
+    # together; mock only the pre-existing native endpoint and permission hook.
+    def test_sparse_display_cache_expiry_empty_and_virtual_paths(self):
+        with patch('time.time', return_value=1000) as clock:
+            with CaptureQueriesContext(connection) as queries:
+                self.assertEqual(tags_for_page(REPO, repo, [('/a', False)]), {('/a', False): []})
+            self.assertEqual(len(queries), 1)
+            seed([('/a', False), ('/hidden', True)])
+            clock.return_value = 1100
+            with CaptureQueriesContext(connection) as queries:
+                self.assertEqual(tags_for_page(REPO, repo, [('/a', False)]), {('/a', False): []})
+            self.assertEqual(len(queries), 0)
+            clock.return_value = 1181
+            with CaptureQueriesContext(connection) as queries:
+                result = tags_for_page(REPO, repo, [('/a', False)])
+            self.assertEqual(len(queries), 1)
+            self.assertEqual(len(result[('/a', False)]), 2)
+            virtual = SimpleNamespace(is_virtual=True, origin_repo_id=REPO, origin_path='/')
+            with CaptureQueriesContext(connection) as queries:
+                self.assertEqual(tags_for_page(OTHER, virtual, [('/a', False)]), result)
+            self.assertEqual(len(queries), 0)
+
+    def test_inline_page_filters_before_tags_and_retains_cursor(self):
+        seed([('/a', False), ('/hidden', True)])
+        data = dict(user_perm='r', dir_id='version', has_more=True, next_start=2, dirent_list=[
+            dict(parent_dir='/', name='a', type='file', permission='rw'),
+            dict(parent_dir='/', name='hidden', type='dir', permission='rw')])
+        request = SimpleNamespace(user=SimpleNamespace(username='alice'))
+        with patch('cloudfile_ext.legacy_tags.directory.check_permission',
+                   side_effect=lambda u, r, p, native: 'r' if p == '/a' else None):
+            response = directory_response(lambda *a, **k: Response(data), None, request, repo_id=REPO)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['next_start'], 2)
+        self.assertTrue(response.data['acl_enforced'])
+        self.assertEqual([e['permission'] for e in response.data['dirent_list']], ['r'])
+        self.assertEqual([i['path'] for i in response.data['tag_batch']['items']], ['/a'])
+        self.assertEqual(len(response.data['tag_batch']['items'][0]['tags']), 2)
+        self.assertEqual(response['Cache-Control'], 'no-store')
+
+    def test_display_failure_is_unknown_and_permission_failure_is_closed(self):
+        data = dict(user_perm='r', has_more=False, dirent_list=[
+            dict(parent_dir='/', name='a', type='file', permission='r')])
+        request = SimpleNamespace(user=SimpleNamespace(username='alice'))
+        with patch('cloudfile_ext.legacy_tags.directory.tags_for_page', side_effect=DatabaseError('offline')):
+            response = directory_response(lambda *a, **k: Response(data), None, request, repo_id=REPO)
+        self.assertEqual(response.status_code, 200)
+        self.assertIsNone(response.data['tag_batch']['items'][0]['tags'])
+        self.assertEqual(response.data['tag_batch']['items'][0]['status'], 'FAILED')
+        self.assertIsNone(cache.get('cf_display_tags_v1_' + REPO))
+        with patch('cloudfile_ext.legacy_tags.directory.check_permission', side_effect=RuntimeError('offline')):
+            response = directory_response(lambda *a, **k: Response(data), None, request, repo_id=REPO)
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn('dirent_list', response.data)
 
     def session_post(self, raw, csrf=True):
         # Exercise the real CSRF parser path; force_authenticate would hide the
