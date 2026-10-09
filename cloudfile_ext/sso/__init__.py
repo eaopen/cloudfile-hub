@@ -48,6 +48,8 @@ def register(registry):
     from django.urls import path
 
     from cloudfile_ext.sso import directory, service
+    from cloudfile_ext.sso.token_api import EmployeeTokenView
+    from cloudfile_ext.sso.account_api import EmployeeAccountInfo
     from cloudfile_ext.sso.apis import (
         AdminLibrarySharesDesiredView, AdminLibrarySharesReconcileView,
         AdminLibrarySharesStatusView, AdminSSOGroupMapView, AdminSSOSyncView,
@@ -67,6 +69,14 @@ def register(registry):
     set_default_group_id_resolver(service.group_external_id)
 
     registry.register_urls([
+        # Preserve native session authorization while exposing a reviewed alias
+        # to the EAP account-info check, only with its separate opt-in switch.
+        path('api2/account/info/', EmployeeAccountInfo.as_view(),
+             name='cloudfile-employee-account-info'),
+        # Inherit native admin checks at the extension URL seam.
+        path('api/v2.1/admin/generate-user-auth-token/',
+             EmployeeTokenView.as_view(),
+             name='cloudfile-admin-employee-token'),
         path('api/v2.1/admin/cloudfile/sso/sync/',
              AdminSSOSyncView.as_view(), name='cloudfile-admin-sso-sync'),
         path('api/v2.1/admin/cloudfile/sso/group-map/',
