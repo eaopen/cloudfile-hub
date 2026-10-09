@@ -17,7 +17,7 @@ from seaserv import seafile_api
 from .backends.meilisearch import client_from_settings
 from .bounded import SearchFailure, query_page, validate
 from .access import SearchAccess
-from .native_many import NativePermissionMany
+from .native_transport import permission_transport
 from .access_runtime import read_snapshot
 
 
@@ -36,9 +36,10 @@ class BoundedSearch(APIView):
             username = request.user.username
             # The native transport retains every C provider; Hub hooks remain
             # per-path narrowing checks here, in both independent passes.
-            native_many = NativePermissionMany(repo_id, username,
-                seafile_api.cf_check_permissions_many, check_permission)
-            access = SearchAccess(lambda: read_snapshot(username, repo_id), None,
+            native_permission, native_many = permission_transport(repo_id, username,
+                seafile_api, check_permission,
+                getattr(settings, 'CF_SEARCH_NATIVE_PERMISSION_MODE', 'batch'))
+            access = SearchAccess(lambda: read_snapshot(username, repo_id), native_permission,
                 native_many=native_many)
             scope = dict(user=username, repo=repo_id, q=q, path=path, limit=limit,
                 head=repo.head_cmmt_id, policy=access.version)

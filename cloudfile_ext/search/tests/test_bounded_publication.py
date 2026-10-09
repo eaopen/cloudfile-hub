@@ -80,9 +80,23 @@ def hits(paths):
     return dict(hits=[dict(repo_id=REPO, path=path) for path in paths])
 
 
+@pytest.mark.parametrize('mode', [None, False, 'auto'])
+def test_unknown_native_transport_is_not_an_implicit_fallback(view, mode):
+    view.module.settings.CF_SEARCH_NATIVE_PERMISSION_MODE = mode
+    response = view.module.BoundedSearch().get(view.request)
+    assert response.status_code == 503
+    assert not response.data.get('data')
+    view.api.check_permission_by_path.assert_not_called()
+    view.api.cf_check_permissions_many.assert_not_called()
+
+
 @pytest.mark.parametrize('count', [1, 20, 50, 100])
 @pytest.mark.parametrize('provider', ['meilisearch', 'native'])
-def test_actual_legacy_counts_and_exact_object_contract(view, count, provider):
+@pytest.mark.parametrize('mode', ['batch', 'scalar'])
+def test_actual_legacy_counts_and_exact_object_contract(view, count, provider, mode):
+    # The old C transport must execute the same two object decisions, not
+    # manufacture authority from a readable parent to avoid RPC calls.
+    view.module.settings.CF_SEARCH_NATIVE_PERMISSION_MODE = mode
     paths = ['/a/drawing' + str(i) for i in range(count)]
     view.client._call.return_value = hits(paths)
     if provider == 'native':
@@ -91,7 +105,8 @@ def test_actual_legacy_counts_and_exact_object_contract(view, count, provider):
     response = view.module.BoundedSearch().get(view.request)
     assert response.status_code == 200
     assert view.api.check_permission_by_path.call_count == 2 * (count + 2)
-    assert view.api.cf_check_permissions_many.call_count == 1 + math.ceil(count / 50) + math.ceil((count + 2) / 50)
+    assert view.api.cf_check_permissions_many.call_count == (
+        1 + math.ceil(count / 50) + math.ceil((count + 2) / 50) if mode == 'batch' else 0)
     assert view.reader.call_count == 3
     assert isinstance(response.content, bytes)
     assert view.api.get_dirent_by_path.call_count == (count if provider == 'meilisearch' else 0)
@@ -116,7 +131,9 @@ def test_mixed_hidden_native_and_file_denials_duplicates_and_stale_hits(view):
 
 
 @pytest.mark.parametrize('change', ['native', 'policy', 'head'])
-def test_revocation_or_head_change_never_publishes_authorization_contract(view, change):
+@pytest.mark.parametrize('mode', ['batch', 'scalar'])
+def test_revocation_or_head_change_never_publishes_authorization_contract(view, change, mode):
+    view.module.settings.CF_SEARCH_NATIVE_PERMISSION_MODE = mode
     view.client._call.return_value = hits(['/a/drawing'])
     if change == 'native':
         # Initial root,parent,object allow, then revoke at publication.
