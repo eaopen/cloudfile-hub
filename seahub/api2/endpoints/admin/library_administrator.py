@@ -14,6 +14,7 @@ from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 from seahub.base.accounts import AuthBackend, User
 from seahub.auth.utils import get_virtual_id_by_email
+from cloudfile_ext.library_admin_identity import resolve_subject, public_subject
 from seahub.profile.models import Profile
 from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
 from seahub.share.utils import (is_repo_admin, share_dir_to_user, share_dir_to_group,
@@ -140,7 +141,7 @@ class AdminLibraryAdministrator(APIView):
             groups = ExtraGroupsSharePermission.objects.get_admin_groups_by_repo(repo_id)
             is_org = bool(_org_repo_owner(repo_id))
             result = Response({'repo_id': repo_id, 'administrators': [
-                *({'subject_type': 'user', 'subject': Profile.objects.get_contact_email_by_user(user),
+                *({'subject_type': 'user', 'subject': public_subject(user, Profile.objects.get_contact_email_by_user),
                    'effective': self._effective(repo_id, 'user', user, is_org,
                                                 self.admin_content_permission)}
                   for user in sorted(set(users))),
@@ -168,7 +169,8 @@ class AdminLibraryAdministrator(APIView):
             if denied is not None:
                 return denied
             if kind == 'user':
-                target = get_virtual_id_by_email(target)
+                # Preserve the existing OAuth account for explicitly verified technical aliases.
+                target = resolve_subject(target, get_virtual_id_by_email)
             # The legacy API only auto-grants read. The explicit one-call API
             # overrides this to rw and upgrades a prior direct read-only share.
             required_permission = self.admin_content_permission
@@ -294,7 +296,8 @@ class AdminLibraryAdministrator(APIView):
             if denied is not None:
                 return denied
             if kind == 'user':
-                target = get_virtual_id_by_email(target)
+                # Preserve the existing OAuth account for explicitly verified technical aliases.
+                target = resolve_subject(target, get_virtual_id_by_email)
             with transaction.atomic():
                 lookup = {'repo_id': repo_id, 'share_to' if kind == 'user' else 'group_id': target}
                 marker = store.objects.select_for_update().filter(**lookup).first()
