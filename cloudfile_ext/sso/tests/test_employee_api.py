@@ -137,7 +137,44 @@ def test_bootstrap_default_import_preserves_operator_bridge_switches():
     # Bootstrap rewrites its generated block at the end of operator settings.
     # The views supply default-off behavior; star import must not reset opt-in.
     namespace = {'CF_EAP_ADMIN_TOKEN_IDENTITY_BRIDGE': True,
-                 'CF_EAP_ACCOUNT_INFO_IDENTITY_BRIDGE': True}
+                 'CF_EAP_ACCOUNT_INFO_IDENTITY_BRIDGE': True,
+                 'CF_EAP_LEGACY_TOKEN_IDENTITY_DOMAIN': 'shanghai-electric.com'}
     exec('from cloudfile_ext.settings_defaults import *', namespace)
     assert namespace['CF_EAP_ADMIN_TOKEN_IDENTITY_BRIDGE'] is True
     assert namespace['CF_EAP_ACCOUNT_INFO_IDENTITY_BRIDGE'] is True
+    assert namespace['CF_EAP_LEGACY_TOKEN_IDENTITY_DOMAIN'] == 'shanghai-electric.com'
+
+
+@pytest.mark.parametrize('account', ['10220942', 'admin'])
+def test_configured_legacy_ingress_reuses_reviewed_identity(runtime, account):
+    # Regression: the deployed EAP synthesizes this suffix instead of auth.local.
+    r = runtime
+    r.settings.CF_EAP_ADMIN_TOKEN_IDENTITY_BRIDGE = True
+    r.settings.CF_EAP_LEGACY_TOKEN_IDENTITY_DOMAIN = 'shanghai-electric.com'
+    r.request.data['email'] = account + '@shanghai-electric.com'
+    assert r.tokens.post(r.request).status_code == 200
+    assert r.resolve.call_args.args[0] == account + '@auth.local'
+    r.native_post.assert_not_called()
+
+
+def test_legacy_ingress_cannot_select_a_native_contact_email(runtime):
+    r = runtime
+    r.settings.CF_EAP_ADMIN_TOKEN_IDENTITY_BRIDGE = True
+    r.settings.CF_EAP_LEGACY_TOKEN_IDENTITY_DOMAIN = 'shanghai-electric.com'
+    r.request.data['email'] = '10220942@shanghai-electric.com'
+    r.resolve.return_value = None
+    assert r.tokens.post(r.request).status_code == 200
+    r.directory.assert_called_once_with('10220942@auth.local')
+    r.native_post.assert_not_called()
+
+
+def test_legacy_ingress_keeps_stale_alias_fail_closed(runtime):
+    r = runtime
+    r.settings.CF_EAP_ADMIN_TOKEN_IDENTITY_BRIDGE = True
+    r.settings.CF_EAP_LEGACY_TOKEN_IDENTITY_DOMAIN = 'shanghai-electric.com'
+    r.request.data['email'] = '10220942@shanghai-electric.com'
+    r.resolve.side_effect = ValueError('stale alias')
+    assert r.tokens.post(r.request).status_code == 503
+    r.directory.assert_not_called()
+    r.native_post.assert_not_called()
+    r.token.assert_not_called()

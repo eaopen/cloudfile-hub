@@ -6,6 +6,7 @@ from seahub.api2.utils import api_error, get_token_v1
 from seahub.base.accounts import User
 from cloudfile_ext.library_admin_identity import resolve_subject
 from .token_identity import resolve_employee_token
+from .token_compat import normalize_token_identity
 
 
 class EmployeeTokenView(AdminGenerateUserAuthToken):
@@ -15,14 +16,20 @@ class EmployeeTokenView(AdminGenerateUserAuthToken):
         if getattr(settings, 'CF_EAP_ADMIN_TOKEN_IDENTITY_BRIDGE', False) is not True:
             return super().post(request)
         try:
+            # Deployed EAP versions still synthesize the corporate suffix.
+            # Normalize only this privileged opt-in ingress; never native email
+            # fallback for converted identities, which could select a namesake.
+            identity, legacy = normalize_token_identity(request.data.get('email'),
+                getattr(settings, 'CF_EAP_LEGACY_TOKEN_IDENTITY_DOMAIN', ''))
             # Reuse reviewed aliases before native lookup so collisions or stale
             # OAuth bindings cannot silently issue a different account's token.
-            native = resolve_subject(request.data.get('email'), fallback=lambda _: None)
+            native = resolve_subject(identity, fallback=lambda _: None)
             if native is None:
-                response = super().post(request)
-                if response.status_code != 404:
-                    return response
-                native = resolve_employee_token(request.data.get('email'))
+                if not legacy:
+                    response = super().post(request)
+                    if response.status_code != 404:
+                        return response
+                native = resolve_employee_token(identity)
             user = User.objects.get(email=native)
             if user.username != native or not user.is_active:
                 raise ValueError('Inactive or changed account')
