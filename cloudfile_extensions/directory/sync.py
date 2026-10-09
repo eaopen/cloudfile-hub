@@ -48,18 +48,32 @@ def _read_mapped(cursor, provider):
 
 def _bound_users(cursor, user_ids, identity_schema):
     profile = qualified(identity_schema, 'profile_profile')
-    usernames = {}
+    usernames, ambiguous, native_users = {}, set(), {}
+    wanted = set(user_ids)
     for start in range(0, len(user_ids), 500):
         batch = user_ids[start:start + 500]
         cursor.execute('SELECT user,login_id FROM ' + profile + ' WHERE login_id IN (' + ','.join(['%s'] * len(batch)) + ')', tuple(batch))
         for username, user_id in cursor.fetchall():
-            identifier(username)
+            if user_id not in wanted:
+                continue
+            try:
+                identifier(username)
+            except ValueError:
+                ambiguous.add(user_id)
+                continue
             if user_id in usernames and usernames[user_id] != username:
-                raise ValueError('ambiguous business identity binding')
+                ambiguous.add(user_id)
             usernames[user_id] = username
-    if len(set(usernames.values())) != len(usernames):
-        raise ValueError('multiple business users share a native identity')
-    return usernames
+            native_users.setdefault(username, set()).add(user_id)
+    # A damaged binding is local data: exclude every conflicting UID rather
+    # than aborting healthy employees, or guessing which identity owns access.
+    for user_ids_for_native in native_users.values():
+        if len(user_ids_for_native) > 1:
+            ambiguous.update(user_ids_for_native)
+    if ambiguous:
+        logger.warning('Directory identity bindings need manual repair: count=%d samples=%s',
+                       len(ambiguous), sorted(ambiguous)[:20])
+    return {uid: native for uid, native in usernames.items() if uid not in ambiguous}
 
 
 def _prepare(entries, cursor, identity_schema):
@@ -79,7 +93,7 @@ def _prepare(entries, cursor, identity_schema):
     return resolved, sorted(unresolved), quarantined
 
 
-def _native_state(mapped, entries, cursor, native_schema):
+def _native_state(mapped, entries, cursor, native_schema, owner=None):
     groups = qualified(native_schema, 'Group')
     by_id = {entry['external_id']: entry for entry in entries}
     members, protected = {}, {}
@@ -101,7 +115,9 @@ def _native_state(mapped, entries, cursor, native_schema):
         elif len(native) != 1:
             raise ValueError('mapped native group is missing')
         members[group_id] = [member.user_name for member in ccnet_api.get_group_members(group_id)]
-        protected[group_id] = [group.creator_name]
+        # Legacy groups may have another creator; the configured technical
+        # owner is infrastructure and must survive employee reconciliation.
+        protected[group_id] = list({group.creator_name, owner} - {None})
     return members, protected
 
 
@@ -121,12 +137,19 @@ def _apply(plan, cursor, provider, owner, mapped):
                            (provider, kind, namespace, external_id, group_id, entry['name'], parent, now, now))
             ids[key] = group_id
             done['create'] += 1
-            for username in entry['members']:
-                ccnet_api.group_add_member(group_id, owner, username)
-                done['add'] += 1
         except Exception:
             logger.exception('Directory group creation failed for %s', key)
             errors.append('create ' + key)
+            continue
+        for username in entry['members']:
+            try:
+                ccnet_api.group_add_member(group_id, owner, username)
+                done['add'] += 1
+            except Exception:
+                # One missing/broken member cannot prevent the remaining
+                # members of this newly created department from being applied.
+                logger.exception('Directory membership add failed for %s in %s', username, key)
+                errors.append('add ' + username + ' to ' + key)
     for entry in plan.rename:
         try:
             ccnet_api.set_group_name(entry['group_id'], entry['name'])
@@ -152,9 +175,13 @@ def _apply(plan, cursor, provider, owner, mapped):
     for entry in plan.unmap:
         kind, namespace, external_id = _mapping(entry['external_id'],
                                                 'group' if entry['external_id'].startswith('role:') else 'dept')
-        cursor.execute('DELETE FROM cf_sso_group_map WHERE provider=%s AND subject_type=%s AND namespace=%s AND external_id=%s AND group_id=%s',
-                       (provider, kind, namespace, external_id, entry['group_id']))
-        done['unmap'] += 1
+        try:
+            cursor.execute('DELETE FROM cf_sso_group_map WHERE provider=%s AND subject_type=%s AND namespace=%s AND external_id=%s AND group_id=%s',
+                           (provider, kind, namespace, external_id, entry['group_id']))
+            done['unmap'] += 1
+        except Exception:
+            logger.exception('Directory unmapping failed for %s', external_id)
+            errors.append('unmap ' + external_id)
     return done, errors
 
 
@@ -198,16 +225,23 @@ def sync():
                 raise ValueError('directory sync is busy')
             mapped = _read_mapped(cursor, provider)
             resolved, unresolved, quarantined = _prepare(entries, cursor, config['identity_schema'])
-            members, protected = _native_state(mapped, resolved, cursor, config['native_schema'])
+            members, protected = _native_state(mapped, resolved, cursor, config['native_schema'], owner)
             # Preserve the v0.1 removal guard and its explicit operator override.
             ratio = getattr(settings, 'CF_SSO_MAX_REMOVAL_RATIO', reconcile.DEFAULT_MAX_REMOVAL_RATIO)
             ratio = None if ratio in ('', None) else float(ratio)
             plan = reconcile.build(resolved, mapped, members, protected=protected,
                                    quarantined=quarantined, max_removal_ratio=ratio)
             done, errors = _apply(plan, cursor, provider, owner, mapped)
-            return dict(status='ERROR' if errors else 'OK', planned=plan.counts(), applied=done,
+            # Local failures are operational exceptions, not a full-sync failure.
+            # Keep retrying on future runs while healthy changes remain active.
+            outcome = 'PARTIAL' if errors or unresolved or quarantined else 'OK'
+            if outcome == 'PARTIAL':
+                logger.warning('Directory sync partial: unresolved=%d quarantined=%d errors=%d samples=%s',
+                               len(unresolved), len(quarantined), len(errors), unresolved[:20])
+            return dict(status=outcome, planned=plan.counts(), applied=done,
                         unresolved_user_ids=unresolved[:100], unresolved_count=len(unresolved),
-                        quarantined_groups=sorted(quarantined)[:100], errors=errors[:20],
+                        quarantined_groups=sorted(quarantined)[:100], quarantined_group_count=len(quarantined),
+                        errors=errors[:20], error_count=len(errors),
                         revision=payload.get('revision'))
     finally:
         if locked:

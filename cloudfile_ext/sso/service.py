@@ -31,6 +31,8 @@ PROVIDER = 'cloudfile-sso'
 SYNC_TASK = 'sso-directory-sync'
 
 STATUS_OK = 'ok'
+# Individual mapping/write failures do not invalidate healthy changes.
+STATUS_PARTIAL = 'partial'
 STATUS_REFUSED = 'refused'
 STATUS_ERROR = 'error'
 STATUS_SKIPPED = 'skipped'
@@ -352,8 +354,12 @@ def _apply(plan, owner):
     for entry in plan.unmap:
         # The group itself is left alone -- it may own libraries and be shared
         # into. Only the mapping goes, so the sync stops touching it.
-        SSOGroupMap.objects.unmap(PROVIDER, entry['external_id'])
-        done['unmap'] += 1
+        try:
+            SSOGroupMap.objects.unmap(PROVIDER, entry['external_id'])
+            done['unmap'] += 1
+        except Exception as exc:
+            # An individual stale mapping must not abort unrelated operations.
+            errors.append('unmap %s: %s' % (entry['external_id'], exc))
 
     return done, errors
 
@@ -431,9 +437,10 @@ def sync(registry=None):
     detail.update(notes)
     if errors:
         detail['errors'] = errors[:20]
-    # An incomplete roster must remain retryable and visible even when safe
-    # additions succeeded; quarantine protects existing members from removal.
-    status = STATUS_ERROR if errors or incomplete else STATUS_OK
+    # Healthy changes remain valid even when individual identities or writes
+    # need manual repair. PARTIAL never suppresses future retries; only affected
+    # groups retain their removal quarantine, not the entire directory.
+    status = STATUS_PARTIAL if errors or incomplete else STATUS_OK
     return _record(status, _describe(detail))
 def sync_user_id(user_id, *, dry_run=True, registry=None):
     """Incrementally compare exactly ONE EAP UID's direct CE group memberships.

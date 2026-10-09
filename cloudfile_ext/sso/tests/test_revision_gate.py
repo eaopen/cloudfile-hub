@@ -146,7 +146,7 @@ def test_failed_native_readback_never_records_success(svc, monkeypatch):
     {'revision': 'same', 'unresolved': ['missing'], 'quarantined_groups': []},
     {'revision': 'same', 'unresolved': [], 'quarantined_groups': ['dept']},
 ])
-def test_incomplete_directory_cannot_report_success_or_revision_skip(svc, monkeypatch, notes):
+def test_incomplete_directory_reports_partial_and_remains_retryable(svc, monkeypatch, notes):
     from types import SimpleNamespace
     from cloudfile_ext.sso import service
     monkeypatch.setitem(sys.modules, 'cloudfile_ext.registry', SimpleNamespace(registry=object()))
@@ -157,7 +157,7 @@ def test_incomplete_directory_cannot_report_success_or_revision_skip(svc, monkey
     monkeypatch.setattr(service, '_apply', lambda *args: ({}, []))
     monkeypatch.setattr(service, '_record', lambda status, detail: {'status': status, 'detail': detail})
     result = service.sync()
-    assert result['status'] == service.STATUS_ERROR
+    assert result['status'] == service.STATUS_PARTIAL
 
 
 def test_revision_check_and_native_writes_share_the_same_lock(svc, monkeypatch):
@@ -204,3 +204,43 @@ def test_sync_report_bounds_repeated_identity_failures(svc):
     assert report['unresolved'] == ['missing']
     assert len(detail['unresolved']) == 50000
     assert report['revision'] == 'current'
+
+
+@pytest.mark.parametrize('errors', [[], ['add broken-member failed']])
+def test_partial_sync_keeps_healthy_changes_and_retries_missing_members(svc, monkeypatch, errors):
+    import json
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from cloudfile_ext.sso import service
+    monkeypatch.setitem(sys.modules, 'cloudfile_ext.registry', SimpleNamespace(registry=object()))
+    monkeypatch.setattr(service.directory, 'active', lambda _: object())
+    monkeypatch.setattr(service, 'group_owner', lambda: 'owner')
+    plan = SimpleNamespace(empty=False, counts=lambda: {'add': 2})
+    notes = {'revision': 'same', 'unresolved': ['missing'], 'quarantined_groups': ['dept']}
+    monkeypatch.setattr(service, 'build_plan', lambda _: (plan, notes))
+    apply = Mock(return_value=({'add': 1}, errors))
+    monkeypatch.setattr(service, '_apply', apply)
+    monkeypatch.setattr(service, '_record', lambda status, detail: {'status': status, 'detail': detail})
+    for _ in range(2):
+        result = service.sync()
+        assert result['status'] == service.STATUS_PARTIAL
+        assert json.loads(result['detail'])['applied']['add'] == 1
+    assert apply.call_count == 2
+    notes['unresolved'] = []
+    notes['quarantined_groups'] = []
+    apply.return_value = ({'add': 2}, [])
+    assert service.sync()['status'] == service.STATUS_OK
+
+
+def test_directory_transport_failure_is_still_a_whole_sync_error(svc, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    from cloudfile_ext.sso import service
+    monkeypatch.setitem(sys.modules, 'cloudfile_ext.registry', SimpleNamespace(registry=object()))
+    monkeypatch.setattr(service.directory, 'active', lambda _: object())
+    monkeypatch.setattr(service, 'group_owner', Mock(side_effect=service.SyncNotConfigured('unavailable')))
+    apply = Mock()
+    monkeypatch.setattr(service, '_apply', apply)
+    monkeypatch.setattr(service, '_record', lambda status, detail: {'status': status, 'detail': detail})
+    assert service.sync()['status'] == service.STATUS_ERROR
+    apply.assert_not_called()
