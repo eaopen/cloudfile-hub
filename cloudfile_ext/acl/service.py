@@ -11,6 +11,9 @@ below the Hub so that WebDAV and the desktop sync client cannot go around it.
 """
 
 import logging
+from contextlib import contextmanager
+from contextvars import ContextVar
+from uuid import uuid4
 
 from django.conf import settings
 from django.core.cache import cache
@@ -23,34 +26,70 @@ logger = logging.getLogger(__name__)
 RULES_CACHE_KEY = 'cf_acl_rules_%s'
 ADMIN_RULES_CACHE_KEY = 'cf_acl_admin_rules_%s'
 SUBJECTS_CACHE_KEY = 'cf_acl_subjects_%s'
+RULES_GENERATION_KEY = 'cf_acl_generation_%s'
+
+# One directory response reuses the same raw inputs, not user decisions.
+# The context is discarded after the request so writes keep their normal checks.
+_page_inputs = ContextVar('cf_acl_page_inputs', default=None)
+
+
+@contextmanager
+def directory_inputs():
+    token = _page_inputs.set({})
+    try:
+        yield
+    finally:
+        _page_inputs.reset(token)
 
 
 def _cache_ttl():
-    return getattr(settings, 'CF_ACL_CACHE_TTL', 30)
+    return getattr(settings, 'CF_ACL_CACHE_TTL', 60)
 
 
 def _load_rules(repo_id):
     key = RULES_CACHE_KEY % repo_id
-    rules = cache.get(key)
+    local = _page_inputs.get()
+    if local is not None and key in local:
+        return local[key]
+    # A writer switches the namespace: an in-flight old DB read cannot refill
+    # the newly invalidated cache. Old generations expire with the normal TTL.
+    generation = cache.get(RULES_GENERATION_KEY % repo_id, '0')
+    shared_key = key + ':' + generation
+    rules = cache.get(shared_key)
     if rules is None:
         from cloudfile_ext.acl.models import DirACL
         rules = DirACL.objects.rules_for_repo(repo_id)
-        cache.set(key, rules, _cache_ttl())
+        cache.set(shared_key, rules, _cache_ttl())
+    if local is not None:
+        local[key] = rules
     return rules
 
 
 def _load_admin_rules(repo_id):
     key = ADMIN_RULES_CACHE_KEY % repo_id
-    rules = cache.get(key)
+    local = _page_inputs.get()
+    if local is not None and key in local:
+        return local[key]
+    # A writer switches the namespace: an in-flight old DB read cannot refill
+    # the newly invalidated cache. Old generations expire with the normal TTL.
+    generation = cache.get(RULES_GENERATION_KEY % repo_id, '0')
+    shared_key = key + ':' + generation
+    rules = cache.get(shared_key)
     if rules is None:
         from cloudfile_ext.acl.models import DirAdmin
         rules = DirAdmin.objects.rules_for_repo(repo_id)
-        cache.set(key, rules, _cache_ttl())
+        cache.set(shared_key, rules, _cache_ttl())
+    if local is not None:
+        local[key] = rules
     return rules
 
 
 def invalidate_repo(repo_id):
     """Drop the cached rules for a repo. Call after any rule write."""
+    local = _page_inputs.get()
+    if local is not None:
+        local.clear()
+    cache.set(RULES_GENERATION_KEY % repo_id, uuid4().hex, None)
     cache.delete(RULES_CACHE_KEY % repo_id)
     cache.delete(ADMIN_RULES_CACHE_KEY % repo_id)
 
@@ -63,8 +102,13 @@ def _load_subjects(username):
     apply to members of its sub-departments (acl-semantics.md section 3).
     """
     key = SUBJECTS_CACHE_KEY % username
+    local = _page_inputs.get()
+    if local is not None and key in local:
+        return local[key]
     cached = cache.get(key)
     if cached is not None:
+        if local is not None:
+            local[key] = cached
         return cached
 
     from seaserv import ccnet_api
@@ -90,11 +134,16 @@ def _load_subjects(username):
 
     subjects = resolver.subject_set(username, group_ids, dept_ids)
     cache.set(key, subjects, _cache_ttl())
+    if local is not None:
+        local[key] = subjects
     return subjects
 
 
 def invalidate_user(username):
     """Drop a user's cached subject set. Call after group membership changes."""
+    local = _page_inputs.get()
+    if local is not None:
+        local.pop(SUBJECTS_CACHE_KEY % username, None)
     cache.delete(SUBJECTS_CACHE_KEY % username)
 
 

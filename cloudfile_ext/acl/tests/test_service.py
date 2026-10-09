@@ -127,3 +127,53 @@ def test_can_manage_loader_failure_fails_closed(service, monkeypatch):
 
     monkeypatch.setattr(service, '_load_admin_rules', boom)
     assert service.can_manage('u@e.com', 'repo', '/x') is False
+
+# Exercise request reuse, shared TTL and write/read races on the actual loaders.
+# An empty policy is data, not a miss; invalidation must defeat an old refill.
+class MemoryCache:
+    def __init__(self):
+        self.values, self.reads, self.writes = {}, [], []
+
+    def get(self, key, default=None):
+        self.reads.append(key)
+        return self.values.get(key, default)
+
+    def set(self, key, value, timeout):
+        self.values[key] = value
+        self.writes.append((key, timeout))
+
+    def delete(self, key):
+        self.values.pop(key, None)
+
+
+def test_directory_reuses_empty_policy_once_and_discards_request_inputs(service, monkeypatch):
+    from unittest.mock import Mock
+    cache = MemoryCache()
+    manager = types.SimpleNamespace(rules_for_repo=Mock(return_value=[]))
+    monkeypatch.setattr(service, 'cache', cache)
+    monkeypatch.setitem(sys.modules, 'cloudfile_ext.acl.models', types.SimpleNamespace(
+        DirACL=types.SimpleNamespace(objects=manager)))
+    with service.directory_inputs():
+        for _ in range(200):
+            assert service._load_rules('repo') == []
+    assert len(cache.reads) == 2  # namespace and value, not 200 Redis reads
+    assert cache.writes == [('cf_acl_rules_repo:0', 60)]
+    service._load_rules('repo')
+    assert len(cache.reads) == 4
+    manager.rules_for_repo.assert_called_once_with('repo')
+
+
+def test_rule_write_cannot_be_undone_by_an_inflight_old_refill(service, monkeypatch):
+    from unittest.mock import Mock
+    cache = MemoryCache()
+    def old_read(repo):
+        service.invalidate_repo(repo)
+        return ['old']
+    manager = types.SimpleNamespace(rules_for_repo=Mock(side_effect=old_read))
+    monkeypatch.setattr(service, 'cache', cache)
+    monkeypatch.setitem(sys.modules, 'cloudfile_ext.acl.models', types.SimpleNamespace(
+        DirACL=types.SimpleNamespace(objects=manager)))
+    assert service._load_rules('repo') == ['old']
+    manager.rules_for_repo.side_effect = lambda repo: ['new']
+    assert service._load_rules('repo') == ['new']
+    assert manager.rules_for_repo.call_count == 2
