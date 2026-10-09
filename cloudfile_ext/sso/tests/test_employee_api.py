@@ -131,3 +131,13 @@ def test_native_errors_other_than_missing_do_not_trigger_directory(runtime):
     r.native_post.return_value = NS(data={'error_msg': 'inactive'}, status_code=400)
     assert r.tokens.post(r.request).status_code == 400
     r.directory.assert_not_called()
+
+
+def test_bootstrap_default_import_preserves_operator_bridge_switches():
+    # Bootstrap rewrites its generated block at the end of operator settings.
+    # The views supply default-off behavior; star import must not reset opt-in.
+    namespace = {'CF_EAP_ADMIN_TOKEN_IDENTITY_BRIDGE': True,
+                 'CF_EAP_ACCOUNT_INFO_IDENTITY_BRIDGE': True}
+    exec('from cloudfile_ext.settings_defaults import *', namespace)
+    assert namespace['CF_EAP_ADMIN_TOKEN_IDENTITY_BRIDGE'] is True
+    assert namespace['CF_EAP_ACCOUNT_INFO_IDENTITY_BRIDGE'] is True

@@ -144,10 +144,9 @@ CF_ACL_MIGRATION_INTERVAL = 60
 # all present in CE and none of them Pro-gated). These settings govern only the
 # part upstream does not do: mirroring an organisation's groups into Seafile.
 
-# EAP legacy compatibility is deployment-specific. Keep both bridges off
-# until reviewed aliases and the account-info consumer contract are verified.
-CF_EAP_ADMIN_TOKEN_IDENTITY_BRIDGE = False
-CF_EAP_ACCOUNT_INFO_IDENTITY_BRIDGE = False
+# EAP compatibility views default their bridge switches to False themselves.
+# Do not export those switches here: bootstrap appends this star import after
+# operator settings on recreation, which would erase reviewed opt-in values.
 
 # Account that owns the groups the sync creates. No default on purpose --
 # picking one silently would attach every synced group to whoever happens to
