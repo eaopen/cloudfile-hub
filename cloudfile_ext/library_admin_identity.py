@@ -13,7 +13,12 @@ def check_binding(alias, binding, profile, links, alias_owner):
     uid = binding.get('user_id')
     provider = binding.get('provider')
     subject = binding.get('oauth_subject')
-    if (not isinstance(employee, str) or not re.fullmatch(r'[0-9]{1,32}', employee)
+    # A reviewed system-account binding changes presentation only; it never
+    # confers staff status or content access. Keep all OAuth/UID checks below.
+    valid_account = isinstance(employee, str) and (
+        re.fullmatch(r'[0-9]{1,32}', employee) or
+        (employee == 'admin' and binding.get('account_kind') == 'system'))
+    if (not valid_account
             or alias != employee + '@auth.local' or not isinstance(uid, str)
             or not re.fullmatch(r'[0-9]{1,225}', uid) or not native
             or not provider or not subject or not profile

@@ -39,3 +39,15 @@ class VerifiedAliasTests(unittest.TestCase):
     def test_unverified_alias_is_rejected(self):
         self.alias = '381@auth.local'
         with self.assertRaises(ValueError): self.check()
+
+    def test_system_account_requires_explicit_review(self):
+        self.alias = 'admin@auth.local'
+        self.binding['employee_no'] = 'admin'
+        self.profile.login_id = 'admin'
+        with self.assertRaises(ValueError): self.check()
+        self.binding['account_kind'] = 'system'
+        self.assertEqual(self.check(), 'opaque@auth.local')
+        self.binding['employee_no'] = 'administrator'
+        self.alias = 'administrator@auth.local'
+        self.profile.login_id = 'administrator'
+        with self.assertRaises(ValueError): self.check()

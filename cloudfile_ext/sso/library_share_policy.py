@@ -50,9 +50,11 @@ def build(desired, ledger, resolved):
 
     desired_by_id = {}
     duplicates = set()
+    invalid = set()
     for entry in desired:
         permission = (entry.permission or '').strip()
         if permission not in ('r', 'rw'):
+            invalid.add(entry.external_group_id)
             errors.append((entry.external_group_id,
                            'invalid permission %r' % entry.permission))
             continue
@@ -65,6 +67,8 @@ def build(desired, ledger, resolved):
             continue
         desired_by_id[entry.external_group_id] = permission
 
+    for external_id in invalid:
+        desired_by_id.pop(external_id, None)
     for external_id in duplicates:
         errors.append((external_id, 'duplicated in desired'))
         desired_by_id.pop(external_id, None)
@@ -86,7 +90,9 @@ def build(desired, ledger, resolved):
         # else: already applied with the wanted permission -- nothing to do.
 
     for external_id, row in sorted(ledger.items()):
-        if external_id in desired_by_id:
+        # Invalid/duplicate desired entries are not evidence of revocation.
+        # Keep their previous grants until the source supplies a valid policy.
+        if external_id in desired_by_id or external_id in invalid | duplicates:
             continue
         if row.get('state') == 'REVOKED':
             continue

@@ -54,6 +54,8 @@ def svc(monkeypatch):
         monkeypatch.delitem(sys.modules, name, raising=False)
     module = importlib.import_module('cloudfile_ext.sso.library_share_service')
 
+    from contextlib import nullcontext
+    monkeypatch.setattr(module, '_revision_lock', lambda _: nullcontext())
     state = {'rev': None}
     monkeypatch.setattr(module, '_read_accepted_revision',
                         lambda repo_id: state['rev'])
@@ -103,3 +105,102 @@ def test_stale_is_refused_whole(svc):
 def test_none_revision_keeps_legacy_contract(svc):
     svc._test_state['rev'] = 42
     svc.check_revision('repo', None)
+
+
+def test_native_drift_is_repaired_even_when_ledger_matches(svc, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    api = Mock()
+    native = {'permission': 'r'}
+    api.get_group_shared_repo_by_path.side_effect = lambda *args: SimpleNamespace(permission=native['permission'])
+    api.set_group_repo_permission.side_effect = lambda gid, repo, perm: native.update(permission=perm)
+    ledger = {'dept': {'seafile_group_id': 7, 'permission': 'rw', 'state': 'ACTIVE'}}
+    monkeypatch.setattr(svc.ManagedLibraryShare, 'objects', Mock())
+    svc.ManagedLibraryShare.objects.as_dict.return_value = ledger
+    monkeypatch.setattr(svc, '_resolved_groups', lambda: {'dept': 7})
+    monkeypatch.setattr(svc, '_seafile_api', lambda: api)
+    monkeypatch.setattr(svc, '_repo_owner', lambda _: 'owner')
+    report = svc.apply('repo', [library_share_policy.DesiredShare('dept', 'rw')], 1)
+    assert report['applied']['update'] == 1 and report['errors'] == []
+    assert native['permission'] == 'rw'
+    svc.ManagedLibraryShare.objects.record_applied.assert_called_once()
+
+
+def test_failed_native_readback_never_records_success(svc, monkeypatch):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    api = Mock()
+    api.get_group_shared_repo_by_path.return_value = SimpleNamespace(permission='r')
+    monkeypatch.setattr(svc.ManagedLibraryShare, 'objects', Mock())
+    svc.ManagedLibraryShare.objects.as_dict.return_value = {}
+    monkeypatch.setattr(svc, '_resolved_groups', lambda: {'dept': 7})
+    monkeypatch.setattr(svc, '_seafile_api', lambda: api)
+    monkeypatch.setattr(svc, '_repo_owner', lambda _: 'owner')
+    report = svc.apply('repo', [library_share_policy.DesiredShare('dept', 'rw')], 1)
+    assert report['errors'] and report['applied']['add'] == 0
+    svc.ManagedLibraryShare.objects.record_applied.assert_not_called()
+    svc.ManagedLibraryShare.objects.record_error.assert_called_once()
+
+
+@pytest.mark.parametrize('notes', [
+    {'revision': 'same', 'unresolved': ['missing'], 'quarantined_groups': []},
+    {'revision': 'same', 'unresolved': [], 'quarantined_groups': ['dept']},
+])
+def test_incomplete_directory_cannot_report_success_or_revision_skip(svc, monkeypatch, notes):
+    from types import SimpleNamespace
+    from cloudfile_ext.sso import service
+    monkeypatch.setitem(sys.modules, 'cloudfile_ext.registry', SimpleNamespace(registry=object()))
+    monkeypatch.setattr(service.directory, 'active', lambda _: object())
+    monkeypatch.setattr(service, 'group_owner', lambda: 'owner')
+    plan = SimpleNamespace(empty=True, counts=lambda: {})
+    monkeypatch.setattr(service, 'build_plan', lambda _: (plan, notes))
+    monkeypatch.setattr(service, '_apply', lambda *args: ({}, []))
+    monkeypatch.setattr(service, '_record', lambda status, detail: {'status': status, 'detail': detail})
+    result = service.sync()
+    assert result['status'] == service.STATUS_ERROR
+
+
+def test_revision_check_and_native_writes_share_the_same_lock(svc, monkeypatch):
+    from contextlib import contextmanager
+    active = {'locked': False}
+    @contextmanager
+    def lock(repo):
+        active['locked'] = True
+        try: yield
+        finally: active['locked'] = False
+    def read(repo):
+        assert active['locked']
+        return 9
+    monkeypatch.setattr(svc, '_revision_lock', lock)
+    monkeypatch.setattr(svc, '_read_accepted_revision', read)
+    with pytest.raises(svc.StaleRevision):
+        svc.apply('repo', [], policy_revision=8)
+    assert not active['locked']
+
+
+def test_directory_sync_preserves_technical_owner_in_legacy_groups(svc, monkeypatch):
+    from types import SimpleNamespace
+    from cloudfile_ext.sso import service
+    api = SimpleNamespace(
+        get_group=lambda gid: SimpleNamespace(creator_name='legacy-owner'),
+        get_group_members=lambda gid: [SimpleNamespace(user_name=name)
+                                      for name in ('technical-owner', 'employee')])
+    monkeypatch.setitem(sys.modules, 'seaserv', SimpleNamespace(ccnet_api=api))
+    monkeypatch.setattr(service, 'group_owner', lambda: 'technical-owner')
+    members, protected, stale = service._current_state({'dept': {'group_id': 7}})
+    assert members[7] == ['technical-owner', 'employee']
+    assert set(protected[7]) == {'legacy-owner', 'technical-owner'}
+    assert stale == []
+
+
+def test_sync_report_bounds_repeated_identity_failures(svc):
+    import json
+    from cloudfile_ext.sso import service
+    detail = {'unresolved': ['missing'] * 50000,
+              'quarantined_groups': ['dept'], 'revision': 'current'}
+    report = json.loads(service._describe(detail))
+    assert report['unresolved_count'] == 50000
+    assert report['unresolved_unique_count'] == 1
+    assert report['unresolved'] == ['missing']
+    assert len(detail['unresolved']) == 50000
+    assert report['revision'] == 'current'

@@ -127,3 +127,11 @@ def test_hand_made_share_is_invisible_to_the_plan():
     # desired: nothing about it appears anywhere in the plan.
     assert plan.add == [(7, 'dept-rd', 'rw')]
     assert all('other' not in str(op) for op in plan.revoke)
+
+
+def test_invalid_or_duplicate_policy_never_revokes_existing_share():
+    for desired in ([DesiredShare('dept', 'admin')],
+                    [DesiredShare('dept', 'r'), DesiredShare('dept', 'rw')],
+                    [DesiredShare('dept', 'rw'), DesiredShare('dept', 'invalid')]):
+        plan = build(desired, {'dept': ledger('dept', 7, 'r')}, {'dept': 7})
+        assert plan.errors and not plan.add and not plan.update and not plan.revoke

@@ -238,6 +238,9 @@ def _current_state(mapped):
     members = {}
     protected = {}
     stale = []
+    # The configured technical owner is infrastructure, not a directory employee.
+    # Older groups may have another creator; never remove this account on sync.
+    technical_owner = group_owner()
     for external_id, row in mapped.items():
         group_id = row['group_id']
         group = ccnet_api.get_group(group_id)
@@ -249,7 +252,7 @@ def _current_state(mapped):
             continue
         members[group_id] = [m.user_name
                              for m in ccnet_api.get_group_members(group_id)]
-        protected[group_id] = [group.creator_name]
+        protected[group_id] = list({group.creator_name, technical_owner})
     return members, protected, stale
 
 
@@ -414,7 +417,8 @@ def sync(registry=None):
         return _record(STATUS_ERROR, repr(exc))
 
     revision = notes.get('revision')
-    if revision and plan.empty:
+    incomplete = bool(notes.get('unresolved') or notes.get('quarantined_groups'))
+    if revision and plan.empty and not incomplete:
         state = SSOSyncState.objects.get_state(SYNC_TASK)
         if state is not None and state.status == STATUS_OK \
                 and _last_revision(state.detail) == revision:
@@ -427,7 +431,9 @@ def sync(registry=None):
     detail.update(notes)
     if errors:
         detail['errors'] = errors[:20]
-    status = STATUS_ERROR if errors else STATUS_OK
+    # An incomplete roster must remain retryable and visible even when safe
+    # additions succeeded; quarantine protects existing members from removal.
+    status = STATUS_ERROR if errors or incomplete else STATUS_OK
     return _record(status, _describe(detail))
 def sync_user_id(user_id, *, dry_run=True, registry=None):
     """Incrementally compare exactly ONE EAP UID's direct CE group memberships.
@@ -629,4 +635,14 @@ def _last_revision(detail):
 
 def _describe(detail):
     import json
-    return json.dumps(detail, sort_keys=True)
+    # One employee can occur in many ancestor groups. Persist bounded samples
+    # and exact totals, not tens of thousands of repeated IDs on every tick.
+    summary = dict(detail)
+    for key in ('unresolved', 'quarantined_groups'):
+        if isinstance(summary.get(key), list):
+            values = summary[key]
+            unique = sorted(set(values))
+            summary[key + '_count'] = len(values)
+            summary[key + '_unique_count'] = len(unique)
+            summary[key] = unique[:20]
+    return json.dumps(summary, sort_keys=True)

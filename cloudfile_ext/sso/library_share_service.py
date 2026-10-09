@@ -16,6 +16,7 @@ decision (2026-08-27 §4.4; revision gate 2026-08-28 §8.2) fixed:
 """
 
 import logging
+from contextlib import contextmanager
 import time
 
 from cloudfile_ext.sso import library_share_policy
@@ -118,10 +119,61 @@ def plan_for(repo_id, desired):
     """Build the plan for one repo. Read-only; used by dry-run and apply."""
     ledger = ManagedLibraryShare.objects.as_dict(repo_id)
     resolved = _resolved_groups()
-    return library_share_policy.build(desired, ledger, resolved)
+    desired = list(desired)
+    plan = library_share_policy.build(desired, ledger, resolved)
+    # The ledger is an integration history, not evidence of current native
+    # access. Check unchanged rows too, so retries repair out-of-band drift.
+    scheduled = {external_id for _, external_id, _ in plan.add + plan.update}
+    invalid = {external_id for external_id, _ in plan.errors}
+    for entry in desired:
+        gid = resolved.get(entry.external_group_id)
+        if gid is None or entry.external_group_id in scheduled | invalid:
+            continue
+        if _native_permission(repo_id, gid) != entry.permission:
+            plan.update.append((gid, entry.external_group_id, entry.permission))
+    return plan
+
+
+def _native_permission(repo_id, group_id):
+    share = _seafile_api().get_group_shared_repo_by_path(repo_id, None, group_id, False)
+    return share.permission if share else None
+
+
+def _write_verified_share(repo_id, group_id, owner, permission):
+    api = _seafile_api()
+    api.set_group_repo(repo_id, group_id, owner, permission)
+    # CE may retain the old permission when re-sharing an existing RepoGroup.
+    # Explicit update plus readback is mandatory before recording ACTIVE.
+    api.set_group_repo_permission(group_id, repo_id, permission)
+    if _native_permission(repo_id, group_id) != permission:
+        raise RuntimeError('Native group permission did not match desired state')
+
+
+@contextmanager
+def _revision_lock(repo_id):
+    # Serialize desired-state writes per library across workers. Checking the
+    # revision before RPC without a lock lets an older request overwrite a newer one.
+    from django.db import transaction
+    connection = _connection()
+    with transaction.atomic(using=connection.alias):
+        now = int(time.time())
+        with connection.cursor() as cursor:
+            cursor.execute(
+                'INSERT INTO %s (provider, repo_id, policy_revision, ctime, mtime) '
+                'VALUES (%%s, %%s, 0, %%s, %%s) ON DUPLICATE KEY UPDATE provider = provider'
+                % REVISION_TABLE, [PROVIDER, repo_id, now, now])
+            cursor.execute('SELECT policy_revision FROM %s WHERE provider = %%s '
+                           'AND repo_id = %%s FOR UPDATE' % REVISION_TABLE, [PROVIDER, repo_id])
+            cursor.fetchone()
+        yield
 
 
 def apply(repo_id, desired, policy_revision=None):
+    with _revision_lock(repo_id):
+        return _apply_locked(repo_id, list(desired), policy_revision)
+
+
+def _apply_locked(repo_id, desired, policy_revision=None):
     """Apply the plan and record the outcome. Returns a report dict.
 
     Never raises past an individual operation: one group that cannot be
@@ -144,7 +196,7 @@ def apply(repo_id, desired, policy_revision=None):
 
     for group_id, external_id, permission in plan.add:
         try:
-            seafile_api.set_group_repo(repo_id, group_id, owner, permission)
+            _write_verified_share(repo_id, group_id, owner, permission)
             ManagedLibraryShare.objects.record_applied(
                 repo_id, external_id, group_id, permission)
             applied['add'] += 1
@@ -154,10 +206,9 @@ def apply(repo_id, desired, policy_revision=None):
             errors.append('add %s: %s' % (external_id, exc))
 
     for group_id, external_id, permission in plan.update:
-        # Seafile's share is idempotent on (repo, group): re-sharing updates
-        # the permission in place, which is exactly the drift fix wanted.
+        # Reconcile the native permission as well as the managed ledger.
         try:
-            seafile_api.set_group_repo(repo_id, group_id, owner, permission)
+            _write_verified_share(repo_id, group_id, owner, permission)
             ManagedLibraryShare.objects.record_applied(
                 repo_id, external_id, group_id, permission)
             applied['update'] += 1
@@ -169,6 +220,8 @@ def apply(repo_id, desired, policy_revision=None):
     for group_id, external_id in plan.revoke:
         try:
             seafile_api.unset_group_repo(repo_id, group_id, owner)
+            if _native_permission(repo_id, group_id) is not None:
+                raise RuntimeError('Native group share still exists after revocation')
             ManagedLibraryShare.objects.record_revoked(repo_id, external_id)
             applied['revoke'] += 1
         except Exception as exc:
