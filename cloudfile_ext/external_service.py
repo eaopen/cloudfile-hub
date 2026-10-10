@@ -60,7 +60,8 @@ class ExternalService(object):
 
     def __init__(self, name, url, secret='', timeout=DEFAULT_TIMEOUT,
                  retries=DEFAULT_RETRIES, on_failure=FAIL_CLOSED,
-                 auth_mode='legacy', key_id='', service_id='cloudfile'):
+                 auth_mode='legacy', key_id='', service_id='cloudfile',
+                 issuer='cloudfile-sso', audience='eap-directory'):
         self.name = name
         self.url = url.rstrip('/')
         self.secret = secret
@@ -72,6 +73,9 @@ class ExternalService(object):
         self.auth_mode = auth_mode
         self.key_id = key_id
         self.service_id = service_id
+        # Match EAP defaults while allowing deployments to override both ends.
+        self.issuer = issuer
+        self.audience = audience
 
     # -- construction ------------------------------------------------------
 
@@ -97,6 +101,8 @@ class ExternalService(object):
             auth_mode=getattr(settings, prefix + 'AUTH_MODE', 'legacy'),
             key_id=getattr(settings, prefix + 'KEY_ID', ''),
             service_id=getattr(settings, prefix + 'SERVICE_ID', 'cloudfile'),
+            issuer=getattr(settings, prefix + 'ISSUER', 'cloudfile-sso'),
+            audience=getattr(settings, prefix + 'AUDIENCE', 'eap-directory'),
         )
 
     # -- calling -----------------------------------------------------------
@@ -122,10 +128,14 @@ class ExternalService(object):
             logger.error('PyJWT missing; calling %s unauthenticated',
                          self.name)
             return headers
+        # Explicit blank claims are invalid; only absent settings use defaults.
+        if (not isinstance(self.issuer, str) or not self.issuer.strip()
+                or not isinstance(self.audience, str) or not self.audience.strip()):
+            raise ExternalServiceError('%s: ISSUER and AUDIENCE must be nonblank' % self.name)
         now = int(time.time())
         claims = {'exp': now + 300,
-                  'iss': 'cloudfile-sso',
-                  'aud': 'eap-directory'}
+                  'iss': self.issuer,
+                  'aud': self.audience}
         if self.auth_mode == 'v2':
             claims.update({'iat': now, 'sub': self.service_id,
                            'jti': str(uuid.uuid4()), 'scope': 'directory.read'})

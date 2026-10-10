@@ -84,3 +84,29 @@ def test_old_outbound_scheme_remains_explicit_legacy(monkeypatch, service_module
 def test_unsupported_auth_mode_is_rejected(service_module):
     with pytest.raises(ValueError):
         service_module.ExternalService('SSO_DIRECTORY', 'http://example.invalid', auth_mode='unknown')
+
+@pytest.mark.parametrize('overrides,expected', [
+    ({}, ('cloudfile-sso', 'eap-directory')),
+    ({'ISSUER': 'custom-sender', 'AUDIENCE': 'custom-directory'},
+     ('custom-sender', 'custom-directory')),
+])
+def test_settings_default_and_override_claims(monkeypatch, service_module, overrides, expected):
+    # Exercise settings through actual token creation, not just stored fields.
+    values = dict(URL='https://directory.invalid', SECRET=SECRET,
+                  AUTH_MODE='v2', KEY_ID='k1', **overrides)
+    service_module.settings = types.SimpleNamespace(**{
+        'CF_SERVICE_SSO_DIRECTORY_' + key: value for key, value in values.items()})
+    monkeypatch.setitem(sys.modules, 'jwt', types.SimpleNamespace(encode=_jwt_encode))
+    client = service_module.ExternalService.from_settings('sso-directory')
+    _, claims = _decode(client._headers()['Authorization'][7:])
+    assert (claims['iss'], claims['aud']) == expected
+
+
+@pytest.mark.parametrize('claim', ['issuer', 'audience'])
+@pytest.mark.parametrize('value', ['', ' ', None])
+def test_explicit_invalid_claim_is_not_defaulted(monkeypatch, service_module, claim, value):
+    monkeypatch.setitem(sys.modules, 'jwt', types.SimpleNamespace(encode=_jwt_encode))
+    client = service_module.ExternalService('SSO_DIRECTORY', 'https://directory.invalid',
+        secret=SECRET, auth_mode='v2', key_id='k1', **{claim: value})
+    with pytest.raises(service_module.ExternalServiceError):
+        client._headers()
