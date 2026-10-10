@@ -121,9 +121,17 @@ def lock_status_map(repo_id, paths, username=''):
 
 def get_actions(repo_id, path, can_edit=False, username=''):
     features = enabled_features()
+    preview_extensions = getattr(settings, 'CF_FILE_ACTION_PREVIEW_EXTENSIONS', ())
+    if external_preview_enabled():
+        # Expanded viewer formats must not be advertised when CE native is
+        # selected or the independent preview service is unconfigured.
+        preview_extensions = tuple(preview_extensions) + (
+            'xmind', 'dwg', 'dxf', 'stl', 'step', 'stp', 'tif', 'tiff',
+            'zip', '7z', 'rar',
+        )
     actions = actions_for(
         path, features,
-        getattr(settings, 'CF_FILE_ACTION_PREVIEW_EXTENSIONS', ()),
+        preview_extensions,
         lock_provider_ready=lock_provider_ready(repo_id, path),
         can_edit=can_edit,
     )

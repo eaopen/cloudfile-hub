@@ -52,16 +52,18 @@ def test_external_viewer_gets_actual_read_token_only_after_auth(monkeypatch):
     monkeypatch.setitem(sys.modules, "seahub.utils", utils)
 
     actions = service.get_actions(REPO, "/plans/test.pdf", username="reader@example.test")
+    assert service.get_actions(REPO, "/map.xmind", username="reader@example.test")[0]["id"] == "external-preview"
     action = actions[0]
     assert action["id"] == "external-preview"
     assert action["writes"] is False and action["available"]
     assert action["url"].startswith("https://preview.example.com/fileview/onlinePreview?")
     source = base64.b64decode(parse_qs(urlsplit(action["url"]).query)["url"][0]).decode()
     assert source == "https://files.example.com/files/short-lived-secret/test.pdf"
-    assert calls == [
+    assert calls[:2] == [
         ("file", REPO, "/plans/test.pdf"),
         ("token", REPO, "abcdef0123456789", "download", "reader@example.test", False),
     ]
+    assert calls[2] == ("file", REPO, "/map.xmind")
 
 
 def test_missing_read_token_disables_action_instead_of_granting_fallback(monkeypatch):
