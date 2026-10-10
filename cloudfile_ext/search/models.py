@@ -23,6 +23,13 @@ class SearchIndexStateManager(models.Manager):
         row = self.filter(name=name).first()
         return row.last_activity_id if row else 0
 
+    def get_pending(self, name):
+        from .task_checkpoint import decode_receipt
+        row = self.filter(name=name).first()
+        if row is None:
+            return None
+        return decode_receipt(row.status, row.detail, row.last_activity_id)
+
     def advance(self, name, last_activity_id, status, detail=''):
         now = int(time.time())
         obj, _created = self.update_or_create(

@@ -149,16 +149,36 @@ class MeilisearchClient(object):
             'searchableAttributes': SEARCHABLE_ATTRIBUTES,
         })
 
+    @staticmethod
+    def _task_id(response):
+        value = response.get('taskUid') if isinstance(response, dict) else None
+        if type(value) is not int or value < 0:
+            raise MeilisearchError('index mutation did not return a Meilisearch task id')
+        return value
+
     def upsert_documents(self, documents):
         if not documents:
-            return
-        self._call('PUT', '/indexes/%s/documents' % INDEX_NAME, documents)
+            raise ValueError('empty index task')
+        response = self._call('PUT', '/indexes/%s/documents' % INDEX_NAME, documents)
+        return self._task_id(response)
 
     def delete_documents(self, document_ids):
         if not document_ids:
-            return
-        self._call('POST', '/indexes/%s/documents/delete-batch' % INDEX_NAME,
-                   list(document_ids))
+            raise ValueError('empty delete task')
+        response = self._call('POST', '/indexes/%s/documents/delete-batch' % INDEX_NAME,
+                              list(document_ids))
+        return self._task_id(response)
+
+    def task_status(self, uid):
+        if type(uid) is not int or uid < 0:
+            raise ValueError('invalid Meilisearch task id')
+        response = self._call('GET', '/tasks/%d' % uid)
+        if (not isinstance(response, dict) or response.get('uid') != uid or
+                response.get('indexUid') != INDEX_NAME or
+                response.get('status') not in
+                ('enqueued', 'processing', 'succeeded', 'failed', 'canceled')):
+            raise MeilisearchError('cannot confirm exact Meilisearch index task')
+        return response['status']
 
     def delete_by_repo(self, repo_id):
         self._call('POST', '/indexes/%s/documents/delete' % INDEX_NAME,

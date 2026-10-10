@@ -53,6 +53,7 @@ def test_directory_activity_create_rename_delete_are_consumed(monkeypatch):
     monkeypatch.setattr(django.conf, 'settings', SimpleNamespace())
     state = Mock()
     state.get_cursor.return_value = 0
+    state.get_pending.return_value = None
     monkeypatch.setitem(sys.modules, 'cloudfile_ext.search.models',
                         SimpleNamespace(SearchIndexState=SimpleNamespace(objects=state)))
     events = [dict(id=1, obj_type='dir', op_type='batch_create', path=None,
@@ -65,11 +66,14 @@ def test_directory_activity_create_rename_delete_are_consumed(monkeypatch):
     build = Mock(side_effect=lambda repo, path, *args: dict(id=doc_id(repo, path), object_type='dir'))
     monkeypatch.setattr(indexer, '_build_document', build)
     client = Mock()
+    client.upsert_documents.return_value = 11
+    client.delete_documents.return_value = 12
+    client.task_status.return_value = 'succeeded'
     indexer.index_tick(client=client, max_bytes=0)
     assert {row['id'] for row in client.upsert_documents.call_args.args[0]} == {doc_id('repo', '/empty'), doc_id('repo', '/renamed')}
     assert client.delete_documents.call_args.args[0] == {doc_id('repo', '/old'), doc_id('repo', '/gone')}
     assert [call.args[-1] for call in build.call_args_list] == ['dir', 'folder']
-    state.advance.assert_called_once_with('meilisearch', 3, 'ok')
+    state.advance.assert_any_call('meilisearch', 3, 'ok')
 
 
 def test_backfill_indexes_empty_and_nested_directories_without_indexing_file_bytes():

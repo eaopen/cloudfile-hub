@@ -370,6 +370,22 @@ def index_tick(client=None, max_bytes=None):
         logger.exception('meilisearch indexer: ensure_index failed; skipping tick')
         return
 
+    from cloudfile_ext.search.task_checkpoint import PendingTaskError
+    try:
+        pending = SearchIndexState.objects.get_pending(_STATE_NAME)
+    except PendingTaskError:
+        logger.exception('invalid persisted search task receipt')
+        return
+    if pending:
+        if pending['cursor'] != cursor:
+            logger.error('persisted search task cursor diverged')
+            return
+        target = pending['last_id']
+        if not any(event['id'] == target for event in events):
+            logger.error('persisted search task target not found in Activity window')
+            return
+        events = [event for event in events if event['id'] <= target]
+
     upserts = {}
     deletes = set()
     for event in events:
@@ -413,20 +429,15 @@ def index_tick(client=None, max_bytes=None):
                 upserts[doc['id']] = doc
                 deletes.discard(doc['id'])
 
-    try:
-        if upserts:
-            client.upsert_documents(list(upserts.values()))
-        if deletes:
-            client.delete_documents(deletes)
-    except MeilisearchError:
-        # Do not advance the watermark on a failed write -- the next tick
-        # retries the same batch. Losing documents silently would be worse
-        # than reprocessing a few extra rows.
-        logger.exception('meilisearch indexer: write failed; watermark not advanced')
-        SearchIndexState.objects.advance(
-            _STATE_NAME, cursor, 'error',
-            'write failed at tick starting after id %s' % cursor)
-        return
-
+    # Meilisearch mutations are asynchronous. HTTP 202 accepts a task; it
+    # never proves the index was updated. Keep an ordered receipt in the
+    # existing cf_search_index_state row, and advance only after success.
+    from cloudfile_ext.search.task_checkpoint import PendingTaskError, drive_tasks
     last_id = events[-1]['id']
-    SearchIndexState.objects.advance(_STATE_NAME, last_id, 'ok')
+    try:
+        drive_tasks(SearchIndexState.objects, client, name=_STATE_NAME,
+                    cursor=cursor, last_id=last_id, upserts=upserts, deletes=deletes)
+    except (MeilisearchError, PendingTaskError):
+        # Unknown submissions cannot be retried safely: a stale task might
+        # land after newer mutations. Operator reconciliation is required.
+        logger.exception('meilisearch index task not confirmed; cursor held')
