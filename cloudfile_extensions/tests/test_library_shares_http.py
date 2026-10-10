@@ -74,6 +74,8 @@ class LibrarySharesHttpTest(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertEqual(result.data['applied'], {'add': 1, 'update': 0, 'revoke': 0})
         self.assertEqual(result.data['errors'], [])
+        self.assertEqual(result.data['status'], 'complete')
+        self.assertTrue(result.data['complete'])
         planner.assert_called_once()
         writer_class.return_value.append.assert_called_once()
         self.assertEqual(writer_class.return_value.append.call_args.args[1]['action'], 'library.share.added')
@@ -82,6 +84,45 @@ class LibrarySharesHttpTest(unittest.TestCase):
             '11111111-1111-4111-8111-111111111111', 42, 'owner@example.com', 'rw')
         self.assertEqual(sum('INSERT INTO cf_library_share_ledger' in sql for sql, _ in cursor.statements), 2)
 
+
+    def test_unmapped_group_is_explicitly_partial_not_a_successful_share(self):
+        native = Mock()
+        native.get_repo_owner.return_value = 'owner@example.com'
+        native.get_org_repo_owner.return_value = None
+        base = type('ManagementBase', (), {'_authorize': lambda self, request, repo_id: None})
+        modules = {}
+        for name, attrs in {
+            'seaserv': {'seafile_api': native},
+            'seahub.api2.endpoints.admin.library_administrator': {'AdminLibraryAdministrator': base},
+            'seahub.api2.utils': {'api_error': lambda code, msg: Response({'error_msg': msg}, status=code)},
+        }.items():
+            item = ModuleType(name)
+            item.__dict__.update(attrs)
+            modules[name] = item
+        module_path = Path(__file__).resolve().parents[1] / 'library_shares.py'
+        spec = importlib.util.spec_from_file_location('cloudfile_extensions.library_shares', module_path)
+        module = importlib.util.module_from_spec(spec)
+        connection = Mock()
+        connection.cursor.return_value = Cursor()
+        with patch.dict(sys.modules, modules), patch.object(settings, 'CLOUDFILE_POLICY_CONFIG',
+                {'provider': 'etech'}, create=True):
+            spec.loader.exec_module(module)
+            with patch.object(module, '_database', return_value=connection), patch.object(
+                    module, 'build_share_plan', return_value=(
+                        {'add': [], 'update': [], 'revoke': []},
+                        ['missing: group mapping is missing or ambiguous'])):
+                result = module.LibrarySharesDesired().put(SimpleNamespace(GET={},
+                    user=SimpleNamespace(username='admin@example.com'),
+                    data={'policy_revision': 2, 'shares': [
+                        {'external_group_id': 'missing', 'permission': 'r'}]}),
+                    '11111111-1111-4111-8111-111111111111')
+        self.assertEqual(result.status_code, 200)  # compatible receipt semantics
+        self.assertFalse(result.data['complete'])
+        self.assertEqual(result.data['status'], 'partial')
+        self.assertEqual(result.data['applied'], {'add': 0, 'update': 0, 'revoke': 0})
+        self.assertEqual(result.data['planned']['add'], 1)
+        self.assertEqual(len(result.data['errors']), 1)
+        native.set_group_repo.assert_not_called()
 
 if __name__ == '__main__':
     unittest.main()

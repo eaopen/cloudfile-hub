@@ -134,7 +134,13 @@ class LibrarySharesDesired(AdminLibraryAdministrator):
                             errors.append(operation + ' ' + external_id + ': native share update failed')
                 cursor.execute('INSERT INTO cf_library_share_revision(repo_id,revision) VALUES(%s,%s) ON DUPLICATE KEY UPDATE revision=GREATEST(revision,VALUES(revision))',
                                (repo_id, revision))
+                # HTTP 200 is a reconcile receipt, not proof that every
+                # requested external group was applied. Keep the existing
+                # wire status for compatibility and expose unambiguous body
+                # flags so callers cannot mistake unmapped groups for success.
                 result = {'revision': revision, 'revision_recorded': True,
+                          'complete': not bool(errors),
+                          'status': 'partial' if errors else 'complete',
                           'planned': {key: len(value) + (unmapped if key == 'add' else 0)
                                       for key, value in share_plan.items()},
                           'applied': applied, 'errors': errors}
