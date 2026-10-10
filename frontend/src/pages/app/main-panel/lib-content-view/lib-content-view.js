@@ -681,6 +681,24 @@ class LibContentView extends React.Component {
   };
 
   showFile = (filePath, noRedirection) => {
+    // V04: resolve a fresh permission-scoped file action rather than
+    // constructing an unauthenticated viewer URL in the browser.
+    if (!noRedirection) {
+      seafileAPI.getCloudFileActions(this.props.repoID, filePath).then((res) => {
+        const actions = res.data && res.data.actions || [];
+        const preview = actions.find(a => a.id === 'external-preview' && a.available && a.url);
+        if (preview) {
+          window.location.assign(preview.url);
+        } else {
+          this.showFileNative(filePath, noRedirection);
+        }
+      }).catch(() => this.showFileNative(filePath, noRedirection));
+      return;
+    }
+    this.showFileNative(filePath, noRedirection);
+  };
+
+  showFileNative = (filePath, noRedirection) => {
     let repoID = this.props.repoID;
 
     if (this.state.isTreePanelShown) {

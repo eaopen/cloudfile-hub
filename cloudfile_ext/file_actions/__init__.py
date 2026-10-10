@@ -20,9 +20,11 @@ def register(registry):
 
     from django.urls import path, re_path
 
-    from cloudfile_ext.file_actions.apis import FileActionsView, LocalSessionView, AgentSessionClaimView
+    from cloudfile_ext.file_actions.apis import FileActionsView, LocalSessionView, AgentSessionClaimView, FormalLibraryEmbedView
     repo_id = r'(?P<repo_id>[-0-9a-f]{36})'
     registry.register_urls([
+        path('api/v2.1/cloudfile/integration/v1/resources/resolve/',
+             FormalLibraryEmbedView.as_view(), name='cloudfile-formal-embed-resolve'),
         re_path(r'^api/v2.1/cloudfile/repos/%s/file-actions/$' % repo_id,
                 FileActionsView.as_view(), name='cloudfile-file-actions'),
         re_path(r'^api/v2.1/cloudfile/repos/%s/local-sessions/$' % repo_id,

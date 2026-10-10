@@ -2,6 +2,8 @@
 """Small adapters around the pure action policy and local-software protocol."""
 
 import os
+import base64
+from urllib.parse import urlsplit, urlencode
 import uuid
 import time
 import hashlib
@@ -48,6 +50,40 @@ def native_preview_url(repo_id, path):
 
 
 
+
+def external_preview_enabled():
+    """An unconfigured viewer cannot replace working native Seafile preview."""
+    base = getattr(settings, 'CF_PREVIEW_PUBLIC_URL', '').strip()
+    provider = getattr(settings, 'CF_PREVIEW_PROVIDER', 'eap-fileview')
+    if provider != 'eap-fileview' or not base:
+        return False
+    parsed = urlsplit(base)
+    # HTTP is permitted for private development only; operators must secure
+    # the origin and fileserver reachability before internet-facing rollout.
+    return parsed.scheme in ('https', 'http') and bool(parsed.netloc) and not (
+        parsed.username or parsed.password or parsed.query or parsed.fragment)
+
+
+def external_preview_url(repo_id, path, username):
+    """Issue a normal Seafile read token AFTER the calling view checks live ACL."""
+    if not external_preview_enabled():
+        raise ValueError('External preview is not configured')
+    from seaserv import seafile_api
+    file_id = seafile_api.get_file_id_by_path(repo_id, path)
+    if not file_id:
+        raise ValueError('File no longer exists')
+    token = seafile_api.get_fileserver_access_token(
+        repo_id, file_id, 'download', username, use_onetime=False)
+    if not token:
+        raise ValueError('Read token unavailable')
+    from seahub.utils import gen_file_get_url
+    source = gen_file_get_url(token, os.path.basename(path))
+    encoded = base64.b64encode(source.encode('utf-8')).decode('ascii')
+    base = getattr(settings, 'CF_PREVIEW_PUBLIC_URL').strip().rstrip('/')
+    return base + '/onlinePreview?' + urlencode({'url': encoded})
+
+
+
 def lock_provider_ready(repo_id, path):
     """No public editing assembler is enabled until native publication is ready."""
     return False
@@ -83,7 +119,7 @@ def lock_status_map(repo_id, paths, username=''):
 
 
 
-def get_actions(repo_id, path, can_edit=False):
+def get_actions(repo_id, path, can_edit=False, username=''):
     features = enabled_features()
     actions = actions_for(
         path, features,
@@ -93,7 +129,24 @@ def get_actions(repo_id, path, can_edit=False):
     )
     for action in actions:
         if action['id'] == 'native-preview' and action['available']:
-            action['url'] = native_preview_url(repo_id, path)
+            if external_preview_enabled():
+                # Same read-only action family, but no fake provider availability.
+                # The caller has already completed path-level permission checks.
+                try:
+                    preview_url = external_preview_url(repo_id, path, username)
+                except Exception:
+                    # Never disclose file tokens in error responses or logs.
+                    # A failed source permission/token call only disables the
+                    # optional action and does not block native download.
+                    action['available'] = False
+                    action['reason'] = 'preview_source_unavailable'
+                else:
+                    action['id'] = 'external-preview'
+                    action['label'] = 'Preview with eap-fileview'
+                    action['description'] = 'Read-only external document preview'
+                    action['url'] = preview_url
+            else:
+                action['url'] = native_preview_url(repo_id, path)
     return actions
 
 

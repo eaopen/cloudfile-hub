@@ -78,7 +78,43 @@ class FileActionsView(_FileActionAPIView):
         return Response({'repo_id': repo_id, 'path': path,
                          'actions': service.get_actions(
                              repo_id, path,
-                             can_edit=parse_repo_perm(permission).can_edit_on_web)})
+                             can_edit=parse_repo_perm(permission).can_edit_on_web,
+                             username=request.user.username)})
+
+
+class FormalLibraryEmbedView(_FileActionAPIView):
+    """Authenticated, repo-root-only resourceKey resolver.
+
+    A folder subtree cannot be treated as isolated merely because an iframe
+    starts there. V04 supports the repository root and existing CE ACL only.
+    """
+
+    def get(self, request):
+        from django.conf import settings as site_settings
+        from cloudfile_ext.file_actions.embedding import configured_repo, library_entry
+
+        resource_key = request.GET.get('resource_key', '')
+        if request.GET.get('view_mode', 'CFILE_EMBED') != 'CFILE_EMBED':
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid view mode')
+        repo_id = configured_repo(
+            getattr(site_settings, 'CF_FORMAL_EMBED_RESOURCES', {}), resource_key)
+        if not repo_id:
+            return api_error(status.HTTP_404_NOT_FOUND, 'Resource unavailable')
+        repo = seafile_api.get_repo(repo_id)
+        if not repo:
+            return api_error(status.HTTP_404_NOT_FOUND, 'Resource unavailable')
+        if not check_folder_permission(request, repo_id, '/'):
+            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied')
+        return Response({
+            'version': 'cloudfile-embed/v1',
+            'resource_key': resource_key,
+            'resource_type': 'FORMAL_LIBRARY',
+            'view_mode': 'CFILE_EMBED',
+            'scope': {'repo_id': repo_id, 'root_path': '/'},
+            'entry': library_entry(
+                site_settings.SITE_ROOT or '/',
+                repo_id, repo.name),
+        })
 
 
 class LocalSessionView(_FileActionAPIView):

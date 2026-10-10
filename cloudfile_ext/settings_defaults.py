@@ -223,6 +223,15 @@ CF_EXTERNAL_SOURCES_ROOTS = ['/shared/external']
 # running SeaSearch. See docs/search.md.
 CF_SEARCH_INDEX_TEXT_MAX_BYTES = 1024 * 1024
 
+# V04: generic preview engine. If no reachable public URL is configured,
+# keep the normal CE preview; never invent a signed link or enable an
+# external service just because a feature flag is true.
+CF_PREVIEW_PROVIDER = 'eap-fileview'
+CF_PREVIEW_PUBLIC_URL = ''
+# Only trusted server-side resource keys; v0.4 MVP supports repo root '/'.
+# e.g. {'engineering': {'repo_id': '<real uuid>', 'root_path': '/'}}.
+CF_FORMAL_EMBED_RESOURCES = {}
+
 # -- file actions ----------------------------------------------------------
 
 # Native previews remain upstream URLs; this list only decides which files get

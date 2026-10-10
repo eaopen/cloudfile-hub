@@ -1144,6 +1144,11 @@ class SeafileAPI {
     return entry;
   }
 
+  getCloudFileActions(repoID, filePath) {
+    const path = encodeURIComponent(filePath);
+    return this.req.get(this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/file-actions/?path=' + path);
+  }
+
   getFileDownloadLink(repoID, filePath) {
     // reuse default to 1 to eliminate cross domain request problem
     //   In browser, the browser will send an option request to server first, the access Token
