@@ -53,6 +53,8 @@ class FakeCursor:
         return (self.count,)
 
     def fetchall(self):
+        if "cf_background_job" in self.statements[-1][0]:
+            return [("queued", 2), ("running", 1)]
         return [("repo-a", 123, 4), ("repo-b", None, None)]
 
 
@@ -66,9 +68,10 @@ class ReportTest(unittest.TestCase):
         self.assertEqual("unknown", report["libraries"][1]["file_count"]["status"])
         self.assertEqual("unsupported", report["metrics"]["search_index_backlog"]["status"])
         self.assertTrue(report["page"]["has_more"])
-        self.assertEqual(2, len(cursor.statements))
+        self.assertEqual(3, len(cursor.statements))
         self.assertTrue(all(s.lstrip().startswith("SELECT") for s, _ in cursor.statements))
         self.assertEqual([2, 0], cursor.statements[1][1])
+        self.assertEqual(2, report["metrics"]["background_job_backlog"]["queued"])
 
     def test_unsafe_database_and_limits_refused(self):
         for name in ("", "db`; DROP TABLE Repo;", "dbname.dot"):

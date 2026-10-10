@@ -58,6 +58,21 @@ def collect(*, db_name, limit, offset, disk_path=None, cursor_factory=None):
                 "directory_count": {"status": "unsupported"},
             })
     result["page"]["has_more"] = offset + len(result["libraries"]) < result["library_count"]
+    # Uses cf_background_job's indexed status key. Never scan per-file tasks.
+    try:
+        with use_cursor() as cursor:
+            cursor.execute("SELECT status,COUNT(*) FROM cf_background_job "
+                           "WHERE status IN ('queued','running','failed') GROUP BY status")
+            counts = {name: int(amount) for name, amount in cursor.fetchall()}
+        result["metrics"]["background_job_backlog"] = {
+            "status": "ok",
+            "queued": counts.get("queued", 0),
+            "running": counts.get("running", 0),
+            "failed": counts.get("failed", 0),
+            "source": "cf_background_job(status) indexed counts",
+        }
+    except Exception:
+        result["errors"].append("background job counts unavailable")
     if disk_path:
         try:
             disk = shutil.disk_usage(disk_path)
