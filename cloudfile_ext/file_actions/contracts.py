@@ -12,12 +12,14 @@ Hub UI, a local Agent and an integration from inventing subtly different meaning
 CONTRACT_VERSION = 'cloudfile-file-action/v1'
 
 NATIVE_PREVIEW = 'native-preview'
+EXTERNAL_PREVIEW = 'external-preview'
 LOCAL_VIEW = 'local-view'
 LOCAL_EDIT = 'local-edit'
 CHECKOUT = 'checkout'
 
 FILE_ACTIONS = frozenset((
     NATIVE_PREVIEW,
+    EXTERNAL_PREVIEW,
     LOCAL_VIEW,
     LOCAL_EDIT,
     CHECKOUT,
@@ -25,6 +27,7 @@ FILE_ACTIONS = frozenset((
 
 READ_ACTIONS = frozenset((
     NATIVE_PREVIEW,
+    EXTERNAL_PREVIEW,
     LOCAL_VIEW,
 ))
 
