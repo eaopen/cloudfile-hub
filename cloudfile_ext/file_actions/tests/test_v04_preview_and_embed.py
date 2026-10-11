@@ -77,11 +77,33 @@ def test_native_pdf_preferred_without_external_token(monkeypatch):
     assert action['url'].endswith('/lib/' + REPO + '/file/a.pdf')
 
 
-def test_native_office_preferred_when_provider_is_enabled(monkeypatch):
+def test_preview_never_uses_onlyoffice_even_when_it_is_enabled(monkeypatch):
     _configured(monkeypatch)
     service.settings.ENABLE_ONLYOFFICE = True
+    service.settings.ENABLE_OFFICE_WEB_APP = True
+    monkeypatch.setattr(service, 'external_preview_url', lambda *_: 'https://preview.example.com/fileview/onlinePreview?url=test')
     action = service.get_actions(REPO, '/a.docx', username='reader')[0]
-    assert action['id'] == 'native-preview'
+    assert action['id'] == 'external-preview'
+    assert 'fallback_preview' not in action
+
+
+def test_office_has_no_onlyoffice_preview_fallback_when_viewer_is_missing(monkeypatch):
+    _configured(monkeypatch, '')
+    service.settings.ENABLE_ONLYOFFICE = True
+    actions = service.get_actions(REPO, '/a.docx', username='reader')
+    assert not any(a['id'] in ('native-preview', 'external-preview') for a in actions)
+
+
+
+def test_office_conversion_failure_never_falls_back_to_onlyoffice(monkeypatch):
+    _configured(monkeypatch)
+    service.settings.ENABLE_ONLYOFFICE = True
+    monkeypatch.setattr(service, 'external_preview_url', lambda *_: (_ for _ in ()).throw(ValueError('viewer denied')))
+    for path in ('/a.docx', '/a.xlsx', '/a.xlsm'):
+        action = service.get_actions(REPO, path, username='reader')[0]
+        assert action['available'] is False
+        assert action['reason'] == 'preview_source_unavailable'
+        assert 'url' not in action and 'fallback_preview' not in action
 
 
 def test_external_tiff_provides_native_fallback_hint(monkeypatch):

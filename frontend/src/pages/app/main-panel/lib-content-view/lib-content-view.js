@@ -82,6 +82,15 @@ const propTypes = {
   repoID: PropTypes.string,
 };
 
+// CloudFile preview never uses Seafile's Office route backed by OnlyOffice.
+// When conversion preview is unavailable, offer the authorized download.
+const CLOUDFILE_CONVERSION_OFFICE_EXTS = new Set([
+  'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'odt', 'ods', 'odp',
+  'wps', 'et', 'dps', 'vsd', 'vsdx', 'rtf', 'pages',
+  'docm', 'xlsm', 'pptm', 'dot', 'dotx', 'dotm',
+  'xlt', 'xltx', 'xltm', 'fodt', 'fods'
+]);
+
 const DIR_SORT_BY_KEY = 'seafile-repo-dir-sort-by';
 const DIR_SORT_ORDER_KEY = 'seafile-repo-dir-sort-order';
 
@@ -681,8 +690,20 @@ class LibContentView extends React.Component {
   };
 
   showFile = (filePath, noRedirection) => {
-    // V04: resolve a fresh permission-scoped file action rather than
-    // constructing an unauthenticated viewer URL in the browser.
+    // V0.6: CloudFile preview uses simple native handlers or eap-fileview.
+    // OnlyOffice is intentionally reserved for explicit online edit actions.
+    const ext = filePath.split('.').pop().toLowerCase();
+    const openSafeFallback = () => {
+      if (!CLOUDFILE_CONVERSION_OFFICE_EXTS.has(ext)) {
+        this.showFileNative(filePath, noRedirection);
+        return;
+      }
+      // Seafile's native Office view can itself invoke OnlyOffice. If the
+      // conversion viewer is unavailable, use the authorized download instead.
+      seafileAPI.getFileDownloadLink(this.props.repoID, filePath).then((res) => {
+        window.location.assign(res.data);
+      }).catch((error) => toaster.danger(Utils.getErrorMsg(error)));
+    };
     if (!noRedirection) {
       seafileAPI.getCloudFileActions(this.props.repoID, filePath).then((res) => {
         const actions = res.data && res.data.actions || [];
@@ -690,12 +711,12 @@ class LibContentView extends React.Component {
         if (preview) {
           window.location.assign(preview.url);
         } else {
-          this.showFileNative(filePath, noRedirection);
+          openSafeFallback();
         }
-      }).catch(() => this.showFileNative(filePath, noRedirection));
+      }).catch(openSafeFallback);
       return;
     }
-    this.showFileNative(filePath, noRedirection);
+    openSafeFallback();
   };
 
   showFileNative = (filePath, noRedirection) => {

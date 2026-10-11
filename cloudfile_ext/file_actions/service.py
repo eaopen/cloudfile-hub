@@ -22,7 +22,7 @@ from cloudfile_ext.file_actions.policy import actions_for, extension
 # Seafile's native PDF/text/image/media readers stay primary; eap-fileview
 # handles formats that benefit from conversion or special parsers.
 NATIVE_FIRST_PREVIEW = frozenset((
-    'pdf', 'txt', 'log', 'md', 'markdown', 'json', 'xml', 'html', 'htm',
+    'pdf', 'txt', 'log', 'md', 'markdown', 'json', 'xml', 'html', 'htm', 'csv', 'tsv',
     'py', 'js', 'css', 'java', 'c', 'cpp', 'yaml', 'yml',
     'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'mp3', 'mp4', 'webm',
 ))
@@ -33,18 +33,24 @@ EXTERNAL_PREVIEW_EXTENSIONS = frozenset((
     'zip', '7z', 'rar', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx',
     'odt', 'ods', 'odp', 'wps', 'et', 'dps', 'vsd', 'vsdx',
     'psd', 'csv', 'txt', 'md', 'pdf', 'jpg', 'jpeg', 'png',
+    'docm', 'xlsm', 'pptm', 'rtf', 'dot', 'dotx', 'dotm',
+    'xlt', 'xltx', 'xltm', 'pages', 'fodt', 'fods',
 ))
 OFFICE_DOCUMENT_EXTENSIONS = frozenset((
     'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'odt', 'ods', 'odp',
-    'wps', 'et', 'dps', 'vsd', 'vsdx',
+    'wps', 'et', 'dps', 'vsd', 'vsdx', 'rtf', 'pages',
+    'docm', 'xlsm', 'pptm', 'dot', 'dotx', 'dotm',
+    'xlt', 'xltx', 'xltm', 'fodt', 'fods',
 ))
 
 
-def choose_preview_provider(ext, *, native_available, external_available, office_native_ready=False):
-    """Pick one preview, using effective capability rather than extension alone."""
-    if ext in NATIVE_FIRST_PREVIEW and native_available:
-        return 'native'
-    if ext in OFFICE_DOCUMENT_EXTENSIONS and office_native_ready and native_available:
+def choose_preview_provider(ext, *, native_available, external_available):
+    """Select simple native rendering or conversion-based preview, never OnlyOffice.
+
+    'native_available' must mean a self-contained Seafile preview handler;
+    upstream Office routes backed by OnlyOffice do not qualify.
+    """
+    if native_available and ext in NATIVE_FIRST_PREVIEW:
         return 'native'
     if external_available:
         return 'external'
@@ -156,18 +162,17 @@ def lock_status_map(repo_id, paths, username=''):
 
 def get_actions(repo_id, path, can_edit=False, username=''):
     features = enabled_features()
-    native_preview_extensions = frozenset(getattr(settings, 'CF_FILE_ACTION_PREVIEW_EXTENSIONS', ()))
+    # CloudFile preview intentionally excludes Office handlers that rely on
+    # ONLYOFFICE/Office Web App, even if Seafile advertises their file extension.
+    # ONLYOFFICE remains an independently enabled editing action, not a viewer.
+    native_preview_extensions = (frozenset(getattr(settings, 'CF_FILE_ACTION_PREVIEW_EXTENSIONS', ()))
+                                 - OFFICE_DOCUMENT_EXTENSIONS)
     external_enabled = external_preview_enabled()
     preview_extensions = native_preview_extensions | (EXTERNAL_PREVIEW_EXTENSIONS if external_enabled else frozenset())
     ext = extension(path)
-    # CE Office viewing needs an actual office provider; the extension list
-    # alone cannot prove that OnlyOffice/Office Web App is ready.
-    office_native_ready = bool(getattr(settings, 'ENABLE_ONLYOFFICE', False) or
-                               getattr(settings, 'ENABLE_OFFICE_WEB_APP', False))
     preferred_preview = choose_preview_provider(
         ext, native_available=ext in native_preview_extensions,
-        external_available=external_enabled and ext in EXTERNAL_PREVIEW_EXTENSIONS,
-        office_native_ready=office_native_ready)
+        external_available=external_enabled and ext in EXTERNAL_PREVIEW_EXTENSIONS)
     actions = actions_for(
         path, features,
         preview_extensions,
@@ -184,7 +189,7 @@ def get_actions(repo_id, path, can_edit=False, username=''):
                 except Exception:
                     # Only fall back to native when its type is explicitly known;
                     # otherwise leave the preview unavailable, but keep download.
-                    if ext in native_preview_extensions and (ext not in OFFICE_DOCUMENT_EXTENSIONS or office_native_ready):
+                    if ext in native_preview_extensions:
                         action['url'] = native_preview_url(repo_id, path)
                     else:
                         action['available'] = False
@@ -194,7 +199,7 @@ def get_actions(repo_id, path, can_edit=False, username=''):
                     action['label'] = 'Preview with eap-fileview'
                     action['description'] = 'Read-only external document preview'
                     action['url'] = preview_url
-                    if ext in native_preview_extensions and (ext not in OFFICE_DOCUMENT_EXTENSIONS or office_native_ready):
+                    if ext in native_preview_extensions:
                         # Client-visible alternative for conversion failure;
                         # this is not a claim that the viewer can auto-recover.
                         action['fallback_preview'] = {
