@@ -59,6 +59,22 @@ class PostForkAgentClaimRuntime(AgentClaimRuntime):
         return policy_host.local_agent_call("commit_authorize", value, request_id)
 
 
+    def commit_upload_authorize(self, value, request_id):
+        return policy_host.local_agent_call("commit_upload_authorize", value, request_id)
+
+    def commit_status_challenge(self, value, request_id):
+        return policy_host.local_agent_call("commit_status_challenge", value, request_id)
+
+    def commit_status(self, value, request_id):
+        return policy_host.local_agent_call("commit_status", value, request_id)
+
+    def upload_grant(self, value, request_id):
+        return policy_host.local_agent_call("upload_grant", value, request_id)
+
+    def upload_receipt(self, value, request_id):
+        return policy_host.local_agent_call("upload_receipt", value, request_id)
+
+
 class PostForkAgentReadTicketIssuer(AgentReadTicketIssuer):
     def issue(self, value, request_id):
         return policy_host.local_read_ticket(value, request_id)

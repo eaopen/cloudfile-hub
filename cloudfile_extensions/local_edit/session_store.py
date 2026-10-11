@@ -163,9 +163,11 @@ class LocalSessionStore:
                 not isinstance(row[6], str) or not re.fullmatch(r"[0-9a-f]{64}", row[6])):
             raise ContractError("LOCAL_SESSION_PENDING", "Session storage requires reconciliation", 503)
         value = json.loads(row[4], object_pairs_hook=_object)
-        if snapshot_json(value) != row[4]:
-            raise ContractError("LOCAL_SESSION_PENDING", "Session snapshot requires reconciliation", 503)
-        return row
+        # Native JSON_SET advances the baseline in the Branch transaction.
+        # MySQL/MariaDB may reformat JSON; validate the exact schema, then
+        # canonicalize in memory for proof digests and snapshot comparison.
+        normalized = snapshot_json(value)
+        return row[:4] + (normalized,) + row[5:]
 
     def create(self, sql, *, provider, actor, device_id, snapshot):
         revision = self._scope(sql, provider, actor, device_id)

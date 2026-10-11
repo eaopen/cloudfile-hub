@@ -219,7 +219,14 @@ class EditingStore:
             raise ValueError('publication action required')
         if snapshot is not None:
             from ..common.validation import object_fields
-            object_fields(snapshot, ('id', 'size', 'source'))
+            device_snapshot = 'session_id' in snapshot or 'device_id' in snapshot
+            object_fields(snapshot, ('id', 'size', 'source') +
+                (('session_id', 'device_id') if device_snapshot else ()))
+            if device_snapshot:
+                if snapshot['source'] != 'agent2-device':
+                    raise ValueError('device snapshot provenance required')
+                uuid(snapshot['session_id'])
+                uuid(snapshot['device_id'])
             uuid(snapshot['id'])
             if type(snapshot['size']) is not int or not 0 <= snapshot['size'] <= 128 * 1024 * 1024:
                 raise ValueError('bounded immutable snapshot required')

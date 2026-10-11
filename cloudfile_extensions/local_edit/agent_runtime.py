@@ -248,7 +248,7 @@ class AgentClaimRuntime:
         """
         return self._commit_device(value, request_id, signed=True)
 
-    def _commit_device(self, value, request_id, *, signed):
+    def _commit_device(self, value, request_id, *, signed, upload=False):
         from ..editing.store import EditingStore
         from .commit_contract import validate_request, bind_request
         self._process()
@@ -317,10 +317,35 @@ class AgentClaimRuntime:
                         staged_file_id=None, content_digest=value["content_digest"],
                         action=value["action"],
                         snapshot=dict(id=value["intent_id"], size=value["snapshot_size"],
-                            source="agent2-device"),
+                            source="agent2-device", session_id=value["session_id"],
+                            device_id=value["device_id"]),
                         actor=actor, holder=guard["holder"], token=value["token"],
                         guard_id=value["guard_id"], generation=int(value["generation"]),
                         credential_epoch=int(value["credential_epoch"]))
+                    if upload:
+                        from .upload_grant import seal, UPLOAD_PATH
+                        current = preparation.contexts.current(actor)
+                        if current is None:
+                            raise ContractError("SUBJECT_UNAVAILABLE", "Current subject unavailable", 503)
+                        provider = authority.state.provider
+                        condition = dict(path=reference["path"],
+                            context=dict(provider=provider, userId=actor, epoch=current["context_epoch"]),
+                            scopes=[dict(type="provider", provider=provider, external_id=provider),
+                                dict(type="user", provider=provider, external_id=actor),
+                                dict(type="repo", provider="cloudfile", external_id=reference["repo_id"])],
+                            local_commit=dict(session_id=value["session_id"], device_id=value["device_id"],
+                                device_revision=str(session_row[3]), session_revision=str(session_row[9])),
+                            editing=dict(repo_id=reference["repo_id"], resource_uid=resource["uid"],
+                                guard_id=value["guard_id"], generation=value["generation"],
+                                credential_epoch=value["credential_epoch"], holder=guard["holder"],
+                                token=value["token"], intent_id=value["intent_id"], base_file_id=value["base_file_id"]))
+                        ticket = seal(self.secret, dict(instance=self.instance, condition=condition, native_user=native_user,
+                            content_digest=value["content_digest"], snapshot_size=value["snapshot_size"],
+                            action=value["action"]))
+                        return dict(ticket=ticket, expires_in=60, intent_id=value["intent_id"],
+                            content_digest=value["content_digest"], snapshot_size=value["snapshot_size"],
+                            native_device_publish=True, transfer=dict(path=UPLOAD_PATH, method="POST",
+                                authorization="Bearer", redirects=False))
                     return dict(intent_id=value["intent_id"], state=prepared["state"],
                         device_authorized=True, publication="not_started")
                 return authority.consume(ref, effect)
@@ -330,3 +355,104 @@ class AgentClaimRuntime:
                     item.current_subject = None
                     item.is_owner = False
                     item.effective_access = None
+
+    def commit_upload_authorize(self, value, request_id):
+        return self._commit_device(value, request_id, signed=True, upload=True)
+
+    def upload_grant(self, value, request_id):
+        from .upload_grant import unseal
+        self._process()
+        if not self.agent2_exclusive_enabled:
+            raise ContractError("EDIT_UNAVAILABLE", "Device publishing disabled", 503)
+        identifier(request_id)
+        grant = unseal(self.secret, value)
+        if grant.get("instance") != self.instance:
+            raise ContractError("AUTHENTICATION_REQUIRED", "Upload origin changed", 401)
+        return grant
+
+    def commit_status_challenge(self, value, request_id):
+        return self._commit_status(value, request_id, signed=False)
+
+    def commit_status(self, value, request_id):
+        return self._commit_status(value, request_id, signed=True)
+
+    def _commit_status(self, value, request_id, *, signed):
+        from .device_proof import _uuid
+        self._process()
+        if not self.agent2_exclusive_enabled:
+            raise ContractError("EDIT_UNAVAILABLE", "Device publishing disabled", 503)
+        object_fields(value, ("session_id", "device_id", "intent_id") +
+            (("challenge", "signature") if signed else ()))
+        for name in ("session_id", "device_id", "intent_id"):
+            _uuid(value[name])
+        identifier(request_id)
+        with self.resources.connection() as connection:
+            Outbox(connection)._require_idle()
+            connection.begin()
+            try:
+                with connection.cursor() as sql:
+                    actor, saved = self._owner(sql, value)
+                    revision = self.sessions._scope(sql, self.resources.provider, actor, value["device_id"])
+                    row = self.sessions._row(sql, self.resources.provider, actor,
+                        value["device_id"], value["session_id"])
+                    if row[3] != revision or saved["mode"] != "exclusive-edit":
+                        raise conflict()
+                    digest = hashlib.sha256(json.dumps(["cloudfile.commit-status.v1",
+                        value["session_id"], value["device_id"], value["intent_id"],
+                        str(revision), str(row[9])], separators=(",", ":")).encode()).hexdigest()
+                    if not signed:
+                        result = dict(challenge=asdict(self.sessions.devices.issue(sql,
+                            provider=self.resources.provider, actor=actor, device_id=value["device_id"],
+                            instance=self.instance, session_id=value["session_id"],
+                            operation="commit", request_sha256=digest)))
+                    else:
+                        object_fields(value["challenge"], ("instance", "device_id", "session_id",
+                            "operation", "nonce", "issued_at", "expires_at", "request_sha256"))
+                        challenge = DeviceChallenge(**value["challenge"])
+                        if (challenge.instance != self.instance or challenge.operation != "commit" or
+                                challenge.session_id != value["session_id"] or
+                                challenge.device_id != value["device_id"] or challenge.request_sha256 != digest):
+                            raise conflict()
+                        self.sessions.devices.consume(sql, provider=self.resources.provider,
+                            actor=actor, challenge=challenge, signature=value["signature"])
+                        result = dict(intent=self._device_receipt(sql, saved["resource_uid"],
+                            value["session_id"], value["device_id"], value["intent_id"]))
+                connection.commit()
+                return result
+            finally:
+                connection.rollback()
+
+    @staticmethod
+    def _device_receipt(sql, uid, session, device, intent):
+        from ..editing.store import EditingStore
+        try:
+            result = EditingStore.intent(sql, uid=uid, intent_id=intent)
+        except ContractError as error:
+            if error.code != "NOT_FOUND":
+                raise
+            return dict(intent_id=intent, state="not-found")
+        metadata = result.get("snapshot") or {}
+        if (metadata.get("source") != "agent2-device" or metadata.get("session_id") != session or
+                metadata.get("device_id") != device):
+            raise ContractError("ACCESS_DENIED", "Intent is not owned by this device session", 403)
+        return {key: result[key] for key in ("intent_id", "state", "result_file_id",
+            "content_digest", "expected_file_id", "action", "checked_in") if result[key] is not None}
+
+    def upload_receipt(self, value, request_id):
+        # Private HTTP adapter call only; value came from the authenticated grant.
+        self._process()
+        if not self.agent2_exclusive_enabled:
+            raise ContractError("EDIT_UNAVAILABLE", "Device publishing disabled", 503)
+        condition = value["condition"]
+        edit, session = condition["editing"], condition["local_commit"]
+        with self.resources.connection() as connection:
+            Outbox(connection)._require_idle()
+            connection.begin()
+            try:
+                with connection.cursor() as sql:
+                    result = self._device_receipt(sql, edit["resource_uid"], session["session_id"],
+                        session["device_id"], edit["intent_id"])
+                connection.commit()
+                return result
+            finally:
+                connection.rollback()

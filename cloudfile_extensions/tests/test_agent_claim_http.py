@@ -62,7 +62,7 @@ class AgentClaimHTTPTests(unittest.TestCase):
         runtime = object.__new__(AgentClaimRuntime)
         issuer = AgentReadTicketIssuer(runtime)
         self.assertEqual(len(agent_claim_routes(runtime=runtime)), 4)
-        self.assertEqual(len(agent_claim_routes(runtime=runtime, read_issuer=issuer)), 8)
+        self.assertEqual(len(agent_claim_routes(runtime=runtime, read_issuer=issuer)), 14)
         other = object.__new__(AgentClaimRuntime)
         with self.assertRaises(ValueError):
             agent_claim_routes(runtime=other, read_issuer=issuer)
