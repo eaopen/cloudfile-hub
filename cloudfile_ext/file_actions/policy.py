@@ -56,9 +56,7 @@ def actions_for(path, features, preview_extensions, lock_provider_ready=False,
         ))
         result.append(_action(
             LOCAL_EDIT, 'Edit with local software',
-            'Start a fenced one-file session for CloudFile Local and the selected professional application.',
-            available=lock_provider_ready,
-            reason='' if lock_provider_ready else 'file_lock_provider_required',
+            'Edit an ordinary local copy, then explicitly confirm an authorized cloud upload; no Checkout required.',
         ))
 
     if features.get('CF_ENABLE_CHECKOUT'):

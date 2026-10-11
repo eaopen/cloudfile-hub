@@ -74,6 +74,7 @@ def _native_repo(repo):
 class AgentBlockView(View):
     runtime = None
     operation = "plan"
+    optimistic = False
     http_method_names = ["post"]
 
     def dispatch(self, request, *args, **kwargs):
@@ -93,13 +94,20 @@ class AgentBlockView(View):
             auth = request.headers.get("Authorization", "")
             if not auth.startswith("Bearer "):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Signed device CDC grant required", 401)
-            grant = self.runtime.upload_grant(auth[7:], request_id)
-            edit = grant["condition"]["editing"]
+            grant = (self.runtime.optimistic_upload_grant(auth[7:], request_id)
+                     if self.optimistic else self.runtime.upload_grant(auth[7:], request_id))
+            condition=grant["condition"]
+            edit=(dict(intent_id=condition["agent_upload"]["intent_id"],
+                repo_id=grant["repo_id"],
+                base_file_id=condition["expected_file_id"])
+                if self.optimistic else condition["editing"])
+            get_receipt=(self.runtime.optimistic_upload_receipt
+                if self.optimistic else self.runtime.upload_receipt)
             if request.headers.get("Idempotency-Key") != edit["intent_id"]:
                 raise invalid("Original CommitIntent required")
             if type(grant["snapshot_size"]) is not int or not 1 <= grant["snapshot_size"] <= MAX_FILE:
                 raise invalid("P0 CDC file limit exceeded")
-            receipt = self.runtime.upload_receipt(grant, request_id)
+            receipt = get_receipt(grant, request_id)
             if receipt["state"] == "published":
                 result = dict(intent=receipt)
             elif receipt["state"] != "prepared":
@@ -169,7 +177,8 @@ class AgentBlockView(View):
                 condition["head_id"] = current_head
                 parent, _, filename = condition["path"].rpartition("/")
                 try:
-                    _call("seafile_cloudfile_publish_edit_blocks",
+                    _call("seafile_cloudfile_publish_optimistic_blocks"
+                          if self.optimistic else "seafile_cloudfile_publish_edit_blocks",
                           (edit["repo_id"], json.dumps(ordered, separators=(",", ":")),
                            str(value["size"]), parent or "/", filename,
                            grant["native_user"], json.dumps(condition, separators=(",", ":"))),
@@ -177,12 +186,13 @@ class AgentBlockView(View):
                 except Exception:
                     # A real Branch update may have landed before reply loss.
                     pass
-                receipt = self.runtime.upload_receipt(grant, request_id)
+                receipt = get_receipt(grant, request_id)
                 if (receipt["state"] != "published" or
                         receipt.get("result_file_id") != value["file_id"] or
                         receipt.get("content_digest") != value["sha256"] or
-                        receipt.get("expected_file_id") != edit["base_file_id"] or
-                        receipt.get("action") != grant["action"]):
+                        (receipt.get("base_file_id") if self.optimistic
+                         else receipt.get("expected_file_id")) != edit["base_file_id"] or
+                        (not self.optimistic and receipt.get("action") != grant["action"])):
                     raise ContractError("PUBLICATION_UNCONFIRMED", "Recover original Intent", 503)
                 result = dict(intent=receipt)
             else:

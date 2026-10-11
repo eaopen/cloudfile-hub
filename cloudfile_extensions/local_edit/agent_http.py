@@ -30,7 +30,7 @@ class AgentClaimView(DirectoryPolicyView):
                     "Authorization" in request.headers or "Content-Encoding" in request.headers):
                 raise invalid("Device claim accepts only proof JSON without cookies, authorization or query")
             value = self._body(request)
-            if self.operation not in {"challenge", "claim", "read-challenge", "read-ticket", "renew-challenge", "renew", "cancel-challenge", "cancel", "commit-challenge", "commit-authorize", "commit-upload-authorize", "commit-status-challenge", "commit-status", "lease-challenge", "lease-receive", "lease-confirm-challenge", "lease-confirm", "lease-renew-challenge", "lease-renew"}:
+            if self.operation not in {"challenge", "claim", "read-challenge", "read-ticket", "renew-challenge", "renew", "cancel-challenge", "cancel", "commit-challenge", "commit-authorize", "commit-upload-authorize", "commit-status-challenge", "commit-status", "lease-challenge", "lease-receive", "lease-confirm-challenge", "lease-confirm", "lease-renew-challenge", "lease-renew", "optimistic-upload-challenge", "optimistic-upload-authorize", "optimistic-status-challenge", "optimistic-status"}:
                 raise invalid("Agent operation is unavailable")
             if not isinstance(self.runtime, AgentClaimRuntime):
                 raise ContractError("LOCAL_SESSION_UNAVAILABLE", "Device claim runtime is unavailable", 503)
@@ -40,7 +40,7 @@ class AgentClaimView(DirectoryPolicyView):
                     raise ContractError("LOCAL_READ_UNAVAILABLE", "Native local read runtime is unavailable", 503)
                 method = {"read-challenge": self.runtime.read_challenge, "read-ticket": self.read_issuer.issue,
                     "renew-challenge": self.runtime.renew_challenge, "renew": self.runtime.renew}[self.operation]
-            elif self.operation in {"commit-challenge", "commit-authorize", "commit-upload-authorize", "commit-status-challenge", "commit-status", "lease-challenge", "lease-receive", "lease-confirm-challenge", "lease-confirm", "lease-renew-challenge", "lease-renew"}:
+            elif self.operation in {"commit-challenge", "commit-authorize", "commit-upload-authorize", "commit-status-challenge", "commit-status", "lease-challenge", "lease-receive", "lease-confirm-challenge", "lease-confirm", "lease-renew-challenge", "lease-renew", "optimistic-upload-challenge", "optimistic-upload-authorize", "optimistic-status-challenge", "optimistic-status"}:
                 method = getattr(self.runtime, self.operation.replace("-", "_"))
             elif self.operation in {"cancel-challenge", "cancel"}:
                 method = self.runtime.cancel_challenge if self.operation == "cancel-challenge" else self.runtime.cancel
@@ -69,13 +69,21 @@ def agent_claim_routes(*, runtime, read_issuer=None):
             read_issuer.runtime is not runtime):
         raise ValueError("actual same-runtime local read issuer required")
     operations = ("challenge", "claim", "cancel-challenge", "cancel") if read_issuer is None else (
-        "challenge", "claim", "read-challenge", "read-ticket", "renew-challenge", "renew", "cancel-challenge", "cancel", "commit-challenge", "commit-authorize", "commit-upload-authorize", "commit-status-challenge", "commit-status", "lease-challenge", "lease-receive", "lease-confirm-challenge", "lease-confirm", "lease-renew-challenge", "lease-renew")
+        "challenge", "claim", "read-challenge", "read-ticket", "renew-challenge", "renew", "cancel-challenge", "cancel", "commit-challenge", "commit-authorize", "commit-upload-authorize", "commit-status-challenge", "commit-status", "lease-challenge", "lease-receive", "lease-confirm-challenge", "lease-confirm", "lease-renew-challenge", "lease-renew", "optimistic-upload-challenge", "optimistic-upload-authorize", "optimistic-status-challenge", "optimistic-status")
     from .upload_http import AgentUploadView
+    from .optimistic_upload_http import AgentOptimisticUploadView
     from .block_http import AgentBlockView
     block = [path("v1/agent/commit-block-" + operation + "/", AgentBlockView.as_view(
         runtime=runtime, operation=operation), name="local-agent-commit-block-" + operation)
         for operation in ("plan", "stage", "publish")] if read_issuer is not None else []
+    optimistic_blocks = [path("v1/agent/optimistic-block-" + operation + "/",
+        AgentBlockView.as_view(runtime=runtime, operation=operation, optimistic=True),
+        name="local-agent-optimistic-block-" + operation)
+        for operation in ("plan", "stage", "publish")] if read_issuer is not None else []
     upload = [path("v1/agent/commit-upload/", AgentUploadView.as_view(runtime=runtime),
         name="local-agent-commit-upload")] if read_issuer is not None else []
-    return upload + block + [path("v1/agent/" + operation + "/", AgentClaimView.as_view(runtime=runtime,
+    optimistic = [path("v1/agent/optimistic-upload/",
+        AgentOptimisticUploadView.as_view(runtime=runtime),
+        name="local-agent-optimistic-upload")] if read_issuer is not None else []
+    return upload + block + optimistic_blocks + optimistic + [path("v1/agent/" + operation + "/", AgentClaimView.as_view(runtime=runtime,
         read_issuer=read_issuer, operation=operation), name="local-agent-" + operation) for operation in operations]

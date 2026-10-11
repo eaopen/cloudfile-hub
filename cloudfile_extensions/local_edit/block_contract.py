@@ -55,6 +55,10 @@ def validate_plan(value, grant):
 
 def columns(grant):
     condition = grant["condition"]
+    if "agent_upload" in condition:
+        session = condition["agent_upload"]
+        return (session["intent_id"],session["session_id"],session["device_id"],
+                grant["repo_id"],grant["snapshot_size"],grant["content_digest"])
     edit = condition["editing"]
     session = condition["local_commit"]
     return (edit["intent_id"], session["session_id"], session["device_id"],

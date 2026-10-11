@@ -34,6 +34,22 @@ class DeviceStore:
             raise conflict()
         return rows[0][0]
 
+    def list_active(self, sql, *, provider, actor):
+        """Read-only selectors for current Web actor under authenticated SQL.
+
+        Requires the same real caller-owned resource transaction as status,
+        never grants a file, bearer, Checkout or unpaired device capability.
+        """
+        identifier(provider, maximum=32)
+        identifier(actor, maximum=225)
+        require_storage(sql)
+        sql.execute("SELECT device_id,revision FROM cf_local_device "
+                    "WHERE provider=%s AND owner_user_id=%s AND state='active' "
+                    "ORDER BY updated_at DESC,device_id LIMIT 32 FOR UPDATE",
+                    (provider, actor))
+        return dict(devices=[dict(device_id=device_id, revision=str(revision))
+            for device_id, revision in sql.fetchall()])
+
     def status(self, sql, *, provider, actor, device_id):
         self._scope(sql, provider, actor, device_id)
         key, state, revision = self._load(sql, provider, actor, device_id)

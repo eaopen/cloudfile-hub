@@ -30,13 +30,13 @@ def test_onlyoffice_is_not_a_cloudfile_action():
     }, PREVIEW) == []
 
 
-def test_local_view_is_available_but_local_edit_and_checkout_are_not():
+def test_optimistic_edit_is_independent_of_checkout_lock_provider():
     actions = by_id(policy.actions_for('/assembly.step', {
         'CF_ENABLE_LOCAL_APP': True,
         'CF_ENABLE_CHECKOUT': True,
     }, PREVIEW))
     assert actions[policy.LOCAL_VIEW]['available'] is True
-    assert actions[policy.LOCAL_EDIT]['available'] is False
+    assert actions[policy.LOCAL_EDIT]['available'] is True
     assert actions[policy.CHECKOUT]['available'] is False
 
 

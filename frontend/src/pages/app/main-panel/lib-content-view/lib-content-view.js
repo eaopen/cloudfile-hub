@@ -10,6 +10,8 @@ import relativeTime from 'dayjs/plugin/relativeTime';
 import Cookies from 'js-cookie';
 import PropTypes from 'prop-types';
 import { seafileAPI } from '@/api/seafile-api';
+import { launchPairedAgent } from '@/cloudfile/agent-local-edit';
+import { cloudFileAPI } from '@/cloudfile/cloudfile-api';
 import { loadFeatures } from '@/cloudfile/features';
 import CurDirPath from '@/components/cur-dir-path';
 import DirTool from '@/components/cur-dir-path/dir-tool';
@@ -687,6 +689,44 @@ class LibContentView extends React.Component {
     let repoInfo = this.state.currentRepoInfo;
     let url = siteRoot + 'library/' + repoID + '/' + encodeURIComponent(repoInfo.repo_name) + Utils.encodePath(path);
     window.history.pushState({ url: url, path: path }, path, url);
+  };
+
+  onCloudFileLocalEdit = async (filePath) => {
+    // v0.7 explicitly selected ONE existing file. It is not v0.8's
+    // resident TaskManager and does not upload upon a filesystem save.
+    if (this.localEditLaunching) return;
+    this.localEditLaunching = true;
+    try {
+      const devicesResponse = await cloudFileAPI.listLocalEditingDevices();
+      const devices = devicesResponse.data && devicesResponse.data.devices;
+      if (!Array.isArray(devices) || devices.length === 0) {
+        throw new Error('当前登录用户没有已配对的本地 Agent，请先完成设备配对。');
+      }
+      let selected = devices[0];
+      if (devices.length > 1) {
+        const labels = devices.map((device, index) => String(index + 1) + '. ' + device.device_id).join('\\n');
+        const choice = window.prompt('选择本次打开的已配对设备编号：\\n' + labels, '1');
+        if (choice === null) return;
+        const number = Number(choice);
+        if (!Number.isInteger(number) || number < 1 || number > devices.length)
+          throw new Error('未选择有效的已配对设备');
+        selected = devices[number - 1];
+      }
+      if (!selected || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(selected.device_id))
+        throw new Error('服务端设备编号无效');
+      const response = await cloudFileAPI.startOrdinaryAgentEdit({
+        repo_id: this.props.repoID, path: filePath, kind: 'file'
+      }, selected.device_id);
+      const session = response && response.data;
+      if (!session || session.state !== 'created' || typeof session.open_uri !== 'string')
+        throw new Error('原会话已领取或结果未知，请先检查本机 Agent，不重新创建会话');
+      await launchPairedAgent(session.open_uri);
+      toaster.success(gettext('Local Agent opening request accepted'));
+    } catch (error) {
+      toaster.danger(error.message || Utils.getErrorMsg(error));
+    } finally {
+      this.localEditLaunching = false;
+    }
   };
 
   showFile = (filePath, noRedirection) => {
@@ -3202,6 +3242,7 @@ class LibContentView extends React.Component {
                               currentMode={this.state.currentMode}
                               onItemConvert={this.onConvertItem}
                               loadDirentList={this.loadDirentList}
+                              onCloudFileLocalEdit={this.onCloudFileLocalEdit}
                             />
                           )
                         ) : (

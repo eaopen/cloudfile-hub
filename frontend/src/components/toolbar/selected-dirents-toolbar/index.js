@@ -1,5 +1,6 @@
 import React from 'react';
 import PropTypes from 'prop-types';
+import { isEnabled } from '@/cloudfile/features';
 import { EVENT_BUS_TYPE as TABLE_EVENT_BUS_TYPE } from '@/features/metadata/constants';
 import { Dirent } from '@/models';
 import { gettext } from '@/utils/constants';
@@ -29,6 +30,7 @@ const propTypes = {
   showDirentDetail: PropTypes.func.isRequired,
   onItemConvert: PropTypes.func,
   loadDirentList: PropTypes.func,
+  onCloudFileLocalEdit: PropTypes.func,
 };
 
 const SINGLE_EXCLUDES = ['Download', 'Delete', 'Share', 'Move', 'Copy'];
@@ -177,6 +179,13 @@ class SelectedDirentsToolbar extends React.Component {
   render() {
     const { selectedDirentList } = this.props;
     const selectedLen = selectedDirentList.length;
+    const selected = selectedLen === 1 ? selectedDirentList[0] : null;
+    const isFile = selected && (typeof selected.isDir === 'function'
+      ? !selected.isDir() : selected.type === 'file');
+    const ordinaryEdit = isEnabled('CF_ENABLE_LOCAL_APP') && isFile &&
+      this.props.onCloudFileLocalEdit &&
+      this.props.currentRepoInfo.status !== 'read-only' &&
+      this.props.userPerm !== 'r';
 
     const { iconOps, menuOps } = this.getSelectedDirentOperations();
     const { iconOps: iconOpsForMulti, menuOps: menuOpsForMulti } = this.getSelectedDirentsOperations();
@@ -206,6 +215,12 @@ class SelectedDirentsToolbar extends React.Component {
         {selectedLen === 1 && (
           <>
             {this.renderIconButtons(iconOps)}
+            {ordinaryEdit && (
+              <button type="button" className="btn btn-sm btn-outline-primary mr-2"
+                onClick={() => this.props.onCloudFileLocalEdit(this.getDirentPath(selected))}>
+                {gettext('Edit with local software')}
+              </button>
+            )}
             <CustomDropdown
               target="selected-item-dropdown-menu"
               items={menuOps}

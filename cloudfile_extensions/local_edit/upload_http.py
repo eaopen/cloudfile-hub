@@ -19,21 +19,20 @@ from .commit_contract import MAX_MANUAL_BYTES
 
 
 def stage(request, output, *, size, digest):
-    """Do not materialize request.body or trust a client filename/path."""
-    actual = hashlib.sha256()
-    remaining = size
-    while remaining:
-        chunk = request.read(min(65536, remaining))
-        if not chunk:
-            raise invalid("Incomplete upload")
-        output.write(chunk)
-        actual.update(chunk)
-        remaining -= len(chunk)
-    if request.read(1) or not hmac.compare_digest(actual.hexdigest(), digest):
-        raise invalid("Upload does not match the captured snapshot")
-    output.flush()
-    os.fsync(output.fileno())
-    os.fchmod(output.fileno(), 0o400)
+    from .shared_staging import stage_chunks
+    def raw():
+        remaining=size
+        while remaining:
+            part=request.read(min(65536,remaining))
+            if not part:
+                raise invalid("Incomplete upload")
+            remaining-=len(part)
+            yield part
+        if request.read(1):
+            raise invalid("Upload stream exceeded declared size")
+    return stage_chunks(output,raw(),expected_size=size,
+                        max_bytes=MAX_MANUAL_BYTES,digest=digest,
+                        protect_snapshot=True)
 
 
 @method_decorator(csrf_exempt, name="dispatch")

@@ -116,9 +116,9 @@ class OIDCManualUpdateView(View):
                     raise ContractError("POLICY_UNAVAILABLE", "Upload staging is unavailable", 503)
                 temporary = Path(data_dir) / "httptemp"
                 with tempfile.NamedTemporaryFile(dir=temporary, prefix="cf-web-update-") as staged:
-                    for chunk in uploaded.chunks():
-                        staged.write(chunk)
-                    staged.flush()
+                    from ..local_edit.shared_staging import stage_chunks
+                    stage_chunks(staged, uploaded.chunks(), expected_size=uploaded.size,
+                                 max_bytes=512 * 1024 * 1024)
                     parent, _, filename = reference["path"].rpartition("/")
                     try:
                         submitted = True

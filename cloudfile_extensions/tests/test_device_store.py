@@ -59,6 +59,22 @@ class DeviceStoreTests(DatabaseTestCase):
     def consume(self, sql, challenge):
         return self.store.consume(sql, provider="etech", actor="user-1", challenge=challenge, signature=self.sign(challenge))
 
+    def test_web_active_device_list_is_scoped_to_current_actor(self):
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as sql:
+                self.create(sql)
+                self.assertEqual(self.store.list_active(sql, provider="etech",
+                    actor="user-1"), {"devices": []})
+                self.consume(sql, self.issue(sql))
+                ours = self.store.list_active(sql, provider="etech", actor="user-1")
+                self.assertEqual(ours["devices"], [
+                    dict(device_id=self.device_id, revision="2")])
+                self.assertEqual(self.store.list_active(sql, provider="etech",
+                    actor="other-user"), {"devices": []})
+        finally:
+            self.connection.rollback()
+
     def test_actual_pair_and_replay_rejection(self):
         self.connection.begin()
         try:

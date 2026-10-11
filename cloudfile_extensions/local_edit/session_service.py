@@ -178,6 +178,11 @@ class LocalSessionService:
         mode = value["mode"]
         authority = self._authority(mode)
         lease = value.get("lease")
+        if mode == "optimistic-edit":
+            from django.conf import settings
+            if getattr(settings, "CLOUDFILE_AGENT2_OPTIMISTIC_UPLOAD_ENABLED", False) is not True:
+                raise ContractError("EDIT_UNAVAILABLE",
+                    "Ordinary Agent edit upload has not been enabled", 503)
         if mode == "exclusive-edit":
             if not self.agent2_exclusive_enabled:
                 raise ContractError('EDIT_UNAVAILABLE', 'Exclusive Agent integration is not enabled', 503)

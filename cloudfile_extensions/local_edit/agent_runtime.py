@@ -235,6 +235,233 @@ class AgentClaimRuntime:
                     authority.is_owner = False
                     authority.effective_access = None
 
+    def optimistic_upload_challenge(self, value, request_id):
+        """Proof for ONE optimistic local edit; never an exclusive lease."""
+        return self._optimistic_upload_authority(value, request_id, signed=False)
+
+    def optimistic_upload_authorize(self, value, request_id):
+        return self._optimistic_upload_authority(value, request_id, signed=True)
+
+    def _optimistic_upload_authority(self, value, request_id, *, signed):
+        from django.conf import settings
+        from .device_proof import _uuid
+        import re
+        from .upload_grant import seal
+        self._process()
+        if getattr(settings, "CLOUDFILE_AGENT2_OPTIMISTIC_UPLOAD_ENABLED", False) is not True:
+            raise ContractError("EDIT_UNAVAILABLE", "Device optimistic upload is disabled", 503)
+        fields = ("session_id", "device_id", "intent_id", "base_file_id",
+                  "content_digest", "snapshot_size")
+        object_fields(value, fields + (("challenge", "signature") if signed else ()))
+        for field in ("session_id", "device_id", "intent_id"):
+            _uuid(value[field])
+        if (not isinstance(value["base_file_id"], str) or
+                not re.fullmatch(r"[0-9a-f]{40}", value["base_file_id"]) or
+                not isinstance(value["content_digest"], str) or
+                not re.fullmatch(r"[0-9a-f]{64}", value["content_digest"]) or
+                type(value["snapshot_size"]) is not int or
+                not 0 <= value["snapshot_size"] <= 128 * 1024 * 1024):
+            raise ValueError("Explicit bounded local file snapshot required")
+        identifier(request_id)
+        with self.resources.connection() as connection:
+            Outbox(connection)._require_idle()
+            with connection.cursor() as sql:
+                actor, saved = self._owner(sql, value)
+            connection.rollback()
+        if saved["mode"] != "optimistic-edit" or saved["base_version"] != value["base_file_id"]:
+            raise conflict()
+        with self.resources.preparation(actor, request_id) as preparation:
+            native_user = preparation.state.username(actor)
+            if not preparation.state.account_active(actor):
+                raise ContractError("ACCESS_DENIED", "Local edit device account unavailable", 403)
+            resources = ResourceService(preparation, self.core,
+                cloud_mode=self.cloud_mode, request_id=request_id,
+                secret=self.secret, lifecycle_reader=self.lifecycle_reader)
+            authority = resources.write_authority
+            try:
+                def effect(sql, reference):
+                    service = LocalSessionService(resources,
+                        actor=AuthenticatedPolicyActor(actor, native_user),
+                        instance=self.instance, version_reader=self.version_reader,
+                        agent2_exclusive_enabled=self.agent2_exclusive_enabled)
+                    current = service._snapshot(sql, reference, mode="optimistic-edit")
+                    if snapshot_json(current) != snapshot_json(saved):
+                        raise conflict()
+                    owner = dict(provider=authority.state.provider, actor=actor,
+                                 session_id=value["session_id"], device_id=value["device_id"])
+                    row = self.sessions._read_ready(sql, **owner, current_snapshot=saved)
+                    encoded = json.dumps([
+                        "cloudfile.optimistic-upload.v1", value["session_id"],
+                        value["device_id"], str(row[3]), str(row[9]),
+                        value["intent_id"], value["base_file_id"],
+                        value["content_digest"], value["snapshot_size"]],
+                        separators=(",", ":"), ensure_ascii=True).encode("ascii")
+                    expected_digest = hashlib.sha256(encoded).hexdigest()
+                    if not signed:
+                        challenge = self.sessions.devices.issue(sql,
+                            provider=owner["provider"], actor=actor,
+                            device_id=value["device_id"], instance=self.instance,
+                            session_id=value["session_id"], operation="commit",
+                            request_sha256=expected_digest)
+                        return dict(challenge=asdict(challenge))
+                    object_fields(value["challenge"], ("instance", "device_id", "session_id",
+                        "operation", "nonce", "issued_at", "expires_at", "request_sha256"))
+                    challenge = DeviceChallenge(**value["challenge"])
+                    if (challenge.instance != self.instance or challenge.operation != "commit" or
+                            challenge.session_id != value["session_id"] or
+                            challenge.device_id != value["device_id"] or
+                            challenge.request_sha256 != expected_digest):
+                        raise conflict()
+                    self.sessions.devices.consume(sql, provider=owner["provider"],
+                        actor=actor, challenge=challenge, signature=value["signature"])
+                    from .optimistic_intent import OptimisticIntentStore
+                    saved_receipt = OptimisticIntentStore.prepare(sql, dict(
+                        intent_id=value["intent_id"],
+                        base_file_id=value["base_file_id"],
+                        content_digest=value["content_digest"],
+                        snapshot_size=value["snapshot_size"]),
+                        session=value["session_id"],device=value["device_id"],
+                        repo=reference["repo_id"])
+                    if saved_receipt["state"] != "prepared":
+                        raise ContractError("EDIT_CONFLICT",
+                            "Original optimistic publication already completed", 409)
+                    subject = preparation.contexts.current(actor)
+                    if subject is None:
+                        raise ContractError("SUBJECT_UNAVAILABLE", "Current subject unavailable", 503)
+                    provider = authority.state.provider
+                    conditions = dict(
+                        path=reference["path"],
+                        context=dict(provider=provider, userId=actor,
+                                     epoch=subject["context_epoch"]),
+                        scopes=[dict(type="provider", provider=provider, external_id=provider),
+                            dict(type="user", provider=provider, external_id=actor),
+                            dict(type="repo", provider="cloudfile", external_id=reference["repo_id"])],
+                        agent_upload=dict(session_id=value["session_id"],
+                            device_id=value["device_id"],
+                            device_revision=str(row[3]),
+                            session_revision=str(row[9]), intent_id=value["intent_id"]),
+                        expected_file_id=value["base_file_id"])
+                    grant = dict(instance=self.instance, condition=conditions,
+                                 repo_id=reference["repo_id"], native_user=native_user,
+                                 intent_id=value["intent_id"],
+                                 content_digest=value["content_digest"],
+                                 snapshot_size=value["snapshot_size"],
+                                 action="optimistic-update")
+                    return dict(ticket=seal(self.secret, grant), expires_in=60,
+                                intent_id=value["intent_id"],
+                                content_digest=value["content_digest"],
+                                snapshot_size=value["snapshot_size"],
+                                native_device_publish=True,
+                                transfer=dict(
+                                    path="/api/v2.1/cloudfile/extensions/local-edit/v1/agent/optimistic-upload/",
+                                    method="POST", authorization="Bearer", redirects=False))
+                return authority.consume(saved["resource"], effect)
+            finally:
+                for item in (resources.read_authority, resources.write_authority,
+                             resources.tag_management):
+                    item.epoch = None
+                    item.current_subject = None
+                    item.is_owner = False
+                    item.effective_access = None
+
+    def optimistic_upload_receipt(self, grant, request_id):
+        """Read the Native Branch-atomic result from a sealed device grant."""
+        from .optimistic_intent import OptimisticIntentStore
+        self._process()
+        identifier(request_id)
+        value=grant["condition"]["agent_upload"]
+        with self.resources.connection() as connection:
+            Outbox(connection)._require_idle()
+            connection.begin()
+            try:
+                with connection.cursor() as sql:
+                    result=OptimisticIntentStore.receipt(sql, value["intent_id"],
+                        session=value["session_id"], device=value["device_id"],
+                        repo=grant["repo_id"])
+                connection.commit()
+                return result
+            finally:
+                connection.rollback()
+
+    def optimistic_status_challenge(self, value, request_id):
+        return self._optimistic_status(value, request_id, signed=False)
+
+    def optimistic_status(self, value, request_id):
+        return self._optimistic_status(value, request_id, signed=True)
+
+    def _optimistic_status(self, value, request_id, *, signed):
+        """Status is signed with the current paired device, not a lost bearer."""
+        from django.conf import settings
+        from .device_proof import _uuid
+        from .optimistic_intent import OptimisticIntentStore
+        self._process()
+        if getattr(settings, "CLOUDFILE_AGENT2_OPTIMISTIC_UPLOAD_ENABLED", False) is not True:
+            raise ContractError("EDIT_UNAVAILABLE","Optimistic publication disabled",503)
+        object_fields(value,("session_id","device_id","intent_id")+
+                      (("challenge","signature") if signed else ()))
+        for key in ("session_id","device_id","intent_id"):
+            _uuid(value[key])
+        identifier(request_id)
+        with self.resources.connection() as connection:
+            Outbox(connection)._require_idle()
+            connection.begin()
+            try:
+                with connection.cursor() as sql:
+                    actor,saved=self._owner(sql,value)
+                    owner=dict(provider=self.resources.provider,actor=actor,
+                        device_id=value["device_id"])
+                    revision=self.sessions.devices._scope(sql,**owner)
+                    row=self.sessions._row(sql,**owner,session_id=value["session_id"])
+                    if row[3]!=revision or saved["mode"]!="optimistic-edit":
+                        raise conflict()
+                    request_hash=hashlib.sha256(json.dumps([
+                        "cloudfile.optimistic-status.v1",value["session_id"],
+                        value["device_id"],value["intent_id"],str(revision),
+                        str(row[9])],separators=(",",":"),ensure_ascii=True).encode()).hexdigest()
+                    if not signed:
+                        result=dict(challenge=asdict(self.sessions.devices.issue(sql,
+                            **owner,instance=self.instance,session_id=value["session_id"],
+                            operation="commit",request_sha256=request_hash)))
+                    else:
+                        object_fields(value["challenge"],("instance","device_id",
+                            "session_id","operation","nonce","issued_at",
+                            "expires_at","request_sha256"))
+                        c=DeviceChallenge(**value["challenge"])
+                        if (c.instance!=self.instance or c.operation!="commit" or
+                            c.device_id!=value["device_id"] or
+                            c.session_id!=value["session_id"] or
+                            c.request_sha256!=request_hash):
+                            raise conflict()
+                        self.sessions.devices.consume(sql,provider=owner["provider"],
+                            actor=actor,challenge=c,signature=value["signature"])
+                        result=dict(intent=OptimisticIntentStore.receipt(sql,
+                            value["intent_id"],session=value["session_id"],
+                            device=value["device_id"]))
+                connection.commit()
+                return result
+            finally:
+                connection.rollback()
+
+    def optimistic_upload_grant(self, value, request_id):
+        """Accept only a signed, short-lived, device-bound optimistic edit."""
+        from django.conf import settings
+        from .upload_grant import unseal
+        self._process()
+        if getattr(settings, "CLOUDFILE_AGENT2_OPTIMISTIC_UPLOAD_ENABLED", False) is not True:
+            raise ContractError("EDIT_UNAVAILABLE", "Device optimistic upload disabled", 503)
+        identifier(request_id)
+        grant = unseal(self.secret, value)
+        if (not isinstance(grant, dict) or
+                set(grant) != {"instance", "condition", "repo_id", "native_user",
+                               "intent_id", "content_digest", "snapshot_size", "action"} or
+                grant["instance"] != self.instance or
+                grant["action"] != "optimistic-update" or
+                not isinstance(grant["condition"], dict) or
+                set(grant["condition"]) != {"path", "context", "scopes",
+                                            "agent_upload", "expected_file_id"}):
+            raise ContractError("AUTHENTICATION_REQUIRED", "Optimistic device upload grant invalid", 401)
+        return grant
+
     def commit_challenge(self, value, request_id):
         """Device-side signed one-file PREPARE; does not authorize file bytes."""
         return self._commit_device(value, request_id, signed=False)

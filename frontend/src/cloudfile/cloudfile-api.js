@@ -63,6 +63,18 @@ class CloudFileAPI {
 
   // The caller retains this key and original body through an unknown reply.
   // Retrying must never silently mint another Checkout or session identity.
+  listLocalEditingDevices() {
+    // Server checks current OIDC/CSRF actor and returns only owned active IDs.
+    return this.req.post(this.server +
+      '/api/v2.1/cloudfile/extensions/local-edit/v1/devices/list/', {});
+  }
+
+  startOrdinaryAgentEdit(reference, deviceID) {
+    return this.req.post(this.server +
+      '/api/v2.1/cloudfile/extensions/local-edit/v1/sessions/create/',
+    { reference, device_id: deviceID, mode: 'optimistic-edit' });
+  }
+
   startExclusiveEdit(reference, deviceID, baseFileID, requestKey) {
     if (typeof requestKey !== 'string' || !/^[\x21-\x7e]{1,128}$/.test(requestKey)) {
       return Promise.reject(new Error('Stable exclusive request key required'));

@@ -89,6 +89,12 @@ class DeviceManagementService:
             return dict(**result, key_thumbprint=key.thumbprint, challenge=asdict(challenge))
         return self._execute(effect)
 
+    def list_devices(self, value):
+        """Return only the current OIDC actor's active paired selectors."""
+        object_fields(value, ())
+        return self._execute(lambda sql: self.store.list_active(sql,
+            provider=self.preparation.state.provider, actor=self.actor.user_id))
+
     def status(self, value):
         object_fields(value, ("device_id",))
         return self._execute(lambda sql: self.store.status(sql, provider=self.preparation.state.provider,

@@ -52,6 +52,24 @@ class PostForkAgentClaimRuntime(AgentClaimRuntime):
     def cancel(self, value, request_id):
         return policy_host.local_agent_call("cancel", value, request_id)
 
+    def optimistic_upload_challenge(self, value, request_id):
+        return policy_host.local_agent_call("optimistic_upload_challenge", value, request_id)
+
+    def optimistic_upload_authorize(self, value, request_id):
+        return policy_host.local_agent_call("optimistic_upload_authorize", value, request_id)
+
+    def optimistic_upload_grant(self, value, request_id):
+        return policy_host.local_agent_call("optimistic_upload_grant", value, request_id)
+
+    def optimistic_upload_receipt(self, value, request_id):
+        return policy_host.local_agent_call("optimistic_upload_receipt", value, request_id)
+
+    def optimistic_status_challenge(self, value, request_id):
+        return policy_host.local_agent_call("optimistic_status_challenge", value, request_id)
+
+    def optimistic_status(self, value, request_id):
+        return policy_host.local_agent_call("optimistic_status", value, request_id)
+
     def commit_challenge(self, value, request_id):
         return policy_host.local_agent_call("commit_challenge", value, request_id)
 
