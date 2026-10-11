@@ -1127,19 +1127,35 @@ class SeafileAPI {
     });
   }
 
-  async cloudFileUpload(repoID, parent, file, replace) {
+  async cloudFileUpload(repoID, parent, file, replace, localEdit = null) {
     const listing = await this.listDir(repoID, parent);
     const head = listing.data.head_id;
     if (!/^[0-9a-f]{40}$/.test(head)) throw new Error('Current head is unavailable');
     const form = new window.FormData();
     form.append('repo_id', repoID);
-    form.append('path', (parent === '/' ? '' : parent.replace(/\/$/, '')) + '/' + file.name);
+    const chosenPath = (parent === '/' ? '' : parent.replace(/\/$/, '')) + '/' + file.name;
+    // Only a previously captured local-edit task may nominate another cloud
+    // filename (e.g. Windows GUID working copies). The server checks the
+    // original version in its final native Branch transaction.
+    if (localEdit !== null) {
+      if (!replace || !localEdit || typeof localEdit !== 'object' ||
+          !/^[0-9a-f]{40}$/.test(localEdit.baseFileID) ||
+          typeof localEdit.originalPath !== 'string' ||
+          !localEdit.originalPath.startsWith((parent === '/' ? '/' : parent.replace(/\/$/, '') + '/')) ||
+          localEdit.originalPath === (parent === '/' ? '/' : parent.replace(/\/$/, '') + '/') ||
+          localEdit.originalPath.slice((parent === '/' ? '/' : parent.replace(/\/$/, '') + '/').length).includes('/')) {
+        throw new Error('Original local edit target and baseline required');
+      }
+      form.append('base_file_id', localEdit.baseFileID);
+    }
+    form.append('path', localEdit ? localEdit.originalPath : chosenPath);
     form.append('head_id', head);
     form.append('file', file);
     const operation = replace ? 'manual-update/' : 'manual-upload/';
     const result = await this.req.post(this.server + '/api/v2.1/cloudfile/extensions/identity/v1/' + operation, form);
     const current = await this.listDir(repoID, parent);
-    const entry = current.data.dirent_list.find(item => item.name === file.name && item.type === 'file');
+    const expectedName = localEdit ? localEdit.originalPath.split('/').pop() : file.name;
+    const entry = current.data.dirent_list.find(item => item.name === expectedName && item.type === 'file');
     if (!entry || entry.id !== result.data.object_id) throw new Error('Refresh required after publication');
     return entry;
   }

@@ -35,6 +35,31 @@ test.each([false, true])('explicit multipart upload uses current head and operat
   expect(seafileAPI.req.get.mock.calls[0][1].params).toEqual({ p: '/' });
 });
 
+test('Agent local-edit web upload preserves original target and base even when working filename is GUID', async () => {
+  const file = new File(['draft'], '6f1e2d9b-capture.dwg');
+  const entry = { name: 'drawing.dwg', type: 'file', id: 'new-dwg' };
+  seafileAPI.req.get.mockResolvedValueOnce({ data: { head_id: 'a'.repeat(40) } })
+    .mockResolvedValueOnce({ data: { dirent_list: [entry] } });
+  seafileAPI.req.post.mockResolvedValueOnce({ data: { object_id: 'new-dwg' } });
+  const task = { originalPath: '/parts/drawing.dwg', baseFileID: 'b'.repeat(40) };
+  expect(await seafileAPI.cloudFileUpload('repo', '/parts', file, true, task)).toEqual(entry);
+  const [url, form] = seafileAPI.req.post.mock.calls[0];
+  expect(url.endsWith('/manual-update/')).toBe(true);
+  expect(form.get('path')).toBe('/parts/drawing.dwg');
+  expect(form.get('base_file_id')).toBe('b'.repeat(40));
+  expect(form.get('file')).toBe(file);
+});
+
+test('Agent local-edit rejects cross-folder and unbound target before uploading', async () => {
+  const file = new File(['x'], 'tmp.docx');
+  seafileAPI.req.get.mockResolvedValue({ data: { head_id: 'a'.repeat(40) } });
+  await expect(seafileAPI.cloudFileUpload('repo', '/parts', file, true,
+    { originalPath: '/elsewhere/drawing.docx', baseFileID: 'b'.repeat(40) })).rejects.toThrow();
+  await expect(seafileAPI.cloudFileUpload('repo', '/parts', file, false,
+    { originalPath: '/parts/drawing.docx', baseFileID: 'b'.repeat(40) })).rejects.toThrow();
+  expect(seafileAPI.req.post).not.toHaveBeenCalled();
+});
+
 test('missing current head cannot publish and thumbnails stay out of browse requests', async () => {
   seafileAPI.req.get.mockResolvedValue({ data: {} });
   await expect(seafileAPI.cloudFileUpload('repo', '/', new File(['x'], 'a'), false)).rejects.toThrow();

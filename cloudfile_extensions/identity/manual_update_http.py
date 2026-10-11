@@ -52,7 +52,9 @@ class OIDCManualUpdateView(View):
                 raise ContractError("ACCESS_DENIED", "CSRF verification failed", 403)
             if request.content_type != "multipart/form-data":
                 raise ContractError("UNSUPPORTED_MEDIA_TYPE", "Multipart form is required", 415)
-            if (set(request.POST) != {"repo_id", "path", "head_id"}
+            base_fields = {"repo_id", "path", "head_id"}
+            task_fields = base_fields | {"base_file_id"}
+            if (set(request.POST) not in (base_fields, task_fields if not self.create else base_fields)
                     or any(len(request.POST.getlist(key)) != 1 for key in request.POST)
                     or set(request.FILES) != {"file"} or len(request.FILES.getlist("file")) != 1):
                 raise invalid("One explicit file and expected head are required")
@@ -61,6 +63,12 @@ class OIDCManualUpdateView(View):
             head = request.POST["head_id"]
             if not re.fullmatch(r"[0-9a-f]{40}", head):
                 raise invalid("Explicit expected head is required")
+            # Optional only for an explicit Web upload of an existing local
+            # edit. The base is the ORIGINAL download File ID, NOT the head
+            # fetched just before upload. Native Branch must enforce both.
+            original_file_id = request.POST.get("base_file_id")
+            if original_file_id is not None and not re.fullmatch(r"[0-9a-f]{40}", original_file_id):
+                raise invalid("Canonical original edit File ID required")
             uploaded = request.FILES["file"]
             if uploaded.size > 512 * 1024 * 1024:
                 raise ContractError("REQUEST_TOO_LARGE", "Manual update exceeds 512 MiB", 413)
@@ -99,6 +107,8 @@ class OIDCManualUpdateView(View):
                     oidc_session=proof)
                 if self.create:
                     condition["create"] = True
+                elif original_file_id is not None:
+                    condition["expected_file_id"] = original_file_id
                 # Trusted shared data directory; the submitted filename never
                 # selects the staging path. Cleanup also runs on RPC failure.
                 data_dir = os.environ.get("SEAFILE_DATA_DIR", "")
@@ -116,7 +126,11 @@ class OIDCManualUpdateView(View):
                             (reference["repo_id"], staged.name, parent or "/", filename,
                              actor.native_username, json.dumps(condition, separators=(",", ":"))),
                             time.monotonic() + 30)
-                    except Exception:
+                    except Exception as error:
+                        from .ticket_transport import NativeVersionConflict
+                        if isinstance(error, NativeVersionConflict):
+                            raise ContractError("RESOURCE_VERSION_CONFLICT",
+                                "Cloud file changed since this local edit began; preserve your copy", 409) from None
                         raise ContractError("PUBLICATION_UNCONFIRMED",
                             "Native update was refused or completion is unconfirmed", 503) from None
             if not isinstance(object_id, str) or not re.fullmatch(r"[0-9a-f]{40}", object_id):

@@ -11,7 +11,7 @@ from types import ModuleType
 import unittest
 from unittest.mock import patch
 
-from cloudfile_extensions.identity.ticket_transport import _call
+from cloudfile_extensions.identity.ticket_transport import _call, NativeVersionConflict
 
 
 class TicketTransportTests(unittest.TestCase):
@@ -97,3 +97,11 @@ class TicketTransportTests(unittest.TestCase):
                     connection.sendall(struct.pack("<I", len(body)) + body)
                 with self.server(responder), self.assertRaises(ValueError):
                     _call("seafile_get_repo", ("repo",), time.monotonic() + 1)
+
+    def test_explicit_native_original_file_conflict_is_distinct_from_lost_ack(self):
+        body = b'{"err_code":601,"err_msg":"Original local file ID changed"}'
+        def responder(connection):
+            connection.sendall(struct.pack("<I", len(body)) + body)
+        with self.server(responder), self.assertRaises(NativeVersionConflict):
+            _call("seafile_cloudfile_put_file_with_barriers",
+                ("repo","file","/","x","user","condition"), time.monotonic() + 1)

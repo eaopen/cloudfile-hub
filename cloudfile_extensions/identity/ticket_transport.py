@@ -7,13 +7,24 @@ import re
 from uuid import UUID
 
 
+class NativeVersionConflict(ValueError):
+    """Native Server explicitly refused stale original File ID (601).
+
+    A timeout/connection drop is never reclassified as a known conflict,
+    because native publication may already have committed before reply loss.
+    """
+
+
 def _call(function, arguments, deadline):
     from seaserv.service import seafile_pipe_path
     counts = {"seafile_get_repo": 1, "seafile_get_file_id_by_commit_and_path": 3,
         "seafile_cloudfile_issue_read_ticket": 7,
         "seafile_cloudfile_put_file_with_barriers": 6,
         "seafile_cloudfile_publish_edit": 6,
-        "seafile_cloudfile_checkin_edit": 4}
+        "seafile_cloudfile_checkin_edit": 4,
+        "seafile_check_repo_blocks_missing": 2,
+        "seafile_cloudfile_stage_raw_block": 4,
+        "seafile_cloudfile_publish_edit_blocks": 7}
     if function not in counts or len(arguments) != counts[function] or any(
             not isinstance(value, str) or "\x00" in value for value in arguments):
         raise ValueError("fixed native ticket arguments required")
@@ -56,6 +67,10 @@ def _call(function, arguments, deadline):
             return result
         response = json.loads(receive(size).decode("utf-8"), object_pairs_hook=pairs,
             parse_constant=lambda _: (_ for _ in ()).throw(ValueError()))
+        if (isinstance(response, dict) and
+                set(response) == {"err_code", "err_msg"} and
+                type(response["err_code"]) is int and response["err_code"] == 601):
+            raise NativeVersionConflict("Native original file version rejected")
         if not isinstance(response, dict) or "err_code" in response or "ret" not in response:
             raise ValueError("native ticket response rejected")
         budget()  # Parsing must not turn an expired transport into success.

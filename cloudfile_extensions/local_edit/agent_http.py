@@ -71,7 +71,11 @@ def agent_claim_routes(*, runtime, read_issuer=None):
     operations = ("challenge", "claim", "cancel-challenge", "cancel") if read_issuer is None else (
         "challenge", "claim", "read-challenge", "read-ticket", "renew-challenge", "renew", "cancel-challenge", "cancel", "commit-challenge", "commit-authorize", "commit-upload-authorize", "commit-status-challenge", "commit-status", "lease-challenge", "lease-receive", "lease-confirm-challenge", "lease-confirm", "lease-renew-challenge", "lease-renew")
     from .upload_http import AgentUploadView
+    from .block_http import AgentBlockView
+    block = [path("v1/agent/commit-block-" + operation + "/", AgentBlockView.as_view(
+        runtime=runtime, operation=operation), name="local-agent-commit-block-" + operation)
+        for operation in ("plan", "stage", "publish")] if read_issuer is not None else []
     upload = [path("v1/agent/commit-upload/", AgentUploadView.as_view(runtime=runtime),
         name="local-agent-commit-upload")] if read_issuer is not None else []
-    return upload + [path("v1/agent/" + operation + "/", AgentClaimView.as_view(runtime=runtime,
+    return upload + block + [path("v1/agent/" + operation + "/", AgentClaimView.as_view(runtime=runtime,
         read_issuer=read_issuer, operation=operation), name="local-agent-" + operation) for operation in operations]

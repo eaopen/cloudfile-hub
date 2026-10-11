@@ -265,3 +265,44 @@ class DeviceUploadSQLTests(DatabaseTestCase):
                 (self.target["uid"], self.guard["guard_id"], self.guard["generation"],
                  self.identity["actor"], hashlib.sha256(self.identity["token"].encode()).hexdigest()))
             self.assertEqual(sql.rowcount,0)
+
+    def test_device_block_plan_is_immutable_and_bound_to_original_intent(self):
+        from cloudfile_extensions.local_edit.block_contract import BlockPlanStore
+        raw = b"ABCDEFGH"
+        block_id = hashlib.sha1(raw).hexdigest()
+        file_id = hashlib.sha1(json.dumps({
+            "block_ids": [block_id], "size": len(raw),
+            "type": 1, "version": 1}, sort_keys=True).encode()).hexdigest()
+        grant = dict(snapshot_size=len(raw),
+            content_digest=hashlib.sha256(raw).hexdigest(),
+            condition=dict(
+                editing=dict(intent_id=self.original["intent_id"],
+                             repo_id=self.target["repo"]),
+                local_commit=dict(session_id=self.session_id,
+                                  device_id=self.device_id)))
+        plan = dict(size=len(raw), sha256=grant["content_digest"],
+                    file_id=file_id, blocks=[dict(id=block_id, size=len(raw))])
+        store = BlockPlanStore()
+        with self.transaction() as sql:
+            ordered, sizes = store.create(sql, grant, plan)
+            self.assertEqual(ordered, [block_id])
+            self.assertEqual(sizes, {block_id:len(raw)})
+            self.assertEqual(store.load(sql, grant)[0], plan)
+            store.create(sql, grant, plan)
+            with self.assertRaises(ValueError):
+                store.create(sql, grant, {**plan,"blocks":[dict(id=block_id,size=7)]})
+            other_block = "f"*40
+            other_file_id = hashlib.sha1(json.dumps({"block_ids":[other_block],
+                "size":len(raw),"type":1,"version":1},sort_keys=True).encode()).hexdigest()
+            with self.assertRaises(ContractError):
+                store.create(sql, grant, {**plan, "file_id":other_file_id,
+                    "blocks":[dict(id=other_block,size=len(raw))]})
+            other = dict(grant, condition=dict(grant["condition"]))
+            other["condition"]["local_commit"] = dict(
+                session_id=self.session_id,device_id=str(uuid4()))
+            with self.assertRaises(ContractError):
+                store.load(sql, other)
+            sql.execute("UPDATE cf_device_block_plan SET expires_at=1 "
+                        "WHERE intent_id=%s", (self.original["intent_id"],))
+            with self.assertRaises(ContractError):
+                store.load(sql, grant)
