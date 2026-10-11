@@ -9,7 +9,7 @@ from .session_service import LocalSessionService
 
 
 class LocalSessionFactory:
-    def __init__(self, resources, *, instance, version_reader, locks=None):
+    def __init__(self, resources, *, instance, version_reader, locks=None, agent2_exclusive_enabled=False):
         if not isinstance(resources, ResourceServiceFactory) or not callable(version_reader):
             raise ValueError("actual resource factory and protected version adapter required")
         if locks is not None:
@@ -19,6 +19,9 @@ class LocalSessionFactory:
         if len(instance) > 255:
             raise ValueError("bounded fixed instance origin required")
         self.resources, self.instance, self.version_reader, self.locks = resources, instance, version_reader, locks
+        if type(agent2_exclusive_enabled) is not bool:
+            raise ValueError('Agent2 exclusive flag must be a boolean')
+        self.agent2_exclusive_enabled = agent2_exclusive_enabled
 
     @contextmanager
     def __call__(self, request, request_id):
@@ -26,4 +29,5 @@ class LocalSessionFactory:
         if not isinstance(actor, AuthenticatedPolicyActor):
             raise ContractError("AUTHENTICATION_REQUIRED", "Native local-session browser identity required", 401)
         with self.resources(request, request_id) as resources:
-            yield LocalSessionService(resources, actor=actor, instance=self.instance, version_reader=self.version_reader)
+            yield LocalSessionService(resources, actor=actor, instance=self.instance,
+                version_reader=self.version_reader, agent2_exclusive_enabled=self.agent2_exclusive_enabled)

@@ -12,6 +12,9 @@ def post_worker_init(worker):
     global _host
     from django.conf import settings
     local_edit_enabled = getattr(settings, "CLOUDFILE_LOCAL_EDIT_ENABLED", False)
+    agent2_exclusive_enabled = getattr(settings, "CLOUDFILE_AGENT2_EXCLUSIVE_ENABLED", False)
+    if type(agent2_exclusive_enabled) is not bool or agent2_exclusive_enabled and not (local_edit_enabled and getattr(settings, "CLOUDFILE_EDITING_ENABLED", False)):
+        raise RuntimeError("Agent2 exclusive requires the local-edit and native editing gates")
     authorization_enabled = getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False)
     transfer_enabled = getattr(settings, "CLOUDFILE_TRANSFER_ENABLED", False)
     editing_enabled = getattr(settings, "CLOUDFILE_EDITING_ENABLED", False)
@@ -72,7 +75,8 @@ def post_worker_init(worker):
             local_edit_version_reader=getattr(settings, "CLOUDFILE_LOCAL_EDIT_VERSION_READER", None),
             local_edit_enabled=local_edit_enabled,
             authorization_enabled=authorization_enabled,
-            transfer_enabled=transfer_enabled, editing_enabled=editing_enabled)
+            transfer_enabled=transfer_enabled, editing_enabled=editing_enabled,
+            agent2_exclusive_enabled=agent2_exclusive_enabled)
         if oidc_enabled and _host.deployment.login_resources is None:
             _host.close()
             _host = None

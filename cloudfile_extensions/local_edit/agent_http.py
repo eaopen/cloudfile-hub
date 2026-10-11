@@ -30,7 +30,7 @@ class AgentClaimView(DirectoryPolicyView):
                     "Authorization" in request.headers or "Content-Encoding" in request.headers):
                 raise invalid("Device claim accepts only proof JSON without cookies, authorization or query")
             value = self._body(request)
-            if self.operation not in {"challenge", "claim", "read-challenge", "read-ticket", "renew-challenge", "renew", "cancel-challenge", "cancel"}:
+            if self.operation not in {"challenge", "claim", "read-challenge", "read-ticket", "renew-challenge", "renew", "cancel-challenge", "cancel", "commit-challenge", "commit-authorize"}:
                 raise invalid("Agent operation is unavailable")
             if not isinstance(self.runtime, AgentClaimRuntime):
                 raise ContractError("LOCAL_SESSION_UNAVAILABLE", "Device claim runtime is unavailable", 503)
@@ -40,6 +40,9 @@ class AgentClaimView(DirectoryPolicyView):
                     raise ContractError("LOCAL_READ_UNAVAILABLE", "Native local read runtime is unavailable", 503)
                 method = {"read-challenge": self.runtime.read_challenge, "read-ticket": self.read_issuer.issue,
                     "renew-challenge": self.runtime.renew_challenge, "renew": self.runtime.renew}[self.operation]
+            elif self.operation in {"commit-challenge", "commit-authorize"}:
+                method = (self.runtime.commit_challenge if self.operation == "commit-challenge"
+                    else self.runtime.commit_authorize)
             elif self.operation in {"cancel-challenge", "cancel"}:
                 method = self.runtime.cancel_challenge if self.operation == "cancel-challenge" else self.runtime.cancel
             else:
@@ -67,6 +70,6 @@ def agent_claim_routes(*, runtime, read_issuer=None):
             read_issuer.runtime is not runtime):
         raise ValueError("actual same-runtime local read issuer required")
     operations = ("challenge", "claim", "cancel-challenge", "cancel") if read_issuer is None else (
-        "challenge", "claim", "read-challenge", "read-ticket", "renew-challenge", "renew", "cancel-challenge", "cancel")
+        "challenge", "claim", "read-challenge", "read-ticket", "renew-challenge", "renew", "cancel-challenge", "cancel", "commit-challenge", "commit-authorize")
     return [path("v1/agent/" + operation + "/", AgentClaimView.as_view(runtime=runtime,
         read_issuer=read_issuer, operation=operation), name="local-agent-" + operation) for operation in operations]

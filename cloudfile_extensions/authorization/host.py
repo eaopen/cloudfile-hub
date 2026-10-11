@@ -15,7 +15,7 @@ class PolicyHost:
                  oidc=None, oidc_jit_enabled=False, local_edit_instance=None,
                  local_edit_version_reader=None, local_edit_enabled=False,
                  authorization_enabled=False, transfer_enabled=False,
-                 editing_enabled=False):
+                 editing_enabled=False, agent2_exclusive_enabled=False):
         # Construct after the server worker fork, never in a preload parent.
         self.pid = os.getpid()
         self.lock = threading.Lock()
@@ -33,7 +33,8 @@ class PolicyHost:
             local_edit_version_reader=local_edit_version_reader,
             local_edit_enabled=local_edit_enabled,
             authorization_enabled=authorization_enabled,
-            transfer_enabled=transfer_enabled, editing_enabled=editing_enabled)
+            transfer_enabled=transfer_enabled, editing_enabled=editing_enabled,
+            agent2_exclusive_enabled=agent2_exclusive_enabled)
 
     @contextmanager
     def login_resources_scope(self):

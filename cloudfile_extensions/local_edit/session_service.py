@@ -38,7 +38,7 @@ class NativeLocalReadConditions:
 
 
 class LocalSessionService:
-    def __init__(self, resources, *, actor, instance, version_reader, locks=None):
+    def __init__(self, resources, *, actor, instance, version_reader, locks=None, agent2_exclusive_enabled=False):
         if not isinstance(resources, ResourceService) or not callable(version_reader):
             raise ValueError("actual resource service and protected native version reader required")
         if locks is not None:
@@ -50,6 +50,9 @@ class LocalSessionService:
         if len(instance) > 255:
             raise ValueError("fixed bounded instance origin required")
         self.resources, self.instance, self.version_reader, self.locks = resources, instance, version_reader, locks
+        if type(agent2_exclusive_enabled) is not bool:
+            raise ValueError('Explicit Agent2 exclusive enablement required')
+        self.agent2_exclusive_enabled = agent2_exclusive_enabled
         self.sessions, self.events = LocalSessionStore(), EventWriter()
         self.owner = DeviceManagementService(resources.read_authority.preparation, actor,
             instance=instance, request_id=resources.request_id)
@@ -122,7 +125,37 @@ class LocalSessionService:
         version = self.version_reader(sql, ref, evidence)
         lease = None
         if mode == "exclusive-edit":
-            raise ContractError('EDIT_UNAVAILABLE', 'Exclusive Agent integration is not enabled', 503)
+            if not self.agent2_exclusive_enabled:
+                raise ContractError('EDIT_UNAVAILABLE', 'Exclusive Agent integration is not enabled', 503)
+            from ..editing.store import EditingStore, digest
+            editing = EditingStore()
+            active = editing.load(sql, row["uid"], ref["repo_id"], evidence.lifecycle_ref)
+            actor = self.resources.write_authority.actor
+            current_native = self.resources.write_authority.state.username(actor)
+            if (not active or active["mode"] != "checkout" or
+                    not active["credential_active"] or active["owner"] != actor or
+                    active["owner_native_user"] != current_native or
+                    active["base_file_id"] != version or active["pending_intent"]):
+                raise ContractError('EDIT_CONFLICT', 'Active guarded checkout is required', 409)
+            if expected_lease is None:
+                raise ContractError('EDIT_CONFLICT', 'Checkout proof required', 409)
+            if "token" in expected_lease:
+                object_fields(expected_lease, ("guard_id", "generation", "credential_epoch", "base_file_id", "token"))
+                if (expected_lease["guard_id"] != active["guard_id"] or
+                        expected_lease["generation"] != str(active["generation"]) or
+                        expected_lease["credential_epoch"] != str(active["credential_epoch"]) or
+                        expected_lease["base_file_id"] != version):
+                    raise ContractError('EDIT_CONFLICT', 'Checkout proof changed', 409)
+                editing.proof(active, actor=actor, holder=active["holder"],
+                    token=expected_lease["token"], guard_id=active["guard_id"],
+                    generation=active["generation"], credential_epoch=active["credential_epoch"])
+                lease = dict(fencing=str(active["generation"]), token_digest=digest(expected_lease["token"]))
+            else:
+                object_fields(expected_lease, ("fencing", "token_digest"))
+                if (expected_lease["fencing"] != str(active["generation"]) or
+                        not hmac.compare_digest(expected_lease["token_digest"], active["proof_digest"])):
+                    raise ContractError('EDIT_CONFLICT', 'Guarded session credential changed', 409)
+                lease = expected_lease
         result = dict(resource=ref, resource_uid=row["uid"], lifecycle_ref=evidence.lifecycle_ref,
             base_version=version, resource_revision=value["revision"], local_open_type=value["local_open_type"],
             mode=mode, lease=lease)
@@ -145,9 +178,9 @@ class LocalSessionService:
         mode = value["mode"]
         authority = self._authority(mode)
         lease = value.get("lease")
-        if mode == "exclusive-edit":
+        if mode == "exclusive-edit" and not self.agent2_exclusive_enabled:
             raise ContractError('EDIT_UNAVAILABLE', 'Exclusive Agent integration is not enabled', 503)
-        if lease is not None:
+        if mode != "exclusive-edit" and lease is not None:
             raise ValueError('This mode does not accept a lease')
         def effect(sql, reference):
             snapshot = self._snapshot(sql, reference, mode=mode, allocate=True, expected_lease=lease)

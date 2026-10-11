@@ -52,6 +52,12 @@ class PostForkAgentClaimRuntime(AgentClaimRuntime):
     def cancel(self, value, request_id):
         return policy_host.local_agent_call("cancel", value, request_id)
 
+    def commit_challenge(self, value, request_id):
+        return policy_host.local_agent_call("commit_challenge", value, request_id)
+
+    def commit_authorize(self, value, request_id):
+        return policy_host.local_agent_call("commit_authorize", value, request_id)
+
 
 class PostForkAgentReadTicketIssuer(AgentReadTicketIssuer):
     def issue(self, value, request_id):

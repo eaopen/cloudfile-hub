@@ -39,7 +39,7 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
                      oidc=None, oidc_jit_enabled=False, local_edit_instance=None,
                      local_edit_version_reader=None, local_edit_enabled=False,
                      authorization_enabled=False, transfer_enabled=False,
-                     editing_enabled=False):
+                     editing_enabled=False, agent2_exclusive_enabled=False):
     """value is trusted host settings, not request JSON or an import path.
 
     Matches the current native authority adapter: private Redis TCP, DB0, password
@@ -60,6 +60,9 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
         raise ValueError("explicit transfer enablement required")
     if type(editing_enabled) is not bool:
         raise ValueError("explicit editing enablement required")
+    if type(agent2_exclusive_enabled) is not bool or agent2_exclusive_enabled and not (
+            editing_enabled and local_edit_enabled and oidc is not None):
+        raise ValueError("Agent2 exclusive requires explicit OIDC, editing and local session gates")
     if editing_enabled and (resource_secret is None or oidc is None):
         raise ValueError("editing requires resource and native OIDC runtimes")
     if oidc is not None:
@@ -194,11 +197,12 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
             from ..local_edit.read_ticket import AgentReadTicketIssuer
             from ..local_edit.session_runtime import LocalSessionFactory
             local_session_factory = LocalSessionFactory(resource_factory, instance=local_edit_instance,
-                version_reader=local_edit_version_reader)
+                version_reader=local_edit_version_reader, agent2_exclusive_enabled=agent2_exclusive_enabled)
             local_device_factory = DeviceManagementFactory(factory, instance=local_edit_instance)
             local_agent_runtime = AgentClaimRuntime(factory.resources, factory.core,
                 instance=local_edit_instance, cloud_mode=factory.cloud_mode, secret=resource_secret,
-                lifecycle_reader=lifecycle_reader, version_reader=local_edit_version_reader)
+                lifecycle_reader=lifecycle_reader, version_reader=local_edit_version_reader,
+                agent2_exclusive_enabled=agent2_exclusive_enabled)
             local_read_issuer = AgentReadTicketIssuer(local_agent_runtime)
         return PolicyDeployment(factory=factory, redis=client, resource_factory=resource_factory,
             audit_factory=audit_factory, context_factory=context_factory,

@@ -25,7 +25,7 @@ from .session_store import LocalSessionStore, snapshot_json, conflict
 
 
 class AgentClaimRuntime:
-    def __init__(self, resources, core, *, instance, cloud_mode, secret, lifecycle_reader, version_reader):
+    def __init__(self, resources, core, *, instance, cloud_mode, secret, lifecycle_reader, version_reader, agent2_exclusive_enabled=False):
         if (not isinstance(resources, PolicyResources) or not isinstance(core, PolicyCore) or
                 type(cloud_mode) is not bool or not isinstance(secret, bytes) or len(secret) < 32 or
                 not callable(lifecycle_reader) or not callable(version_reader)):
@@ -37,6 +37,9 @@ class AgentClaimRuntime:
         self.resources, self.core, self.instance = resources, core, instance
         self.cloud_mode, self.secret = cloud_mode, secret
         self.lifecycle_reader, self.version_reader = lifecycle_reader, version_reader
+        if type(agent2_exclusive_enabled) is not bool:
+            raise ValueError("Explicit Agent2 exclusive feature flag required")
+        self.agent2_exclusive_enabled = agent2_exclusive_enabled
         self.sessions = LocalSessionStore()
         self.pid = os.getpid()
 
@@ -229,3 +232,99 @@ class AgentClaimRuntime:
                     authority.current_subject = None
                     authority.is_owner = False
                     authority.effective_access = None
+
+    def commit_challenge(self, value, request_id):
+        """Device-side signed one-file PREPARE; does not authorize file bytes."""
+        return self._commit_device(value, request_id, signed=False)
+
+    def commit_authorize(self, value, request_id):
+        """Consume device proof and persist the intent in the same ACL SQL txn.
+
+        No file publication or long-lived write bearer is returned. The native
+        guarded publisher must still receive independently trusted current
+        device-session evidence; absent that product adapter this remains off.
+        """
+        return self._commit_device(value, request_id, signed=True)
+
+    def _commit_device(self, value, request_id, *, signed):
+        from ..editing.store import EditingStore
+        from .commit_contract import validate_request, bind_request
+        self._process()
+        if not self.agent2_exclusive_enabled:
+            raise ContractError("EDIT_UNAVAILABLE", "Agent2 device publishing is disabled", 503)
+        identifier(request_id)
+        validate_request(value, signed=signed)
+        # Resolve identity and the saved resource without trusting userId/path
+        # from a device body; this is a selector, not authorization.
+        with self.resources.connection() as connection:
+            Outbox(connection)._require_idle()
+            with connection.cursor() as sql:
+                actor, saved = self._owner(sql, value)
+            connection.rollback()
+        if saved["mode"] != "exclusive-edit":
+            raise ContractError("EDIT_UNAVAILABLE", "Only an existing exclusive session may commit", 503)
+        ref = saved["resource"]
+        with self.resources.preparation(actor, request_id) as preparation:
+            native_user = preparation.state.username(actor)
+            if not preparation.state.account_active(actor):
+                raise ContractError("ACCESS_DENIED", "Current device account is unavailable", 403)
+            resources = ResourceService(preparation, self.core,
+                cloud_mode=self.cloud_mode, request_id=request_id,
+                secret=self.secret, lifecycle_reader=self.lifecycle_reader)
+            authority = resources.write_authority
+            try:
+                def effect(sql, reference):
+                    evidence = resources.store._validate_evidence(resources.reader(sql, reference))
+                    resource = resources.store._row(reference, evidence, locking=True)
+                    if (resource is None or resource["uid"] != saved["resource_uid"] or
+                            evidence.lifecycle_ref != saved["lifecycle_ref"] or
+                            str(resource["revision"]) != str(saved["resource_revision"])):
+                        raise conflict()
+                    current_file = self.version_reader(sql, reference, evidence)
+                    if current_file != value["base_file_id"] or current_file != saved["base_version"]:
+                        raise ContractError("RESOURCE_VERSION_CONFLICT", "Native version changed", 409)
+                    edits = EditingStore()
+                    guard = edits.load(sql, resource["uid"], reference["repo_id"], evidence.lifecycle_ref)
+                    if not guard or guard["owner"] != actor:
+                        raise ContractError("ACCESS_DENIED", "Current guarded edit owner required", 403)
+                    owner = dict(provider=authority.state.provider, actor=actor,
+                        device_id=value["device_id"], session_id=value["session_id"])
+                    session_row = self.sessions._read_ready(sql, **owner, current_snapshot=saved)
+                    request_digest = bind_request(value, snapshot=saved,
+                        session_row=session_row, edit_guard=guard, current_native=native_user)
+                    if not signed:
+                        challenge = self.sessions.devices.issue(sql, **{
+                            "provider": owner["provider"], "actor": actor,
+                            "device_id":value["device_id"]},
+                            instance=self.instance, session_id=value["session_id"],
+                            operation="commit", request_sha256=request_digest)
+                        return dict(challenge=asdict(challenge))
+                    object_fields(value["challenge"], ("instance", "device_id", "session_id",
+                        "operation", "nonce", "issued_at", "expires_at", "request_sha256"))
+                    challenge = DeviceChallenge(**value["challenge"])
+                    if (challenge.instance != self.instance or challenge.operation != "commit" or
+                            challenge.device_id != value["device_id"] or
+                            challenge.session_id != value["session_id"] or
+                            challenge.request_sha256 != request_digest):
+                        raise conflict()
+                    self.sessions.devices.consume(sql, provider=owner["provider"],
+                        actor=actor, challenge=challenge, signature=value["signature"])
+                    prepared = edits.prepare(sql, uid=resource["uid"],
+                        repo=reference["repo_id"], lifecycle=evidence.lifecycle_ref,
+                        intent_id=value["intent_id"], expected_file_id=value["base_file_id"],
+                        staged_file_id=None, content_digest=value["content_digest"],
+                        action=value["action"],
+                        snapshot=dict(id=value["intent_id"], size=value["snapshot_size"],
+                            source="agent2-device"),
+                        actor=actor, holder=guard["holder"], token=value["token"],
+                        guard_id=value["guard_id"], generation=int(value["generation"]),
+                        credential_epoch=int(value["credential_epoch"]))
+                    return dict(intent_id=value["intent_id"], state=prepared["state"],
+                        device_authorized=True, publication="not_started")
+                return authority.consume(ref, effect)
+            finally:
+                for item in (resources.read_authority, resources.write_authority, resources.tag_management):
+                    item.epoch = None
+                    item.current_subject = None
+                    item.is_owner = False
+                    item.effective_access = None
