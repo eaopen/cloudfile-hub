@@ -230,6 +230,40 @@ class DeviceUploadSQLTests(DatabaseTestCase):
                 escrow.receive(sql, secret=secret, **arguments,
                     expected_digest=hashlib.sha256(lease["token"].encode()).hexdigest())
 
+    def test_device_abandon_reuses_real_guard_release_and_fences_pending(self):
+        # The signed device endpoint supplies the token only after P-256 proof.
+        # Existing EditingStore.release (not a new delete query) performs the
+        # actual owner/holder/epoch/Guard check and pending-Intent fence.
+        kwargs=dict(uid=self.target["uid"],repo=self.target["repo"],
+            lifecycle=self.target["lifecycle"],
+            actor=self.identity["actor"],
+            guard_id=self.guard["guard_id"],
+            generation=int(self.guard["generation"]),
+            proof=dict(holder=self.identity["holder"],
+                token=self.identity["token"],
+                credential_epoch=int(self.guard["credential_epoch"])))
+        # Fixture setUp already prepared the original device CommitIntent.
+        # Never fabricate a *second* intent over a pending Checkout.
+        self.assertEqual(self.status()["state"],"prepared")
+        with self.transaction() as sql:
+            with self.assertRaises(ContractError):
+                self.store.release(sql,**kwargs)
+            self.assertIsNotNone(self.store.load(sql,**self.target)["guard_id"])
+        with self.transaction() as sql:
+            sql.execute("UPDATE cf_edit_guard SET pending_intent=NULL WHERE resource_uid=%s",
+                        (self.target["uid"],))
+            result=self.store.release(sql,**kwargs)
+            self.assertFalse(result["active"])
+            sql.execute("UPDATE cf_edit_session SET state='completed',"
+                "revision=revision+1,updated_at=UTC_TIMESTAMP(6) "
+                "WHERE session_id=%s AND device_id=%s AND state IN ('claimed','active')",
+                (self.session_id,self.device_id))
+            self.assertEqual(sql.rowcount,1)
+        with self.transaction() as sql:
+            self.assertIsNone(self.store.load(sql,**self.target)["guard_id"])
+            sql.execute("SELECT state FROM cf_edit_session WHERE session_id=%s",(self.session_id,))
+            self.assertEqual(sql.fetchone()[0],"completed")
+
     def test_signed_lease_renewal_respects_existing_guard_expiry(self):
         from datetime import datetime
         with self.transaction() as sql:

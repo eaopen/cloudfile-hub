@@ -63,5 +63,14 @@ def is_enabled(name):
 
 
 def enabled_features():
-    """Return {switch_name: bool} for every known switch."""
-    return {name: getattr(settings, name, False) is True for name in FEATURES}
+    """List existing CF switches plus non-configurable Agent capability.
+
+    The extra value is derived from TWO deployment gates, never accepted as
+    another operator input and never a substitute for Server authorization.
+    Users must not see an Agent edit button that is guaranteed to return 503.
+    """
+    result = {name: getattr(settings, name, False) is True for name in FEATURES}
+    result["CF_AGENT_OPTIMISTIC_UPLOAD_READY"] = (
+        result["CF_ENABLE_LOCAL_APP"] and
+        getattr(settings, "CLOUDFILE_AGENT2_OPTIMISTIC_UPLOAD_ENABLED", False) is True)
+    return result

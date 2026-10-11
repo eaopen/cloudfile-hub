@@ -31,12 +31,32 @@ const propTypes = {
   onItemConvert: PropTypes.func,
   loadDirentList: PropTypes.func,
   onCloudFileLocalEdit: PropTypes.func,
+  onCloudFileManualReturn: PropTypes.func,
 };
 
 const SINGLE_EXCLUDES = ['Download', 'Delete', 'Share', 'Move', 'Copy'];
 const MULTI_EXCLUDES = ['Download', 'Delete', 'Move', 'Copy'];
 
 class SelectedDirentsToolbar extends React.Component {
+  manualReturnInput = React.createRef();
+  pendingCloudReturn = null;
+
+  chooseCloudReturn = (selected) => {
+    if (!selected || !/^[a-f0-9]{40}$/.test(selected.id || '') ||
+        !this.props.onCloudFileManualReturn) return;
+    // Capture the original *cloud* target and File ID BEFORE the file picker.
+    // The local working-copy name may be a GUID and must never become target.
+    this.pendingCloudReturn = { path: this.getDirentPath(selected), baseFileID: selected.id };
+    this.manualReturnInput.current?.click();
+  };
+
+  onCloudReturnSelected = (event) => {
+    const file = event.target.files && event.target.files[0];
+    event.target.value = '';
+    const target = this.pendingCloudReturn;
+    this.pendingCloudReturn = null;
+    if (file && target) this.props.onCloudFileManualReturn(file, target);
+  };
 
   onItemsDelete = () => {
     this.props.onItemsDelete();
@@ -182,16 +202,24 @@ class SelectedDirentsToolbar extends React.Component {
     const selected = selectedLen === 1 ? selectedDirentList[0] : null;
     const isFile = selected && (typeof selected.isDir === 'function'
       ? !selected.isDir() : selected.type === 'file');
-    const ordinaryEdit = isEnabled('CF_ENABLE_LOCAL_APP') && isFile &&
+    const ordinaryEdit = isEnabled('CF_AGENT_OPTIMISTIC_UPLOAD_READY') && isFile &&
       this.props.onCloudFileLocalEdit &&
       this.props.currentRepoInfo.status !== 'read-only' &&
       this.props.userPerm !== 'r';
 
+    const uploadReturnedCopy = selectedLen === 1 && isFile &&
+      /^[a-f0-9]{40}$/.test(selected.id || '') &&
+      this.props.onCloudFileManualReturn &&
+      this.props.currentRepoInfo.status !== 'read-only' &&
+      this.props.userPerm !== 'r';
     const { iconOps, menuOps } = this.getSelectedDirentOperations();
     const { iconOps: iconOpsForMulti, menuOps: menuOpsForMulti } = this.getSelectedDirentsOperations();
 
     return (
       <div className="selected-dirents-toolbar">
+        <input type="file" ref={this.manualReturnInput} style={{ display: 'none' }}
+          aria-label={gettext('Select locally edited file')}
+          onChange={this.onCloudReturnSelected} />
         <OpElement
           className="cur-view-path-btn px-2"
           op={this.handleUnselect}
@@ -215,9 +243,15 @@ class SelectedDirentsToolbar extends React.Component {
         {selectedLen === 1 && (
           <>
             {this.renderIconButtons(iconOps)}
+            {uploadReturnedCopy && (
+              <button type="button" className="btn btn-sm btn-outline-primary mr-2"
+                onClick={() => this.chooseCloudReturn(selected)}>
+                {gettext('Upload edited copy')}
+              </button>
+            )}
             {ordinaryEdit && (
               <button type="button" className="btn btn-sm btn-outline-primary mr-2"
-                onClick={() => this.props.onCloudFileLocalEdit(this.getDirentPath(selected))}>
+                onClick={() => this.props.onCloudFileLocalEdit(this.getDirentPath(selected), selected.id)}>
                 {gettext('Edit with local software')}
               </button>
             )}

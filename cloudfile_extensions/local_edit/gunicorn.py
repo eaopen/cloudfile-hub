@@ -52,6 +52,12 @@ class PostForkAgentClaimRuntime(AgentClaimRuntime):
     def cancel(self, value, request_id):
         return policy_host.local_agent_call("cancel", value, request_id)
 
+    def lease_abandon_challenge(self, value, request_id):
+        return policy_host.local_agent_call("lease_abandon_challenge", value, request_id)
+
+    def lease_abandon(self, value, request_id):
+        return policy_host.local_agent_call("lease_abandon", value, request_id)
+
     def optimistic_upload_challenge(self, value, request_id):
         return policy_host.local_agent_call("optimistic_upload_challenge", value, request_id)
 

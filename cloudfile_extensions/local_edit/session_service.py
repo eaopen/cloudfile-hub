@@ -214,6 +214,10 @@ class LocalSessionService:
                 self._audit(sql, "local.session.created", issued.session_id, value["device_id"], snapshot, revision)
             result = dict(session_id=issued.session_id, state=state, revision=revision,
                 claim_expires_at=issued.expires_at)
+            if mode == "optimistic-edit":
+                # Expose the server-recorded ORIGINAL file version to the
+                # authenticated Web creator, not a later directory listing.
+                result["base_file_id"] = snapshot["base_version"]
             if state == "created":
                 result["open_uri"] = make_open_uri(OpenURI(self.instance, issued.session_id, issued.ticket))
             return result

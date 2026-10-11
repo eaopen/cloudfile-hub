@@ -712,6 +712,12 @@ class AgentClaimRuntime:
     def lease_renew(self, value, request_id):
         return self._lease_handoff(value, request_id, purpose="renew", signed=True)
 
+    def lease_abandon_challenge(self, value, request_id):
+        return self._lease_handoff(value, request_id, purpose="abandon", signed=False)
+
+    def lease_abandon(self, value, request_id):
+        return self._lease_handoff(value, request_id, purpose="abandon", signed=True)
+
     def _lease_handoff(self, value, request_id, *, purpose, signed):
         """Signed, current-device Checkout delivery with durable-journal ACK.
 
@@ -724,8 +730,15 @@ class AgentClaimRuntime:
         self._process()
         if not self.agent2_exclusive_enabled:
             raise ContractError("EDIT_UNAVAILABLE", "Device Checkout is disabled", 503)
-        object_fields(value, ("session_id", "device_id") +
-            (("challenge", "signature") if signed else ()))
+        base_fields = ("session_id", "device_id")
+        if purpose == "abandon":
+            from .commit_contract import validate_checkout_lease
+            base_fields += ("guard_id", "generation", "credential_epoch",
+                            "base_file_id", "token")
+        object_fields(value, base_fields + (("challenge", "signature") if signed else ()))
+        if purpose == "abandon":
+            validate_checkout_lease({name: value[name] for name in
+                ("guard_id", "generation", "credential_epoch", "base_file_id", "token")})
         identifier(request_id)
         with self.resources.connection() as connection:
             Outbox(connection)._require_idle()
@@ -789,6 +802,52 @@ class AgentClaimRuntime:
                         raise conflict()
                     self.sessions.devices.consume(sql, provider=authority.state.provider,
                         actor=actor, challenge=challenge, signature=value["signature"])
+                    if purpose == "abandon":
+                        # Current device proof + the actual local Checkout
+                        # token authorize releasing ONLY this same current
+                        # Guard. Reuse EditingStore.release and its
+                        # pending-Intent fence; no replacement delete SQL.
+                        from ..editing.store import EditingStore
+                        import hashlib as _hashlib
+                        evidence = resources.store._validate_evidence(resources.reader(sql, reference))
+                        resource = resources.store._row(reference, evidence, locking=True)
+                        if resource is None or resource["uid"] != saved["resource_uid"]:
+                            raise conflict()
+                        current_guard = EditingStore().load(sql, resource["uid"],
+                            reference["repo_id"], evidence.lifecycle_ref)
+                        lease = saved["lease"]
+                        if (not current_guard or current_guard["mode"] != "checkout" or
+                                current_guard["owner"] != actor or
+                                current_guard["owner_native_user"] != native_user or
+                                current_guard["guard_id"] != value["guard_id"] or
+                                str(current_guard["generation"]) != value["generation"] or
+                                str(current_guard["credential_epoch"]) != value["credential_epoch"] or
+                                current_guard["base_file_id"] != value["base_file_id"] or
+                                lease["fencing"] != value["generation"] or
+                                not hmac.compare_digest(lease["token_digest"],
+                                    _hashlib.sha256(value["token"].encode("ascii")).hexdigest())):
+                            raise conflict()
+                        if current_guard["pending_intent"] is not None:
+                            raise ContractError("EDIT_PENDING",
+                                "Recover the original CommitIntent before releasing Checkout", 409)
+                        released = EditingStore().release(sql, uid=resource["uid"],
+                            repo=reference["repo_id"], lifecycle=evidence.lifecycle_ref,
+                            actor=actor, guard_id=value["guard_id"],
+                            generation=int(value["generation"]),
+                            proof=dict(holder=current_guard["holder"],
+                                token=value["token"],
+                                credential_epoch=int(value["credential_epoch"])))
+                        if released["active"]:
+                            raise conflict()
+                        sql.execute("UPDATE cf_edit_session SET state='completed',"
+                            "revision=revision+1,updated_at=UTC_TIMESTAMP(6) "
+                            "WHERE session_id=%s AND device_id=%s "
+                            "AND state IN ('claimed','active')",
+                            (value["session_id"], value["device_id"]))
+                        if sql.rowcount != 1:
+                            raise conflict()
+                        return dict(session_id=value["session_id"],
+                            state="abandoned", released=True)
                     if purpose == "renew":
                         # A live signed device may renew *only its own* current
                         # checkout, within the existing hard deadline. No
