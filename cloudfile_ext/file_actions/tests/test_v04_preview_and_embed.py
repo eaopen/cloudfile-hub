@@ -51,19 +51,59 @@ def test_external_viewer_gets_actual_read_token_only_after_auth(monkeypatch):
     monkeypatch.setitem(sys.modules, "seaserv", seaserv)
     monkeypatch.setitem(sys.modules, "seahub.utils", utils)
 
-    actions = service.get_actions(REPO, "/plans/test.pdf", username="reader@example.test")
+    actions = service.get_actions(REPO, "/plans/test.docx", username="reader@example.test")
     assert service.get_actions(REPO, "/map.xmind", username="reader@example.test")[0]["id"] == "external-preview"
     action = actions[0]
     assert action["id"] == "external-preview"
     assert action["writes"] is False and action["available"]
     assert action["url"].startswith("https://preview.example.com/fileview/onlinePreview?")
     source = base64.b64decode(parse_qs(urlsplit(action["url"]).query)["url"][0]).decode()
-    assert source == "https://files.example.com/files/short-lived-secret/test.pdf"
+    assert source == "https://files.example.com/files/short-lived-secret/test.docx"
     assert calls[:2] == [
-        ("file", REPO, "/plans/test.pdf"),
+        ("file", REPO, "/plans/test.docx"),
         ("token", REPO, "abcdef0123456789", "download", "reader@example.test", False),
     ]
     assert calls[2] == ("file", REPO, "/map.xmind")
+
+
+def test_native_pdf_preferred_without_external_token(monkeypatch):
+    _configured(monkeypatch)
+    # A native-capable PDF must not need an external preview read token.
+    monkeypatch.setattr(service, 'external_preview_url', lambda *args: (_ for _ in ()).throw(
+        AssertionError('external preview must not be called for native PDF')))
+    action = service.get_actions(REPO, '/a.pdf', username='reader')[0]
+    assert action['id'] == 'native-preview'
+    assert action['available']
+    assert action['url'].endswith('/lib/' + REPO + '/file/a.pdf')
+
+
+def test_native_office_preferred_when_provider_is_enabled(monkeypatch):
+    _configured(monkeypatch)
+    service.settings.ENABLE_ONLYOFFICE = True
+    action = service.get_actions(REPO, '/a.docx', username='reader')[0]
+    assert action['id'] == 'native-preview'
+
+
+def test_external_tiff_provides_native_fallback_hint(monkeypatch):
+    _configured(monkeypatch)
+    service.settings.CF_FILE_ACTION_PREVIEW_EXTENSIONS = ('pdf', 'docx', 'tif')
+    monkeypatch.setattr(service, 'external_preview_url', lambda *_: 'https://preview.example.com/fileview/onlinePreview?url=test')
+    action = service.get_actions(REPO, '/scan.tif', username='reader')[0]
+    assert action['id'] == 'external-preview'
+    assert action['fallback_preview']['id'] == 'native-preview'
+    assert action['fallback_preview']['url'].endswith('/lib/' + REPO + '/file/scan.tif')
+
+
+def test_missing_read_token_falls_back_to_native_when_supported(monkeypatch):
+    _configured(monkeypatch)
+    service.settings.CF_FILE_ACTION_PREVIEW_EXTENSIONS = ('pdf', 'docx', 'tif')
+    seaserv = ModuleType('seaserv')
+    seaserv.seafile_api = SimpleNamespace(get_file_id_by_path=lambda *_: None)
+    monkeypatch.setitem(sys.modules, 'seaserv', seaserv)
+    action = service.get_actions(REPO, '/scan.tif', username='reader')[0]
+    assert action['id'] == 'native-preview'
+    assert action['available']
+    assert action['url'].endswith('/lib/' + REPO + '/file/scan.tif')
 
 
 def test_missing_read_token_disables_action_instead_of_granting_fallback(monkeypatch):
@@ -71,7 +111,7 @@ def test_missing_read_token_disables_action_instead_of_granting_fallback(monkeyp
     seaserv = ModuleType("seaserv")
     seaserv.seafile_api = SimpleNamespace(get_file_id_by_path=lambda *_: None)
     monkeypatch.setitem(sys.modules, "seaserv", seaserv)
-    actions = service.get_actions(REPO, "/a.pdf", username="reader")
+    actions = service.get_actions(REPO, "/map.xmind", username="reader")
     assert actions[0]["available"] is False
     assert "url" not in actions[0]
     assert actions[0]["reason"] == "preview_source_unavailable"

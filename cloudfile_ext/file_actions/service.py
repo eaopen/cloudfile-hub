@@ -15,7 +15,42 @@ from django.core.cache import cache
 from django.db import connections
 
 from cloudfile_ext.features import enabled_features
-from cloudfile_ext.file_actions.policy import actions_for
+from cloudfile_ext.file_actions.policy import actions_for, extension
+
+
+# A small default preference, not a second copy of eap-fileview's FileType.
+# Seafile's native PDF/text/image/media readers stay primary; eap-fileview
+# handles formats that benefit from conversion or special parsers.
+NATIVE_FIRST_PREVIEW = frozenset((
+    'pdf', 'txt', 'log', 'md', 'markdown', 'json', 'xml', 'html', 'htm',
+    'py', 'js', 'css', 'java', 'c', 'cpp', 'yaml', 'yml',
+    'jpg', 'jpeg', 'png', 'gif', 'webp', 'svg', 'bmp', 'mp3', 'mp4', 'webm',
+))
+EXTERNAL_PREVIEW_EXTENSIONS = frozenset((
+    'xmind', 'eml', 'msg', 'drawio', 'bpmn', 'epub', 'ofd',
+    'dwg', 'dxf', 'dwf', 'dwt', 'stl', 'step', 'stp', 'iges', 'igs',
+    'ifc', 'gltf', 'glb', 'obj', '3ds', 'fbx', 'ply', 'tif', 'tiff',
+    'zip', '7z', 'rar', 'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx',
+    'odt', 'ods', 'odp', 'wps', 'et', 'dps', 'vsd', 'vsdx',
+    'psd', 'csv', 'txt', 'md', 'pdf', 'jpg', 'jpeg', 'png',
+))
+OFFICE_DOCUMENT_EXTENSIONS = frozenset((
+    'doc', 'docx', 'ppt', 'pptx', 'xls', 'xlsx', 'odt', 'ods', 'odp',
+    'wps', 'et', 'dps', 'vsd', 'vsdx',
+))
+
+
+def choose_preview_provider(ext, *, native_available, external_available, office_native_ready=False):
+    """Pick one preview, using effective capability rather than extension alone."""
+    if ext in NATIVE_FIRST_PREVIEW and native_available:
+        return 'native'
+    if ext in OFFICE_DOCUMENT_EXTENSIONS and office_native_ready and native_available:
+        return 'native'
+    if external_available:
+        return 'external'
+    if native_available:
+        return 'native'
+    return None
 
 
 #: CloudFile's own write-lifecycle error code, mirroring common/cf-fileop.h.
@@ -121,14 +156,18 @@ def lock_status_map(repo_id, paths, username=''):
 
 def get_actions(repo_id, path, can_edit=False, username=''):
     features = enabled_features()
-    preview_extensions = getattr(settings, 'CF_FILE_ACTION_PREVIEW_EXTENSIONS', ())
-    if external_preview_enabled():
-        # Expanded viewer formats must not be advertised when CE native is
-        # selected or the independent preview service is unconfigured.
-        preview_extensions = tuple(preview_extensions) + (
-            'xmind', 'dwg', 'dxf', 'stl', 'step', 'stp', 'tif', 'tiff',
-            'zip', '7z', 'rar',
-        )
+    native_preview_extensions = frozenset(getattr(settings, 'CF_FILE_ACTION_PREVIEW_EXTENSIONS', ()))
+    external_enabled = external_preview_enabled()
+    preview_extensions = native_preview_extensions | (EXTERNAL_PREVIEW_EXTENSIONS if external_enabled else frozenset())
+    ext = extension(path)
+    # CE Office viewing needs an actual office provider; the extension list
+    # alone cannot prove that OnlyOffice/Office Web App is ready.
+    office_native_ready = bool(getattr(settings, 'ENABLE_ONLYOFFICE', False) or
+                               getattr(settings, 'ENABLE_OFFICE_WEB_APP', False))
+    preferred_preview = choose_preview_provider(
+        ext, native_available=ext in native_preview_extensions,
+        external_available=external_enabled and ext in EXTERNAL_PREVIEW_EXTENSIONS,
+        office_native_ready=office_native_ready)
     actions = actions_for(
         path, features,
         preview_extensions,
@@ -137,23 +176,30 @@ def get_actions(repo_id, path, can_edit=False, username=''):
     )
     for action in actions:
         if action['id'] == 'native-preview' and action['available']:
-            if external_preview_enabled():
-                # Same read-only action family, but no fake provider availability.
-                # The caller has already completed path-level permission checks.
+            if preferred_preview == 'external':
+                # The caller already passed path-level ACL checks. A configured
+                # viewer URL alone does not prove that its converter is healthy.
                 try:
                     preview_url = external_preview_url(repo_id, path, username)
                 except Exception:
-                    # Never disclose file tokens in error responses or logs.
-                    # A failed source permission/token call only disables the
-                    # optional action and does not block native download.
-                    action['available'] = False
-                    action['reason'] = 'preview_source_unavailable'
+                    # Only fall back to native when its type is explicitly known;
+                    # otherwise leave the preview unavailable, but keep download.
+                    if ext in native_preview_extensions and (ext not in OFFICE_DOCUMENT_EXTENSIONS or office_native_ready):
+                        action['url'] = native_preview_url(repo_id, path)
+                    else:
+                        action['available'] = False
+                        action['reason'] = 'preview_source_unavailable'
                 else:
                     action['id'] = 'external-preview'
                     action['label'] = 'Preview with eap-fileview'
                     action['description'] = 'Read-only external document preview'
                     action['url'] = preview_url
-            else:
+                    if ext in native_preview_extensions and (ext not in OFFICE_DOCUMENT_EXTENSIONS or office_native_ready):
+                        # Client-visible alternative for conversion failure;
+                        # this is not a claim that the viewer can auto-recover.
+                        action['fallback_preview'] = {
+                            'id': 'native-preview', 'url': native_preview_url(repo_id, path)}
+            elif ext in native_preview_extensions:
                 action['url'] = native_preview_url(repo_id, path)
     return actions
 
