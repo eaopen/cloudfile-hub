@@ -111,6 +111,18 @@ class DeviceUploadSQLTests(DatabaseTestCase):
         return self.runtime.commit_status(dict(body, challenge=challenge,
             signature=self.sign(DeviceChallenge(**challenge))), 'fixture-request')['intent']
 
+    def test_native_session_schema_gates_match_real_migration_ledger(self):
+        with self.transaction() as sql:
+            for version in ('030_local_devices', '031_edit_sessions'):
+                query = native_sql("SELECT version FROM cf_schema_migration WHERE version='" + version + "'")
+                sql.execute(query)
+                self.assertEqual(sql.fetchall(), ((version,),))
+                sql.execute("SAVEPOINT migration_gate")
+                sql.execute("UPDATE cf_schema_migration SET state='applying' WHERE version=%s", (version,))
+                sql.execute(query)
+                self.assertEqual(sql.fetchall(), ())
+                sql.execute("ROLLBACK TO SAVEPOINT migration_gate")
+
     def test_device_native_predicates_shared_cases(self):
         cases = json.loads((WORKSPACE / 'cloudfile-docker/docs/device-edit-upload-cases.json').read_text())
         session_query = native_sql('SELECT s.snapshot,r.uid,r.lifecycle_ref,COALESCE')
@@ -189,3 +201,67 @@ class DeviceUploadSQLTests(DatabaseTestCase):
             guard = self.store.load(sql, **self.target)
             self.assertEqual(guard['pending_intent'], self.original['intent_id'])
             self.assertEqual(guard['base_file_id'], 'b' * 40)
+
+    def test_encrypted_checkout_handoff_ack_erases_server_secret(self):
+        from cloudfile_extensions.local_edit.lease_escrow import CheckoutLeaseEscrow
+        escrow = CheckoutLeaseEscrow()
+        secret = b"test-only-cloudfile-server-secret-32bytes"
+        lease = dict(guard_id=self.guard["guard_id"],
+            generation=str(self.guard["generation"]),
+            credential_epoch=str(self.guard["credential_epoch"]),
+            base_file_id="b"*40,token=self.identity["token"])
+        arguments = dict(instance="https://cloudfile.invalid", session=self.session_id,
+            device=self.device_id, actor=self.identity["actor"])
+        with self.transaction() as sql:
+            escrow.create(sql, secret=secret, lease=lease, **arguments)
+            sql.execute("SELECT ciphertext FROM cf_device_checkout_lease WHERE session_id=%s",
+                        (self.session_id,))
+            encoded = bytes(sql.fetchone()[0])
+            self.assertNotIn(lease["token"].encode(), encoded)
+            self.assertEqual(escrow.receive(sql, secret=secret, **arguments,
+                expected_digest=hashlib.sha256(lease["token"].encode()).hexdigest()),lease)
+            escrow.confirm(sql,session=self.session_id)
+            sql.execute("SELECT LENGTH(ciphertext),acknowledged_at FROM cf_device_checkout_lease WHERE session_id=%s",
+                        (self.session_id,))
+            size, acknowledged = sql.fetchone()
+            self.assertEqual(size,0)
+            self.assertIsNotNone(acknowledged)
+            with self.assertRaises(ContractError):
+                escrow.receive(sql, secret=secret, **arguments,
+                    expected_digest=hashlib.sha256(lease["token"].encode()).hexdigest())
+
+    def test_signed_lease_renewal_respects_existing_guard_expiry(self):
+        from datetime import datetime
+        with self.transaction() as sql:
+            sql.execute("SELECT lease_until FROM cf_edit_guard WHERE resource_uid=%s",
+                        (self.target["uid"],))
+            original = sql.fetchone()[0]
+            sql.execute(
+                "UPDATE cf_edit_guard SET lease_until=LEAST(hard_expire_at,"
+                "TIMESTAMPADD(SECOND,600,UTC_TIMESTAMP(6))) "
+                "WHERE resource_uid=%s AND guard_id=%s AND generation=%s "
+                "AND owner=%s AND proof_digest=%s AND mode='checkout' "
+                "AND lease_until>UTC_TIMESTAMP(6) AND hard_expire_at>UTC_TIMESTAMP(6)",
+                (self.target["uid"], self.guard["guard_id"], self.guard["generation"],
+                 self.identity["actor"], hashlib.sha256(self.identity["token"].encode()).hexdigest()))
+            self.assertEqual(sql.rowcount,1)
+            sql.execute("SELECT lease_until FROM cf_edit_guard WHERE resource_uid=%s",
+                        (self.target["uid"],))
+            self.assertGreaterEqual(sql.fetchone()[0],original)
+            sql.execute(
+                "UPDATE cf_edit_session SET expires_at=GREATEST(expires_at,"
+                "FLOOR(UNIX_TIMESTAMP())+1800),updated_at=UTC_TIMESTAMP(6) "
+                "WHERE session_id=%s AND device_id=%s AND state IN ('claimed','active') "
+                "AND expires_at>FLOOR(UNIX_TIMESTAMP())",
+                (self.session_id,self.device_id))
+            sql.execute("UPDATE cf_edit_guard SET lease_until=TIMESTAMPADD(SECOND,-1,UTC_TIMESTAMP(6)) "
+                        "WHERE resource_uid=%s",(self.target["uid"],))
+            sql.execute(
+                "UPDATE cf_edit_guard SET lease_until=LEAST(hard_expire_at,"
+                "TIMESTAMPADD(SECOND,600,UTC_TIMESTAMP(6))) "
+                "WHERE resource_uid=%s AND guard_id=%s AND generation=%s "
+                "AND owner=%s AND proof_digest=%s AND mode='checkout' "
+                "AND lease_until>UTC_TIMESTAMP(6) AND hard_expire_at>UTC_TIMESTAMP(6)",
+                (self.target["uid"], self.guard["guard_id"], self.guard["generation"],
+                 self.identity["actor"], hashlib.sha256(self.identity["token"].encode()).hexdigest()))
+            self.assertEqual(sql.rowcount,0)

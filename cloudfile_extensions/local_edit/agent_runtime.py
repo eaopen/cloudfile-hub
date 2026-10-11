@@ -456,3 +456,166 @@ class AgentClaimRuntime:
                 return result
             finally:
                 connection.rollback()
+
+    @staticmethod
+    def _lease_digest(session_id, device_id, session_row, purpose):
+        if purpose not in ("receive", "confirm", "renew"):
+            raise ValueError("Supported device Checkout handoff action required")
+        snapshot_hash = hashlib.sha256(session_row[4].encode("utf-8")).hexdigest()
+        body = json.dumps(["cloudfile.lease-handoff.v1", purpose, session_id,
+            device_id, str(session_row[3]), str(session_row[9]), snapshot_hash],
+            ensure_ascii=True, separators=(",", ":")).encode("ascii")
+        return hashlib.sha256(body).hexdigest()
+
+    def lease_challenge(self, value, request_id):
+        return self._lease_handoff(value, request_id, purpose="receive", signed=False)
+
+    def lease_receive(self, value, request_id):
+        return self._lease_handoff(value, request_id, purpose="receive", signed=True)
+
+    def lease_confirm_challenge(self, value, request_id):
+        return self._lease_handoff(value, request_id, purpose="confirm", signed=False)
+
+    def lease_confirm(self, value, request_id):
+        return self._lease_handoff(value, request_id, purpose="confirm", signed=True)
+
+    def lease_renew_challenge(self, value, request_id):
+        return self._lease_handoff(value, request_id, purpose="renew", signed=False)
+
+    def lease_renew(self, value, request_id):
+        return self._lease_handoff(value, request_id, purpose="renew", signed=True)
+
+    def _lease_handoff(self, value, request_id, *, purpose, signed):
+        """Signed, current-device Checkout delivery with durable-journal ACK.
+
+        Challenge reads carry no Checkout credential. A receive result may be
+        retried only by the same live device with a new signature, until the
+        Agent reports that the private journal was persisted. Confirmation
+        erases ciphertext and retains an acknowledgement marker.
+        """
+        from .lease_escrow import CheckoutLeaseEscrow
+        self._process()
+        if not self.agent2_exclusive_enabled:
+            raise ContractError("EDIT_UNAVAILABLE", "Device Checkout is disabled", 503)
+        object_fields(value, ("session_id", "device_id") +
+            (("challenge", "signature") if signed else ()))
+        identifier(request_id)
+        with self.resources.connection() as connection:
+            Outbox(connection)._require_idle()
+            connection.begin()
+            try:
+                with connection.cursor() as sql:
+                    actor, saved = self._owner(sql, value)
+                    if saved["mode"] != "exclusive-edit":
+                        raise conflict()
+                    row = self.sessions._read_ready(sql,
+                        provider=self.resources.provider, actor=actor,
+                        device_id=value["device_id"], session_id=value["session_id"],
+                        current_snapshot=saved)
+                    expected = self._lease_digest(value["session_id"],
+                        value["device_id"], row, purpose)
+                    if not signed:
+                        challenge = self.sessions.devices.issue(sql,
+                            provider=self.resources.provider, actor=actor,
+                            device_id=value["device_id"], instance=self.instance,
+                            session_id=value["session_id"], operation="lease",
+                            request_sha256=expected)
+                        result = dict(challenge=asdict(challenge))
+                if not signed:
+                    connection.commit()
+                    return result
+            finally:
+                connection.rollback()
+        if not signed:
+            raise ContractError("LOCAL_SESSION_UNAVAILABLE", "Lease challenge unavailable", 503)
+        object_fields(value["challenge"], ("instance", "device_id", "session_id",
+            "operation", "nonce", "issued_at", "expires_at", "request_sha256"))
+        challenge = DeviceChallenge(**value["challenge"])
+        if (challenge.instance != self.instance or challenge.operation != "lease" or
+                challenge.session_id != value["session_id"] or
+                challenge.device_id != value["device_id"] or
+                challenge.request_sha256 != expected):
+            raise conflict()
+        with self.resources.preparation(actor, request_id) as preparation:
+            native_user = preparation.state.username(actor)
+            if not preparation.state.account_active(actor):
+                raise ContractError("ACCESS_DENIED", "Current device account unavailable", 403)
+            resources = ResourceService(preparation, self.core,
+                cloud_mode=self.cloud_mode, request_id=request_id,
+                secret=self.secret, lifecycle_reader=self.lifecycle_reader)
+            authority = resources.write_authority
+            try:
+                def effect(sql, reference):
+                    session_service = LocalSessionService(resources,
+                        actor=AuthenticatedPolicyActor(actor, native_user),
+                        instance=self.instance, version_reader=self.version_reader,
+                        agent2_exclusive_enabled=True)
+                    current = session_service._snapshot(sql, reference,
+                        mode="exclusive-edit", expected_lease=saved["lease"])
+                    if snapshot_json(current) != snapshot_json(saved):
+                        raise conflict()
+                    row = self.sessions._read_ready(sql, provider=authority.state.provider,
+                        actor=actor, device_id=value["device_id"],
+                        session_id=value["session_id"], current_snapshot=saved)
+                    if challenge.request_sha256 != self._lease_digest(
+                            value["session_id"], value["device_id"], row, purpose):
+                        raise conflict()
+                    self.sessions.devices.consume(sql, provider=authority.state.provider,
+                        actor=actor, challenge=challenge, signature=value["signature"])
+                    if purpose == "renew":
+                        # A live signed device may renew *only its own* current
+                        # checkout, within the existing hard deadline. No
+                        # browser cookie, user-nominated path or token digest
+                        # supplied by the device can authorize a different lock.
+                        from ..editing.store import EditingStore
+                        evidence = resources.store._validate_evidence(resources.reader(sql, reference))
+                        resource = resources.store._row(reference, evidence, locking=True)
+                        if resource is None or resource["uid"] != saved["resource_uid"]:
+                            raise conflict()
+                        guard = EditingStore().load(sql, resource["uid"],
+                            reference["repo_id"], evidence.lifecycle_ref)
+                        if (not guard or guard["mode"] != "checkout" or not guard["credential_active"] or
+                                guard["owner"] != actor or guard["owner_native_user"] != native_user or
+                                guard["guard_id"] is None or
+                                str(guard["generation"]) != saved["lease"]["fencing"] or
+                                not hmac.compare_digest(guard["proof_digest"],
+                                    saved["lease"]["token_digest"])):
+                            raise conflict()
+                        sql.execute(
+                            "UPDATE cf_edit_guard SET lease_until=LEAST(hard_expire_at,"
+                            "TIMESTAMPADD(SECOND,600,UTC_TIMESTAMP(6))) "
+                            "WHERE resource_uid=%s AND guard_id=%s AND generation=%s "
+                            "AND owner=%s AND proof_digest=%s AND mode='checkout' "
+                            "AND lease_until>UTC_TIMESTAMP(6) AND hard_expire_at>UTC_TIMESTAMP(6)",
+                            (resource["uid"], guard["guard_id"], guard["generation"],
+                             actor, guard["proof_digest"]))
+                        if sql.rowcount != 1:
+                            raise conflict()
+                        sql.execute(
+                            "UPDATE cf_edit_session "
+                            "SET expires_at=GREATEST(expires_at,FLOOR(UNIX_TIMESTAMP())+1800),"
+                            "updated_at=UTC_TIMESTAMP(6) "
+                            "WHERE session_id=%s AND device_id=%s AND state IN ('claimed','active') "
+                            "AND expires_at>FLOOR(UNIX_TIMESTAMP())",
+                            (value["session_id"], value["device_id"]))
+                        return dict(session_id=value["session_id"], renewed=True)
+                    escrow = CheckoutLeaseEscrow()
+                    if purpose == "confirm":
+                        escrow.confirm(sql, session=value["session_id"])
+                        return dict(confirmed=True, session_id=value["session_id"])
+                    lease = escrow.receive(sql, secret=self.secret,
+                        instance=self.instance, session=value["session_id"],
+                        device=value["device_id"], actor=actor,
+                        expected_digest=saved["lease"]["token_digest"])
+                    if (lease["base_file_id"] != saved["base_version"] or
+                            lease["generation"] != saved["lease"]["fencing"]):
+                        raise conflict()
+                    return dict(session_id=value["session_id"], lease=lease)
+                return authority.consume(saved["resource"], effect)
+            finally:
+                for item in (resources.read_authority, resources.write_authority,
+                             resources.tag_management):
+                    item.epoch = None
+                    item.current_subject = None
+                    item.is_owner = False
+                    item.effective_access = None

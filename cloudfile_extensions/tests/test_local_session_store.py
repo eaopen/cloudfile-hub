@@ -6,6 +6,76 @@ from cloudfile_extensions.tests.test_device_store import DeviceStoreTests
 
 
 class LocalSessionStoreTests(DeviceStoreTests):
+    def test_exclusive_start_replays_original_session_after_lost_reply(self):
+        sessions = LocalSessionStore()
+        snapshot = {**self.snapshot(), "mode": "exclusive-edit",
+            "lease": {"fencing": "1", "token_digest": hashlib.sha256(b"a" * 64).hexdigest()}}
+        args = dict(**self.owner, snapshot=snapshot, secret=b"s" * 32, token="a" * 64)
+        self.connection.begin()
+        with self.connection.cursor() as sql:
+            self.active(sql)
+        self.connection.commit()
+        try:
+            self.connection.begin()
+            with self.connection.cursor() as sql:
+                first, created, _, _ = sessions.create_exclusive(sql, **args)
+                self.assertTrue(created)
+            self.connection.commit()  # Simulate commit followed by lost HTTP reply.
+            self.connection.begin()
+            with self.connection.cursor() as sql:
+                second, created, state, revision = sessions.create_exclusive(sql, **args)
+                self.assertFalse(created)
+                self.assertEqual(first, second)
+                self.assertEqual((state, revision), ("created", "1"))
+                sql.execute("SELECT COUNT(*) FROM cf_edit_session")
+                self.assertEqual(sql.fetchone()[0], 1)
+                claim = dict(**self.owner, session_id=first.session_id, ticket=first.ticket,
+                    current_snapshot=snapshot, instance="https://cloudfile.invalid")
+                challenge = sessions.challenge(sql, **claim)
+                sessions.claim(sql, **claim, challenge=challenge, signature=self.sign(challenge))
+                _, created, state, revision = sessions.create_exclusive(sql, **args)
+                self.assertFalse(created)
+                self.assertEqual((state, revision), ("claimed", "2"))
+                with self.assertRaises(ContractError):
+                    sessions.challenge(sql, **claim)
+        finally:
+            self.connection.rollback()
+
+    def test_exclusive_replay_rejects_expiry_cancel_device_and_snapshot_changes(self):
+        sessions = LocalSessionStore()
+        snapshot = {**self.snapshot(), "mode": "exclusive-edit",
+            "lease": {"fencing": "1", "token_digest": hashlib.sha256(b"a" * 64).hexdigest()}}
+        args = dict(**self.owner, snapshot=snapshot, secret=b"s" * 32, token="a" * 64)
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as sql:
+                self.active(sql)
+                first, _, _, _ = sessions.create_exclusive(sql, **args)
+                sql.execute("SAVEPOINT before_replay_mutation")
+                for statement, parameters in (
+                    ("UPDATE cf_edit_session SET ticket_expires_at=1 WHERE session_id=%s", (first.session_id,)),
+                    ("UPDATE cf_edit_session SET state='cancelled' WHERE session_id=%s", (first.session_id,)),
+                    ("UPDATE cf_local_device SET revision=revision+1 WHERE device_id=%s", (self.device_id,)),
+                    ("UPDATE cf_local_device SET state='revoked' WHERE device_id=%s", (self.device_id,)),
+                ):
+                    sql.execute(statement, parameters)
+                    with self.assertRaises(ContractError):
+                        sessions.create_exclusive(sql, **args)
+                    sql.execute("ROLLBACK TO SAVEPOINT before_replay_mutation")
+                with self.assertRaises(ContractError):
+                    sessions.create_exclusive(sql, **{**args,
+                        "snapshot": {**snapshot, "base_version": "b" * 40}})
+                sql.execute("SELECT COUNT(*) FROM cf_edit_session")
+                self.assertEqual(sql.fetchone()[0], 1)
+                # Provisioning failure rolls back; same identity can be retried.
+                sql.execute("DELETE FROM cf_edit_session WHERE session_id=%s", (first.session_id,))
+                retried, created, _, _ = sessions.create_exclusive(sql, **args)
+                self.assertTrue(created)
+                self.assertEqual(first.session_id, retried.session_id)
+                self.assertEqual(first.ticket, retried.ticket)
+        finally:
+            self.connection.rollback()
+
     def test_device_cancel_can_stop_expired_session_and_is_proof_atomic(self):
         sessions = LocalSessionStore()
         self.connection.begin()

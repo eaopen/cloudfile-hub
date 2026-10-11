@@ -189,12 +189,29 @@ class LocalSessionService:
             raise ValueError('This mode does not accept a lease')
         def effect(sql, reference):
             snapshot = self._snapshot(sql, reference, mode=mode, allocate=True, expected_lease=lease)
-            issued = self.sessions.create(sql, provider=authority.state.provider, actor=authority.actor,
-                device_id=value["device_id"], snapshot=snapshot)
-            self._audit(sql, "local.session.created", issued.session_id, value["device_id"], snapshot, "1")
-            return dict(session_id=issued.session_id, state="created", revision="1",
-                claim_expires_at=issued.expires_at,
-                open_uri=make_open_uri(OpenURI(self.instance, issued.session_id, issued.ticket)))
+            if mode == "exclusive-edit":
+                issued, created, state, revision = self.sessions.create_exclusive(sql,
+                    provider=authority.state.provider, actor=authority.actor,
+                    device_id=value["device_id"], snapshot=snapshot,
+                    secret=self.resources.store.secret, token=lease["token"])
+                if created:
+                    from .lease_escrow import CheckoutLeaseEscrow
+                    # Issuance, escrow and audit roll back together. Checkout
+                    # itself is recovered with the original request key.
+                    CheckoutLeaseEscrow().create(sql, secret=self.resources.store.secret,
+                        instance=self.instance, session=issued.session_id,
+                        device=value["device_id"], actor=authority.actor, lease=lease)
+            else:
+                issued = self.sessions.create(sql, provider=authority.state.provider, actor=authority.actor,
+                    device_id=value["device_id"], snapshot=snapshot)
+                created, state, revision = True, "created", "1"
+            if created:
+                self._audit(sql, "local.session.created", issued.session_id, value["device_id"], snapshot, revision)
+            result = dict(session_id=issued.session_id, state=state, revision=revision,
+                claim_expires_at=issued.expires_at)
+            if state == "created":
+                result["open_uri"] = make_open_uri(OpenURI(self.instance, issued.session_id, issued.ticket))
+            return result
         Outbox(self.resources.store.connection)._require_idle()
         return authority.consume(ref, effect)
 

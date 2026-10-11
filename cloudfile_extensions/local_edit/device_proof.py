@@ -22,7 +22,7 @@ from ..common.errors import ContractError
 
 
 P256_ORDER = 0xFFFFFFFF00000000FFFFFFFFFFFFFFFFBCE6FAADA7179E84F3B9CAC2FC632551
-OPERATIONS = frozenset({"pair", "claim", "read", "renew", "commit", "cancel"})
+OPERATIONS = frozenset({"pair", "claim", "read", "renew", "commit", "cancel", "lease"})
 
 
 def rejected():

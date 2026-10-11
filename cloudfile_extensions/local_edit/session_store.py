@@ -169,16 +169,53 @@ class LocalSessionStore:
         normalized = snapshot_json(value)
         return row[:4] + (normalized,) + row[5:]
 
-    def create(self, sql, *, provider, actor, device_id, snapshot):
+    def create(self, sql, *, provider, actor, device_id, snapshot, issuance=None):
         revision = self._scope(sql, provider, actor, device_id)
         raw = snapshot_json(snapshot)
         sql.execute("SELECT FLOOR(UNIX_TIMESTAMP())")
         now = int(sql.fetchone()[0])
-        ticket = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
-        session_id = str(uuid4())
+        if issuance is None:
+            ticket = base64.urlsafe_b64encode(secrets.token_bytes(32)).decode().rstrip("=")
+            session_id = str(uuid4())
+        else:
+            session_id, ticket = issuance
+            if str(UUID(session_id)) != session_id:
+                raise ValueError("canonical session required")
+            self._digest(ticket)
         sql.execute("INSERT INTO cf_edit_session(session_id,provider,owner_user_id,device_id,device_revision,snapshot,state,ticket_digest,ticket_expires_at,expires_at,revision,created_at,updated_at) VALUES(%s,%s,%s,%s,%s,%s,'created',%s,%s,%s,1,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6))",
             (session_id, provider, actor, device_id, revision, raw, self._digest(ticket), now + 60, now + 1800))
         return IssuedSession(session_id, now + 60, ticket)
+
+    def create_exclusive(self, sql, *, provider, actor, device_id, snapshot, secret, token):
+        """Replay one Checkout handoff under the existing device/authority locks.
+
+        The device row serializes concurrent retries; no second session or
+        ticket is minted. Claimed tickets are never returned to the browser.
+        """
+        if snapshot["mode"] != "exclusive-edit" or not isinstance(secret, bytes) or len(secret) < 32:
+            raise ValueError("exclusive issuance requires deployment secret")
+        revision = self._scope(sql, provider, actor, device_id)
+        raw = snapshot_json(snapshot)
+        payload = json.dumps(["cloudfile.exclusive-session.v1", provider, actor,
+            device_id, token], ensure_ascii=True, separators=(",", ":")).encode("ascii")
+        identity = hmac.new(secret, b"id\n" + payload, hashlib.sha256).digest()
+        session_id = str(UUID(bytes=identity[:16], version=4))
+        ticket = base64.urlsafe_b64encode(hmac.new(secret, b"ticket\n" + payload,
+            hashlib.sha256).digest()).decode().rstrip("=")
+        sql.execute("SELECT session_id FROM cf_edit_session WHERE session_id=%s FOR UPDATE", (session_id,))
+        if sql.fetchone() is None:
+            issued = self.create(sql, provider=provider, actor=actor, device_id=device_id,
+                snapshot=snapshot, issuance=(session_id, ticket))
+            return issued, True, "created", "1"
+        row = self._row(sql, provider, actor, device_id, session_id)
+        sql.execute("SELECT FLOOR(UNIX_TIMESTAMP())")
+        now = int(sql.fetchone()[0])
+        if (row[3] != revision or row[4] != raw or now >= row[8] or
+                row[5] not in {"created", "claimed", "active"} or
+                row[5] == "created" and now >= row[7] or
+                not hmac.compare_digest(row[6], self._digest(ticket))):
+            raise conflict()
+        return IssuedSession(session_id, row[7], ticket), False, row[5], str(row[9])
 
     def _ready(self, sql, *, provider, actor, device_id, session_id, ticket, current_snapshot):
         revision = self._scope(sql, provider, actor, device_id)
