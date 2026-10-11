@@ -14,4 +14,3 @@ def deterministic_checkout_token(secret, *, provider, actor, holder, reference,
         holder, reference, device_id, base_file_id, request_key],
         sort_keys=True, ensure_ascii=True, separators=(",", ":")).encode("ascii")
     return hmac.new(secret, payload, hashlib.sha256).hexdigest()
-
