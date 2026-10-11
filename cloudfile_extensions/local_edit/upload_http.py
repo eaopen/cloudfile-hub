@@ -1,11 +1,9 @@
 """Device-only bounded byte staging into the existing native Branch publisher."""
 import hashlib
 import hmac
-import json
 import os
 from pathlib import Path
 import tempfile
-import time
 from uuid import uuid4
 
 from django.http import JsonResponse
@@ -74,16 +72,11 @@ class AgentUploadView(View):
                     from ..identity.ticket_transport import _call
                     condition = grant["condition"]
                     repo = edit["repo_id"]
-                    current = _call("seafile_get_repo", (repo,), time.monotonic() + 5)
-                    heads = [name for name in ("head_cmmt_id", "head-cmmt-id") if name in current]
-                    if len(heads) != 1:
-                        raise ContractError("EDIT_UNAVAILABLE", "Native head unavailable", 503)
-                    condition["head_id"] = current[heads[0]]
-                    parent, _, filename = condition["path"].rpartition("/")
+                    from .native_publish import full_native_publish
                     try:
-                        _call("seafile_cloudfile_publish_edit", (repo, output.name, parent or "/", filename,
-                            grant["native_user"], json.dumps(condition, separators=(",", ":"))),
-                            time.monotonic() + 180)
+                        full_native_publish(call=_call, repo=repo, staged=output.name,
+                            user=grant["native_user"], condition=condition,
+                            mode="exclusive", timeout=180)
                     except Exception:
                         # Native may have committed before the RPC reply was lost.
                         pass

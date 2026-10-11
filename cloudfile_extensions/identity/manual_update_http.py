@@ -1,11 +1,9 @@
 """Explicit Web creation/replacement through native conditional publication."""
 from copy import deepcopy
-import json
 import os
 from pathlib import Path
 import re
 import tempfile
-import time
 from uuid import uuid4
 
 from django.http import JsonResponse
@@ -119,13 +117,14 @@ class OIDCManualUpdateView(View):
                     from ..local_edit.shared_staging import stage_chunks
                     stage_chunks(staged, uploaded.chunks(), expected_size=uploaded.size,
                                  max_bytes=512 * 1024 * 1024)
-                    parent, _, filename = reference["path"].rpartition("/")
                     try:
                         submitted = True
-                        object_id = _call("seafile_cloudfile_put_file_with_barriers",
-                            (reference["repo_id"], staged.name, parent or "/", filename,
-                             actor.native_username, json.dumps(condition, separators=(",", ":"))),
-                            time.monotonic() + 30)
+                        from ..local_edit.native_publish import full_native_publish
+                        object_id = full_native_publish(call=_call,
+                            repo=reference["repo_id"],staged=staged.name,
+                            user=actor.native_username,condition=condition,
+                            mode="web",target_path=reference["path"],
+                            head=head,timeout=30)
                     except Exception as error:
                         from .ticket_transport import NativeVersionConflict
                         if isinstance(error, NativeVersionConflict):

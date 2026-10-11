@@ -7,12 +7,10 @@ identity/ACL, path version and any managed lock. No cookie or Seafile update
 token can authorize this endpoint. This initial mode is a one-shot upload:
 an uncertain reply is NEVER interpreted as a durable published receipt.
 """
-import json
 import os
 from pathlib import Path
 import re
 import tempfile
-import time
 from uuid import uuid4
 
 from django.http import JsonResponse
@@ -79,21 +77,11 @@ class AgentOptimisticUploadView(View):
                 with tempfile.NamedTemporaryFile(dir=Path(data_dir) / "httptemp",
                                                  prefix="cf-optimistic-edit-") as output:
                     stage(request, output, size=size, digest=grant["content_digest"])
-                    # Repository HEAD guards against concurrent library changes.
-                    repo = grant["repo_id"]
-                    native = _call("seafile_get_repo", (repo,), time.monotonic() + 5)
-                    heads = [key for key in ("head_cmmt_id", "head-cmmt-id") if key in native]
-                    if len(heads) != 1 or not _HEX40.fullmatch(native[heads[0]]):
-                        raise ContractError("EDIT_UNAVAILABLE", "Current native head unavailable", 503)
-                    condition["head_id"] = native[heads[0]]
-                    parent, _, filename = condition["path"].rpartition("/")
-                    if not filename or filename in (".", "..") or "/" in filename:
-                        raise invalid("Original cloud path invalid")
+                    from .native_publish import full_native_publish
                     try:
-                        _call("seafile_cloudfile_put_file_with_barriers",
-                            (repo, output.name, parent or "/", filename, grant["native_user"],
-                             json.dumps(condition, ensure_ascii=False, separators=(",", ":"))),
-                            time.monotonic() + 180)
+                        full_native_publish(call=_call, repo=grant["repo_id"],
+                            staged=output.name, user=grant["native_user"],
+                            condition=condition, mode="optimistic", timeout=180)
                     except NativeVersionConflict:
                         raise ContractError("RESOURCE_VERSION_CONFLICT",
                             "Cloud file changed since local edit began; local file retained", 409) from None

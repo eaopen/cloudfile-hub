@@ -12,12 +12,17 @@ from ..common.errors import invalid
 
 
 def stage_chunks(output, chunks, *, expected_size, max_bytes, digest=None,
-                 protect_snapshot=False):
+                 protect_snapshot=False, hash_algorithm="sha256"):
     if (type(expected_size) is not int or type(max_bytes) is not int or
             expected_size < 0 or expected_size > max_bytes):
         raise invalid("Bounded upload size required")
+    # Raw Seafile blocks are addressed by SHA-1. Whole-file snapshot
+    # integrity uses SHA-256. Only these two explicit algorithms are allowed;
+    # Native Seafile independently verifies staged block names and indexes.
+    if hash_algorithm not in ("sha256", "sha1"):
+        raise invalid("Unsupported Seafile staging checksum")
     counter=0
-    checksum=hashlib.sha256()
+    checksum=hashlib.new(hash_algorithm)
     for part in chunks:
         if not isinstance(part, bytes):
             raise invalid("Binary upload chunks required")

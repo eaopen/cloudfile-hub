@@ -5,7 +5,6 @@ issued by commit-upload-authorize. There is no browser cookie or repo-wide
 upload token. Raw block stage is pathless. Only the native guarded Branch
 transaction can finalize an Intent and advertise a published receipt.
 """
-import hashlib
 import json
 import os
 from pathlib import Path
@@ -64,10 +63,8 @@ def _native_repo(repo):
             current.get("status", 0) != 0):
         raise ContractError("EDIT_UNAVAILABLE",
                             "CDC requires a writable unencrypted v1 library", 503)
-    heads = [x for x in ("head_cmmt_id", "head-cmmt-id") if x in current]
-    if len(heads) != 1:
-        raise ContractError("EDIT_UNAVAILABLE", "Current native head unavailable", 503)
-    return current[heads[0]]
+    from .native_publish import native_head
+    return native_head(current)
 
 
 @method_decorator(csrf_exempt, name="dispatch")
@@ -145,21 +142,21 @@ class AgentBlockView(View):
                 data_dir = os.environ.get("SEAFILE_DATA_DIR", "")
                 if not os.path.isabs(data_dir):
                     raise ContractError("EDIT_UNAVAILABLE", "Protected native storage unavailable", 503)
-                digest = hashlib.sha1()
-                remaining = size
-                with tempfile.NamedTemporaryFile(dir=Path(data_dir) / "httptemp",
-                                                 prefix="cf-device-cdc-") as tmp:
+                from .shared_staging import stage_chunks
+                def raw_blocks():
+                    remaining = size
                     while remaining:
                         chunk = request.read(min(65536, remaining))
                         if not chunk:
-                            raise invalid("Incomplete block stage")
-                        digest.update(chunk)
-                        tmp.write(chunk)
+                            raise invalid("Incomplete Seafile block stage")
                         remaining -= len(chunk)
-                    if request.read(1) or digest.hexdigest() != block_id:
-                        raise invalid("Block content changed")
-                    tmp.flush()
-                    os.fsync(tmp.fileno())
+                        yield chunk
+                    if request.read(1):
+                        raise invalid("Unexpected bytes after Seafile block")
+                with tempfile.NamedTemporaryFile(dir=Path(data_dir) / "httptemp",
+                                                 prefix="cf-device-cdc-") as tmp:
+                    stage_chunks(tmp, raw_blocks(), expected_size=size,
+                        max_bytes=MAX_BLOCK, digest=block_id, hash_algorithm="sha1")
                     _native_repo(edit["repo_id"])
                     outcome = _call("seafile_cloudfile_stage_raw_block",
                                 (edit["repo_id"], block_id, tmp.name, grant["native_user"]),
@@ -173,16 +170,13 @@ class AgentBlockView(View):
                     raise invalid("CDC publication carries no new file bytes")
                 value, ordered, sizes = _read_blocks(self.runtime, grant, request_id)
                 current_head = _native_repo(edit["repo_id"])
-                condition = grant["condition"]
-                condition["head_id"] = current_head
-                parent, _, filename = condition["path"].rpartition("/")
+                from .native_publish import cdc_native_publish
                 try:
-                    _call("seafile_cloudfile_publish_optimistic_blocks"
-                          if self.optimistic else "seafile_cloudfile_publish_edit_blocks",
-                          (edit["repo_id"], json.dumps(ordered, separators=(",", ":")),
-                           str(value["size"]), parent or "/", filename,
-                           grant["native_user"], json.dumps(condition, separators=(",", ":"))),
-                          time.monotonic() + 240)
+                    cdc_native_publish(call=_call, repo=edit["repo_id"],
+                        ordered=ordered, size=value["size"],
+                        user=grant["native_user"],condition=grant["condition"],
+                        mode="optimistic" if self.optimistic else "exclusive",
+                        head=current_head)
                 except Exception:
                     # A real Branch update may have landed before reply loss.
                     pass
