@@ -66,3 +66,19 @@ def bind_request(value, *, snapshot, session_row, edit_guard, current_native):
     ]
     message = json.dumps(protected, ensure_ascii=True, separators=(",", ":")).encode("ascii")
     return hashlib.sha256(message).hexdigest()
+
+
+def validate_checkout_lease(value):
+    """Browser may create exclusive sessions with the actual checkout token,
+    never with only a stored digest or a caller-nominated user/holder.
+    The current guard and file are still rechecked by EditingStore.
+    """
+    object_fields(value, ("guard_id", "generation", "credential_epoch", "base_file_id", "token"))
+    _uuid(value["guard_id"])
+    for field in ("generation", "credential_epoch"):
+        if not isinstance(value[field], str) or not re.fullmatch(r"[1-9][0-9]{0,19}", value[field]):
+            raise ValueError("canonical positive checkout epoch required")
+    if (not isinstance(value["base_file_id"], str) or not re.fullmatch(r"[0-9a-f]{40}", value["base_file_id"]) or
+            not isinstance(value["token"], str) or not re.fullmatch(r"[0-9a-f]{64}", value["token"])):
+        raise ValueError("actual bounded checkout proof required")
+    return value

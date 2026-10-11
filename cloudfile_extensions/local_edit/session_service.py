@@ -178,8 +178,13 @@ class LocalSessionService:
         mode = value["mode"]
         authority = self._authority(mode)
         lease = value.get("lease")
-        if mode == "exclusive-edit" and not self.agent2_exclusive_enabled:
-            raise ContractError('EDIT_UNAVAILABLE', 'Exclusive Agent integration is not enabled', 503)
+        if mode == "exclusive-edit":
+            if not self.agent2_exclusive_enabled:
+                raise ContractError('EDIT_UNAVAILABLE', 'Exclusive Agent integration is not enabled', 503)
+            # A stored lease fingerprint is sufficient to CHECK a previously
+            # claimed internal session, but MUST NOT create a new session.
+            from .commit_contract import validate_checkout_lease
+            validate_checkout_lease(lease)
         if mode != "exclusive-edit" and lease is not None:
             raise ValueError('This mode does not accept a lease')
         def effect(sql, reference):

@@ -117,7 +117,8 @@ class AgentClaimRuntime:
                 request_id=request_id, secret=self.secret, lifecycle_reader=self.lifecycle_reader)
             try:
                 service = LocalSessionService(resources, actor=AuthenticatedPolicyActor(actor, username),
-                    instance=self.instance, version_reader=self.version_reader)
+                    instance=self.instance, version_reader=self.version_reader,
+                    agent2_exclusive_enabled=self.agent2_exclusive_enabled)
                 # No stale precheck grant is returned. Current ResourceService
                 # prepares latest subjects and repeats device proof/expiry under
                 # current native CE/C/file snapshot before committing claim.
@@ -222,7 +223,8 @@ class AgentClaimRuntime:
                 request_id=request_id, secret=self.secret, lifecycle_reader=self.lifecycle_reader)
             try:
                 service = LocalSessionService(resources, actor=AuthenticatedPolicyActor(actor, username),
-                    instance=self.instance, version_reader=self.version_reader)
+                    instance=self.instance, version_reader=self.version_reader,
+                    agent2_exclusive_enabled=self.agent2_exclusive_enabled)
                 if operation == "cancel":
                     return service.cancel_device(value)
                 return service.renew(value) if operation == "renew" else service.prepare_native_read(value)

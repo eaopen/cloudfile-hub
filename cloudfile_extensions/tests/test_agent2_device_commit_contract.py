@@ -1,8 +1,10 @@
 """No database needed: challenge binds the current guard, session & digest."""
 import hashlib
 import unittest
+import base64
 
-from cloudfile_extensions.local_edit.commit_contract import bind_request, validate_request
+from cloudfile_extensions.local_edit.commit_contract import bind_request, validate_request, validate_checkout_lease
+from cloudfile_extensions.local_edit.device_proof import DeviceChallenge
 from cloudfile_extensions.common.errors import ContractError
 
 
@@ -35,6 +37,31 @@ class DeviceCommitContractTest(unittest.TestCase):
         return bind_request(request or self.request,snapshot=snapshot or self.snapshot,
             session_row=self.row,edit_guard=guard or self.guard,
             current_native="engineer@example.test")
+
+    def test_canonical_commit_signature_bytes_match_go_and_dotnet(self):
+        challenge = DeviceChallenge(
+            instance="https://etech.example",
+            device_id="11111111-1111-4111-8111-111111111111",
+            session_id="22222222-2222-4222-8222-222222222222",
+            operation="commit",
+            nonce=base64.urlsafe_b64encode(bytes(range(32))).decode().rstrip("="),
+            issued_at=1791734999, expires_at=1791735059,
+            request_sha256="a" * 64)
+        self.assertEqual(hashlib.sha256(challenge.message()).hexdigest(),
+            "151b7a256dcd805d360846444510f2be2a12862de7c092bd093ca62f63d1e4e2")
+
+    def test_new_exclusive_session_requires_real_checkout_secret(self):
+        proof={key:self.request[key] for key in (
+            "guard_id", "generation", "credential_epoch", "base_file_id", "token")}
+        self.assertEqual(validate_checkout_lease(proof), proof)
+        for replacement in (
+            {"fencing":"3", "token_digest":"a"*64},
+            {**proof, "token":"a"*63},
+            {**proof, "generation":"03"},
+            {**proof, "actor":"admin"},
+        ):
+            with self.subTest(replacement=replacement), self.assertRaises((ValueError, ContractError)):
+                validate_checkout_lease(replacement)
 
     def test_valid_bounded_manual_one_file(self):
         self.assertIs(validate_request(self.request),self.request)
