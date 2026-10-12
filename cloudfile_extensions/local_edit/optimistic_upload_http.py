@@ -18,6 +18,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
+from .private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from ..identity.ticket_transport import _call, NativeVersionConflict
 from .agent_runtime import AgentClaimRuntime
@@ -37,7 +38,7 @@ class AgentOptimisticUploadView(View):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Manual optimistic upload requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Device TLS required", 401)
             if (request.GET or request.META.get("QUERY_STRING") or
                     "Cookie" in request.headers or

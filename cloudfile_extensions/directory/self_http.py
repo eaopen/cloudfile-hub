@@ -5,6 +5,7 @@ from django.http import JsonResponse
 from django.urls import path
 from django.views import View
 
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from .self_context import OwnContextService
 
@@ -18,7 +19,7 @@ class OwnContextView(View):
         try:
             if request.method != "GET" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed for this context target", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
             if request.GET or request.read(1):
                 raise invalid("Own context takes no parameters or body")

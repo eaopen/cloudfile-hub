@@ -13,6 +13,7 @@ from django.http import JsonResponse
 from django.middleware.csrf import CsrfViewMiddleware
 
 from ..authorization.http import DirectoryPolicyView
+from .private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from ..common.validation import object_fields
 from ..resources.paths import resource_ref
@@ -30,7 +31,7 @@ class ExclusiveStartView(DirectoryPolicyView):
         request_id = str(uuid4())
         lease = None
         try:
-            if request.method != "POST" or args or kwargs or not request.is_secure():
+            if request.method != "POST" or args or kwargs or not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Native OIDC session required", 401)
             if (request.GET or request.headers.get("Authorization") or
                     request.headers.get("Content-Encoding")):

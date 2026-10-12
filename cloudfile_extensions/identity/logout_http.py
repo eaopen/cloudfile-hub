@@ -5,6 +5,7 @@ from django.http import JsonResponse
 from django.middleware.csrf import CsrfViewMiddleware
 from django.views import View
 
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError
 from .browser_binding import BINDING_COOKIE, BrowserLoginBindings, request_binding
 from .resources import LoginResources
@@ -25,7 +26,7 @@ class LocalLogoutView(View):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Local logout only accepts POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure logout is required", 401)
             if request.GET or request.read(1) or request.headers.get("Authorization"):
                 raise ContractError("INVALID_REQUEST", "Local logout takes no query, body or authorization header", 400)

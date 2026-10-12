@@ -15,6 +15,7 @@ from django.views import View
 
 from ..authorization.http import DirectoryPolicyView
 from ..authorization.gunicorn import login_resources_scope
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from ..resources.paths import resource_ref
 from .service import EditingService
@@ -78,7 +79,7 @@ class EditingUploadView(View):
             from ..identity.ticket_transport import _call
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "File commit requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure session is required", 401)
             if request.GET or request.headers.get("Authorization") or request.headers.get("Content-Encoding"):
                 raise invalid("File commit requires a native session multipart form")
@@ -229,7 +230,7 @@ class EditingCheckinView(DirectoryPolicyView):
             from ..identity.ticket_transport import _call
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Checkin requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure session is required", 401)
             if request.GET or request.headers.get("Authorization") or request.headers.get("Content-Encoding"):
                 raise invalid("Checkin requires a native session JSON request")

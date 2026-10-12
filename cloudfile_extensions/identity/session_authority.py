@@ -2,6 +2,7 @@
 from contextlib import contextmanager
 from copy import deepcopy
 
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError
 from ..jobs.authority import scope_locks
 from .resources import LoginResources
@@ -19,7 +20,7 @@ class OIDCSessionAuthority:
     @contextmanager
     def guard(self, request):
         from seahub.auth import BACKEND_SESSION_KEY
-        if not request.is_secure() or request.session.get(BACKEND_SESSION_KEY) != BACKEND:
+        if not transport_allowed(request) or request.session.get(BACKEND_SESSION_KEY) != BACKEND:
             raise ContractError("AUTHENTICATION_REQUIRED", "Native OIDC session is required", 401)
         key = request.session.session_key
         reference = request.session.get(SESSION_REFERENCE_KEY)

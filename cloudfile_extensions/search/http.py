@@ -5,6 +5,7 @@ from django.http import JsonResponse
 from django.middleware.csrf import CsrfViewMiddleware
 
 from ..authorization.http import DirectoryPolicyView
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from .query_runtime import GuardedSearchRequest
 
@@ -18,7 +19,7 @@ class ResourceSearchView(DirectoryPolicyView):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Search requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
             if request.headers.get("Authorization") or request.headers.get("Content-Encoding"):
                 raise invalid("Search Web requests do not accept machine credentials or encoded bodies")

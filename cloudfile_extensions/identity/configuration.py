@@ -1,6 +1,7 @@
 """Opt-in OIDC host wiring; no connections, authentication or readiness claim."""
 
 from urllib.parse import urlsplit
+import os
 
 from django.core.exceptions import ImproperlyConfigured
 
@@ -78,6 +79,16 @@ def configure_oidc_host(settings):
     settings.MIDDLEWARE = [GUARDED_MIDDLEWARE if entry == SESSION_MIDDLEWARE else entry
                            for entry in middleware]
     settings.AUTHENTICATION_BACKENDS = backends if BACKEND in backends else backends + (BACKEND,)
-    settings.SESSION_COOKIE_SECURE = True
+    # Browser cookies follow the actual application scheme. On internal
+    # HTTP, Secure would make the browser discard the session entirely.
+    callback_secure = urlsplit(oidc.redirect_uri).scheme == "https"
+    if not callback_secure or any(urlsplit(value).scheme == "http" for value in (
+            oidc.issuer, oidc.authorization_url, oidc.token_url,
+            oidc.userinfo_url, oidc.jwks_url)):
+        # oauthlib refuses HTTP authorization even when the deployment's
+        # fixed callback/IdP URL is explicitly HTTP; this is required for
+        # native HTTP-mode OIDC. No redirect endpoint is taken from requests.
+        os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
+    settings.SESSION_COOKIE_SECURE = callback_secure
     settings.SESSION_COOKIE_HTTPONLY = True
-    settings.CSRF_COOKIE_SECURE = True
+    settings.CSRF_COOKIE_SECURE = callback_secure

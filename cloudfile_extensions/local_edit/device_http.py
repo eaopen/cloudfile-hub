@@ -6,6 +6,7 @@ from django.middleware.csrf import CsrfViewMiddleware
 from django.urls import path
 
 from ..authorization.http import DirectoryPolicyView
+from .private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from .device_runtime import DeviceManagementFactory
 from .device_service import DeviceManagementService
@@ -21,7 +22,7 @@ class DeviceManagementView(DirectoryPolicyView):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Device management requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure device management required", 401)
             if request.GET or request.headers.get("Content-Encoding", "identity") != "identity":
                 raise invalid("Device management takes uncompressed JSON without query")

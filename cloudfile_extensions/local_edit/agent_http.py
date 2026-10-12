@@ -7,6 +7,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
 from ..authorization.http import DirectoryPolicyView
+from .private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from .agent_runtime import AgentClaimRuntime
 from .read_ticket import AgentReadTicketIssuer
@@ -24,7 +25,7 @@ class AgentClaimView(DirectoryPolicyView):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Device claim requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure device claim required", 401)
             if (request.GET or request.META.get("QUERY_STRING") or "Cookie" in request.headers or
                     "Authorization" in request.headers or "Content-Encoding" in request.headers):

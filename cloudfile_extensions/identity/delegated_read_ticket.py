@@ -5,6 +5,7 @@ import math
 from uuid import UUID
 
 from ..authorization.resources import PolicyResources
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError
 from ..directory.preparation import SubjectPreparation
 from ..resources.paths import resource_ref
@@ -20,7 +21,7 @@ class DelegatedReadTicketIssuer:
         self.preparation, self.verifier = preparation, verifier
 
     def issue(self, request, reference, *, operation="download"):
-        if (not request.is_secure() or "Cookie" in request.headers
+        if (not transport_allowed(request) or "Cookie" in request.headers
                 or request.GET):
             raise ContractError("AUTHENTICATION_REQUIRED", "Secure cookie-free delegation is required", 401)
         principal = self.verifier.verify(request.headers.get("Authorization"))
@@ -71,7 +72,7 @@ class DelegatedReadTicketFactory:
 
     @contextmanager
     def __call__(self, request, request_id):
-        if not request.is_secure() or "Cookie" in request.headers or request.GET:
+        if not transport_allowed(request) or "Cookie" in request.headers or request.GET:
             raise ContractError("AUTHENTICATION_REQUIRED", "Secure cookie-free delegation is required", 401)
         principal = self.verifier.verify(request.headers.get("Authorization"))
         if principal.provider != self.resources.provider:

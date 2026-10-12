@@ -9,6 +9,7 @@ from django.middleware.csrf import CsrfViewMiddleware
 
 from ..authorization import gunicorn
 from ..authorization.http import DirectoryPolicyView
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from ..identity.service_revocations import ServiceRevocations
 from ..identity.service_tokens import ServiceTokenVerifier
@@ -23,7 +24,7 @@ class SystemTagProviderView(DirectoryPolicyView):
         try:
             if request.method != 'POST' or args or kwargs:
                 raise ContractError('METHOD_NOT_ALLOWED', 'System tags require POST', 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError('AUTHENTICATION_REQUIRED', 'Secure provider session required', 401)
             if request.GET or request.headers.get('Authorization') or request.headers.get('Content-Encoding'):
                 raise invalid('Provider session accepts no query, machine login or encoded body')

@@ -6,6 +6,7 @@ from django.http import HttpResponseRedirect, JsonResponse
 from django.urls import path
 from django.views import View
 
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError
 from .resources import LoginResources
 from .runtime import LoginRuntime
@@ -21,7 +22,7 @@ class LoginBeginView(View):
         try:
             if request.method != "GET" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Login initiation only accepts GET", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure login is required", 401)
             if request.GET or request.read(1):
                 raise ContractError("INVALID_REQUEST", "Login initiation takes no query or body", 400)

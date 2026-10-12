@@ -6,8 +6,9 @@ from urllib.parse import urlsplit
 from django.http import JsonResponse
 from django.views import View
 
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError
-from .logout_state import LogoutStates, LOGOUT_COOKIE
+from .logout_state import LogoutStates, LOGOUT_COOKIE, logout_cookie
 from .resources import LoginResources
 
 
@@ -20,7 +21,7 @@ class LogoutReturnView(View):
         try:
             if request.method != "GET" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Logout return only accepts GET", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure logout return required", 401)
             if request.read(1) or request.headers.get("Authorization"):
                 raise ContractError("INVALID_REQUEST", "Logout return takes no body or authorization header", 400)
@@ -38,9 +39,9 @@ class LogoutReturnView(View):
             if len(raw) > 8192:
                 raise ContractError("AUTHENTICATION_REQUIRED", "Invalid logout binding cookie", 401)
             cookies = [part.strip().split("=", 1)[1] for part in raw.split(";")
-                if "=" in part and part.strip().split("=", 1)[0] == LOGOUT_COOKIE]
+                if "=" in part and part.strip().split("=", 1)[0] == logout_cookie(request)]
             if (len(cookies) != 1 or not re.fullmatch(r"[A-Za-z0-9_-]{43}", cookies[0])
-                    or request.COOKIES.get(LOGOUT_COOKIE) != cookies[0]):
+                    or request.COOKIES.get(logout_cookie(request)) != cookies[0]):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Exact logout browser binding required", 401)
             LogoutStates(self.resources.resources.redis, issuer=config.issuer,
                 client_id=config.client_id, prefix=self.resources.prefix + "oidc:logout:").consume(
@@ -48,8 +49,8 @@ class LogoutReturnView(View):
             # A delayed return must not destroy an intervening fresh login.
             # State proves correlation, not that every IdP/RP session ended.
             response = JsonResponse(dict(rp_returned=True, idp_logged_out=None))
-            response.set_cookie(LOGOUT_COOKIE, "", max_age=0, path="/",
-                secure=True, httponly=True, samesite="Lax")
+            response.set_cookie(logout_cookie(request), "", max_age=0, path="/",
+                secure=request.is_secure(), httponly=True, samesite="Lax")
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)
         except Exception:

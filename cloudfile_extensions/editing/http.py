@@ -6,6 +6,7 @@ from django.http import JsonResponse
 from django.middleware.csrf import CsrfViewMiddleware
 
 from ..authorization.http import DirectoryPolicyView
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from .service import EditingService
 
@@ -20,7 +21,7 @@ class EditingView(DirectoryPolicyView):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Editing operation requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
             if request.GET:
                 raise invalid("Editing operations take no URL parameters")

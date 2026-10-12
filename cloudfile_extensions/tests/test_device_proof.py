@@ -16,6 +16,23 @@ def encode(raw):
 
 
 class DeviceProofTests(unittest.TestCase):
+    def test_http_and_https_are_both_valid_canonical_challenge_origins(self):
+        from dataclasses import replace
+        from cloudfile_extensions.local_edit.device_proof import DeviceChallenge
+        for value in ("http://cloudfile.invalid", "http://10.12.1.157:8092",
+                      "https://cloudfile.invalid"):
+            proof=DeviceChallenge(instance=value,
+                device_id="11111111-1111-4111-8111-111111111111",
+                session_id="22222222-2222-4222-8222-222222222222",
+                operation="read",nonce=encode(b"n"*32),issued_at=100,
+                expires_at=160,request_sha256="a"*64)
+            self.assertIn(value.encode("ascii"),proof.message())
+        for bad in ("http://cloudfile.invalid/path", "http://evil@cloudfile.invalid",
+                    "ftp://cloudfile.invalid", "http://CLOUD.invalid"):
+            with self.assertRaises(ValueError):
+                proof=replace(proof,instance=bad)
+                proof.message()
+
     def setUp(self):
         self.private = ec.generate_private_key(ec.SECP256R1())
         numbers = self.private.public_key().public_numbers()
@@ -56,7 +73,7 @@ class DeviceProofTests(unittest.TestCase):
                 DevicePublicKey.parse(value)
 
     def test_challenge_lifetime_and_non_origin_are_not_caller_parameters(self):
-        for values in (dict(expires_at=221), dict(instance="http://cloudfile.invalid"),
+        for values in (dict(expires_at=221), dict(instance="ftp://cloudfile.invalid"),
                 dict(instance="https://cloudfile.invalid/path"), dict(operation="upload-anything")):
             with self.assertRaises(ContractError):
                 verify_possession(self.public, replace(self.challenge, **values), self.signature, now=101)

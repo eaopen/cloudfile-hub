@@ -11,6 +11,7 @@ import jwt
 from ..authorization.read import ContentReadAuthority
 from ..authorization.core import PolicyCore
 from ..authorization.resources import PolicyResources
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError
 from ..common.validation import identifier
 from ..resources.paths import resource_ref
@@ -36,7 +37,7 @@ class UserDelegationIssuer:
         self.key, self.kid = signing_key, kid
 
     def issue(self, request, reference, *, operation="download"):
-        if not request.is_secure() or "Cookie" in request.headers or request.GET:
+        if not transport_allowed(request) or "Cookie" in request.headers or request.GET:
             raise ContractError("AUTHENTICATION_REQUIRED", "Secure login-service authentication is required", 401)
         principal = self.verifier.verify(request.headers.get("Authorization"))
         principal.require(self.ACTION)
@@ -118,7 +119,7 @@ class UserDelegationIssueFactory:
 
     @contextmanager
     def __call__(self, request, request_id, user_id):
-        if not request.is_secure() or "Cookie" in request.headers or request.GET:
+        if not transport_allowed(request) or "Cookie" in request.headers or request.GET:
             raise ContractError("AUTHENTICATION_REQUIRED", "Secure login-service authentication is required", 401)
         principal = self.verifier.verify(request.headers.get("Authorization"))
         principal.require(UserDelegationIssuer.ACTION)

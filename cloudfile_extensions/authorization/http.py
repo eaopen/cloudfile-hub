@@ -7,6 +7,7 @@ from django.http import JsonResponse
 from django.middleware.csrf import CsrfViewMiddleware
 from django.views import View
 
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from .service import DirectoryPolicyService
 
@@ -48,7 +49,7 @@ class DirectoryPolicyView(View):
         try:
             if request.method not in {"GET", "POST", "PUT", "DELETE"}:
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
             rule_id = str(kwargs["rule_id"]) if kwargs.get("rule_id") is not None else None
             if ((request.method in {"GET", "POST"} and rule_id is not None) or
@@ -107,7 +108,7 @@ class DirectoryEffectiveView(View):
     def get(self, request):
         request_id = str(uuid4())
         try:
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError('AUTHENTICATION_REQUIRED', 'Secure authentication is required', 401)
             required = {'repo_id', 'path', 'kind'}
             if set(request.GET) != required or any(len(request.GET.getlist(k)) != 1 for k in request.GET) or request.read(1):
@@ -137,7 +138,7 @@ class LibraryRulesView(View):
     def get(self, request):
         request_id = str(uuid4())
         try:
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError('AUTHENTICATION_REQUIRED', 'Secure authentication is required', 401)
             if not {'repo_id'} <= set(request.GET) or set(request.GET) - {'repo_id', 'limit', 'after'} or request.read(1):
                 raise invalid('A library reference is required')

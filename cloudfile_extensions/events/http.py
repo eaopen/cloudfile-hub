@@ -7,6 +7,7 @@ from django.urls import path
 from django.views import View
 from django.middleware.csrf import CsrfViewMiddleware
 
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from .authorized_query import AuthorizedAuditQuery
 from ..authorization.http import DirectoryPolicyView
@@ -23,7 +24,7 @@ class AuditEventsView(View):
         try:
             if request.method != "GET" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed for this audit target", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
             query = request.META.get("QUERY_STRING", "")
             if not isinstance(query, str) or len(query.encode("utf-8")) > 16384:
@@ -89,7 +90,7 @@ class AuditExportView(DirectoryPolicyView):
             if (self.operation not in {"create", "status", "cancel", "result"}
                     or request.method != expected or args or set(kwargs) != wanted):
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed for this export target", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
             if request.GET:
                 raise invalid("Audit export takes no query parameters")

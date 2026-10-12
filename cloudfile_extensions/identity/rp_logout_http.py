@@ -9,7 +9,7 @@ from django.utils.html import format_html
 from ..common.errors import ContractError
 from .logout_http import LocalLogoutView
 from .native_session import BACKEND, LOGOUT_HINT_KEY, SERVER_SESSION_ENGINES
-from .logout_state import LogoutStates, LOGOUT_COOKIE
+from .logout_state import LogoutStates, LOGOUT_COOKIE, logout_cookie
 
 
 class RPLogoutView(LocalLogoutView):
@@ -41,8 +41,8 @@ class RPLogoutView(LocalLogoutView):
             '<script nonce="{}">document.getElementById("rp-logout").submit();</script></body></html>',
             config.end_session_url, hint["id_token"], config.post_logout_redirect_uri, state, nonce)
         response = HttpResponse(html, content_type="text/html; charset=utf-8")
-        response.set_cookie(LOGOUT_COOKIE, binding, max_age=300, path="/",
-            secure=True, httponly=True, samesite="Lax")
+        response.set_cookie(logout_cookie(request), binding, max_age=300, path="/",
+            secure=request.is_secure(), httponly=True, samesite="Lax")
         endpoint = urlsplit(config.end_session_url)
         origin = endpoint.scheme + "://" + endpoint.netloc
         response["Content-Security-Policy"] = ("default-src 'none'; base-uri 'none'; frame-ancestors 'none'; "

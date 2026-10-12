@@ -9,6 +9,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
 from ..authorization.http import DirectoryPolicyView
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from .refresh_management import UserRefreshManagement
 
@@ -27,7 +28,7 @@ class UserRefreshView(DirectoryPolicyView):
             if (self.operation not in {"submit", "status", "retry", "cancel"} or request.method != expected
                     or args or set(kwargs) != wanted):
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed for this refresh target", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
             if request.GET:
                 raise invalid("Refresh target takes no query parameters")

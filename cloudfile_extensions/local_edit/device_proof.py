@@ -99,14 +99,15 @@ class DeviceChallenge:
         Pair uses a server-generated pairing session UUID, not an edit session.
         """
         parsed = urlsplit(self.instance)
-        if (parsed.scheme != "https" or not parsed.hostname or parsed.username or parsed.password or
+        from .private_http import http_origin_allowed
+        if ((parsed.scheme not in ("http", "https") or not http_origin_allowed(self.instance)) or not parsed.hostname or parsed.username or parsed.password or
                 parsed.query or parsed.fragment or parsed.path not in ("", "/") or
                 self.instance.endswith("/") or any(ord(c) < 33 or ord(c) > 126 for c in self.instance)):
-            raise ValueError("fixed canonical HTTPS instance origin required")
+            raise ValueError("fixed canonical HTTPS or explicitly allowed internal HTTP origin required")
         if "%" in self.instance or "\\" in self.instance or parsed.netloc != parsed.netloc.lower():
-            raise ValueError("fixed canonical HTTPS instance origin required")
+            raise ValueError("fixed canonical HTTPS or explicitly allowed internal HTTP origin required")
         if parsed.port is not None and not 1 <= parsed.port <= 65535:
-            raise ValueError("fixed canonical HTTPS instance origin required")
+            raise ValueError("fixed canonical HTTPS or explicitly allowed internal HTTP origin required")
         _uuid(self.device_id)
         _uuid(self.session_id)
         if (self.operation not in OPERATIONS or type(self.issued_at) is not int or

@@ -1,4 +1,4 @@
-"""Bounded HTTPS JSON transport for deployment-owned directory/IdP addresses."""
+"""Bounded HTTP/HTTPS JSON transport for configured upstream services."""
 
 import json
 import os
@@ -11,11 +11,11 @@ from .errors import ContractError
 
 def trusted_https_url(value):
     if not isinstance(value, str):
-        raise ValueError("service URL must be HTTPS")
+        raise ValueError("service URL must be HTTP or HTTPS")
     parsed = urlsplit(value)
-    if (parsed.scheme != "https" or not parsed.hostname or parsed.username or
+    if (parsed.scheme not in ("http", "https") or not parsed.hostname or parsed.username or
             parsed.password or parsed.fragment or parsed.query):
-        raise ValueError("service URL must be a fixed HTTPS address without credentials or query")
+        raise ValueError("service URL must be a fixed HTTP/HTTPS address without credentials or query")
     return value
 
 

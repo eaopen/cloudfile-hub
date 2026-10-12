@@ -6,6 +6,7 @@ from django.http import JsonResponse
 from django.urls import path
 from django.views import View
 
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError
 from .browser_binding import request_binding
 from .login import PendingLogin
@@ -23,7 +24,7 @@ class LoginCallbackView(View):
         try:
             if request.method != "GET" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "OIDC callback only accepts GET", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure callback is required", 401)
             if request.read(1) or request.headers.get("Authorization"):
                 raise ContractError("INVALID_REQUEST", "Callback takes no body or authorization header", 400)

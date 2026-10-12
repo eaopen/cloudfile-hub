@@ -187,8 +187,10 @@ class HttpBoundaryTest(unittest.TestCase):
         self.assertTrue(session.options["verify"])
         self.assertEqual(session.options["timeout"], (3, 10))
 
-    def test_only_deployment_owned_https_urls_are_accepted(self):
-        for url in ("http://directory.example.com", "https://user:pass@example.com", "https://example.com#fragment", "https://example.com?url=other"):
+    def test_deployment_owned_http_https_urls_are_accepted(self):
+        self.assertEqual(trusted_https_url("http://directory.example.com"),
+                         "http://directory.example.com")
+        for url in ("ftp://directory.example.com", "https://user:pass@example.com", "https://example.com#fragment", "https://example.com?url=other"):
             with self.assertRaises(ValueError):
                 trusted_https_url(url)
 

@@ -7,6 +7,7 @@ from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
 from ..authorization.http import DirectoryPolicyView
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from ..common.validation import object_fields, identifier
 from ..resources.paths import resource_ref
@@ -22,7 +23,7 @@ class UserDelegationIssueView(DirectoryPolicyView):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Delegation issuance requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure login-service authentication is required", 401)
             if (request.GET or request.META.get("QUERY_STRING")
                     or "Cookie" in request.headers or "Content-Encoding" in request.headers):

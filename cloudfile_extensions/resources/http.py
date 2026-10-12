@@ -11,6 +11,7 @@ from django.http import JsonResponse
 from django.middleware.csrf import CsrfViewMiddleware
 
 from ..authorization.http import DirectoryPolicyView
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from ..common.validation import annotation_changes, object_fields
 from .paths import resource_ref
@@ -32,7 +33,7 @@ class ResourceResolveView(DirectoryPolicyView):
             expected = methods[self.operation]
             if request.method != expected or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed for this resource target", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure authentication is required", 401)
             if request.headers.get("Authorization") or request.headers.get("Content-Encoding"):
                 raise invalid("Resource Web requests do not accept machine credentials or encoded bodies")

@@ -10,6 +10,7 @@ from ..authorization.http import DirectoryPolicyView
 from ..authorization.core import PolicyCore
 from ..authorization.read import ContentReadAuthority
 from ..authorization.runtime import AuthenticatedPolicyActor
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from ..common.validation import object_fields
 from ..resources.paths import resource_ref
@@ -29,7 +30,7 @@ def native_download_actor(request):
     from django.core.exceptions import MultipleObjectsReturned
     user = getattr(request, "user", None)
     session = getattr(request, "session", None)
-    if (not request.is_secure() or session is None
+    if (not transport_allowed(request) or session is None
             or session.get(BACKEND_SESSION_KEY) != BACKEND
             or not isinstance(user, User) or user.is_authenticated is not True
             or session.get(SESSION_KEY) != user.username or user.is_active is not True):
@@ -76,7 +77,7 @@ class OIDCReadTicketView(DirectoryPolicyView):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Download tickets require POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure session is required", 401)
             if request.GET or request.headers.get("Authorization") or request.headers.get("Content-Encoding"):
                 raise invalid("Download tickets accept only native session JSON")

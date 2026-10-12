@@ -6,6 +6,7 @@ from django.middleware.csrf import CsrfViewMiddleware
 from django.urls import path
 
 from ..authorization.http import DirectoryPolicyView
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from ..common.validation import object_fields
 from ..identity.read_ticket_http import native_download_actor
@@ -24,7 +25,7 @@ class ReadReconciliationView(DirectoryPolicyView):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Reconciliation requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure native session is required", 401)
             if (request.GET or request.META.get("QUERY_STRING") or "Authorization" in request.headers
                     or "Content-Encoding" in request.headers):

@@ -54,6 +54,22 @@ class OIDCHostConfigurationTests(unittest.TestCase):
         configure_oidc_host(settings)
         self.assertEqual(vars(settings), before)
 
+    def test_http_callback_configures_nonsecure_browser_cookies_and_oauthlib(self):
+        settings = self.configured()
+        settings.CLOUDFILE_OIDC_CONFIG = dict(settings.CLOUDFILE_OIDC_CONFIG,
+            redirect_uri="http://cloudfile.internal/" + LOGIN_PREFIX + "callback/",
+            authorization_url="http://auth.internal/authorize/",
+            token_url="http://auth.internal/token",
+            userinfo_url="http://auth.internal/userinfo",
+            jwks_url="http://auth.internal/jwks",
+            issuer="http://auth.internal/issuer")
+        with patch.dict(os.environ, {}, clear=False):
+            configure_oidc_host(settings)
+            self.assertIs(settings.SESSION_COOKIE_SECURE, False)
+            self.assertIs(settings.CSRF_COOKIE_SECURE, False)
+            self.assertTrue(settings.SESSION_COOKIE_HTTPONLY)
+            self.assertEqual(os.environ.get("OAUTHLIB_INSECURE_TRANSPORT"), "1")
+
     def test_backchannel_requires_boolean_flag_and_enabled_oidc_host(self):
         for enabled, flag in [(False, True), (True, 'true')]:
             settings = self.configured()

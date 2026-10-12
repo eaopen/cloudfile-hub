@@ -8,6 +8,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError
 from .logout_resources import LogoutResources
 from .logout_jobs import BackchannelJobs
@@ -23,7 +24,7 @@ class BackchannelLogoutView(View):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Logout notification requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure notification is required", 401)
             if request.GET or request.META.get("QUERY_STRING"):
                 raise ContractError("INVALID_REQUEST", "Notification query is not allowed", 400)

@@ -18,6 +18,7 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
+from .private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from ..events.outbox import Outbox
 from ..identity.ticket_transport import _call
@@ -79,7 +80,7 @@ class AgentBlockView(View):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "CDC requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure device CDC required", 401)
             if (request.GET or request.META.get("QUERY_STRING") or
                     "Cookie" in request.headers or "Transfer-Encoding" in request.headers or

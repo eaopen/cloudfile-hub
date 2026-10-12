@@ -10,6 +10,12 @@ from ..common.errors import ContractError
 
 LOGOUT_COOKIE = "__Host-cloudfile-logout-binding"
 
+HTTP_LOGOUT_COOKIE = "cloudfile-logout-binding"
+
+
+def logout_cookie(request):
+    return LOGOUT_COOKIE if request.is_secure() else HTTP_LOGOUT_COOKIE
+
 
 class LogoutStates:
     def __init__(self, redis, *, issuer, client_id, prefix="cf:oidc:logout:"):

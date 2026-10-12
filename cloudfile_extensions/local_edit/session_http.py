@@ -6,6 +6,7 @@ from django.middleware.csrf import CsrfViewMiddleware
 from django.urls import path
 
 from ..authorization.http import DirectoryPolicyView
+from .private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from .session_runtime import LocalSessionFactory
 from .session_service import LocalSessionService
@@ -21,7 +22,7 @@ class LocalSessionView(DirectoryPolicyView):
         try:
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Local session metadata requires POST", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure native browser identity required", 401)
             if request.GET or request.headers.get("Content-Encoding", "identity") != "identity":
                 raise invalid("Local session requires uncompressed JSON without query")

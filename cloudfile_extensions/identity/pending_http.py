@@ -6,6 +6,7 @@ from django.http import JsonResponse
 from django.middleware.csrf import CsrfViewMiddleware
 from django.views import View
 
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError
 from .pending import PendingLoginStatus, PendingLoginProofs
 from .browser_binding import BINDING_COOKIE, BrowserLoginBindings, request_binding
@@ -21,7 +22,7 @@ class PendingStatusView(View):
         try:
             if request.method not in {"GET", "POST"} or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Method is not allowed", 405)
-            if not request.is_secure():
+            if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure pending login is required", 401)
             if request.GET:
                 raise ContractError("INVALID_REQUEST", "Pending proof must not be sent in a URL", 400)

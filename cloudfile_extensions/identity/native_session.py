@@ -2,6 +2,7 @@
 from django.conf import settings
 from django.http import HttpResponseRedirect
 
+from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError
 from .login import PendingLogin, PreparedLogin
 from .native_backend import CloudFileOIDCBackend
@@ -21,7 +22,7 @@ SERVER_SESSION_ENGINES = frozenset({"django.contrib.sessions.backends.db",
 
 class NativeOIDCSession:
     def complete(self, request, runtime, *, state, code, binding):
-        if not isinstance(runtime, LoginRuntime) or not request.is_secure():
+        if not isinstance(runtime, LoginRuntime) or not transport_allowed(request):
             raise ValueError("actual owned login runtime and HTTPS request required")
         if BACKEND not in settings.AUTHENTICATION_BACKENDS:
             raise ContractError("IDENTITY_UNAVAILABLE", "OIDC native session backend is not configured", 503)

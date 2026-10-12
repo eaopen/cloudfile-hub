@@ -7,14 +7,20 @@ export const CLOUDFILE_EXTENSION_ID = 'gocnpbhnbikcpnlafmodflddgnmfcjoc';
 export function launchPairedAgent(openURI) {
   return new Promise((resolve, reject) => {
     const runtime = typeof window !== 'undefined' && window.chrome && window.chrome.runtime;
-    if (window.location.protocol !== 'https:' ||
+    if (!(window.location.protocol === 'https:' ||
+        window.location.protocol === 'http:') ||
         typeof openURI !== 'string' || openURI.length > 2048 ||
         !openURI.startsWith('cloudfile-open://v1/open?instance=') ||
         !runtime || typeof runtime.sendMessage !== 'function') {
-      reject(new Error('CloudFile Agent 需要 HTTPS 页面与已安装的 Chrome 扩展'));
+      reject(new Error('CloudFile Agent 需要 HTTP/HTTPS CloudFile 实例 与受信 Chrome 扩展'));
       return;
     }
     try {
+      const url = new URL(openURI);
+      const instance = url.searchParams.get('instance');
+      if (url.protocol !== 'cloudfile-open:' || url.hostname !== 'v1' ||
+          url.pathname !== '/open' || instance !== window.location.origin)
+        throw new Error('本地 Agent URI 与当前 CloudFile 实例不匹配');
       runtime.sendMessage(CLOUDFILE_EXTENSION_ID,
         { type: 'open_uri', uri: openURI }, response => {
           const failure = runtime.lastError;
