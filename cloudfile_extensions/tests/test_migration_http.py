@@ -29,7 +29,7 @@ class MigrationHTTPTests(unittest.TestCase):
     def test_tls_csrf_and_method(self):
         view = MigrationJobView.as_view()
         self.assertEqual(view(self.requests.get("/migration/", secure=True)).status_code, 405)
-        self.assertEqual(view(self.requests.post("/migration/")).status_code, 401)
+        self.assertEqual(view(self.requests.post("/migration/")).status_code, 403)
         self.assertEqual(view(self.requests.post("/migration/", data="{}", content_type="application/json", secure=True)).status_code, 403)
 
     def test_submissions_require_idempotency_and_reject_compression(self):

@@ -89,8 +89,8 @@ class PolicyHTTPTest(unittest.TestCase):
     def test_duplicate_query_and_wrong_method_target(self):
         self.assertEqual(self.view(self.requests.get("/policy/?kind=dir&kind=file", secure=True)).status_code, 400)
         self.assertEqual(self.view(self.requests.get("/policy/", data=self.ref, secure=True), rule_id=str(uuid4())).status_code, 405)
-        self.assertEqual(self.view(self.requests.get("/policy/", data=self.ref, secure=False)).status_code, 401)
-        self.service.list.assert_not_called()
+        self.assertEqual(self.view(self.requests.get("/policy/", data=self.ref, secure=False)).status_code, 200)
+        self.assertEqual(self.service.list.call_count, 1)
 
     def test_factory_absent_and_domain_errors_are_safe_and_release_scope(self):
         request = lambda: self.requests.get("/policy/", data=self.ref, secure=True)

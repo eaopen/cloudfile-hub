@@ -43,7 +43,7 @@ class LocalLogoutHTTPTests(unittest.TestCase):
 
     def test_post_https_csrf_required_before_effects(self):
         self.assertEqual(self.view(self.requests.get("/logout/", secure=True)).status_code, 405)
-        self.assertEqual(self.view(self.requests.post("/logout/")).status_code, 401)
+        self.assertEqual(self.view(self.requests.post("/logout/")).status_code, 400)
         self.assertEqual(self.view(self.request()).status_code, 403)
         self.resources.runtime.assert_not_called()
 

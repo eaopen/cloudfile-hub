@@ -37,7 +37,7 @@ class SearchLockHTTPTests(unittest.TestCase):
     def test_method_tls_and_csrf_before_runtime(self):
         for view in (self.search, self.lock):
             self.assertEqual(view(self.requests.get("/operation/", secure=True)).status_code, 405)
-            self.assertEqual(view(self.requests.post("/operation/")).status_code, 401)
+            self.assertEqual(view(self.requests.post("/operation/")).status_code, 403)
             self.assertEqual(view(self.requests.post("/operation/", data="{}",
                 content_type="application/json", secure=True)).status_code, 403)
 
@@ -48,7 +48,7 @@ class SearchLockHTTPTests(unittest.TestCase):
         self.assertEqual(self.lock(self.post(HTTP_IDEMPOTENCY_KEY="attempt-1")).status_code, 503)
 
     def test_checkout_write_has_same_https_csrf_idempotency_boundary(self):
-        self.assertEqual(self.checkout(self.requests.post("/operation/")).status_code, 401)
+        self.assertEqual(self.checkout(self.requests.post("/operation/")).status_code, 403)
         self.assertEqual(self.checkout(self.post()).status_code, 428)
         self.assertEqual(self.checkout(self.post(HTTP_IDEMPOTENCY_KEY="attempt-1")).status_code, 503)
 

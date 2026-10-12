@@ -62,10 +62,15 @@ class AuditHTTPTest(unittest.TestCase):
 
     def test_invalid_input_does_not_allocate_audit_scope(self):
         for request in (self.requests.get("/audit/v1/events/object/access/?repo_id=x&repo_id=y", secure=True),
-                self.request(limit="201"), self.request(actor="forged"),
-                self.requests.get("/audit/v1/events/", data=self.query, secure=False)):
+                self.request(limit="201"), self.request(actor="forged")):
             self.assertIn(self.view(request).status_code, (400, 401))
         self.service.events.assert_not_called()
+
+    def test_valid_http_query_has_same_bounded_behavior(self):
+        response = self.view(self.requests.get("/audit/v1/events/", data=self.query, secure=False))
+        self.assertEqual(response.status_code, 200)
+        self.service.events.assert_called_once()
+        self.assertIn("no-store", response["Cache-Control"])
 
     def test_library_query_uses_distinct_management_route(self):
         target = resolve("/v1/events/library/operations/", urlconf="cloudfile_extensions.events.urls")

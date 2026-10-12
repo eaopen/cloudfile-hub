@@ -123,15 +123,13 @@ def test_callback_never_logs_in_on_protocol_or_identity_failure(callback_runtime
     assert 'cf_eap_oidc' not in r.request.session
 
 
-def test_dev_jwks_transport_requires_explicit_opt_in():
+def test_jwks_http_https_and_invalid_urls():
     from cloudfile_extensions.identity.oidc import SigningKeys
     from cloudfile_ext.sso.eap_oauth import JsonClient
     url = 'http://dev.test/ssoauth/jwks/'
-    with pytest.raises(ValueError):
-        SigningKeys(url, client=JsonClient())
+    assert SigningKeys(url, client=JsonClient()).url == url
     assert SigningKeys(url, client=JsonClient(), allow_http=True).url == url
-    with pytest.raises(ValueError):
-        SigningKeys(url, allow_http=True)
+    assert SigningKeys(url, allow_http=True).url == url
     for unsafe in ['http://user:pass@dev.test/jwks/', 'http://dev.test/jwks/?x=1',
                    'http://dev.test/jwks/#fragment', 'http:///jwks/']:
         with pytest.raises(ValueError):

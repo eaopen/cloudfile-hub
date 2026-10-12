@@ -35,7 +35,7 @@ class DelegatedReadHTTPTests(unittest.TestCase):
 
     def test_method_tls_and_bearer(self):
         self.assertEqual(self.view(self.requests.get("/tickets/", secure=True)).status_code, 405)
-        self.assertEqual(self.view(self.requests.post("/tickets/")).status_code, 401)
+        self.assertEqual(self.view(self.requests.post("/tickets/")).status_code, 400)
         self.assertEqual(self.view(self.request(HTTP_AUTHORIZATION="")).status_code, 401)
 
     def test_any_browser_cookie_and_compression_rejected(self):

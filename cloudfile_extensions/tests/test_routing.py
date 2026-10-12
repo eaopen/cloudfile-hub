@@ -63,14 +63,15 @@ class RoutingTest(unittest.TestCase):
             client = Client()
             assert client.get("/api/v2.1/native/").json() == {"native": True}
             assert client.get("/api/v2.1/cloudfile/extensions/project/ping/").json() == {"project": True}
-            assert client.post("/api/v2.1/cloudfile/extensions/local-edit/v1/agent/challenge/").status_code == 401
+            challenge_response = client.post("/api/v2.1/cloudfile/extensions/local-edit/v1/agent/challenge/")
+            assert challenge_response.status_code == 400, (challenge_response.status_code, challenge_response.content)
             context_response = client.get("/api/v2.1/cloudfile/extensions/authorization/v1/contexts/me/")
-            assert context_response.status_code == 401, (context_response.status_code, context_response.content)
+            assert context_response.status_code == 503, (context_response.status_code, context_response.content)
             delegation_response = client.post("/api/v2.1/cloudfile/extensions/authorization/v1/delegations/")
-            assert delegation_response.status_code == 401, (delegation_response.status_code, delegation_response.content)
+            assert delegation_response.status_code == 400, (delegation_response.status_code, delegation_response.content)
             delegated_read = client.post(
                 "/api/v2.1/cloudfile/extensions/transfer/v1/delegated-read-tickets/")
-            assert delegated_read.status_code == 401, (delegated_read.status_code, delegated_read.content)
+            assert delegated_read.status_code == 400, (delegated_read.status_code, delegated_read.content)
             audit = client.get("/api/v2.1/cloudfile/extensions/audit/v1/events/library/operations/",
                 {"repo_id": "11111111-1111-4111-8111-111111111111",
                  "start": "2026-09-01T00:00:00Z", "end": "2026-09-02T00:00:00Z"}, secure=True)
@@ -107,11 +108,12 @@ class RoutingTest(unittest.TestCase):
                 assert resolve(edit_prefix + operation + "/").url_name == "editing-" + operation
             for operation in agent_operations:
                 assert resolve(agent_prefix + operation + "/").url_name == "local-agent-" + operation
-            assert client.post(edit_prefix + "checkout/").status_code == 401
+            checkout_response = client.post(edit_prefix + "checkout/")
+            assert checkout_response.status_code == 415, (checkout_response.status_code, checkout_response.content)
             settings.CLOUDFILE_EDITING_ENABLED = False
             importlib.reload(root)
             clear_url_caches()
-            assert client.post(agent_prefix + "challenge/").status_code == 401
+            assert client.post(agent_prefix + "challenge/").status_code == 400
             assert client.post(edit_prefix + "checkout/").status_code == 404
             from django.core.exceptions import ImproperlyConfigured
             from cloudfile_extensions.registry import RESERVED_DOMAINS

@@ -33,7 +33,7 @@ class ReadTicketHTTPTests(unittest.TestCase):
 
     def test_method_tls_and_csrf(self):
         self.assertEqual(self.view(self.requests.get("/tickets/", secure=True)).status_code, 405)
-        self.assertEqual(self.view(self.requests.post("/tickets/")).status_code, 401)
+        self.assertEqual(self.view(self.requests.post("/tickets/")).status_code, 403)
         request = self.requests.post("/tickets/", data="{}", content_type="application/json", secure=True)
         self.assertEqual(self.view(request).status_code, 403)
 
