@@ -39,10 +39,14 @@ class HostedLoginView(View):
                     "logout": LocalLogoutView, "idp": RPLogoutView, "return": LogoutReturnView}
                 if self.operation == "backchannel":
                     adapter = BackchannelLogoutView.as_view(resources=LogoutResources(resources, enabled=True))
-                elif self.operation == "read":
-                    adapter = OIDCReadTicketView.as_view(service_factory=OIDCReadTicketFactory(resources))
-                elif self.operation in ("update", "upload"):
-                    adapter = OIDCManualUpdateView.as_view(resources=resources, create=self.operation == "upload")
+                elif self.operation in ("read", "directory-read"):
+                    directory = self.operation == "directory-read"
+                    adapter = OIDCReadTicketView.as_view(
+                        service_factory=OIDCReadTicketFactory(resources, directory_access=directory),
+                        directory_access=directory)
+                elif self.operation in ("update", "upload", "directory-update", "directory-upload"):
+                    adapter = OIDCManualUpdateView.as_view(resources=resources,
+                        create=self.operation.endswith("upload"), directory_access=self.operation.startswith("directory-"))
                 elif self.operation == "pending":
                     @contextmanager
                     def pending(request_id):
@@ -101,6 +105,10 @@ def hosted_login_routes(*, resources_scope, return_path="/", backchannel_enabled
             resources_scope=resources_scope, operation="update"), name="cloudfile-oidc-manual-update"))
         result.append(path("manual-upload/", HostedLoginView.as_view(
             resources_scope=resources_scope, operation="upload"), name="cloudfile-oidc-manual-upload"))
+        for suffix, operation in (("read-tickets", "read"), ("manual-update", "update"), ("manual-upload", "upload")):
+            result.append(path("directory-access/" + suffix + "/", HostedLoginView.as_view(
+                resources_scope=resources_scope, operation="directory-" + operation),
+                name="cloudfile-directory-" + operation))
     if backchannel_enabled:
         # CSRF middleware sees the outer hosted view. Only this cookie-free,
         # signed server notification gets an exemption, never browser logout.

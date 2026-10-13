@@ -60,3 +60,32 @@ class ReadTicketHTTPTests(unittest.TestCase):
         self.assertIn("no-store", response["Cache-Control"])
         self.assertEqual(response["Referrer-Policy"], "no-referrer")
         self.assertTrue(response["X-Request-ID"])
+
+    def test_library_and_directory_entries_choose_distinct_preflight(self):
+        from contextlib import contextmanager
+        from types import SimpleNamespace
+        from unittest.mock import Mock, patch
+        from django.test import override_settings
+        from cloudfile_extensions.identity.read_ticket_http import OIDCReadTicketFactory
+        from cloudfile_extensions.identity.resources import LoginResources
+        for directory in (False, True):
+            factory = OIDCReadTicketFactory(Mock(spec=LoginResources), directory_access=directory)
+            issuer = Mock()
+            issuer.issue.return_value = dict(ticket='fixture', expires_in=60)
+            @contextmanager
+            def scope(factory, request, request_id):
+                yield issuer
+            normal, scoped = Mock(), Mock()
+            view = OIDCReadTicketView.as_view(service_factory=factory, directory_access=directory)
+            with patch.object(OIDCReadTicketFactory, '__call__', scope), \
+                    patch('cloudfile_extensions.identity.read_ticket_http.ContentReadAuthority', normal), \
+                    patch('cloudfile_extensions.identity.read_ticket_http.native_scoped_authority', scoped), \
+                    patch('cloudfile_extensions.identity.read_ticket_http.PolicyCore'), \
+                    override_settings(CLOUDFILE_POLICY_CONFIG=dict(core_library='fixture', cloud_mode=False)):
+                self.assertEqual(view(self.request()).status_code, 201)
+            self.assertEqual(normal.call_count, int(not directory))
+            self.assertEqual(scoped.call_count, int(directory))
+
+    def test_client_cannot_select_directory_access_on_old_ticket_api(self):
+        body = dict(self.body, directory_access=True)
+        self.assertEqual(self.view(self.request(json.dumps(body))).status_code, 400)

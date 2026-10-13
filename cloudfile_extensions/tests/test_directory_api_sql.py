@@ -97,3 +97,35 @@ class DirectoryAPISQLTest(fixtures.ScopedReadSQLTest):
         result = service.revoke(dict(query, items=[dict(id=child['id'], etag=child['etag'])]),
             idempotency_key='remove-child')
         self.assertEqual(result['items'], [dict(id=child['id'], path=child_ref['path'], deleted=True)])
+
+    def test_explicit_factory_keeps_legacy_management_and_library_access(self):
+        from contextlib import contextmanager
+        from cloudfile_extensions.authorization.runtime import PolicyServiceFactory, AuthenticatedPolicyActor
+        from cloudfile_extensions.authorization.service import DirectoryPolicyService
+        from cloudfile_extensions.authorization.directory_service import DirectoryService
+        from cloudfile_extensions.authorization.read import ContentReadAuthority
+        refs, root, _ = self.shared()
+        with self.connection.cursor() as cursor:
+            cursor.execute("UPDATE RepoOwner SET owner_id='native-user'")
+        grantor = DelegatedDirectoryManagement(self.preparation, self.core,
+            request_id='grant-entry-test', cloud_mode=False, administrators=True)
+        grantor.mutate(root, value=dict(path=root['path'], kind='dir', permission='manage', inherit=True,
+            subject=dict(type='user', provider='directory', namespace='user', external_id='employee')))
+        with self.connection.cursor() as cursor:
+            cursor.execute("UPDATE RepoOwner SET owner_id='another-user'")
+        @contextmanager
+        def preparation_scope(actor, request_id):
+            yield self.preparation
+        factory = PolicyServiceFactory(authenticate=lambda request: AuthenticatedPolicyActor('employee', 'native-user'),
+            preparation_scope=preparation_scope, core=self.core, cloud_mode=False, lifecycle_reader=self.lifecycle)
+        with factory(None, 'normal-entry') as normal:
+            self.assertIs(type(normal), DirectoryPolicyService)
+            with self.assertRaises(ContractError):
+                normal.list('acl', dict(reference=root))
+        with factory.directory(None, 'directory-entry') as directory:
+            self.assertIs(type(directory), DirectoryService)
+            self.assertEqual(len(directory.list('shares', dict(reference=root))['items']), 1)
+            self.assertEqual(directory.resolve_directory(dict(reference=root))['permission'], 'r')
+        normal_read = ContentReadAuthority(self.preparation, self.core, request_id='normal-user', cloud_mode=False)
+        with self.assertRaises(ContractError):
+            normal_read.consume(refs[0], lambda cursor, ref: 'normal entry')

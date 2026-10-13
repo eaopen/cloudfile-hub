@@ -37,8 +37,14 @@ class PolicyServiceFactory:
             raise ValueError('trusted lifecycle reader required')
         self.lifecycle_reader = lifecycle_reader
 
-    @contextmanager
     def __call__(self, request, request_id):
+        return self._service(request, request_id, directory=False)
+
+    def directory(self, request, request_id):
+        return self._service(request, request_id, directory=True)
+
+    @contextmanager
+    def _service(self, request, request_id, *, directory):
         # Authenticate before allocating domain resources; never interpret a
         # supplied business ID or contact email as a native session identity.
         actor = self.authenticate(request)
@@ -57,12 +63,14 @@ class PolicyServiceFactory:
             if not state.account_active(actor.user_id):
                 raise ContractError("ACCESS_DENIED", "Native policy account is not active", 403)
             from .directory_management import DelegatedDirectoryManagement
-            management_type = DelegatedDirectoryManagement if self.lifecycle_reader is not None else DirectoryManagement
+            management_type = DelegatedDirectoryManagement if directory else DirectoryManagement
             management = management_type(preparation, self.core,
                 request_id=request_id, cloud_mode=self.cloud_mode)
             try:
-                if self.lifecycle_reader is None:
+                if not directory:
                     yield DirectoryPolicyService(management)
+                elif self.lifecycle_reader is None:
+                    raise ContractError("POLICY_UNAVAILABLE", "Directory lifecycle adapter is unavailable", 503)
                 else:
                     from .directory_service import DirectoryService
                     yield DirectoryService(management, lifecycle_reader=self.lifecycle_reader)

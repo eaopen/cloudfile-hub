@@ -111,18 +111,18 @@ class PolicyHTTPTest(unittest.TestCase):
     def test_directory_routes_use_authenticated_factory(self):
         from django.urls import resolve
         from cloudfile_extensions.authorization.http import DirectoryAccessView
-        from cloudfile_extensions.authorization.gunicorn import policy_service
+        from cloudfile_extensions.authorization.gunicorn import directory_service
         for domain in ('admins', 'shares'):
             for suffix in ('', str(uuid4()) + '/'):
                 route = resolve('/v1/directory-' + domain + '/' + suffix,
                     urlconf='cloudfile_extensions.authorization.urls')
                 self.assertIs(route.func.view_class, DirectoryPolicyView)
                 self.assertEqual(route.func.view_initkwargs['domain'], domain)
-                self.assertIs(route.func.view_initkwargs['service_factory'], policy_service)
+                self.assertIs(route.func.view_initkwargs['service_factory'], directory_service)
         for name in ('shared-directories', 'directory-address'):
             route = resolve('/v1/' + name + '/', urlconf='cloudfile_extensions.authorization.urls')
             self.assertIs(route.func.view_class, DirectoryAccessView)
-            self.assertIs(route.func.view_initkwargs['service_factory'], policy_service)
+            self.assertIs(route.func.view_initkwargs['service_factory'], directory_service)
 
     def test_directory_access_rejects_actor_injection_and_sanitizes_errors(self):
         from cloudfile_extensions.authorization.directory_service import DirectoryService

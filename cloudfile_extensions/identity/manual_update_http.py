@@ -14,6 +14,7 @@ from django.views import View
 from ..common.errors import ContractError, invalid
 from ..authorization.core import PolicyCore
 from ..authorization.scoped_read import native_scoped_authority
+from ..authorization.read import ContentMetadataWriteAuthority
 from ..resources.paths import resource_ref
 from .native_session import SESSION_REFERENCE_KEY
 from .read_ticket_http import native_download_actor
@@ -26,6 +27,7 @@ from .transfer_audit import record_transfer, audit_peer_ip
 class OIDCManualUpdateView(View):
     resources = None
     create = False
+    directory_access = False
     http_method_names = ["post"]
 
     def dispatch(self, request, *args, **kwargs):
@@ -78,9 +80,12 @@ class OIDCManualUpdateView(View):
                 if preparation.state.username(actor.user_id) != actor.native_username:
                     raise ContractError("ACCESS_DENIED", "Native identity changed", 403)
                 policy = settings.CLOUDFILE_POLICY_CONFIG
-                preflight = native_scoped_authority(preparation,
-                    PolicyCore(policy["core_library"]), request_id=request_id,
-                    cloud_mode=policy["cloud_mode"], write=True)
+                if self.directory_access:
+                    preflight = native_scoped_authority(preparation, PolicyCore(policy["core_library"]),
+                        request_id=request_id, cloud_mode=policy["cloud_mode"], write=True)
+                else:
+                    preflight = ContentMetadataWriteAuthority(preparation, PolicyCore(policy["core_library"]),
+                        request_id=request_id, cloud_mode=policy["cloud_mode"])
                 preflight.consume(reference, lambda cursor, target: None)
                 if self.create:
                     parent = reference["path"].rpartition("/")[0] or "/"
@@ -103,6 +108,8 @@ class OIDCManualUpdateView(View):
                         dict(type="user", provider=provider, external_id=actor.user_id),
                         dict(type="repo", provider="cloudfile", external_id=reference["repo_id"])],
                     oidc_session=proof)
+                if self.directory_access:
+                    condition["directory_access"] = True
                 if self.create:
                     condition["create"] = True
                 elif original_file_id is not None:
