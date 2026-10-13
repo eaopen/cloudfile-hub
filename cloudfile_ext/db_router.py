@@ -3,9 +3,11 @@
 
 The ACL tables have to be readable by seaf-server (C) and the Go fileserver,
 neither of which connects to seahub-db. They therefore live in seafile-db and
-are created by cloudfile-server's scripts/sql, not by a Django migration --
-the models are declared ``managed = False`` and this router only decides which
-connection they use.
+are never created by Django migrations. Legacy integration tables are owned by
+cloudfile-server's scripts/sql; the current directory ACL/admin/share trio is
+owned by cloudfile_extensions.schema. The models here describe the legacy
+layout, are ``managed = False``, and must not be used to write upgraded tables.
+This router only decides which connection they use.
 
 Install by adding to seahub_settings.py::
 
@@ -45,7 +47,7 @@ class CloudFileRouter(object):
 
     def allow_migrate(self, db, app_label, model_name=None, **hints):
         if app_label in self.app_labels:
-            # Owned by cloudfile-server/scripts/sql, never by manage.py migrate.
+            # Owned by explicit CloudFile schema tools, never manage.py migrate.
             return False
         if db == _alias():
             return False

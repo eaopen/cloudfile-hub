@@ -129,11 +129,22 @@ class SchemaRunner:
 
     def apply(self):
         with self._locked():
+            self._check_directory_layouts()
             self._bootstrap()
             plan = {item["version"]: item for item in self.plan()}
             for migration in self.migrations:
                 self._apply_one(migration, plan[migration.version])
+            self.require_current()
         return self.status()
+
+    def _check_directory_layouts(self):
+        # CREATE IF NOT EXISTS would hide legacy/type drift. Reject it before
+        # applying any unrelated DDL; the explicit offline directory upgrade
+        # is the only operation allowed to archive old directory tables.
+        from .directory import VERSIONS, inspect_tables
+        if VERSIONS.intersection(m.version for m in self.migrations):
+            if any(row['state'] not in ('missing', 'current') for row in inspect_tables(self)):
+                raise MigrationError('directory schema is incompatible; run directory-plan before offline upgrade')
 
     def _verify(self, step):
         rows = self._query(step["verify"])
@@ -171,8 +182,12 @@ class SchemaRunner:
             raise MigrationError("migration failed; inspect the ledger and repair before retry") from None
 
     def require_current(self):
+        self._check_directory_layouts()
         plan = self.plan()
         if any(item["state"] != "applied" for item in plan):
             raise MigrationError("schema upgrade is required")
         if not all(self._verify(step) for migration in self.migrations for step in migration.steps):
             raise MigrationError("schema structure has drifted")
+        from .directory import VERSIONS, verify_indexes
+        if VERSIONS.issubset(m.version for m in self.migrations) and not verify_indexes(self):
+            raise MigrationError('directory index contract has drifted')
