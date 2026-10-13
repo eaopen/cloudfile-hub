@@ -1,3 +1,5 @@
+[CloudFile product home / 产品总入口](https://github.com/eaopen/cloudfile) · [English](https://github.com/eaopen/cloudfile/blob/main/README.md) · [简体中文](https://github.com/eaopen/cloudfile/blob/main/README.zh-CN.md)
+
 <!-- generated-by: gsd-doc-writer -->
 # CloudFile Hub
 
@@ -5,7 +7,7 @@
 > 适用版本：Seafile CE 14.x；当前基线来自 `haiwen/seahub`。
 > 状态：已完成（文档与 `dev` 分支代码核对，2026-08-11）。
 
-CloudFile Hub 是 Seahub 的长期跟随型 fork：复用 Seafile CE 14 的 Web、API、认证与文件预览能力，在 `cloudfile_ext/` 和 `frontend/src/cloudfile/` 中补充 Pro 平替、CE 补强和新应用扩展。
+CloudFile Hub 是 Seahub 的长期跟随型 fork：复用 Seafile CE 14 的 Web、API、认证与文件预览能力，在 `cloudfile_ext/` 和 `frontend/src/cloudfile/` 中补充企业集成与文件协作扩展。
 
 ## 产品边界
 
