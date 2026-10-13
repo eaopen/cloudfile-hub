@@ -47,6 +47,7 @@ class LibraryOwnerManagement:
         Only the exact content-read authority shares these inputs across targets;
         management/write callers still use authorize and their object scope.
         """
+        self.qualification_ready = False
         self.epoch = None
         self.current_subject = None
         self.hard_readonly = False
@@ -106,6 +107,7 @@ class LibraryOwnerManagement:
         if (permission is not None and not self.is_owner and not self.is_global_library_admin
                 and self.requires_library_admin()):
             self.is_library_admin = self._library_admin(cursor, repo, username)
+        self.qualification_ready = True
         return permission
 
     def decision_allowed(self, decision):
