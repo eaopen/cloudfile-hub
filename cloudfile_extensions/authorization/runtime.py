@@ -25,7 +25,7 @@ class AuthenticatedPolicyActor:
 
 
 class PolicyServiceFactory:
-    def __init__(self, *, authenticate, preparation_scope, core, cloud_mode):
+    def __init__(self, *, authenticate, preparation_scope, core, cloud_mode, lifecycle_reader=None):
         if not callable(authenticate) or not callable(preparation_scope):
             raise ValueError("trusted authentication and owned preparation scope required")
         if not isinstance(core, PolicyCore) or type(cloud_mode) is not bool:
@@ -33,6 +33,9 @@ class PolicyServiceFactory:
         self.authenticate = authenticate
         self.preparation_scope = preparation_scope
         self.core, self.cloud_mode = core, cloud_mode
+        if lifecycle_reader is not None and not callable(lifecycle_reader):
+            raise ValueError('trusted lifecycle reader required')
+        self.lifecycle_reader = lifecycle_reader
 
     @contextmanager
     def __call__(self, request, request_id):
@@ -53,10 +56,16 @@ class PolicyServiceFactory:
                 raise ContractError("ACCESS_DENIED", "Native policy identity does not match", 403)
             if not state.account_active(actor.user_id):
                 raise ContractError("ACCESS_DENIED", "Native policy account is not active", 403)
-            management = DirectoryManagement(preparation, self.core,
+            from .directory_management import DelegatedDirectoryManagement
+            management_type = DelegatedDirectoryManagement if self.lifecycle_reader is not None else DirectoryManagement
+            management = management_type(preparation, self.core,
                 request_id=request_id, cloud_mode=self.cloud_mode)
             try:
-                yield DirectoryPolicyService(management)
+                if self.lifecycle_reader is None:
+                    yield DirectoryPolicyService(management)
+                else:
+                    from .directory_service import DirectoryService
+                    yield DirectoryService(management, lifecycle_reader=self.lifecycle_reader)
             finally:
                 management.epoch = None
                 management.current_subject = None

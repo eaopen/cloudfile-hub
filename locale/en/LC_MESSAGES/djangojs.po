@@ -13557,3 +13557,27 @@ msgstr "Name cannot be double dots"
 
 #~ msgid "No faces"
 #~ msgstr "No faces"
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Directory sharing"
+msgstr "Directory sharing"
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Read only by default"
+msgstr "Read only by default"
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Directory namespace"
+msgstr "Directory namespace"
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Subject ID"
+msgstr "Subject ID"
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Directory rules also apply to users without library access. Inherited rules apply to child folders."
+msgstr "Directory rules also apply to users without library access. Inherited rules apply to child folders."
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Sharing gives read access by default. Directory permissions determine write access and restrictions. Removing a share keeps directory rules."
+msgstr "Sharing gives read access by default. Directory permissions determine write access and restrictions. Removing a share keeps directory rules."

@@ -107,3 +107,43 @@ class PolicyHTTPTest(unittest.TestCase):
         body = dict(reference=self.ref, value={})
         self.assertEqual(self.view(self.write(json.dumps(body))).status_code, 200)
         self.service.create.assert_called_once_with("acl", body, idempotency_key="create")
+
+    def test_directory_routes_use_authenticated_factory(self):
+        from django.urls import resolve
+        from cloudfile_extensions.authorization.http import DirectoryAccessView
+        from cloudfile_extensions.authorization.gunicorn import policy_service
+        for domain in ('admins', 'shares'):
+            for suffix in ('', str(uuid4()) + '/'):
+                route = resolve('/v1/directory-' + domain + '/' + suffix,
+                    urlconf='cloudfile_extensions.authorization.urls')
+                self.assertIs(route.func.view_class, DirectoryPolicyView)
+                self.assertEqual(route.func.view_initkwargs['domain'], domain)
+                self.assertIs(route.func.view_initkwargs['service_factory'], policy_service)
+        for name in ('shared-directories', 'directory-address'):
+            route = resolve('/v1/' + name + '/', urlconf='cloudfile_extensions.authorization.urls')
+            self.assertIs(route.func.view_class, DirectoryAccessView)
+            self.assertIs(route.func.view_initkwargs['service_factory'], policy_service)
+
+    def test_directory_access_rejects_actor_injection_and_sanitizes_errors(self):
+        from cloudfile_extensions.authorization.directory_service import DirectoryService
+        from cloudfile_extensions.authorization.http import DirectoryAccessView
+        service = Mock(spec=DirectoryService)
+        service.resolve_directory.return_value = dict(root_path='/a')
+        service.shared_with_me.return_value = dict(items=[], next_after=None)
+        @contextmanager
+        def factory(request, request_id):
+            yield service
+        resolve = DirectoryAccessView.as_view(service_factory=factory)
+        shared = DirectoryAccessView.as_view(service_factory=factory, operation='shared')
+        response = resolve(self.requests.get('/address/', data=self.ref, secure=True))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('no-store', response['Cache-Control'])
+        service.resolve_directory.assert_called_once_with(dict(reference=self.ref))
+        self.assertEqual(resolve(self.requests.get('/address/', data={**self.ref, 'actor': 'other'}, secure=True)).status_code, 400)
+        self.assertEqual(shared(self.requests.get('/shared/?limit=1&limit=2', secure=True)).status_code, 400)
+        self.assertEqual(shared(self.requests.get('/shared/?limit=101', secure=True)).status_code, 400)
+        self.assertEqual(shared(self.requests.get('/shared/?limit=1', secure=True)).status_code, 200)
+        service.shared_with_me.side_effect = RuntimeError('private credentials')
+        response = shared(self.requests.get('/shared/', secure=True))
+        self.assertEqual(response.status_code, 503)
+        self.assertNotIn(b'private credentials', response.content)

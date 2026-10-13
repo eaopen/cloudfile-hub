@@ -11,7 +11,7 @@ from .seahub import SeahubPolicyAuthentication
 def session_policy_factory(*, environment, redis, provider_id, native_schema,
                            identity_schema, directory_url, authorization,
                            attribute_allowlist, core_library, cloud_mode,
-                           prefix="cf:subjects:", ca_bundle=None):
+                           prefix="cf:subjects:", ca_bundle=None, lifecycle_reader=None):
     """All arguments originate from deployment settings, never an HTTP body.
 
     The fixed Redis pool must use the same CF authority namespace as native
@@ -45,6 +45,6 @@ def session_policy_factory(*, environment, redis, provider_id, native_schema,
         provider_id=provider_id, directory_factory=directory_factory,
         native_schema=native_schema, identity_schema=identity_schema, prefix=prefix)
     factory = PolicyServiceFactory(authenticate=SeahubPolicyAuthentication(resources.state),
-        preparation_scope=resources.preparation, core=core, cloud_mode=cloud_mode)
+        preparation_scope=resources.preparation, core=core, cloud_mode=cloud_mode, lifecycle_reader=lifecycle_reader)
     factory.resources = resources
     return factory

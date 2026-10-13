@@ -52,8 +52,11 @@ class ContentReadAuthority(DirectoryManagement):
             permission = ('invisible' if not self.effective_visible else 'rw' if decision['write']
                           else 'r' if decision['read'] else 'none')
             return dict(native_permission=self.native_permission, effective_permission=permission,
-                        can_manage=self.can_manage_library())
+                        can_manage=self.management_permission(cursor, ref))
         return self._consume(reference, diagnostic, diagnostic=True)
+
+    def management_permission(self, cursor, reference):
+        return self.can_manage_library()
 
     def consume(self, reference, reader):
         return self._consume(reference, reader, diagnostic=False)

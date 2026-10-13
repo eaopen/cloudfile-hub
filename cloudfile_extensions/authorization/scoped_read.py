@@ -26,6 +26,19 @@ class ScopedContentReadAuthority(ContentReadAuthority):
     def scope_allowed(self, reference):
         return self.browse_root is None or is_descendant_or_equal(reference['path'], self.browse_root)
 
+    def management_permission(self, cursor, reference):
+        from .directory_management import DirectoryAdminRules, subject_keys
+        if self.can_manage_library():
+            return True
+        if not self.qualification_ready:
+            return False
+        keys = subject_keys(self.current_subject, self.state.provider)
+        grants = DirectoryAdminRules(self.state.connection, provider=self.state.provider,
+            actor=self.actor, request_id=self.rules.request_id, authorize=lambda *args: False)
+        return any(tuple(rule['subject'][key] for key in ('type', 'provider', 'namespace', 'external_id')) in keys and
+            (rule['path'] == reference['path'] or rule['inherit'])
+            for rule in grants.candidates(reference, locking=True))
+
     def authorize(self, cursor, actor, reference):
         native = self.prepare_authorization(cursor, actor, reference)
         # No-library eligibility must not be confused with early rejection of

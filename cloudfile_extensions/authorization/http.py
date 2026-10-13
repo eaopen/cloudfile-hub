@@ -78,6 +78,10 @@ class DirectoryPolicyView(View):
             with self.service_factory(request, request_id) as service:
                 if not isinstance(service, DirectoryPolicyService):
                     raise RuntimeError("invalid authenticated policy assembly")
+                if self.domain in ('admins', 'shares'):
+                    from .directory_service import DirectoryService
+                    if not isinstance(service, DirectoryService):
+                        raise ContractError('POLICY_UNAVAILABLE', 'Directory runtime is unavailable', 503)
                 if request.method == "GET":
                     result = service.list(self.domain, body, limit=int(limit), after=request.GET.get("after"))
                 elif request.method == "POST":
@@ -158,6 +162,53 @@ class LibraryRulesView(View):
             response = JsonResponse(error.response(request_id), status=error.status)
         except Exception:
             error = ContractError('POLICY_UNAVAILABLE', 'Policy service is unavailable', 503)
+            response = JsonResponse(error.response(request_id), status=503)
+        response['Cache-Control'] = 'no-store, max-age=0'
+        response['Vary'] = 'Cookie, Authorization'
+        response['X-Request-ID'] = request_id
+        return response
+
+
+class DirectoryAccessView(View):
+    service_factory = None
+    operation = 'resolve'
+    http_method_names = ['get']
+
+    def get(self, request):
+        from .directory_service import DirectoryService
+        request_id = str(uuid4())
+        try:
+            if not transport_allowed(request):
+                raise ContractError('AUTHENTICATION_REQUIRED', 'Secure authentication is required', 401)
+            if any(len(request.GET.getlist(k)) != 1 for k in request.GET) or request.read(1):
+                raise invalid('Invalid directory access query')
+            if self.operation == 'resolve':
+                required = {'repo_id', 'path', 'kind'}
+                if not required <= set(request.GET) or set(request.GET) - required - {'shared_root'}:
+                    raise invalid('Directory reference required')
+                value = dict(reference={key: request.GET[key] for key in required})
+                if 'shared_root' in request.GET:
+                    value['shared_root'] = request.GET['shared_root']
+            elif self.operation == 'shared':
+                if set(request.GET) - {'limit', 'after'}:
+                    raise invalid('Invalid shared-directory query')
+                limit = request.GET.get('limit', '50')
+                if not re.fullmatch(r'[1-9][0-9]{0,2}', limit) or int(limit) > 100:
+                    raise invalid('Invalid directory page limit')
+            else:
+                raise RuntimeError('invalid trusted operation')
+            if not callable(self.service_factory):
+                raise ContractError('POLICY_UNAVAILABLE', 'Directory service is unavailable', 503)
+            with self.service_factory(request, request_id) as service:
+                if not isinstance(service, DirectoryService):
+                    raise ContractError('POLICY_UNAVAILABLE', 'Directory runtime is unavailable', 503)
+                result = (service.resolve_directory(value) if self.operation == 'resolve' else
+                    service.shared_with_me(limit=int(limit), after=request.GET.get('after')))
+                response = JsonResponse(result)
+        except ContractError as error:
+            response = JsonResponse(error.response(request_id), status=error.status)
+        except Exception:
+            error = ContractError('POLICY_UNAVAILABLE', 'Directory service is unavailable', 503)
             response = JsonResponse(error.response(request_id), status=503)
         response['Cache-Control'] = 'no-store, max-age=0'
         response['Vary'] = 'Cookie, Authorization'
