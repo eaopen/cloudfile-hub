@@ -65,3 +65,20 @@ class DirectoryService(DirectoryPolicyService):
     @safe_errors
     def shared_with_me(self, *, limit=50, after=None):
         return self.access.shared_with_me(limit=limit, after=after)
+
+    @safe_errors
+    def directory_entries(self, request, *, limit=50, after=None):
+        from .directory_entries import DirectoryEntriesService
+        return DirectoryEntriesService(self.access.authority).list(request, limit=limit, after=after)
+
+    @safe_errors
+    def list_scope(self, request, *, limit=50, after=None):
+        from .directory_scope import DirectoryScopeService
+        return DirectoryScopeService(self.management, lifecycle_reader=self.shares.store.lifecycle_reader).list_scope(
+            request, limit=limit, after=after)
+
+    @safe_errors
+    def revoke_scope(self, request, *, idempotency_key):
+        from .directory_scope import DirectoryScopeService
+        return DirectoryScopeService(self.management, lifecycle_reader=self.shares.store.lifecycle_reader).revoke(
+            request, idempotency_key=idempotency_key)

@@ -13,7 +13,7 @@ from django.views import View
 
 from ..common.errors import ContractError, invalid
 from ..authorization.core import PolicyCore
-from ..authorization.read import ContentMetadataWriteAuthority
+from ..authorization.scoped_read import native_scoped_authority
 from ..resources.paths import resource_ref
 from .native_session import SESSION_REFERENCE_KEY
 from .read_ticket_http import native_download_actor
@@ -78,9 +78,9 @@ class OIDCManualUpdateView(View):
                 if preparation.state.username(actor.user_id) != actor.native_username:
                     raise ContractError("ACCESS_DENIED", "Native identity changed", 403)
                 policy = settings.CLOUDFILE_POLICY_CONFIG
-                preflight = ContentMetadataWriteAuthority(preparation,
+                preflight = native_scoped_authority(preparation,
                     PolicyCore(policy["core_library"]), request_id=request_id,
-                    cloud_mode=policy["cloud_mode"])
+                    cloud_mode=policy["cloud_mode"], write=True)
                 preflight.consume(reference, lambda cursor, target: None)
                 if self.create:
                     parent = reference["path"].rpartition("/")[0] or "/"

@@ -8,7 +8,7 @@ from django.middleware.csrf import CsrfViewMiddleware
 
 from ..authorization.http import DirectoryPolicyView
 from ..authorization.core import PolicyCore
-from ..authorization.read import ContentReadAuthority
+from ..authorization.scoped_read import native_scoped_authority
 from ..authorization.runtime import AuthenticatedPolicyActor
 from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
@@ -95,7 +95,7 @@ class OIDCReadTicketView(DirectoryPolicyView):
                 raise ContractError("POLICY_UNAVAILABLE", "Download ticket runtime is unavailable", 503)
             with self.service_factory(request, request_id) as issuer:
                 config = settings.CLOUDFILE_POLICY_CONFIG
-                preflight = ContentReadAuthority(issuer.preparation, PolicyCore(config['core_library']),
+                preflight = native_scoped_authority(issuer.preparation, PolicyCore(config['core_library']),
                     request_id=request_id, cloud_mode=config['cloud_mode'])
                 try:
                     preflight.consume(reference, lambda cursor, target: None)

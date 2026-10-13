@@ -13,6 +13,7 @@ from .shares import DirectoryShares, share_value
 
 
 class DirectoryShareService:
+    operation_namespace = 'directory_share'
     def __init__(self, management, *, lifecycle_reader):
         if not isinstance(management, DirectoryManagement):
             raise ValueError('transactional directory management authority required')
@@ -85,7 +86,7 @@ class DirectoryShareService:
                             from .requests import require_storage
                             from .rules import digest
                             DirectoryPolicyService._key(idempotency_key)
-                            key = digest(json.dumps(['directory_share', authority.state.provider,
+                            key = digest(json.dumps([self.operation_namespace, authority.state.provider,
                                 authority.actor, ref, idempotency_key], sort_keys=True))
                             fingerprint = digest(json.dumps(payload, sort_keys=True))
                             require_storage(cursor)

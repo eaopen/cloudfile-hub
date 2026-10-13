@@ -1,7 +1,7 @@
 """v0.9 same-transaction directory reads; not a transfer ticket issuer.
 
-This explicit authority leaves the legacy CE route unchanged until native byte
-and write consumers are connected to the same scoped qualification contract.
+Directory APIs and Web transfer preflights use this scoped authority. Native
+consumers independently repeat current qualification at byte access/publication.
 """
 from ..resources.paths import is_descendant_or_equal, normalize_path
 from .read import ContentReadAuthority
@@ -51,3 +51,20 @@ class ScopedContentReadAuthority(ContentReadAuthority):
             attribute_allowlist=self.preparation.contexts.allowlist, hard_readonly=self.hard_readonly)
         return self.decision_allowed(decision)
 
+
+class ScopedContentWriteAuthority(ScopedContentReadAuthority):
+    """Content write preflight, never management permission or native publication."""
+    def decision_allowed(self, decision):
+        super().decision_allowed(decision)
+        return self.effective_access['write']
+
+
+def native_scoped_authority(preparation, core, *, request_id, cloud_mode, write=False):
+    """Use the deployment-owned lifecycle adapter; a request cannot replace it."""
+    from django.conf import settings
+    from ..common.errors import ContractError
+    reader = getattr(settings, 'CLOUDFILE_RESOURCE_LIFECYCLE_READER', None)
+    if not callable(reader):
+        raise ContractError('POLICY_UNAVAILABLE', 'Native lifecycle adapter is unavailable', 503)
+    cls = ScopedContentWriteAuthority if write else ScopedContentReadAuthority
+    return cls(preparation, core, request_id=request_id, cloud_mode=cloud_mode, lifecycle_reader=reader)

@@ -7,10 +7,13 @@ from ..directory.self_http import own_context_routes
 from ..identity.delegation_gunicorn import delegation_issue_factory
 from ..identity.delegation_issue_http import delegation_issue_routes
 from .gunicorn import context_service, machine_refresh_service, policy_service
-from .http import DirectoryPolicyView, DirectoryEffectiveView, LibraryRulesView, DirectoryAccessView
+from .http import DirectoryPolicyView, DirectoryEffectiveView, LibraryRulesView, DirectoryAccessView, DirectoryScopeView
 
 
 urlpatterns = [
+    path('v1/directory-scope/list/', DirectoryScopeView.as_view(service_factory=policy_service), name='directory-scope-list'),
+    path('v1/directory-scope/revoke/', DirectoryScopeView.as_view(service_factory=policy_service, operation='revoke'), name='directory-scope-revoke'),
+    path('v1/directory-entries/', DirectoryAccessView.as_view(service_factory=policy_service, operation='entries'), name='directory-entries'),
     path('v1/directory-admins/', DirectoryPolicyView.as_view(service_factory=policy_service, domain='admins'), name='directory-admins'),
     path('v1/directory-admins/<uuid:rule_id>/', DirectoryPolicyView.as_view(service_factory=policy_service, domain='admins'), name='directory-admin-item'),
     path('v1/directory-shares/', DirectoryPolicyView.as_view(service_factory=policy_service, domain='shares'), name='directory-shares'),

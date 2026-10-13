@@ -182,9 +182,10 @@ class DirectoryAccessView(View):
                 raise ContractError('AUTHENTICATION_REQUIRED', 'Secure authentication is required', 401)
             if any(len(request.GET.getlist(k)) != 1 for k in request.GET) or request.read(1):
                 raise invalid('Invalid directory access query')
-            if self.operation == 'resolve':
+            if self.operation in ('resolve', 'entries'):
                 required = {'repo_id', 'path', 'kind'}
-                if not required <= set(request.GET) or set(request.GET) - required - {'shared_root'}:
+                optional = {'shared_root'} | ({'limit', 'after'} if self.operation == 'entries' else set())
+                if not required <= set(request.GET) or set(request.GET) - required - optional:
                     raise invalid('Directory reference required')
                 value = dict(reference={key: request.GET[key] for key in required})
                 if 'shared_root' in request.GET:
@@ -197,18 +198,72 @@ class DirectoryAccessView(View):
                     raise invalid('Invalid directory page limit')
             else:
                 raise RuntimeError('invalid trusted operation')
+            if self.operation == 'entries':
+                limit = request.GET.get('limit', '50')
+                if not re.fullmatch(r'[1-9][0-9]{0,2}', limit) or int(limit) > 100:
+                    raise invalid('Invalid directory page limit')
             if not callable(self.service_factory):
                 raise ContractError('POLICY_UNAVAILABLE', 'Directory service is unavailable', 503)
             with self.service_factory(request, request_id) as service:
                 if not isinstance(service, DirectoryService):
                     raise ContractError('POLICY_UNAVAILABLE', 'Directory runtime is unavailable', 503)
-                result = (service.resolve_directory(value) if self.operation == 'resolve' else
-                    service.shared_with_me(limit=int(limit), after=request.GET.get('after')))
+                if self.operation == 'resolve':
+                    result = service.resolve_directory(value)
+                elif self.operation == 'entries':
+                    result = service.directory_entries(value, limit=int(limit), after=request.GET.get('after'))
+                else:
+                    result = service.shared_with_me(limit=int(limit), after=request.GET.get('after'))
                 response = JsonResponse(result)
         except ContractError as error:
             response = JsonResponse(error.response(request_id), status=error.status)
         except Exception:
             error = ContractError('POLICY_UNAVAILABLE', 'Directory service is unavailable', 503)
+            response = JsonResponse(error.response(request_id), status=503)
+        response['Cache-Control'] = 'no-store, max-age=0'
+        response['Vary'] = 'Cookie, Authorization'
+        response['X-Request-ID'] = request_id
+        return response
+
+
+class DirectoryScopeView(DirectoryPolicyView):
+    """POST explicit scope queries/revocations through the existing CSRF boundary."""
+    operation = 'list'
+
+    def dispatch(self, request, *args, **kwargs):
+        from .directory_service import DirectoryService
+        request_id = str(uuid4())
+        try:
+            if request.method != 'POST' or args or kwargs:
+                raise ContractError('METHOD_NOT_ALLOWED', 'Directory scope requires POST', 405)
+            if not transport_allowed(request):
+                raise ContractError('AUTHENTICATION_REQUIRED', 'Secure authentication is required', 401)
+            if request.GET:
+                raise invalid('Directory scope accepts JSON only')
+            csrf = CsrfViewMiddleware(lambda _: None)
+            csrf.process_request(request)
+            if csrf.process_view(request, lambda *_: None, (), {}) is not None:
+                raise ContractError('ACCESS_DENIED', 'CSRF verification failed', 403)
+            body = self._body(request)
+            from ..common.validation import object_fields
+            if self.operation == 'list':
+                object_fields(body, ('reference', 'domain'), ('limit', 'after'))
+            if not callable(self.service_factory):
+                raise ContractError('POLICY_UNAVAILABLE', 'Directory runtime is unavailable', 503)
+            with self.service_factory(request, request_id) as service:
+                if not isinstance(service, DirectoryService):
+                    raise ContractError('POLICY_UNAVAILABLE', 'Directory runtime is unavailable', 503)
+                if self.operation == 'list':
+                    result = service.list_scope({k: body[k] for k in ('reference', 'domain')},
+                        limit=body.get('limit', 50), after=body.get('after'))
+                elif self.operation == 'revoke':
+                    result = service.revoke_scope(body, idempotency_key=request.headers.get('Idempotency-Key'))
+                else:
+                    raise RuntimeError('invalid trusted operation')
+            response = JsonResponse(result)
+        except ContractError as error:
+            response = JsonResponse(error.response(request_id), status=error.status)
+        except Exception:
+            error = ContractError('POLICY_UNAVAILABLE', 'Directory scope is unavailable', 503)
             response = JsonResponse(error.response(request_id), status=503)
         response['Cache-Control'] = 'no-store, max-age=0'
         response['Vary'] = 'Cookie, Authorization'

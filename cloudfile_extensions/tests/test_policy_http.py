@@ -147,3 +147,36 @@ class PolicyHTTPTest(unittest.TestCase):
         response = shared(self.requests.get('/shared/', secure=True))
         self.assertEqual(response.status_code, 503)
         self.assertNotIn(b'private credentials', response.content)
+
+    def test_directory_entries_and_scope_routes_validate_transport_and_dispatch(self):
+        from django.urls import resolve
+        from cloudfile_extensions.authorization.directory_service import DirectoryService
+        from cloudfile_extensions.authorization.http import DirectoryAccessView, DirectoryScopeView
+        service = Mock(spec=DirectoryService)
+        service.directory_entries.return_value = dict(items=[], head_id='a' * 40, next_after=None)
+        service.list_scope.return_value = dict(items=[], next_after=None)
+        service.revoke_scope.return_value = dict(items=[])
+        @contextmanager
+        def factory(request, request_id):
+            yield service
+        route = resolve('/v1/directory-entries/', urlconf='cloudfile_extensions.authorization.urls')
+        self.assertIs(route.func.view_class, DirectoryAccessView)
+        entries = DirectoryAccessView.as_view(service_factory=factory, operation='entries')
+        self.assertEqual(entries(self.requests.get('/entries/', data={**self.ref, 'limit': '2'}, secure=True)).status_code, 200)
+        service.directory_entries.assert_called_once_with(dict(reference=self.ref), limit=2, after=None)
+        self.assertEqual(entries(self.requests.get('/entries/', data={**self.ref, 'limit': '101'}, secure=True)).status_code, 400)
+        for operation in ('list', 'revoke'):
+            route = resolve('/v1/directory-scope/' + operation + '/', urlconf='cloudfile_extensions.authorization.urls')
+            self.assertIs(route.func.view_class, DirectoryScopeView)
+            self.assertEqual(route.func.view_initkwargs.get('operation', 'list'), operation)
+            view = DirectoryScopeView.as_view(service_factory=factory, operation=operation)
+            body = dict(reference=self.ref, domain='shares')
+            if operation == 'revoke':
+                body['items'] = [dict(id=str(uuid4()), etag='"revision"')]
+            self.assertEqual(view(self.write(json.dumps(body), csrf=False)).status_code, 403)
+            response = view(self.write(json.dumps(body)))
+            self.assertEqual(response.status_code, 200)
+            self.assertIn('no-store', response['Cache-Control'])
+            self.assertEqual(view(self.requests.get('/scope/', secure=True)).status_code, 405)
+        service.list_scope.assert_called_once_with(dict(reference=self.ref, domain='shares'), limit=50, after=None)
+        service.revoke_scope.assert_called_once_with(body, idempotency_key='create')
