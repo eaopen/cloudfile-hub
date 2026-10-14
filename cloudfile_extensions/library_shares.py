@@ -27,6 +27,11 @@ def _database():
                            connect_timeout=3, read_timeout=10, write_timeout=10, autocommit=True)
 
 
+def _org_repo_owner(repo_id):
+    lookup = getattr(seafile_api, 'get_org_repo_owner', None)
+    return lookup(repo_id) if callable(lookup) else None
+
+
 class LibrarySharesDesired(AdminLibraryAdministrator):
     """Accept a bounded complete desired state; never revoke shares outside our ledger."""
     http_method_names = ('put',)
@@ -54,7 +59,7 @@ class LibrarySharesDesired(AdminLibraryAdministrator):
         denied = self._authorize(request, repo_id)
         if denied is not None:
             return denied
-        owner = seafile_api.get_repo_owner(repo_id) or seafile_api.get_org_repo_owner(repo_id)
+        owner = seafile_api.get_repo_owner(repo_id) or _org_repo_owner(repo_id)
         if not owner:
             return api_error(503, 'Library owner is unavailable.')
         config = getattr(settings, 'CLOUDFILE_POLICY_CONFIG', None)
@@ -79,7 +84,7 @@ class LibrarySharesDesired(AdminLibraryAdministrator):
                 # may have removed native shares before resubmitting the same groups.
                 scheduled = {item[0] for name in ('add', 'update') for item in share_plan[name]}
                 invalid = {error.split(': ', 1)[0] for error in errors}
-                is_org = bool(seafile_api.get_org_repo_owner(repo_id))
+                is_org = bool(_org_repo_owner(repo_id))
                 for external_id, permission in desired.items():
                     if external_id in scheduled or external_id in invalid:
                         continue
@@ -104,7 +109,7 @@ class LibrarySharesDesired(AdminLibraryAdministrator):
                                 seafile_api.unset_group_repo(repo_id, group_id, owner)
                             else:
                                 if operation == 'add':
-                                    is_org = bool(seafile_api.get_org_repo_owner(repo_id))
+                                    is_org = bool(_org_repo_owner(repo_id))
                                     native = seafile_api.get_group_shared_repo_by_path(repo_id, None, group_id, is_org)
                                     cursor.execute('SELECT group_id,permission,state FROM cf_library_share_ledger WHERE repo_id=%s AND external_id=%s',
                                                    (repo_id, external_id))

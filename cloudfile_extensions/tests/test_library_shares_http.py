@@ -53,10 +53,15 @@ class LibrarySharesHttpTest(unittest.TestCase):
     def test_removed_department_revokes_group_without_touching_user_shares(self):
         self._apply_group_plan('revoke', native_permission='r')
 
-    def _apply_group_plan(self, operation, native_permission=None):
+    def test_ce14_without_optional_organization_rpc_still_publishes_group_share(self):
+        self._apply_group_plan('add', ce=True)
+
+    def _apply_group_plan(self, operation, native_permission=None, ce=False):
         native = Mock()
         native.get_repo_owner.return_value = 'owner@example.com'
         native.get_org_repo_owner.return_value = None
+        if ce:
+            del native.get_org_repo_owner
         # Readback follows the native group write; no user share API is needed.
         permissions = {} if native_permission is None else {42:native_permission}
         native.get_group_shared_repo_by_path.side_effect = lambda repo, path, group, org: (
