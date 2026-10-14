@@ -1,12 +1,12 @@
 import { renderToStaticMarkup } from 'react-dom/server';
-import { cloudFileAPI } from '../../cloudfile-api';
+import { cloudFileAPI } from '@/cloudfile/cloudfile-api';
 import DirACLPanel from '../dir-acl-panel';
 
 jest.mock('@/utils/constants', () => ({ gettext: text => text }));
 jest.mock('@/components/loading', () => () => null);
 jest.mock('@/components/toast', () => ({ danger: jest.fn() }));
 jest.mock('uuid', () => ({ v4: jest.fn(() => 'stable-request-key') }));
-jest.mock('../../cloudfile-api', () => ({ cloudFileAPI: {
+jest.mock('@/cloudfile/cloudfile-api', () => ({ cloudFileAPI: {
   listDirectoryPolicy: jest.fn(), createDirectoryPolicy: jest.fn(),
   replaceDirectoryRule: jest.fn(), deleteDirectoryPolicy: jest.fn(),
 } }));
@@ -20,9 +20,8 @@ function panel() {
 }
 beforeEach(() => jest.clearAllMocks());
 
-test('uncertain mutation retry keeps key and never creates ACL for a share', async () => {
+test('uncertain unified ACL retry keeps key and sharing mode', async () => {
   const instance = panel();
-  instance.state.domain = 'shares';
   instance.state.subject = 'employee';
   cloudFileAPI.createDirectoryPolicy.mockRejectedValue(new Error('lost response'));
   instance.submit({ preventDefault() {} });
@@ -32,10 +31,10 @@ test('uncertain mutation retry keeps key and never creates ACL for a share', asy
   expect(cloudFileAPI.createDirectoryPolicy).toHaveBeenCalledTimes(2);
   const first = cloudFileAPI.createDirectoryPolicy.mock.calls[0];
   expect(first).toEqual(cloudFileAPI.createDirectoryPolicy.mock.calls[1]);
-  expect(first[1]).toEqual({ path: '/folder', subject: {
+  expect(first[1]).toEqual({ path: '/folder', kind: 'dir', permission: 'r', inherit: true, share_mode: 1, subject: {
     type: 'user', provider: 'directory', namespace: 'user', external_id: 'employee',
   } });
-  expect(first[2]).toBe('shares');
+  expect(first[2]).toBe('rules');
   expect(cloudFileAPI.replaceDirectoryRule).not.toHaveBeenCalled();
 });
 
@@ -54,15 +53,15 @@ test('stale directory response cannot replace the newly selected folder', async 
   expect(instance.state.rules).toEqual([]);
 });
 
-test('sharing form exposes no permission or delegation controls', () => {
+test('unified form exposes permission and sharing without a separate share editor', () => {
   const instance = panel();
   instance.state.loading = false;
-  instance.state.domain = 'shares';
   const html = renderToStaticMarkup(instance.render());
   expect(html).toContain('Directory sharing');
-  expect(html).not.toContain('id="cf-policy-permission"');
+  expect(html).toContain('id="cf-policy-permission"');
   expect(html).not.toContain('directory-admin');
-  expect(html).toContain('Removing a share keeps directory rules.');
+  expect(html).toContain('Allow access without library membership');
+  expect(html).not.toContain('cf-policy-domain');
 });
 
 
@@ -79,4 +78,15 @@ test('switching folders during pagination releases stale busy state', async () =
   await oldPage;
   expect(instance.state.busy).toBe(false);
   expect(instance.state.rules).toEqual([]);
+});
+
+
+test('root ACL never enables directory sharing', async () => {
+  const instance = panel();
+  instance.props.path = '/';
+  instance.state.subject = 'employee';
+  cloudFileAPI.createDirectoryPolicy.mockRejectedValue(new Error('lost response'));
+  instance.submit({ preventDefault() {} });
+  await Promise.resolve(); await Promise.resolve();
+  expect(cloudFileAPI.createDirectoryPolicy.mock.calls[0][1].share_mode).toBe(0);
 });

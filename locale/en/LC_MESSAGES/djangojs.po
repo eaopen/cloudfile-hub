@@ -13581,3 +13581,9 @@ msgstr "Directory rules also apply to users without library access. Inherited ru
 #: frontend/src/cloudfile/acl/dir-acl-panel.js
 msgid "Sharing gives read access by default. Directory permissions determine write access and restrictions. Removing a share keeps directory rules."
 msgstr "Sharing gives read access by default. Directory permissions determine write access and restrictions. Removing a share keeps directory rules."
+
+msgid "Enable sharing to allow access without library membership. Permissions and inheritance are controlled by the same rule."
+msgstr "Enable sharing to allow access without library membership. Permissions and inheritance are controlled by the same rule."
+
+msgid "Allow access without library membership"
+msgstr "Allow access without library membership"

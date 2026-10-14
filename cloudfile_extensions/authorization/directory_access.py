@@ -38,9 +38,6 @@ class DirectoryAccessService:
             if authority.native_permission is not None:
                 roots.add('/')
             roots.update(item['path'] for item in shares)
-            roots.update(item['path'] for item in rules if item['kind'] == 'dir' and
-                item['permission'] in ('r', 'rw') and
-                tuple(item['subject'][k] for k in ('type', 'provider', 'namespace', 'external_id')) in keys)
             if shared_root is not None:
                 if shared_root not in {item['path'] for item in shares}:
                     raise ContractError('ACCESS_DENIED', 'Shared directory is unavailable', 403)
@@ -87,7 +84,7 @@ class DirectoryAccessService:
             hashes = sorted({authority.shares.subject_hash(item) for item in subjects})
             if len(hashes) > 4096:
                 raise ContractError('POLICY_UNAVAILABLE', 'Subject budget exceeded', 503)
-            query = ('SELECT repo_id,path_hash,MIN(path) FROM cf_dir_share WHERE subject_hash IN (' +
+            query = ('SELECT repo_id,path_hash,MIN(path) FROM cf_dir_acl WHERE share_mode=1 AND kind=\'dir\' AND subject_hash IN (' +
                 ','.join(['%s'] * len(hashes)) + ')')
             params = list(hashes)
             if cursor_value:

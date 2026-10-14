@@ -1,5 +1,6 @@
 """Hub and Server consume one scoped policy matrix using the real C library."""
 import json
+import os
 from datetime import datetime, timezone
 from pathlib import Path
 import subprocess
@@ -21,9 +22,9 @@ class ScopedPolicyTest(unittest.TestCase):
         cls.addClassCleanup(cls.temp.cleanup)
         library = Path(cls.temp.name) / 'acl.so'
         subprocess.run(['cc', '-std=c11', '-Wall', '-Wextra', '-Werror', '-shared', '-fPIC',
-            str(WORKSPACE / 'cloudfile-server/server/cloudfile-acl.c'), '-o', str(library)], check=True)
+            str(Path(os.environ.get('CF_TEST_SERVER_ROOT', WORKSPACE / 'cloudfile-server')) / 'server/cloudfile-acl.c'), '-o', str(library)], check=True)
         cls.core = PolicyCore(str(library))
-        cls.vectors = json.loads((WORKSPACE / 'cloudfile-docker/docs/directory-access-v09-cases.json').read_text())
+        cls.vectors = json.loads((Path(os.environ.get('CF_TEST_DOCKER_ROOT', WORKSPACE / 'cloudfile-docker')) / 'docs/directory-access-v09-cases.json').read_text())
 
     def test_shared_matrix(self):
         for case in self.vectors['cases']:

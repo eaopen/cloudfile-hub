@@ -1,4 +1,4 @@
-"""Real isolated SQL tests: share mutations never create or remove ACL rows."""
+"""Real isolated SQL tests: sharing and ACL permissions share one record and revision."""
 from uuid import uuid4
 
 from cloudfile_extensions.authorization.shares import DirectoryShares
@@ -18,7 +18,7 @@ class DirectorySharesSQLTest(DatabaseTestCase):
         self.subject = dict(type='user', provider='directory', namespace='user', external_id='u1')
         self.value = dict(path='/team', subject=self.subject)
 
-    def test_create_idempotent_and_revoke_without_acl_side_effects(self):
+    def test_create_idempotent_and_revoke_retains_library_acl(self):
         self.connection.begin()
         try:
             with self.connection.cursor() as cursor:
@@ -28,11 +28,11 @@ class DirectorySharesSQLTest(DatabaseTestCase):
                 self.assertFalse(created)
                 self.assertEqual(first, again)
                 cursor.execute('SELECT COUNT(*) FROM cf_dir_acl')
-                self.assertEqual(cursor.fetchall(), ((0,),))
+                self.assertEqual(cursor.fetchall(), ((1,),))
                 self.assertEqual(self.store.candidates(cursor, {**self.ref, 'path': '/team/file', 'kind': 'file'}, [self.subject]), [self.value])
                 self.store.delete(cursor, self.ref, first['id'], if_match=first['etag'])
                 cursor.execute('SELECT COUNT(*) FROM cf_dir_acl')
-                self.assertEqual(cursor.fetchall(), ((0,),))
+                self.assertEqual(cursor.fetchall(), ((1,),))
                 self.assertEqual(self.store.candidates(cursor, self.ref, [self.subject]), [])
         finally:
             self.connection.rollback()
@@ -63,3 +63,17 @@ class DirectorySharesSQLTest(DatabaseTestCase):
                 self.assertEqual(self.store.candidates(cursor, self.ref, [self.subject]), [self.value])
         finally:
             self.connection.rollback()
+
+    def test_noninherited_shared_acl_only_qualifies_exact_directory(self):
+        self.connection.begin()
+        with self.connection.cursor() as cursor:
+            item, _ = self.store.create(cursor, self.ref, self.value, actor='admin')
+            cursor.execute("UPDATE cf_dir_acl SET inherit=0,permission='rw' WHERE id=%s", (item['id'],))
+            # Compatibility creation must preserve an existing ACL's permission
+            # and inheritance, even when repeated by another administrator.
+            same, changed = self.store.create(cursor, self.ref, self.value, actor='admin2')
+            self.assertFalse(changed)
+            self.assertEqual((same['permission'], same['inherit']), ('rw', False))
+            self.assertEqual(self.store.candidates(cursor, self.ref, [self.subject]), [self.value])
+            self.assertEqual(self.store.candidates(cursor, {**self.ref, 'path': '/team/file', 'kind': 'file'}, [self.subject]), [])
+        self.connection.rollback()

@@ -10,6 +10,8 @@ from .share_service import DirectoryShareService
 class DirectoryService(DirectoryPolicyService):
     def __init__(self, management, *, lifecycle_reader):
         super().__init__(management)
+        # The same trusted reader pins sharing created through the unified ACL API.
+        management.rules.lifecycle_reader = lifecycle_reader
         args = (management.preparation, management.core)
         options = dict(request_id=management.rules.request_id,
             cloud_mode=management.native_qualification.cloud_mode)
@@ -46,7 +48,7 @@ class DirectoryService(DirectoryPolicyService):
         if domain == 'admins':
             return self.admins.replace('acl', rule_id, request, if_match=if_match, idempotency_key=idempotency_key)
         if domain == 'shares':
-            raise invalid('Shares have implicit read access; remove or create a recipient instead')
+            raise invalid('Update permissions and sharing mode through the ACL endpoint')
         return super().replace(domain, rule_id, request, if_match=if_match, idempotency_key=idempotency_key)
 
     @safe_errors

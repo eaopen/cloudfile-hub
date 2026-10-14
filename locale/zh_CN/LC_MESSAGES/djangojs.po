@@ -12713,3 +12713,9 @@ msgstr "目录权限同样适用于没有库权限的用户。继承规则对子
 #: frontend/src/cloudfile/acl/dir-acl-panel.js
 msgid "Sharing gives read access by default. Directory permissions determine write access and restrictions. Removing a share keeps directory rules."
 msgstr "目录共享默认提供只读权限，读写权限及访问限制由目录权限决定。取消共享不会删除目录权限规则。"
+
+msgid "Enable sharing to allow access without library membership. Permissions and inheritance are controlled by the same rule."
+msgstr "开启共享后，无库权限也可访问。访问权限和继承由同一条规则控制。"
+
+msgid "Allow access without library membership"
+msgstr "允许无库权限访问"

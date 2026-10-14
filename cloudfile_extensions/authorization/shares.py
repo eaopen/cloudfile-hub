@@ -1,31 +1,27 @@
-"""Directory share value contract. A share is READ qualification, not an ACL."""
-from ..common.errors import invalid
+"""Compatibility projection of sharing on the single directory ACL record."""
+from uuid import uuid4
+
+from ..common.errors import ContractError, invalid
 from ..common.validation import object_fields
-from .rules import rule_value
+from .rules import ACLRules, rule_value, digest
 
 
 def share_value(value):
-    """Validate the two share facts without accepting an ACL permission field."""
+    """Old shares requests enable sharing; permission edits use the ACL API."""
     object_fields(value, ('path', 'subject'))
-    # Reuse canonical directory and qualified identity validation, never store
-    # the temporary validation shape as an ACL row.
     checked = rule_value(dict(path=value['path'], subject=value['subject'],
-        kind='dir', permission='r', inherit=True))
-    if checked['path'] == '/':
-        raise invalid('Directory sharing cannot grant a library root')
+        kind='dir', permission='r', inherit=True, share_mode=1))
     return dict(path=checked['path'], subject=checked['subject'])
 
 
 class DirectoryShares:
-    """Same-cursor persistence; caller owns authority, locks and commit.
+    """Same-cursor ACL projection; caller owns authorization and repository locks.
 
-    Not a public service. The caller must authorize management before mutations,
-    check current identity before queries, and keep the repository guard until
-    the consumed effect. Lifecycle evidence comes from the trusted native reader.
-    No method writes cf_dir_acl or turns a directory grant into CE qualification.
+    Shared discovery and ACL edits use one ID/revision. Disabling sharing keeps
+    the ACL for library members; deleting the ACL removes both access facts.
     """
-    FIELDS = ('id,repo_id,path,path_hash,lifecycle_ref,subject_type,provider,namespace,'
-              'external_id,subject_hash,revision,created_by')
+    FIELDS = ACLRules.FIELDS
+    subject_hash = staticmethod(ACLRules._subject_hash)
 
     def __init__(self, *, lifecycle_reader):
         if not callable(lifecycle_reader):
@@ -33,94 +29,85 @@ class DirectoryShares:
         self.lifecycle_reader = lifecycle_reader
 
     @staticmethod
-    def subject_hash(subject):
-        import hashlib
-        import json
-        return hashlib.sha256(json.dumps(subject, sort_keys=True,
-            ensure_ascii=False, separators=(',', ':')).encode()).hexdigest()
-
-    @staticmethod
     def _decode(row):
-        from uuid import UUID
-        from .rules import digest
-        from ..common.validation import identifier
-        from ..common.errors import ContractError
         try:
-            id_, repo, path, path_hash, birth, type_, provider, namespace, external, hashed, revision, actor = row
-            value = share_value(dict(path=path, subject=dict(type=type_, provider=provider,
-                namespace=namespace, external_id=external)))
-            if (value['path'] != path or digest(path) != path_hash or
-                    DirectoryShares.subject_hash(value['subject']) != hashed or
-                    any(str(UUID(v)) != v for v in (id_, repo, revision))):
-                raise ValueError('invalid stored share')
-            identifier(birth, maximum=512)
-            identifier(actor, maximum=225)
-            return dict(id=id_, repo_id=repo, **value, lifecycle_ref=birth,
-                revision=revision, etag='"' + revision + '"', created_by=actor)
+            result = ACLRules._decode(row)
+            if result['share_mode'] != 1:
+                raise ValueError('sharing is disabled')
+            return result
         except (ValueError, TypeError, ContractError):
-            raise ContractError('POLICY_UNAVAILABLE', 'Directory share storage is invalid', 503) from None
+            raise ContractError('POLICY_UNAVAILABLE', 'Shared ACL storage is invalid', 503) from None
 
     def _birth(self, cursor, ref):
         from ..resources.store import ResourceStore
         return ResourceStore._validate_evidence(self.lifecycle_reader(cursor, ref)).lifecycle_ref
 
     def create(self, cursor, reference, value, *, actor):
-        from uuid import uuid4
-        from .rules import digest
         from ..resources.paths import resource_ref
         from ..common.validation import identifier
-        from ..common.errors import ContractError
         ref, value = resource_ref(reference), share_value(value)
         identifier(actor, maximum=225)
         if ref['kind'] != 'dir' or ref['path'] != value['path']:
             raise invalid('Share target must match its directory')
         birth = self._birth(cursor, ref)
         s = value['subject']
-        hashed = self.subject_hash(s)
-        cursor.execute('SELECT ' + self.FIELDS + ' FROM cf_dir_share '
-            'WHERE repo_id=%s AND path_hash=%s AND subject_hash=%s FOR UPDATE',
-            (ref['repo_id'], digest(ref['path']), hashed))
+        cursor.execute('SELECT ' + self.FIELDS + ' FROM cf_dir_acl '
+            "WHERE repo_id=%s AND path_hash=%s AND kind='dir' AND subject_hash=%s FOR UPDATE",
+            (ref['repo_id'], digest(ref['path']), self.subject_hash(s)))
         rows = cursor.fetchall()
         if rows:
             if len(rows) != 1:
-                raise ContractError('POLICY_UNAVAILABLE', 'Ambiguous directory share', 503)
-            current = self._decode(rows[0])
-            if (current['path'] != ref['path'] or current['subject'] != s or current['lifecycle_ref'] != birth):
-                raise ContractError('PATH_STATE_PENDING', 'Share lifecycle requires reconciliation', 409)
-            return current, False
+                raise ContractError('POLICY_UNAVAILABLE', 'Ambiguous shared ACL', 503)
+            current = ACLRules._decode(rows[0])
+            if current['path'] != ref['path'] or current['subject'] != s:
+                raise ContractError('POLICY_UNAVAILABLE', 'Shared ACL identity mismatch', 503)
+            if current['share_mode']:
+                if current['lifecycle_ref'] != birth:
+                    raise ContractError('PATH_STATE_PENDING', 'Disable stale sharing before regranting', 409)
+                return current, False
+            revision = str(uuid4())
+            cursor.execute('UPDATE cf_dir_acl SET share_mode=1,lifecycle_ref=%s,revision=%s '
+                'WHERE repo_id=%s AND id=%s', (birth, revision, ref['repo_id'], current['id']))
+            return dict(current, share_mode=1, lifecycle_ref=birth, revision=revision, etag='"' + revision + '"'), True
+        # Creating a shared ACL must close legacy unguarded publication in
+        # this same transaction, including internal store callers.
+        cursor.execute('INSERT INTO cf_managed_library(repo_id,created_at) VALUES(%s,UTC_TIMESTAMP(6)) '
+            'ON DUPLICATE KEY UPDATE repo_id=VALUES(repo_id)', (ref['repo_id'],))
         id_, revision = str(uuid4()), str(uuid4())
-        fields = (id_, ref['repo_id'], ref['path'], digest(ref['path']), birth, s['type'],
-            s['provider'], s['namespace'], s['external_id'], hashed, revision, actor)
-        cursor.execute('INSERT INTO cf_dir_share (' + self.FIELDS + ',created_at) VALUES (' +
-            ','.join(['%s'] * len(fields)) + ',UTC_TIMESTAMP(6))', fields)
+        fields = (id_, ref['repo_id'], ref['path'], digest(ref['path']), 'dir', s['type'],
+            s['provider'], s['namespace'], s['external_id'], self.subject_hash(s), 'r', 1, revision, 1, birth)
+        cursor.execute('INSERT INTO cf_dir_acl (' + self.FIELDS + ') VALUES (' +
+            ','.join(['%s'] * len(fields)) + ')', fields)
         return self._decode(fields), True
 
     def delete(self, cursor, reference, share_id, *, if_match):
         from uuid import UUID
         from ..common.conditions import compare_if_match
         from ..resources.paths import resource_ref
-        from ..common.errors import ContractError
         ref = resource_ref(reference)
         try:
             share_id = str(UUID(share_id))
         except (ValueError, TypeError, AttributeError):
             raise invalid('Invalid share ID') from None
-        cursor.execute('SELECT ' + self.FIELDS + ' FROM cf_dir_share WHERE repo_id=%s AND id=%s FOR UPDATE',
+        cursor.execute('SELECT ' + self.FIELDS + ' FROM cf_dir_acl WHERE repo_id=%s AND id=%s AND share_mode=1 FOR UPDATE',
             (ref['repo_id'], share_id))
         rows = cursor.fetchall()
         if not rows:
-            raise ContractError('NOT_FOUND', 'Directory share does not exist', 404)
+            raise ContractError('NOT_FOUND', 'Directory sharing does not exist', 404)
         if len(rows) != 1:
-            raise ContractError('POLICY_UNAVAILABLE', 'Ambiguous directory share', 503)
+            raise ContractError('POLICY_UNAVAILABLE', 'Ambiguous shared ACL', 503)
         current = self._decode(rows[0])
         if ref['kind'] != 'dir' or current['path'] != ref['path']:
-            raise ContractError('NOT_FOUND', 'Directory share does not exist', 404)
+            raise ContractError('NOT_FOUND', 'Directory sharing does not exist', 404)
         compare_if_match(if_match, current['etag'])
-        # Revocation must remain possible after deletion/recreation of the target.
-        cursor.execute('DELETE FROM cf_dir_share WHERE repo_id=%s AND id=%s', (ref['repo_id'], share_id))
+        # Revocation remains possible after deletion/recreation, and invalidates
+        # ACL ETags too so another editor cannot accidentally restore sharing.
+        revision = str(uuid4())
+        cursor.execute("UPDATE cf_dir_acl SET share_mode=0,lifecycle_ref='',revision=%s WHERE repo_id=%s AND id=%s",
+            (revision, ref['repo_id'], share_id))
         if cursor.rowcount != 1:
             raise ContractError('POLICY_UNAVAILABLE', 'Share revocation failed', 503)
-        return current
+        return dict(current, share_mode=0, lifecycle_ref='', revision=revision, etag='"' + revision + '"')
 
     def candidates(self, cursor, reference, subjects):
         return self.candidates_many(cursor, [reference], subjects)[0]
@@ -152,7 +139,7 @@ class DirectoryShares:
         if len(paths) > 4096:
             raise invalid('Directory ancestor batch exceeds budget')
         paths = sorted(paths)
-        cursor.execute('SELECT ' + self.FIELDS + ' FROM cf_dir_share WHERE repo_id=%s AND path_hash IN (' +
+        cursor.execute('SELECT ' + self.FIELDS + ' FROM cf_dir_acl WHERE share_mode=1 AND kind=\'dir\' AND repo_id=%s AND path_hash IN (' +
             ','.join(['%s'] * len(paths)) + ') AND subject_hash IN (' + ','.join(['%s'] * len(hashes)) +
             ') ORDER BY id LIMIT 4097 FOR UPDATE', (ref['repo_id'], *(digest(p) for p in paths), *hashes))
         rows = cursor.fetchall()
@@ -166,5 +153,7 @@ class DirectoryShares:
             if item['path'] not in births:
                 births[item['path']] = self._birth(cursor, dict(repo_id=ref['repo_id'], path=item['path'], kind='dir'))
             if births[item['path']] == item['lifecycle_ref']:
-                result.append(dict(path=item['path'], subject=item['subject']))
-        return [[item for item in result if is_descendant_or_equal(target['path'], item['path'])] for target in refs]
+                result.append(item)
+        return [[dict(path=item['path'], subject=item['subject']) for item in result
+            if item['path'] == target['path'] or (item['inherit'] and
+                is_descendant_or_equal(target['path'], item['path']))] for target in refs]

@@ -24,7 +24,7 @@ def digest(value):
 
 
 def rule_value(value):
-    object_fields(value, ("path", "kind", "subject", "permission", "inherit"))
+    object_fields(value, ("path", "kind", "subject", "permission", "inherit"), ("share_mode",))
     path = normalize_path(value["path"], value["kind"])
     if len(path.encode()) > 4096 or len(path.split("/")) > 130:
         raise invalid("ACL path exceeds budget")
@@ -41,6 +41,10 @@ def rule_value(value):
             type(value["inherit"]) is not bool or
             (value["kind"] == "file" and (value["inherit"] or value["permission"] not in {"invisible", "none"}))):
         raise invalid("Invalid ACL permission or inheritance")
+    if "share_mode" in value and (type(value["share_mode"]) is not int or
+            value["share_mode"] not in (0, 1) or
+            (value["share_mode"] and (value["kind"] != "dir" or path == "/"))):
+        raise invalid("Sharing requires a non-root directory and mode 0 or 1")
     return {**value, "path": path, "subject": dict(subject)}
 
 
@@ -48,9 +52,9 @@ class ACLRules:
     TABLE = "cf_dir_acl"
     ACTION_PREFIX = "acl"
     validate = staticmethod(rule_value)
-    FIELDS = "id,repo_id,path,path_hash,kind,subject_type,provider,namespace,external_id,subject_hash,permission,inherit,revision"
+    FIELDS = "id,repo_id,path,path_hash,kind,subject_type,provider,namespace,external_id,subject_hash,permission,inherit,revision,share_mode,lifecycle_ref"
 
-    def __init__(self, connection, *, provider, actor, request_id, authorize, finalize=None, authorize_change=None):
+    def __init__(self, connection, *, provider, actor, request_id, authorize, finalize=None, authorize_change=None, lifecycle_reader=None):
         if self.TABLE not in ("cf_dir_acl", "cf_dir_admin"):
             raise ValueError("fixed policy table required")
         if not connection.get_autocommit() or not callable(authorize):
@@ -67,6 +71,7 @@ class ACLRules:
         self.request_id, self.authorize = request_id, authorize
         self.finalize = finalize
         self.authorize_change = authorize_change
+        self.lifecycle_reader = lifecycle_reader
         self.events = EventWriter()
         self._require_storage()
 
@@ -110,9 +115,9 @@ class ACLRules:
 
     @classmethod
     def _decode(cls, row):
-        if len(row) != 13:
+        if len(row) != len(cls.FIELDS.split(",")):
             raise ValueError("invalid stored ACL")
-        id_, repo, path, path_hash, kind, type_, provider, namespace, external, subject_hash, permission, inherit, revision = row
+        id_, repo, path, path_hash, kind, type_, provider, namespace, external, subject_hash, permission, inherit, revision = row[:13]
         if type(inherit) is not int or inherit not in (0, 1):
             raise ValueError("invalid stored inheritance")
         try:
@@ -125,6 +130,16 @@ class ACLRules:
                 subject_hash != cls._subject_hash(value["subject"]) or str(UUID(id_)) != id_ or
                 str(UUID(revision)) != revision):
             raise ValueError("invalid stored ACL identity")
+        if cls.TABLE == "cf_dir_acl":
+            mode, birth = row[13:]
+            if type(mode) is not int or mode not in (0, 1) or not isinstance(birth, str):
+                raise ValueError("invalid stored sharing mode")
+            cls.validate({**value, "share_mode": mode})
+            if mode:
+                identifier(birth, maximum=512)
+            elif birth:
+                raise ValueError("disabled sharing has lifecycle evidence")
+            value.update(share_mode=mode, lifecycle_ref=birth)
         return dict(id=id_, repo_id=repo, **value, revision=revision, etag='"' + revision + '"')
 
     def candidates(self, reference, *, locking=False):
@@ -406,6 +421,19 @@ class ACLRules:
                             compare_if_match(if_match, previous["etag"])
                         if self.authorize_change is not None and self.authorize_change(cursor, self.actor, ref, previous, value) is not True:
                             raise ContractError("ACCESS_DENIED", "Policy change exceeds management scope", 403)
+                        birth = ""
+                        if self.TABLE == "cf_dir_acl" and value is not None:
+                            # Old clients omit the field: retain sharing on replacement,
+                            # but do not silently grant non-members on old-style creates.
+                            value = {**value, "share_mode": value.get("share_mode",
+                                previous["share_mode"] if previous else 0)}
+                            if value["share_mode"]:
+                                from ..resources.store import ResourceStore
+                                if not callable(self.lifecycle_reader):
+                                    raise ContractError("POLICY_UNAVAILABLE", "Sharing requires a lifecycle reader", 503)
+                                birth = ResourceStore._validate_evidence(self.lifecycle_reader(cursor, ref)).lifecycle_ref
+                                if previous and previous["share_mode"] and previous["lifecycle_ref"] != birth:
+                                    raise ContractError("PATH_STATE_PENDING", "Disable stale sharing before regranting", 409)
                         # A reconciliation PUT must not rotate revisions or emit a
                         # false policy-change event. Authorization and If-Match above
                         # still run; durable replay and finalization below are preserved.
@@ -425,14 +453,18 @@ class ACLRules:
                                 fields = (ref["path"], digest(ref["path"]), ref["kind"], s["type"], s["provider"],
                                     s["namespace"], s["external_id"], self._subject_hash(s), value["permission"],
                                     int(value["inherit"]), revision)
+                                sharing = (value["share_mode"], birth) if self.TABLE == "cf_dir_acl" else ()
                                 if previous is None:
                                     cursor.execute("INSERT INTO " + self.TABLE + "(" + self.FIELDS + ") VALUES(" +
-                                        ",".join(["%s"] * 13) + ")", (id_, ref["repo_id"], *fields))
+                                        ",".join(["%s"] * (13 + len(sharing))) + ")", (id_, ref["repo_id"], *fields, *sharing))
                                 else:
-                                    cursor.execute("UPDATE " + self.TABLE + " SET path=%s,path_hash=%s,kind=%s,subject_type=%s,provider=%s,namespace=%s,external_id=%s,subject_hash=%s,permission=%s,inherit=%s,revision=%s WHERE id=%s AND repo_id=%s",
-                                        (*fields, id_, ref["repo_id"]))
+                                    cursor.execute("UPDATE " + self.TABLE + " SET path=%s,path_hash=%s,kind=%s,subject_type=%s,provider=%s,namespace=%s,external_id=%s,subject_hash=%s,permission=%s,inherit=%s,revision=%s" +
+                                        (",share_mode=%s,lifecycle_ref=%s" if sharing else "") + " WHERE id=%s AND repo_id=%s",
+                                        (*fields, *sharing, id_, ref["repo_id"]))
                                     if cursor.rowcount != 1: raise ValueError()
                                 result = dict(id=id_, repo_id=ref["repo_id"], **value, revision=revision, etag='"' + revision + '"')
+                                if self.TABLE == "cf_dir_acl":
+                                    result['lifecycle_ref'] = birth
                             self.events.append(cursor, dict(event_id=str(uuid4()), request_id=self.request_id,
                                 occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
                                 actor_user_id=self.actor, actor_kind="user", source="hub",

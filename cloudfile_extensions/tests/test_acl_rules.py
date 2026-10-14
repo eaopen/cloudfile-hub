@@ -160,3 +160,41 @@ class ACLRulesTest(DatabaseTestCase):
         for limit in (True, 0, 101):
             with self.assertRaises(ContractError):
                 self.rules.list_target(self.ref(), limit=limit)
+
+    def test_unified_sharing_toggle_revision_and_lifecycle(self):
+        from cloudfile_extensions.resources.store import ResourceEvidence
+        from cloudfile_extensions.authorization.shares import DirectoryShares
+        self.rules.lifecycle_reader = Mock(return_value=ResourceEvidence('birth'))
+        one = self.rules.mutate(self.ref(), value=dict(self.value(permission='rw'), share_mode=1), idempotency_key='shared')
+        self.assertEqual((one['share_mode'], one['permission']), (1, 'rw'))
+        self.assertEqual(self.rules.mutate(self.ref(), value=dict(self.value(permission='rw'), share_mode=1),
+            idempotency_key='shared'), one)
+        unchanged = self.rules.mutate(self.ref(), value=self.value(permission='rw'), rule_id=one['id'], if_match=one['etag'])
+        self.assertEqual(unchanged, one)
+        shares = DirectoryShares(lifecycle_reader=self.rules.lifecycle_reader)
+        self.connection.begin()
+        with self.connection.cursor() as cursor:
+            disabled = shares.delete(cursor, self.ref(), one['id'], if_match=one['etag'])
+        self.connection.commit()
+        self.assertEqual((disabled['share_mode'], disabled['permission']), (0, 'rw'))
+        with self.assertRaises(ContractError) as error:
+            self.rules.mutate(self.ref(), value=dict(self.value(), share_mode=1), rule_id=one['id'], if_match=one['etag'])
+        self.assertEqual(error.exception.status, 412)
+        again = self.rules.mutate(self.ref(), value=dict(self.value(), share_mode=1), rule_id=one['id'], if_match=disabled['etag'])
+        self.rules.lifecycle_reader.return_value = ResourceEvidence('recreated')
+        with self.assertRaises(ContractError) as error:
+            self.rules.mutate(self.ref(), value=self.value(), rule_id=one['id'], if_match=again['etag'])
+        self.assertEqual(error.exception.status, 409)
+        self.rules.mutate(self.ref(), rule_id=again['id'], if_match=again['etag'])
+        with self.connection.cursor() as cursor:
+            self.assertEqual(shares.candidates(cursor, self.ref(), [one['subject']]), [])
+
+    def test_shared_mode_validation_and_missing_lifecycle_fail_closed(self):
+        for mode in (True, '1', -1, 2):
+            with self.assertRaises(ContractError):
+                self.rules.mutate(self.ref(), value=dict(self.value(), share_mode=mode))
+        with self.assertRaises(ContractError):
+            self.rules.mutate(self.ref('/'), value=dict(self.value('/'), share_mode=1))
+        with self.assertRaises(ContractError):
+            self.rules.mutate(self.ref(), value=dict(self.value(), share_mode=1))
+        self.assertEqual(self.rules.candidates(self.ref()), [])

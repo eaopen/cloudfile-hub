@@ -66,6 +66,7 @@ class PolicyServiceFactory:
             management_type = DelegatedDirectoryManagement if directory else DirectoryManagement
             management = management_type(preparation, self.core,
                 request_id=request_id, cloud_mode=self.cloud_mode)
+            management.rules.lifecycle_reader = self.lifecycle_reader
             try:
                 if not directory:
                     yield DirectoryPolicyService(management)

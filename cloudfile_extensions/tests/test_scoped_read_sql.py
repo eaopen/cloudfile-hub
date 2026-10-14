@@ -25,6 +25,15 @@ class ScopedReadSQLTest(fixtures.ResourceBatchSQLTest):
         self.authority = ScopedContentReadAuthority(self.preparation, self.core, cloud_mode=False,
             request_id='scoped-test', lifecycle_reader=self.lifecycle)
 
+    def rule(self, ref, permission, inherit=False):
+        # Shared and ordinary rules now have one unique target/subject identity.
+        self.rules.lifecycle_reader = self.lifecycle
+        current = next((r for r in self.rules.candidates(ref) if r['path'] == ref['path'] and
+            r['kind'] == ref['kind'] and r['subject']['external_id'] == 'employee'), None)
+        options = dict(rule_id=current['id'], if_match=current['etag']) if current else {}
+        return self.rules.mutate(ref, value=dict(path=ref['path'], kind=ref['kind'], permission=permission,
+            inherit=inherit, subject=dict(type='user', provider='directory', namespace='user', external_id='employee')), **options)
+
     def shared(self):
         refs = self.references(2)
         root = dict(repo_id=refs[0]['repo_id'], path='/folder', kind='dir')
@@ -44,7 +53,7 @@ class ScopedReadSQLTest(fixtures.ResourceBatchSQLTest):
         refs, root, share = self.shared()
         denied = {**root, 'path': '/sibling'}
         self.assertEqual(self.authority.consume_many([refs[0], denied, refs[1]]), ['r', None, 'r'])
-        self.rule(root, 'rw', True)
+        share = self.rule(root, 'rw', True)
         self.assertEqual(self.authority.consume_many(refs), ['rw', 'rw'])
         self.connection.begin()
         try:
@@ -53,9 +62,9 @@ class ScopedReadSQLTest(fixtures.ResourceBatchSQLTest):
             self.connection.commit()
         finally:
             self.connection.rollback()
-        self.assertEqual(self.authority.consume_many(refs), ['rw', 'rw'])
-        self.assertEqual(self.authority.consume(refs[0], lambda cursor, ref: self.authority.effective_access),
-            dict(read=True, write=True))
+        self.assertEqual(self.authority.consume_many(refs), [None, None])
+        with self.assertRaises(ContractError):
+            self.authority.consume(refs[0], lambda cursor, ref: 'must-not-escape')
 
     def test_inactive_account_cannot_use_existing_share(self):
         refs, root, share = self.shared()
@@ -74,7 +83,7 @@ class ScopedReadSQLTest(fixtures.ResourceBatchSQLTest):
         self.lifecycle.return_value = ResourceEvidence('new-directory')
         self.assertEqual(self.authority.consume_many(refs), [None, None])
 
-    def test_management_commands_do_not_mutate_acl(self):
+    def test_sharing_commands_preserve_acl_on_disable(self):
         ref = {**self.references(1)[0], 'path': '/folder', 'kind': 'dir'}
         management = DirectoryManagement(self.preparation, self.core, request_id='share-commands', cloud_mode=False)
         service = DirectoryShareService(management, lifecycle_reader=self.lifecycle)
@@ -85,8 +94,8 @@ class ScopedReadSQLTest(fixtures.ResourceBatchSQLTest):
         service.delete(item['id'], dict(reference=ref), if_match=item['etag'])
         with self.connection.cursor() as cursor:
             cursor.execute('SELECT COUNT(*) FROM cf_dir_acl')
-            self.assertEqual(cursor.fetchone()[0], 0)
-            cursor.execute('SELECT COUNT(*) FROM cf_dir_share')
+            self.assertEqual(cursor.fetchone()[0], 1)
+            cursor.execute('SELECT COUNT(*) FROM cf_dir_acl WHERE share_mode=1')
             self.assertEqual(cursor.fetchone()[0], 0)
 
     def test_share_recipient_cannot_manage_shares(self):
