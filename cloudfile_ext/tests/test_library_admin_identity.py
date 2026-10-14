@@ -9,16 +9,20 @@ class VerifiedAliasTests(unittest.TestCase):
         self.alias = '10220942@auth.local'
         self.binding = dict(native_user='opaque@auth.local', employee_no='10220942',
                             user_id='381', provider='test-provider', oauth_subject='stable-sub')
-        self.profile = SimpleNamespace(user='opaque@auth.local', login_id='10220942')
+        self.profile = SimpleNamespace(user='opaque@auth.local', login_id='381')
         self.links = [('opaque@auth.local', 'test-provider', 'stable-sub')]
 
     def check(self, owner=None):
         return check_binding(self.alias, self.binding, self.profile, self.links, owner)
 
-    def test_existing_account_and_uid_profile_are_supported(self):
+    def test_only_business_uid_profile_is_supported(self):
         self.assertEqual(self.check(), 'opaque@auth.local')
-        self.profile.login_id = '381'
-        self.assertEqual(self.check(), 'opaque@auth.local')
+
+    def test_employee_number_login_id_is_rejected(self):
+        # login_id 统一存业务 UID（2026-10-10 起）；旧工号值只能靠迁移修掉，
+        # 校验层继续放行会把迁移缺口藏起来。
+        self.profile.login_id = '10220942'
+        with self.assertRaises(ValueError): self.check()
 
     def test_oauth_uid_is_not_replaced_by_business_uid(self):
         self.links = [('opaque@auth.local', 'test-provider', '381')]
@@ -43,11 +47,11 @@ class VerifiedAliasTests(unittest.TestCase):
     def test_system_account_requires_explicit_review(self):
         self.alias = 'admin@auth.local'
         self.binding['employee_no'] = 'admin'
-        self.profile.login_id = 'admin'
+        self.profile.login_id = self.binding['user_id']
         with self.assertRaises(ValueError): self.check()
         self.binding['account_kind'] = 'system'
         self.assertEqual(self.check(), 'opaque@auth.local')
         self.binding['employee_no'] = 'administrator'
         self.alias = 'administrator@auth.local'
-        self.profile.login_id = 'administrator'
+        self.profile.login_id = self.binding['user_id']
         with self.assertRaises(ValueError): self.check()

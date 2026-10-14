@@ -58,17 +58,24 @@ def unique_identity(usernames):
     return next(iter(values)) if values else None
 
 
-def _default_map_email(subject):
-    """Seahub's own login-string -> identity mapping. Returns input if unmapped.
+def _default_map_login(subject):
+    """Map a login id (business UID) to the account identity. Returns input if unmapped.
 
-    ``MultipleObjectsReturned`` is re-raised as ``AmbiguousSubject`` rather
-    than treated as "no mapping": a duplicated contact_email must refuse, not
-    fall through to the existence check and land on an arbitrary account.
+    2026-10-14 收紧：不再借用 Seahub 的 ``convert_login_str_to_username``。后者先查
+    ``Profile.login_id``、**再查 ``Profile.contact_email``**，于是「收信地址」变成了
+    身份寻址键；而 eTech 目录里同一邮箱被多个账号持有时（实测生产 7 组），
+    「按邮箱授权」就会落到另一个账号上——测试环境已经发生过（一条库管理员标记
+    挂到了 name=admin 的账号）。contact_email 是联系资料、不是身份（上游注释原文：
+    "Contact email is used to receive emails."），身份只认 login_id / 账号名。
+
+    ``MultipleObjectsReturned`` 仍转成 ``AmbiguousSubject``：一个主体映射到多个账号
+    必须拒绝，不能落回存在性检查去撞任意一个账号。``login_id`` 有唯一索引，
+    正常不会触发，保留是为了注入实现（见 tests/test_identity.py）也守同一契约。
     """
     from django.core.exceptions import MultipleObjectsReturned
     from seahub.profile.models import Profile
     try:
-        return Profile.objects.convert_login_str_to_username(subject)
+        return Profile.objects.get_username_by_login_id(subject) or subject
     except MultipleObjectsReturned:
         raise AmbiguousSubject(subject)
 
@@ -83,33 +90,33 @@ def _default_group_exists(gid):
     return ccnet_api.get_group(gid) is not None
 
 
-def resolve_user(subject, map_email=None, account_exists=None):
+def resolve_user(subject, map_login=None, account_exists=None):
     """Return the identity enforcement will see, for a typed user subject.
 
-    Accepts the internal id or a login/contact email: an admin knows the email,
-    while an API client may already hold the id.
+    主体形态：账号名（含 ``工号@auth.local``、历史不透明虚拟 id）或 ``login_id``（业务 UID）。
+    **不再接受 contact_email**（2026-10-14 起）——见 ``_default_map_login``。
 
     **The mapping is tried before the existence check, and that order is the
     whole point.** The obvious shape -- "if this already names an account, keep
-    it; otherwise map it" -- looks right and is wrong, because
-    ``ccnet_api.get_emailuser`` resolves an *email* too. An email therefore
-    passes the "is this an identity?" test, gets kept verbatim, and the rule is
-    stored against a string enforcement never compares. That is precisely the
-    bug this module was written to fix, and the first version of it reproduced
-    the bug exactly; the six-entry matrix caught it, unit tests did not.
+    it; otherwise map it" -- looks right and is wrong: on a deployment whose
+    account names *are* mail addresses (pre-14, or any provider that provisions
+    with mailboxes), ``ccnet_api.get_emailuser`` answers yes for the mailbox, so
+    the string is kept verbatim and the rule is stored against something
+    enforcement never compares. That is precisely the bug this module was
+    written to fix, and the first version of it reproduced the bug exactly; the
+    six-entry matrix caught it, unit tests did not.
 
     So: map first, and only fall back to the input when the mapping is a no-op.
 
-    The mapping is Seahub's ``convert_login_str_to_username`` rather than a
-    query of our own. It is what the rest of Seahub authenticates through, so
-    borrowing it means a rule matches exactly the account that logging in
-    produces; a private reimplementation would be one more thing to drift, and
-    drift here means rules that quietly apply to nobody.
+    2026-10-14：映射从 ``convert_login_str_to_username``（login_id → contact_email 两级）
+    收紧为只认 ``login_id``。contact_email 是收信地址而不是身份，把「邮箱」当寻址键会让
+    共用同一邮箱的不同账号互相串号（测试环境已发生）。仍在账号名层面支持邮箱形态
+    —— 那是 pre-14 部署/以邮箱建号的提供方的正常形态，与 contact_email 无关。
 
     The lookups are injectable so this ordering can be tested without Django,
-    seaserv or a running server -- see tests/test_subjects.py.
+    seaserv or a running server -- see tests/test_identity.py.
     """
-    map_email = map_email or _default_map_email
+    map_login = map_login or _default_map_login
     account_exists = account_exists or _default_account_exists
 
     subject = (subject or '').strip()
@@ -117,7 +124,7 @@ def resolve_user(subject, map_email=None, account_exists=None):
         raise UnknownSubject('empty subject')
 
     try:
-        mapped = map_email(subject)
+        mapped = map_login(subject)
     except AmbiguousSubject:
         # An ambiguous mapping is never a "try the fallback" situation: the
         # directory disagrees with itself about who this is, and guessing an
@@ -228,7 +235,7 @@ def resolve_group(subject, group_map=None, group_exists=None):
     never silently pointed at the group.
 
     ``group_map`` is injectable for the same reason ``resolve_user`` takes
-    ``map_email``: identity is baseline, and must not depend on the SSO
+    ``map_login``: identity is baseline, and must not depend on the SSO
     capability that owns ``cf_sso_group_map``. When omitted, the process-wide
     default installed by the SSO capability is used, so callers that only
     import ``identity`` still get the translation when SSO is on.

@@ -18,11 +18,15 @@ def check_binding(alias, binding, profile, links, alias_owner):
     valid_account = isinstance(employee, str) and (
         re.fullmatch(r'[0-9]{1,32}', employee) or
         (employee == 'admin' and binding.get('account_kind') == 'system'))
+    # 2026-10-13 收紧：Profile.login_id 自 2026-10-10 起统一存业务 UID，
+    # 只认 uid；继续接受 employee/工号会把未迁移的旧行判为"合法"，
+    # 让迁移缺口在校验层被掩盖（那段历史数据应由一次性迁移处理，见
+    # cloudfile_ext.identity / docs 中的 login_id 迁移说明）。
     if (not valid_account
             or alias != employee + '@auth.local' or not isinstance(uid, str)
             or not re.fullmatch(r'[0-9]{1,225}', uid) or not native
             or not provider or not subject or not profile
-            or profile.user != native or profile.login_id not in (employee, uid)
+            or profile.user != native or profile.login_id != uid
             or links != [(native, provider, subject)]
             or alias_owner not in (None, native)):
         raise ValueError('Verified library administrator identity no longer matches')

@@ -10,6 +10,10 @@ The failure being guarded against: an email that maps to a different identity
 must never be stored verbatim. A rule stored against an email is compared
 against nothing, so it never applies, and no error is raised anywhere -- the
 folder just stays open while the administrator believes it is restricted.
+
+2026-10-14：默认映射收紧为只认 ``Profile.login_id``，**不再按 ``contact_email`` 反查**
+（见 ``identity._default_map_login``）。本文件的注入式用例模拟"外部映射"，顺序契约不变；
+新增 ``test_contact_email_is_no_longer_a_subject`` 固定这条策略。
 """
 
 import pytest
@@ -33,7 +37,7 @@ def accounts(*known):
 def test_email_resolves_to_identity():
     assert identity.resolve_user(
         EMAIL,
-        map_email=mapping({EMAIL: IDENTITY}),
+        map_login=mapping({EMAIL: IDENTITY}),
         account_exists=accounts(IDENTITY, EMAIL),
     ) == IDENTITY
 
@@ -50,7 +54,7 @@ def test_email_wins_even_though_it_names_an_account():
     """
     assert identity.resolve_user(
         EMAIL,
-        map_email=mapping({EMAIL: IDENTITY}),
+        map_login=mapping({EMAIL: IDENTITY}),
         account_exists=accounts(IDENTITY, EMAIL),   # both exist, as in reality
     ) == IDENTITY
 
@@ -58,7 +62,7 @@ def test_email_wins_even_though_it_names_an_account():
 def test_identity_passes_through():
     assert identity.resolve_user(
         IDENTITY,
-        map_email=mapping({EMAIL: IDENTITY}),
+        map_login=mapping({EMAIL: IDENTITY}),
         account_exists=accounts(IDENTITY),
     ) == IDENTITY
 
@@ -68,9 +72,27 @@ def test_pre_14_identity_equals_email():
     legacy = 'alice@example.com'
     assert identity.resolve_user(
         legacy,
-        map_email=mapping({}),          # nothing to map
+        map_login=mapping({}),          # nothing to map
         account_exists=accounts(legacy),
     ) == legacy
+
+
+def test_contact_email_is_no_longer_a_subject():
+    """2026-10-14：身份解析不再按 contact_email 反查。
+
+    注入一个"只认 login_id"的映射（等价于新的默认 ``_default_map_login``），
+    并给 account_exists 只认账号名。邮箱形态的主体必须被拒绝——否则"拿某人的邮箱
+    去授权"会落到持有该邮箱的另一个账号上（测试环境已发生：一条库管理员标记
+    挂到了 name=admin 的账号）。账号名层面的邮箱形态仍然保留，
+    见 ``test_pre_14_identity_equals_email``。
+    """
+    login_only = mapping({'387': IDENTITY})     # login_id -> identity
+    with pytest.raises(identity.UnknownSubject):
+        identity.resolve_user(EMAIL, map_login=login_only,
+                              account_exists=accounts(IDENTITY))
+    # login_id 形态仍能解析
+    assert identity.resolve_user('387', map_login=login_only,
+                                 account_exists=accounts(IDENTITY)) == IDENTITY
 
 
 def test_unknown_subject_is_refused():
@@ -79,21 +101,21 @@ def test_unknown_subject_is_refused():
     with pytest.raises(identity.UnknownSubject):
         identity.resolve_user(
             'typo@example.com',
-            map_email=mapping({EMAIL: IDENTITY}),
+            map_login=mapping({EMAIL: IDENTITY}),
             account_exists=accounts(IDENTITY, EMAIL),
         )
 
 
 def test_empty_subject_is_refused():
     with pytest.raises(identity.UnknownSubject):
-        identity.resolve_user('   ', map_email=mapping({}),
+        identity.resolve_user('   ', map_login=mapping({}),
                               account_exists=accounts())
 
 
 def test_whitespace_is_stripped():
     assert identity.resolve_user(
         f'  {EMAIL} ',
-        map_email=mapping({EMAIL: IDENTITY}),
+        map_login=mapping({EMAIL: IDENTITY}),
         account_exists=accounts(IDENTITY),
     ) == IDENTITY
 
@@ -114,7 +136,7 @@ def test_ambiguous_mapping_is_refused_not_fallback():
     with pytest.raises(identity.AmbiguousSubject):
         identity.resolve_user(
             EMAIL,
-            map_email=ambiguous,
+            map_login=ambiguous,
             account_exists=accounts(IDENTITY, EMAIL),  # fallback must not run
         )
 
