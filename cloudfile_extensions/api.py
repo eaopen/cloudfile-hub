@@ -3,7 +3,7 @@ from rest_framework.response import Response
 
 from seahub.api2.base import APIView
 
-from .capabilities import annotation_implementation_registry, management_implementation_registry, legacy_implementation_registry, audit_query_implementation_registry, build_capability_document
+from .capabilities import annotation_implementation_registry, management_implementation_registry, legacy_implementation_registry, audit_query_implementation_registry, local_edit_implementation_registry, build_capability_document
 
 
 class CapabilitiesView(APIView):
@@ -31,6 +31,9 @@ class CapabilitiesView(APIView):
             sso_enabled=getattr(settings, 'CF_ENABLE_SSO', False))
         implementations = audit_query_implementation_registry(implementations, gunicorn._host,
             audit_query_enabled=getattr(settings, 'CLOUDFILE_AUDIT_QUERY_ENABLED', False))
+        implementations = local_edit_implementation_registry(implementations, gunicorn._host,
+            local_edit_enabled=getattr(settings, 'CLOUDFILE_LOCAL_EDIT_ENABLED', False),
+            oidc_enabled=getattr(settings, 'CLOUDFILE_OIDC_ENABLED', False))
         return Response(build_capability_document(
             configured, seafile_version=seafile_version, webdav_enabled=webdav_enabled,
             implementation_registry=implementations

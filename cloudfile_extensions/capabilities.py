@@ -201,3 +201,44 @@ def audit_query_implementation_registry(base, host, *, audit_query_enabled):
     implementations['audit.query'] = replace(implementations['audit.query'],
         implemented=True, default_enabled=True)
     return SimpleNamespace(implementations=implementations)
+
+
+def local_edit_implementation_registry(base, host, *, local_edit_enabled, oidc_enabled):
+    """Expose device edit only from the current worker's complete native runtime."""
+    import os
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from .authorization.host import PolicyHost
+    from .authorization.runtime import PolicyServiceFactory
+    from .identity.resources import LoginResources
+    from .resources.runtime import ResourceServiceFactory
+    from .local_edit.device_runtime import DeviceManagementFactory
+    from .local_edit.session_runtime import LocalSessionFactory
+    from .local_edit.agent_runtime import AgentClaimRuntime
+    from .local_edit.read_ticket import AgentReadTicketIssuer
+    if (local_edit_enabled is not True or oidc_enabled is not True
+            or not isinstance(host, PolicyHost) or host.pid != os.getpid()
+            or host.closed or host.draining):
+        return base
+    deployment = host.deployment
+    required = (
+        (deployment.factory, PolicyServiceFactory),
+        (deployment.login_resources, LoginResources),
+        (deployment.resource_factory, ResourceServiceFactory),
+        (deployment.local_device_factory, DeviceManagementFactory),
+        (deployment.local_session_factory, LocalSessionFactory),
+        (deployment.local_agent_runtime, AgentClaimRuntime),
+        (deployment.local_read_issuer, AgentReadTicketIssuer),
+    )
+    if any(not isinstance(value, expected) for value, expected in required):
+        return base
+    if deployment.local_read_issuer.runtime is not deployment.local_agent_runtime:
+        return base
+    implementations = dict(base.implementations)
+    for name in ('auth.oidc', 'directory.subjects', 'library.policy', 'directory.acl',
+                 'resource.local-open-type', 'local.open-edit'):
+        implementations[name] = replace(implementations[name], implemented=True,
+                                         provider=registry.implementations[name].provider,
+                                         dependencies=registry.implementations[name].dependencies,
+                                         default_enabled=True)
+    return SimpleNamespace(implementations=implementations)

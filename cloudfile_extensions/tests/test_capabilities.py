@@ -199,3 +199,62 @@ class AuditQueryCapabilityTest(unittest.TestCase):
         for closed in (audit_query_implementation_registry(registry, host, audit_query_enabled=False),
                        audit_query_implementation_registry(registry, None, audit_query_enabled=True)):
             self.assertFalse(build_capability_document(implementation_registry=closed)['capabilities']['audit.query']['enabled'])
+
+
+class LocalEditRuntimeCapabilityTest(unittest.TestCase):
+    def host(self):
+        import os
+        from types import SimpleNamespace
+        from unittest.mock import Mock
+        from cloudfile_extensions.authorization.host import PolicyHost
+        from cloudfile_extensions.authorization.runtime import PolicyServiceFactory
+        from cloudfile_extensions.identity.resources import LoginResources
+        from cloudfile_extensions.resources.runtime import ResourceServiceFactory
+        from cloudfile_extensions.local_edit.device_runtime import DeviceManagementFactory
+        from cloudfile_extensions.local_edit.session_runtime import LocalSessionFactory
+        from cloudfile_extensions.local_edit.agent_runtime import AgentClaimRuntime
+        from cloudfile_extensions.local_edit.read_ticket import AgentReadTicketIssuer
+        host = Mock(spec=PolicyHost)
+        host.pid = os.getpid(); host.closed = False; host.draining = False
+        agent = Mock(spec=AgentClaimRuntime)
+        read = Mock(spec=AgentReadTicketIssuer); read.runtime = agent
+        host.deployment = SimpleNamespace(factory=Mock(spec=PolicyServiceFactory),
+            login_resources=Mock(spec=LoginResources), resource_factory=Mock(spec=ResourceServiceFactory),
+            local_device_factory=Mock(spec=DeviceManagementFactory),
+            local_session_factory=Mock(spec=LocalSessionFactory), local_agent_runtime=agent,
+            local_read_issuer=read)
+        return host
+
+    def capabilities(self, host, *, enabled=True, oidc=True, configured=None):
+        from cloudfile_extensions.capabilities import local_edit_implementation_registry
+        base = ImplementationRegistry()
+        ready = local_edit_implementation_registry(base, host,
+            local_edit_enabled=enabled, oidc_enabled=oidc)
+        return build_capability_document(configured, implementation_registry=ready)['capabilities']
+
+    def test_complete_runtime_publishes_device_edit_without_claiming_unrelated_features(self):
+        capabilities = self.capabilities(self.host())
+        for name in ('auth.oidc', 'directory.subjects', 'library.policy', 'directory.acl',
+                     'resource.local-open-type', 'local.open-edit'):
+            self.assertTrue(capabilities[name]['enabled'])
+        for name in ('file.lock', 'search.resources', 'audit.query', 'transfer.web'):
+            self.assertFalse(capabilities[name]['enabled'])
+        self.assertFalse(self.capabilities(self.host(), configured={'local.open-edit':False})['local.open-edit']['enabled'])
+
+    def test_missing_inherited_or_disabled_runtime_cannot_be_manufactured_by_settings(self):
+        host = self.host()
+        for name in vars(host.deployment):
+            original = getattr(host.deployment,name); setattr(host.deployment,name,None)
+            with self.subTest(name=name):
+                self.assertFalse(self.capabilities(host, configured={'local.open-edit':True})['local.open-edit']['enabled'])
+            setattr(host.deployment,name,original)
+        self.assertFalse(self.capabilities(None)['local.open-edit']['enabled'])
+        self.assertFalse(self.capabilities(host, enabled=False)['local.open-edit']['enabled'])
+        self.assertFalse(self.capabilities(host, oidc=False)['local.open-edit']['enabled'])
+        host.pid += 1
+        self.assertFalse(self.capabilities(host)['local.open-edit']['enabled'])
+        host = self.host(); host.draining = True
+        self.assertFalse(self.capabilities(host)['local.open-edit']['enabled'])
+        host = self.host(); host.local_read_issuer = None
+        host.deployment.local_read_issuer.runtime = object()
+        self.assertFalse(self.capabilities(host)['local.open-edit']['enabled'])
