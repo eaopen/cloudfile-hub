@@ -16,7 +16,7 @@ from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 
-from cloudfile_ext.identity import unique_identity, AmbiguousSubject
+from cloudfile_ext.identity import unique_identity, AmbiguousSubject, provisioning_provider
 
 
 class AdminExternalIdentityView(APIView):
@@ -76,6 +76,12 @@ class AdminExternalIdentityView(APIView):
         display_name = str(request.data.get('display_name') or '').strip()
         provider = (getattr(settings, 'OAUTH_PROVIDER', '')
                     or getattr(settings, 'OAUTH_PROVIDER_DOMAIN', ''))
+        # Directory business IDs are not OAuth sub values; retain both bindings
+        # so permission synchronization cannot break an existing SSO login.
+        try:
+            provider = provisioning_provider(request.data.get('identity_source'), provider)
+        except ValueError:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Identity source invalid.')
         if not user_id or len(user_id) > 225 or not account or len(account) > 225 \
                 or not login_email or '@' not in login_email or len(login_email) > 225 \
                 or '@' not in contact_email or len(contact_email) > 225 \

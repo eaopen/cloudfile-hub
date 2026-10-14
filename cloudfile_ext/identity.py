@@ -58,6 +58,15 @@ def unique_identity(usernames):
     return next(iter(values)) if values else None
 
 
+def provisioning_provider(identity_source, oauth_provider):
+    """Keep directory UIDs separate from OAuth subjects without rebinding login."""
+    if identity_source == 'etech-directory':
+        return 'directory:etech'
+    if identity_source:
+        raise ValueError('Unknown identity source.')
+    return oauth_provider
+
+
 def _default_map_login(subject):
     """Map a login id (business UID) to the account identity. Returns input if unmapped.
 
