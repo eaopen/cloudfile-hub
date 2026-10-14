@@ -10,10 +10,10 @@ from functools import lru_cache
 from .runner import MigrationError, SchemaRunner, load_migrations
 
 
-TABLES = ('cf_dir_acl', 'cf_dir_admin', 'cf_dir_share')
+TABLES = ('cf_dir_acl', 'cf_dir_admin')
 VERSIONS = frozenset(('008_directory_acl', '009_directory_admins',
                      '036_library_acl_page', '040_directory_shares',
-                     '041_directory_admin_page'))
+                     '041_directory_admin_page', '042_unified_directory_acl'))
 LEGACY_COLUMNS = {'id', 'repo_id', 'path', 'path_hash', 'subject_type',
                   'subject', 'inherit', 'ctime', 'mtime'}
 
@@ -48,7 +48,10 @@ def verify_indexes(runner):
             continue
         for step in migration.steps:
             sql = step['sql']
-            table = re.match(r'(?:CREATE|ALTER) TABLE (\w+) ', sql)[1]
+            match = re.match(r'(?:CREATE|ALTER) TABLE (\w+) ', sql)
+            if not match or match[1] not in expected:
+                continue
+            table = match[1]
             for unique, name, columns in re.findall(r'(UNIQUE )?KEY (\w+)\(([^)]+)\)', sql):
                 expected[table][name] = (0 if unique else 1, tuple(columns.split(',')))
     for table, indexes in expected.items():
@@ -73,9 +76,14 @@ def inspect_tables(runner):
                   for name, kind, collation, nullable in rows}
         engine = runner._query('SELECT ENGINE FROM information_schema.tables '
                                'WHERE table_schema=DATABASE() AND table_name=%s', (table,))
-        state = 'missing' if not actual else 'current' if actual == expected and engine == (('InnoDB',),) else 'incompatible'
+        current = dict(expected)
+        if table == 'cf_dir_acl':
+            current.update(share_mode=('tinyint', None, 'NO'), lifecycle_ref=('varchar(512)', 'utf8mb4_bin', 'NO'))
+        state = 'missing' if not actual else 'current' if actual == current and engine == (('InnoDB',),) else 'incompatible'
+        if table == 'cf_dir_acl' and actual == expected and engine == (('InnoDB',),):
+            state = 'v09'
         legacy = LEGACY_COLUMNS | ({'permission'} if table == 'cf_dir_acl' else set())
-        if (table != 'cf_dir_share' and set(actual) == legacy and
+        if (set(actual) == legacy and
                 actual.get('path_hash', ('',))[0] == 'char(40)' and
                 actual.get('id', ('',))[0].startswith('bigint') and engine == (('InnoDB',),)):
             state = 'legacy'
@@ -107,6 +115,7 @@ class DirectorySchemaRunner(SchemaRunner):
     def apply(self, *, offline=False):
         if offline is not True:
             raise MigrationError('stop directory readers and writers before an offline upgrade')
+        self.offline = True
         with self._locked():
             plan = {row['version']: row for row in self.plan()}
             tables = inspect_tables(self)

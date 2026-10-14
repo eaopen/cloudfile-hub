@@ -60,6 +60,7 @@ class SchemaRunner:
         if not connection.get_autocommit():
             raise MigrationError("schema runner requires a dedicated autocommit connection")
         self.connection = connection
+        self.offline = False
         self.migrations = load_migrations() if migrations is None else tuple(migrations)
         if len({item.version for item in self.migrations}) != len(self.migrations):
             raise MigrationError("duplicate migration version")
@@ -129,7 +130,7 @@ class SchemaRunner:
 
     def apply(self):
         with self._locked():
-            self._check_directory_layouts()
+            self._check_directory_layouts(upgrading=True)
             self._bootstrap()
             plan = {item["version"]: item for item in self.plan()}
             for migration in self.migrations:
@@ -137,17 +138,33 @@ class SchemaRunner:
             self.require_current()
         return self.status()
 
-    def _check_directory_layouts(self):
+    def _check_directory_layouts(self, *, upgrading=False):
         # CREATE IF NOT EXISTS would hide legacy/type drift. Reject it before
         # applying any unrelated DDL; the explicit offline directory upgrade
         # is the only operation allowed to archive old directory tables.
         from .directory import VERSIONS, inspect_tables
         if VERSIONS.intersection(m.version for m in self.migrations):
-            if any(row['state'] not in ('missing', 'current') for row in inspect_tables(self)):
+            allowed = ('missing', 'current', 'v09') if upgrading or not any(m.version == '042_unified_directory_acl' for m in self.migrations) else ('missing', 'current')
+            if any(row['state'] not in allowed for row in inspect_tables(self)):
                 raise MigrationError('directory schema is incompatible; run directory-plan before offline upgrade')
+            if upgrading and any(m.version == '042_unified_directory_acl' for m in self.migrations):
+                # Existing installations must stop both Hub and native writers;
+                # a new empty database is allowed to run the full catalog directly.
+                if not self.offline and self._query("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_dir_share'")[0][0]:
+                    raise MigrationError('existing sharing requires directory-apply --offline')
 
     def _verify(self, step):
-        rows = self._query(step["verify"])
+        sql = step["verify"]
+        # Migration 042 retires the independent table. Preserve 040's immutable
+        # checksum while verifying its explicit successor, never recreate it.
+        if "table_name='cf_dir_share'" in sql and sql.startswith("SELECT IF("):
+            if self._exists():
+                successor = self._query("SELECT state,step FROM cf_schema_migration WHERE version='042_unified_directory_acl'")
+                if successor and successor[0][1] >= 2 and not self._query(
+                        "SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_dir_share'")[0][0]:
+                    from .unified_acl import successor_steps
+                    return all(self._verify(item) for item in successor_steps())
+        rows = self._query(sql)
         return len(rows) == 1 and len(rows[0]) == 1 and rows[0][0] == step["expected"]
 
     def _apply_one(self, migration, previous):
@@ -164,6 +181,9 @@ class SchemaRunner:
             for index, step in enumerate(migration.steps, 1):
                 # DDL may have committed before a crash. Verify actual structure before replay.
                 if not self._verify(step):
+                    if migration.version == '042_unified_directory_acl' and step['sql'] == 'DROP TABLE cf_dir_share':
+                        from .unified_acl import merge_shares
+                        merge_shares(self)
                     self._query(step["sql"])
                     self.connection.commit()
                 if not self._verify(step):

@@ -51,7 +51,7 @@ class DirectoryShareService:
         if after is not None:
             DirectoryPolicyService._id(after)
         def read(cursor):
-            sql = 'SELECT ' + self.store.FIELDS + ' FROM cf_dir_share WHERE repo_id=%s AND path_hash=%s'
+            sql = 'SELECT ' + self.store.FIELDS + ' FROM cf_dir_acl WHERE share_mode=1 AND kind=\'dir\' AND repo_id=%s AND path_hash=%s'
             params = [ref['repo_id'], digest(ref['path'])]
             if after is not None:
                 sql += ' AND id>%s'

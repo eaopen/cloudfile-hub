@@ -20,17 +20,17 @@ class DirectorySchemaUpgradeTest(DatabaseTestCase):
             runner.apply()
         runner.apply(offline=True)
         runner.require_current()
-        self.assertEqual(len(runner.plan()), 5)
+        self.assertEqual(len(runner.plan()), 6)
         self.assertTrue(all(row['state'] == 'current' for row in runner.inspect()['tables']))
         runner.apply(offline=True)
         # A bounded directory upgrade must still compose with the full catalog.
         SchemaRunner(self.connection).apply()
         SchemaRunner(self.connection).require_current()
 
-    def test_empty_legacy_is_archived_and_three_tables_upgraded(self):
+    def test_empty_legacy_is_archived_and_two_tables_upgraded(self):
         self.legacy()
         runner = DirectorySchemaRunner(self.connection)
-        self.assertEqual([x['state'] for x in runner.inspect()['tables']], ['legacy', 'legacy', 'missing'])
+        self.assertEqual([x['state'] for x in runner.inspect()['tables']], ['legacy', 'legacy'])
         with self.assertRaises(MigrationError):
             SchemaRunner(self.connection).apply()
         self.assertEqual(runner.status(), [])
@@ -57,7 +57,7 @@ class DirectorySchemaUpgradeTest(DatabaseTestCase):
         runner = DirectorySchemaRunner(self.connection)
         runner.apply(offline=True)
         with self.connection.cursor() as cursor:
-            cursor.execute('ALTER TABLE cf_dir_share MODIFY path_hash CHAR(40) CHARACTER SET ascii COLLATE ascii_bin NOT NULL')
+            cursor.execute('ALTER TABLE cf_dir_acl MODIFY path_hash CHAR(40) CHARACTER SET ascii COLLATE ascii_bin NOT NULL')
         with self.assertRaises(MigrationError):
             runner.require_current()
         with self.assertRaises(MigrationError):
@@ -101,7 +101,7 @@ class DirectorySchemaUpgradeTest(DatabaseTestCase):
         runner = DirectorySchemaRunner(self.connection)
         with self.assertRaises(MigrationError):
             runner.apply(offline=True)
-        self.assertEqual([x['state'] for x in runner.inspect()['tables']], ['legacy', 'legacy', 'missing'])
+        self.assertEqual([x['state'] for x in runner.inspect()['tables']], ['legacy', 'legacy'])
 
     def test_page_index_uniqueness_drift_is_rejected(self):
         runner = DirectorySchemaRunner(self.connection)
@@ -110,3 +110,115 @@ class DirectorySchemaUpgradeTest(DatabaseTestCase):
             cursor.execute('ALTER TABLE cf_dir_admin DROP INDEX acl_library_page, ADD UNIQUE KEY acl_library_page(repo_id,id)')
         with self.assertRaises(MigrationError):
             runner.require_current()
+
+
+class UnifiedDirectoryUpgradeTest(DatabaseTestCase):
+    def setUp(self):
+        super().setUp()
+        # Build the exact released catalog, including its unchanged checksums.
+        SchemaRunner(self.connection, [m for m in load_migrations()
+            if m.version != '042_unified_directory_acl']).apply()
+
+    def seed(self, *, acl_permission=None):
+        from uuid import uuid4
+        from cloudfile_extensions.authorization.rules import ACLRules, digest
+        repo, id_, revision = str(uuid4()), str(uuid4()), str(uuid4())
+        subject = dict(type='user', provider='directory', namespace='user', external_id='employee')
+        with self.connection.cursor() as cursor:
+            cursor.execute('INSERT INTO cf_dir_share(id,repo_id,path,path_hash,lifecycle_ref,subject_type,provider,namespace,'
+                'external_id,subject_hash,revision,created_by,created_at) VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(6))',
+                (id_, repo, '/team', digest('/team'), 'birth', 'user', 'directory', 'user', 'employee',
+                 ACLRules._subject_hash(subject), revision, 'admin'))
+            acl_id = str(uuid4())
+            if acl_permission:
+                cursor.execute('INSERT INTO cf_dir_acl(' + ACLRules.FIELDS.rsplit(',', 2)[0] + ') VALUES(' +
+                    ','.join(['%s'] * 13) + ')', (acl_id, repo, '/team', digest('/team'), 'dir', 'user', 'directory',
+                    'user', 'employee', ACLRules._subject_hash(subject), acl_permission, 0, str(uuid4())))
+        return id_, acl_id
+
+    def test_offline_merge_preserves_acl_and_drops_independent_table_permanently(self):
+        share, _ = self.seed()
+        _, acl = self.seed(acl_permission='rw')
+        _, deny = self.seed(acl_permission='none')
+        with self.assertRaises(MigrationError):
+            SchemaRunner(self.connection).apply()
+        runner = DirectorySchemaRunner(self.connection)
+        runner.apply(offline=True)
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT id,permission,inherit,share_mode,lifecycle_ref FROM cf_dir_acl')
+            rows = {row[0]: row[1:] for row in cursor.fetchall()}
+            self.assertEqual(rows, {share: ('r', 1, 1, 'birth'), acl: ('rw', 0, 1, 'birth'), deny: ('none', 0, 1, 'birth')})
+            cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name LIKE 'cf_dir_share%'")
+            self.assertEqual(cursor.fetchone()[0], 0)
+            cursor.execute("UPDATE cf_dir_acl SET share_mode=0,lifecycle_ref='' WHERE id=%s", (share,))
+        runner.apply(offline=True)
+        SchemaRunner(self.connection).apply()
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT share_mode FROM cf_dir_acl WHERE id=%s', (share,))
+            self.assertEqual(cursor.fetchone()[0], 0)
+            cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_dir_share'")
+            self.assertEqual(cursor.fetchone()[0], 0)
+
+    def test_invalid_legacy_identity_prevents_conversion_and_drop(self):
+        self.seed()
+        with self.connection.cursor() as cursor:
+            cursor.execute("UPDATE cf_dir_share SET subject_hash=REPEAT('0',64)")
+        with self.assertRaises(MigrationError):
+            DirectorySchemaRunner(self.connection).apply(offline=True)
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT COUNT(*) FROM cf_dir_share')
+            self.assertEqual(cursor.fetchone()[0], 1)
+            cursor.execute('SELECT COUNT(*) FROM cf_dir_acl')
+            self.assertEqual(cursor.fetchone()[0], 0)
+
+    def test_crash_after_drop_resumes_without_recreating_table(self):
+        self.seed()
+        runner = DirectorySchemaRunner(self.connection)
+        original = runner._query
+        def crash(sql, parameters=()):
+            if sql.startswith("UPDATE cf_schema_migration SET step=") and parameters == (3, '042_unified_directory_acl'):
+                raise RuntimeError('simulated crash after committed DROP')
+            return original(sql, parameters)
+        runner._query = crash
+        with self.assertRaises(MigrationError):
+            runner.apply(offline=True)
+        runner = DirectorySchemaRunner(self.connection)
+        runner.apply(offline=True)
+        runner.require_current()
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT COUNT(*) FROM cf_dir_acl')
+            self.assertEqual(cursor.fetchone()[0], 1)
+            cursor.execute("SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_dir_share'")
+            self.assertEqual(cursor.fetchone()[0], 0)
+
+    def test_id_collision_never_overwrites_another_acl(self):
+        share, _ = self.seed()
+        _, other_acl = self.seed(acl_permission='rw')
+        with self.connection.cursor() as cursor:
+            cursor.execute('UPDATE cf_dir_acl SET id=%s WHERE id=%s', (share, other_acl))
+        with self.assertRaises(MigrationError):
+            DirectorySchemaRunner(self.connection).apply(offline=True)
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT id,permission,share_mode FROM cf_dir_acl')
+            self.assertEqual(cursor.fetchall(), ((share, 'rw', 0),))
+            cursor.execute('SELECT COUNT(*) FROM cf_dir_share')
+            self.assertEqual(cursor.fetchone()[0], 2)
+
+    def test_crash_before_drop_retries_conversion_without_rotating_revision(self):
+        self.seed(acl_permission='rw')
+        runner = DirectorySchemaRunner(self.connection)
+        original = runner._query
+        def crash(sql, parameters=()):
+            if sql == 'DROP TABLE cf_dir_share':
+                raise RuntimeError('simulated failure after committed conversion')
+            return original(sql, parameters)
+        runner._query = crash
+        with self.assertRaises(MigrationError):
+            runner.apply(offline=True)
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT id,revision,share_mode FROM cf_dir_acl')
+            before = cursor.fetchall()
+        DirectorySchemaRunner(self.connection).apply(offline=True)
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT id,revision,share_mode FROM cf_dir_acl')
+            self.assertEqual(cursor.fetchall(), before)

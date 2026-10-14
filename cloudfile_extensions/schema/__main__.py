@@ -10,6 +10,7 @@ from .runner import MigrationError, SchemaRunner
 
 def main():
     parser = argparse.ArgumentParser()
+    # Directory cutovers must remain explicitly offline; ordinary apply cannot replace this entry.
     parser.add_argument("command", choices=("plan", "apply", "status", "check",
                                            "directory-plan", "directory-apply", "directory-check"))
     parser.add_argument("--offline", action="store_true",

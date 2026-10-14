@@ -2,18 +2,18 @@ import React from 'react';
 import { Button, Form, FormGroup, Input, Label, Table } from 'reactstrap';
 import PropTypes from 'prop-types';
 import { v4 as uuidv4 } from 'uuid';
+import { cloudFileAPI } from '@/cloudfile/cloudfile-api';
 import Loading from '@/components/loading';
 import toaster from '@/components/toast';
 import { gettext } from '@/utils/constants';
-import { cloudFileAPI } from '../cloudfile-api';
 
 const TYPES = [['user', gettext('User')], ['dept', gettext('Department')], ['group', gettext('Group')]];
 const PERMISSIONS = [['invisible', gettext('Invisible')], ['none', gettext('No access')],
   ['r', gettext('Read only')], ['rw', gettext('Read write')]];
 
 class DirACLPanel extends React.Component {
-  state = { loading: true, busy: false, failed: false, rules: [], shares: [], cursors: {}, provider: '',
-    domain: 'rules', subjectType: 'user', subject: '', namespace: '', permission: 'r', inherit: true, editing: null };
+  state = { loading: true, busy: false, failed: false, rules: [], cursors: {}, provider: '',
+    domain: 'rules', subjectType: 'user', subject: '', namespace: '', permission: 'r', inherit: true, shareMode: 1, editing: null };
   pendingKeys = new Map();
   generation = 0;
   mounted = false;
@@ -30,10 +30,11 @@ class DirACLPanel extends React.Component {
     // A stale pagination request must not leave the newly selected folder busy.
     this.setState({ loading: true, busy: this.inFlight, failed: false, domain: 'rules', editing: null });
     try {
-      const domains = this.props.path === '/' ? ['rules'] : ['rules', 'shares'];
+      // Sharing belongs to each ACL, so one page provides both controls.
+      const domains = ['rules'];
       const responses = await Promise.all(domains.map(domain => cloudFileAPI.listDirectoryPolicy(this.props.repoID, this.props.path, domain)));
       if (generation !== this.generation) return;
-      const next = { rules: [], shares: [], cursors: {}, loading: false, provider: responses[0].data.subject_provider };
+      const next = { rules: [], cursors: {}, loading: false, provider: responses[0].data.subject_provider };
       responses.forEach((response, i) => { next[domains[i]] = response.data.items; next.cursors[domains[i]] = response.data.next_after; });
       this.setState(next);
     } catch (error) {
@@ -69,10 +70,10 @@ class DirACLPanel extends React.Component {
   };
   submit = event => {
     event.preventDefault();
-    const { provider, subjectType, subject, namespace, domain, permission, inherit, editing } = this.state;
+    const { provider, subjectType, subject, namespace, domain, permission, inherit, shareMode, editing } = this.state;
     const value = { path: this.props.path,
       subject: { type: subjectType, provider, namespace: subjectType === 'user' ? 'user' : namespace.trim(), external_id: subject.trim() },
-      ...(domain === 'rules' ? { kind: 'dir', permission, inherit } : {}) };
+      kind: 'dir', permission, inherit, share_mode: this.props.path === '/' ? 0 : shareMode };
     const reference = this.reference();
     if (editing && domain === 'rules') {
       this.mutate({ action: 'replace', reference, value, id: editing.id, etag: editing.etag },
@@ -88,20 +89,21 @@ class DirACLPanel extends React.Component {
   };
   renderTable = domain => (
     <React.Fragment>
-      <Table><thead><tr><th>{gettext('Type')}</th><th>{gettext('Subject')}</th><th>{gettext('Permission')}</th><th>{gettext('Inherit')}</th><th></th></tr></thead>
+      <Table><thead><tr><th>{gettext('Type')}</th><th>{gettext('Subject')}</th><th>{gettext('Permission')}</th><th>{gettext('Inherit')}</th><th>{gettext('Directory sharing')}</th><th></th></tr></thead>
         <tbody>
-          {this.state[domain].length === 0 && <tr><td colSpan="5">{gettext('No rules on this folder.')}</td></tr>}
+          {this.state[domain].length === 0 && <tr><td colSpan="6">{gettext('No rules on this folder.')}</td></tr>}
           {this.state[domain].map(rule => (
             <tr key={rule.id}>
               <td>{TYPES.find(([type]) => type === rule.subject.type)?.[1]}</td>
               <td>{rule.subject.external_id}{rule.subject.type !== 'user' && ` (${rule.subject.namespace})`}</td>
-              <td>{domain === 'shares' ? gettext('Read only by default') : PERMISSIONS.find(([permission]) => permission === rule.permission)?.[1]}</td>
-              <td>{domain === 'shares' || rule.inherit ? gettext('Yes') : gettext('No')}</td>
+              <td>{PERMISSIONS.find(([permission]) => permission === rule.permission)?.[1]}</td>
+              <td>{rule.inherit ? gettext('Yes') : gettext('No')}</td>
+              <td>{rule.share_mode === 1 ? gettext('Yes') : gettext('No')}</td>
               <td>
                 {domain === 'rules' && (
                   <Button color="link" disabled={this.state.busy} onClick={() => this.setState({
                     editing: rule, domain, subjectType: rule.subject.type, subject: rule.subject.external_id,
-                    namespace: rule.subject.namespace, permission: rule.permission, inherit: rule.inherit,
+                    namespace: rule.subject.namespace, permission: rule.permission, inherit: rule.inherit, shareMode: rule.share_mode || 0,
                   })}>{gettext('Edit')}
                   </Button>)}
                 <Button color="link" disabled={this.state.busy} onClick={() => this.remove(domain, rule)}>{gettext('Delete')}</Button>
@@ -113,26 +115,15 @@ class DirACLPanel extends React.Component {
     </React.Fragment>
   );
   render() {
-    const { loading, busy, failed, domain, subjectType, subject, namespace, permission, inherit, provider, editing } = this.state;
+    const { loading, busy, failed, domain, subjectType, subject, namespace, permission, inherit, shareMode, provider, editing } = this.state;
     if (loading) return <Loading />;
     if (failed) return <Button onClick={this.load}>{gettext('Retry')}</Button>;
     return (
       <div className="cloudfile-dir-acl">
         <h4>{gettext('Directory permissions')}: {this.props.path}</h4>
-        <p className="text-secondary">{gettext('Directory rules also apply to users without library access. Inherited rules apply to child folders.')}</p>
+        <p className="text-secondary">{gettext('Enable sharing to allow access without library membership. Permissions and inheritance are controlled by the same rule.')}</p>
         {this.renderTable('rules')}
-        {this.props.path !== '/' && (
-          <React.Fragment><h4>{gettext('Directory sharing')}</h4>
-            <p className="text-secondary">{gettext('Sharing gives read access by default. Directory permissions determine write access and restrictions. Removing a share keeps directory rules.')}</p>
-            {this.renderTable('shares')}
-          </React.Fragment>)}
         <Form onSubmit={this.submit}>
-          <FormGroup><Label for="cf-policy-domain">{gettext('Add')}</Label>
-            <Input id="cf-policy-domain" type="select" value={domain} onChange={e => this.setState({ domain: e.target.value, editing: null })}>
-              <option value="rules">{gettext('Directory permissions')}</option>
-              {this.props.path !== '/' && <option value="shares">{gettext('Directory sharing')}</option>}
-            </Input>
-          </FormGroup>
           <FormGroup><Label for="cf-policy-type">{gettext('Type')}</Label>
             <Input id="cf-policy-type" type="select" value={subjectType} onChange={e => this.setState({ subjectType: e.target.value, namespace: '' })}>
               {TYPES.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -153,6 +144,14 @@ class DirACLPanel extends React.Component {
                 </Input>
               </FormGroup>
               <FormGroup check><Label check><Input type="checkbox" checked={inherit} onChange={e => this.setState({ inherit: e.target.checked })} />{gettext('Inherit')}</Label></FormGroup>
+              {this.props.path !== '/' && (
+                <FormGroup check>
+                  <Label check>
+                    <Input type="checkbox" checked={shareMode === 1} onChange={e => this.setState({ shareMode: e.target.checked ? 1 : 0 })} />
+                    {gettext('Allow access without library membership')}
+                  </Label>
+                </FormGroup>
+              )}
             </React.Fragment>)}
           <Button type="submit" color="primary" disabled={busy || !provider || !subject.trim() || (subjectType !== 'user' && !namespace.trim())}>{editing ? gettext('Save') : gettext('Add')}</Button>
           {editing && <Button disabled={busy} onClick={() => this.setState({ editing: null })}>{gettext('Cancel')}</Button>}

@@ -17,7 +17,7 @@ class DirectoryScopeService(DirectoryShareService):
 
     def store_for(self, domain):
         if domain == 'shares':
-            return 'cf_dir_share', self.store
+            return 'cf_dir_acl', self.store
         if domain == 'acl':
             return 'cf_dir_acl', self.management.rules
         if domain == 'admins':
@@ -38,6 +38,8 @@ class DirectoryScopeService(DirectoryShareService):
         def read(cursor):
             sql = ('SELECT ' + store.FIELDS + ' FROM ' + table + ' WHERE repo_id=%s '
                 'AND (path=%s OR LEFT(path,CHAR_LENGTH(%s))=%s)')
+            if request['domain'] == 'shares':
+                sql += ' AND share_mode=1'
             values = [ref['repo_id'], ref['path'], prefix, prefix]
             if after:
                 sql += ' AND id>%s'
@@ -67,7 +69,8 @@ class DirectoryScopeService(DirectoryShareService):
             removed = []
             for item in sorted(items, key=lambda value: value['id']):
                 cursor.execute('SELECT ' + store.FIELDS + ' FROM ' + table +
-                    ' WHERE repo_id=%s AND id=%s FOR UPDATE', (ref['repo_id'], item['id']))
+                    ' WHERE repo_id=%s AND id=%s' + (' AND share_mode=1' if domain == 'shares' else '') +
+                    ' FOR UPDATE', (ref['repo_id'], item['id']))
                 rows = cursor.fetchall()
                 if len(rows) != 1:
                     raise ContractError('PRECONDITION_FAILED', 'Revocation target changed', 412)
@@ -78,10 +81,14 @@ class DirectoryScopeService(DirectoryShareService):
                         strictly_below=domain == 'admins'):
                     raise ContractError('ACCESS_DENIED', 'Revocation exceeds management scope', 403)
                 compare_if_match(item['etag'], value['etag'])
-                cursor.execute('DELETE FROM ' + table + ' WHERE repo_id=%s AND id=%s AND revision=%s',
-                    (ref['repo_id'], value['id'], value['revision']))
-                if cursor.rowcount != 1:
-                    raise ContractError('PRECONDITION_FAILED', 'Revocation target changed', 412)
+                if domain == 'shares':
+                    value = self.store.delete(cursor, dict(repo_id=ref['repo_id'], path=value['path'], kind='dir'),
+                        value['id'], if_match=item['etag'])
+                else:
+                    cursor.execute('DELETE FROM ' + table + ' WHERE repo_id=%s AND id=%s AND revision=%s',
+                        (ref['repo_id'], value['id'], value['revision']))
+                    if cursor.rowcount != 1:
+                        raise ContractError('PRECONDITION_FAILED', 'Revocation target changed', 412)
                 EventWriter().append(cursor, dict(event_id=str(uuid4()),
                     occurred_at=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                     request_id=self.management.rules.request_id, actor_user_id=self.management.actor,
@@ -89,7 +96,7 @@ class DirectoryScopeService(DirectoryShareService):
                         'shares': 'directory_share.deleted'}[domain], result='succeeded', repo_id=ref['repo_id'],
                     path=value['path'], resource_kind=value.get('kind', 'dir'), policy_revision=value['revision']))
                 removed.append(dict(id=value['id'], path=value['path'], deleted=True))
-            # One domain per request: shared READ never mutates ACL records.
+            # Sharing revocation disables the flag; ACL revocation removes the whole row.
             return dict(domain=domain, reference=ref, items=removed), None
         return self._change(ref, change, idempotency_key=DirectoryPolicyService._key(idempotency_key),
             payload=dict(action='revoke', **request))

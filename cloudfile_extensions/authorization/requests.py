@@ -44,7 +44,7 @@ def response(text, *, reference, value, rule_id, validate):
         if result != dict(id=rule_id, deleted=True) or type(result["deleted"]) is not bool:
             raise ValueError("invalid saved deletion")
         return result
-    if set(result) != {"id", "repo_id", "path", "kind", "subject", "permission", "inherit", "revision", "etag"}:
+    if set(result) - {"share_mode", "lifecycle_ref"} != {"id", "repo_id", "path", "kind", "subject", "permission", "inherit", "revision", "etag"}:
         raise ValueError("invalid saved mutation fields")
     for key in ("id", "revision"):
         if str(UUID(result[key])) != result[key]:
@@ -53,7 +53,10 @@ def response(text, *, reference, value, rule_id, validate):
         raise ValueError("invalid saved rule identity")
     if result["etag"] != '"' + result["revision"] + '"' or result["repo_id"] != reference["repo_id"]:
         raise ValueError("invalid saved mutation revision")
-    saved = validate({key: result[key] for key in ("path", "kind", "subject", "permission", "inherit")})
+    fields = ("path", "kind", "subject", "permission", "inherit")
+    if "share_mode" in value:
+        fields += ("share_mode",)
+    saved = validate({key: result[key] for key in fields})
     if saved != value:
         raise ValueError("invalid saved mutation value")
     return result

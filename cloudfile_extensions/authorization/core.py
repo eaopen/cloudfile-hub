@@ -65,7 +65,7 @@ class PolicyCore:
                         directory_shares, attribute_allowlist=(), hard_readonly=False):
         """Explicit v0.9 policy entry; callers must verify share lifecycle first.
 
-        An empty share list still enables independent directory ACL qualification.
+        An empty share list requires native library qualification.
         This does not grant a native library or issue byte-transfer credentials.
         """
         if not isinstance(directory_shares, list) or len(directory_shares) > 4096:
@@ -120,7 +120,7 @@ class PolicyCore:
             try:
                 version = self.library.cf_acl_scoped_abi_version
                 version.argtypes, version.restype = [], c.c_int
-                if version() != 1:
+                if version() != 2:
                     raise ValueError('unsupported scoped policy ABI')
                 evaluate = self.library.cf_acl_evaluate_scoped
                 evaluate.argtypes = [c.POINTER(Context), c.c_char_p, c.c_int,

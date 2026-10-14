@@ -66,8 +66,8 @@ class DirectoryAPISQLTest(fixtures.ScopedReadSQLTest):
         self.assertEqual(service.list_scope(query)['items'], [])
         with self.connection.cursor() as cursor:
             cursor.execute('SELECT COUNT(*) FROM cf_dir_acl')
-            self.assertEqual(cursor.fetchone()[0], 1)
-            cursor.execute('SELECT id FROM cf_dir_share')
+            self.assertEqual(cursor.fetchone()[0], 4)
+            cursor.execute('SELECT id FROM cf_dir_acl WHERE share_mode=1')
             self.assertEqual(cursor.fetchall(), ((sibling['id'],),))
 
     def test_batch_revoke_cannot_remove_delegated_admin_root_or_sibling(self):

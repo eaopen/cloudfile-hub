@@ -7,7 +7,7 @@ from cloudfile_extensions.tests import test_scoped_read_sql as fixtures
 
 
 class DirectoryAccessSQLTest(fixtures.ScopedReadSQLTest):
-    def test_composed_service_returns_provider_and_keeps_domains_separate(self):
+    def test_composed_service_unifies_acl_and_shares_but_keeps_admins_separate(self):
         from cloudfile_extensions.authorization.directory_management import DelegatedDirectoryManagement
         from cloudfile_extensions.authorization.directory_service import DirectoryService
         ref = {**self.references(1)[0], 'path': '/folder', 'kind': 'dir'}
@@ -16,11 +16,11 @@ class DirectoryAccessSQLTest(fixtures.ScopedReadSQLTest):
         value = dict(path=ref['path'], subject=dict(type='user', provider='directory', namespace='user', external_id='recipient'))
         share = service.create('shares', dict(reference=ref, value=value), idempotency_key='new-share')
         self.assertEqual(service.list('shares', dict(reference=ref))['items'], [share])
-        self.assertEqual(service.list('acl', dict(reference=ref)), dict(items=[], next_after=None, subject_provider='directory'))
+        self.assertEqual(service.list('acl', dict(reference=ref)), dict(items=[share], next_after=None, subject_provider='directory'))
         delegated = service.create('admins', dict(reference=ref, value={**value, 'permission': 'manage', 'kind': 'dir', 'inherit': True}),
             idempotency_key='new-admin')
         self.assertEqual(delegated['permission'], 'manage')
-        self.assertEqual(service.list('acl', dict(reference=ref))['items'], [])
+        self.assertEqual(service.list('acl', dict(reference=ref))['items'], [share])
 
     def test_share_is_discoverable_and_address_root_is_server_selected(self):
         _, root, _ = self.shared()
@@ -41,8 +41,8 @@ class DirectoryAccessSQLTest(fixtures.ScopedReadSQLTest):
             cursor.execute("UPDATE RepoOwner SET owner_id='another-user'")
         self.rule(ref, 'rw', True)
         service = DirectoryAccessService(self.authority)
-        result = service.resolve(dict(reference={**ref, 'path': '/folder/child'}))
-        self.assertEqual((result['root_path'], result['permission']), ('/folder', 'rw'))
+        with self.assertRaises(ContractError):
+            service.resolve(dict(reference={**ref, 'path': '/folder/child'}))
         self.assertEqual(service.shared_with_me()['items'], [])
 
     def test_denied_share_is_filtered_and_invalid_cursor_is_client_error(self):

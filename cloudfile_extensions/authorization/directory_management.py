@@ -8,6 +8,8 @@ from .rules import ACLRules, rule_value
 def management_value(value):
     if not isinstance(value, dict) or value.get('permission') != 'manage':
         raise invalid('Directory administrator permission must be manage')
+    if 'share_mode' in value:
+        raise invalid('Directory management cannot grant content sharing')
     checked = rule_value({**value, 'permission': 'r'})
     if checked['kind'] != 'dir' or checked['path'] == '/':
         raise invalid('Directory delegation requires a non-root directory')
@@ -23,6 +25,7 @@ def subject_keys(subject, provider):
 
 class DirectoryAdminRules(ACLRules):
     TABLE = 'cf_dir_admin'
+    FIELDS = ACLRules.FIELDS.rsplit(',', 2)[0]
     ACTION_PREFIX = 'directory_admin'
     validate = staticmethod(management_value)
 
