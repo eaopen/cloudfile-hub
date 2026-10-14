@@ -58,6 +58,14 @@ def unique_identity(usernames):
     return next(iter(values)) if values else None
 
 
+def provisioning_enabled(settings):
+    """Retain directory provisioning when native OIDC owns the login route."""
+    return (bool(getattr(settings, 'ENABLE_OAUTH', False))
+            or bool(getattr(settings, 'ENABLE_CUSTOM_OAUTH', False))
+            or (getattr(settings, 'CLOUDFILE_OIDC_ENABLED', False) is True
+                and getattr(settings, 'CLOUDFILE_ADMIN_POLICY_ENABLED', False) is True))
+
+
 def provisioning_provider(identity_source, oauth_provider):
     """Keep directory UIDs separate from OAuth subjects without rebinding login."""
     if identity_source == 'etech-directory':

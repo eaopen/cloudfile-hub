@@ -31,9 +31,10 @@ def register(registry):
                 name='cloudfile-admin-library-administrator-with-access'),
     ])
 
-    # Identity provisioning belongs to the configured OAuth login provider;
-    # it is independent of optional directory/group synchronization.
-    if getattr(settings, 'ENABLE_OAUTH', False) or getattr(settings, 'ENABLE_CUSTOM_OAUTH', False):
+    # Native OIDC disables legacy OAuth; directory provisioning still belongs
+    # to its explicitly enabled administrator control plane.
+    from cloudfile_ext.identity import provisioning_enabled
+    if provisioning_enabled(settings):
         from cloudfile_ext.identity_api import AdminExternalIdentityView
         registry.register_urls([
             path('api/v2.1/admin/cloudfile/sso/identities/resolve/',

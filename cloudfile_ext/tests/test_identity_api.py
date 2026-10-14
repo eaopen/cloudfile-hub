@@ -1,4 +1,15 @@
-from cloudfile_ext.identity import unique_identity, AmbiguousSubject, provisioning_provider
+from types import SimpleNamespace
+from cloudfile_ext.identity import unique_identity, AmbiguousSubject, provisioning_provider, provisioning_enabled
+
+
+def test_provisioning_gate_preserves_legacy_and_requires_native_admin_opt_in():
+    assert not provisioning_enabled(SimpleNamespace())
+    assert provisioning_enabled(SimpleNamespace(ENABLE_OAUTH=True))
+    assert provisioning_enabled(SimpleNamespace(ENABLE_CUSTOM_OAUTH=True))
+    assert not provisioning_enabled(SimpleNamespace(CLOUDFILE_OIDC_ENABLED=True))
+    assert not provisioning_enabled(SimpleNamespace(CLOUDFILE_ADMIN_POLICY_ENABLED=True))
+    assert provisioning_enabled(SimpleNamespace(ENABLE_OAUTH=False,
+        CLOUDFILE_OIDC_ENABLED=True, CLOUDFILE_ADMIN_POLICY_ENABLED=True))
 
 
 def test_directory_provisioning_does_not_reuse_oauth_namespace():
