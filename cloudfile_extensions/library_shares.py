@@ -75,6 +75,22 @@ class LibrarySharesDesired(AdminLibraryAdministrator):
                 if previous and revision < previous[0]:
                     return api_error(409, 'Stale library share revision.')
                 share_plan, errors = build_share_plan(cursor, repo_id, provider, desired)
+                # The ledger is not proof of native access: eTech force publication
+                # may have removed native shares before resubmitting the same groups.
+                scheduled = {item[0] for name in ('add', 'update') for item in share_plan[name]}
+                invalid = {error.split(': ', 1)[0] for error in errors}
+                is_org = bool(seafile_api.get_org_repo_owner(repo_id))
+                for external_id, permission in desired.items():
+                    if external_id in scheduled or external_id in invalid:
+                        continue
+                    cursor.execute('SELECT group_id FROM cf_library_share_ledger WHERE repo_id=%s AND external_id=%s',
+                                   (repo_id, external_id))
+                    row = cursor.fetchone()
+                    if row is None:
+                        raise ValueError('Managed group ledger is unavailable')
+                    native = seafile_api.get_group_shared_repo_by_path(repo_id, None, row[0], is_org)
+                    if native is None or native.permission != permission:
+                        share_plan['update'].append((external_id, row[0], permission))
                 unmapped = len(errors)
                 applied = {'add': 0, 'update': 0, 'revoke': 0}
                 writer = EventWriter()
@@ -107,6 +123,15 @@ class LibrarySharesDesired(AdminLibraryAdministrator):
                                         seafile_api.set_group_repo(repo_id, group_id, owner, permission)
                                 else:
                                     seafile_api.set_group_repo(repo_id, group_id, owner, permission)
+                            # Keep permissions on groups; never generate user shares.
+                            # CE re-sharing can retain an old permission, so update
+                            # explicitly and verify before marking the ledger APPLIED.
+                            if operation != 'revoke':
+                                seafile_api.set_group_repo_permission(group_id, repo_id, permission)
+                            actual = seafile_api.get_group_shared_repo_by_path(repo_id, None, group_id, is_org)
+                            if (operation == 'revoke' and actual is not None) or (
+                                    operation != 'revoke' and (actual is None or actual.permission != permission)):
+                                raise ValueError('Native group permission did not match desired state')
                             # SQL status and its CloudFile audit fact commit together.
                             # If this fails after the native RPC, the ledger remains
                             # retryable (PENDING or APPLIED) instead of claiming success.
