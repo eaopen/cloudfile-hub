@@ -258,3 +258,25 @@ class LocalEditRuntimeCapabilityTest(unittest.TestCase):
         host = self.host(); host.local_read_issuer = None
         host.deployment.local_read_issuer.runtime = object()
         self.assertFalse(self.capabilities(host)['local.open-edit']['enabled'])
+
+
+class NativeLibraryShareCapabilityTest(LocalEditRuntimeCapabilityTest):
+    def test_admin_share_endpoint_is_independent_of_session_acl_gate(self):
+        from unittest.mock import Mock
+        from cloudfile_extensions.authorization.resources import PolicyResources
+        from cloudfile_extensions.capabilities import library_share_implementation_registry
+        host = self.host()
+        host.deployment.factory.resources = Mock(spec=PolicyResources)
+        host.deployment.factory.resources.provider = 'etech'
+        ready = library_share_implementation_registry(ImplementationRegistry(), host, sso_enabled=False)
+        caps = build_capability_document(implementation_registry=ready)['capabilities']
+        self.assertTrue(caps['library.shares.manage']['enabled'])
+        self.assertFalse(caps['directory.acl.manage']['enabled'])
+        self.assertFalse(build_capability_document({'library.shares.manage':False},
+            implementation_registry=ready)['capabilities']['library.shares.manage']['enabled'])
+        for host_, legacy in ((None, False), (host, True)):
+            closed = library_share_implementation_registry(ImplementationRegistry(), host_, sso_enabled=legacy)
+            self.assertFalse(build_capability_document(implementation_registry=closed)['capabilities']['library.shares.manage']['enabled'])
+        host.deployment.factory.resources = None
+        closed = library_share_implementation_registry(ImplementationRegistry(), host, sso_enabled=False)
+        self.assertFalse(build_capability_document(implementation_registry=closed)['capabilities']['library.shares.manage']['enabled'])

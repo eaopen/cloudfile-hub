@@ -165,6 +165,27 @@ def management_implementation_registry(base, host, *, authorization_enabled, oid
     return SimpleNamespace(implementations=implementations)
 
 
+def library_share_implementation_registry(base, host, *, sso_enabled):
+    """The native admin-token share endpoint does not require session ACL CRUD."""
+    import os
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from .authorization.host import PolicyHost
+    from .authorization.runtime import PolicyServiceFactory
+    from .authorization.resources import PolicyResources
+    if (sso_enabled is not False or not isinstance(host, PolicyHost)
+            or host.pid != os.getpid() or host.closed or host.draining
+            or not isinstance(host.deployment.factory, PolicyServiceFactory)):
+        return base
+    resources = getattr(host.deployment.factory, 'resources', None)
+    if not isinstance(resources, PolicyResources) or resources.provider != 'etech':
+        return base
+    implementations = dict(base.implementations)
+    implementations['library.shares.manage'] = replace(
+        registry.implementations['library.shares.manage'], implemented=True, default_enabled=True)
+    return SimpleNamespace(implementations=implementations)
+
+
 def legacy_implementation_registry(base, *, authorization_enabled, dir_acl_enabled,
                                    sso_enabled):
     """Advertise only the legacy endpoints installed by this deployment."""
