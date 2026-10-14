@@ -406,30 +406,38 @@ class ACLRules:
                             compare_if_match(if_match, previous["etag"])
                         if self.authorize_change is not None and self.authorize_change(cursor, self.actor, ref, previous, value) is not True:
                             raise ContractError("ACCESS_DENIED", "Policy change exceeds management scope", 403)
-                        id_ = rule_id or str(uuid4())
-                        revision = str(uuid4())
-                        if value is None:
-                            cursor.execute("DELETE FROM " + self.TABLE + " WHERE id=%s AND repo_id=%s", (id_, ref["repo_id"]))
-                            if cursor.rowcount != 1: raise ValueError()
-                            result = dict(id=id_, deleted=True)
+                        # A reconciliation PUT must not rotate revisions or emit a
+                        # false policy-change event. Authorization and If-Match above
+                        # still run; durable replay and finalization below are preserved.
+                        unchanged = previous is not None and value is not None and all(
+                            previous.get(key) == item for key, item in value.items())
+                        if unchanged:
+                            result = previous
                         else:
-                            s = value["subject"]
-                            fields = (ref["path"], digest(ref["path"]), ref["kind"], s["type"], s["provider"],
-                                s["namespace"], s["external_id"], self._subject_hash(s), value["permission"],
-                                int(value["inherit"]), revision)
-                            if previous is None:
-                                cursor.execute("INSERT INTO " + self.TABLE + "(" + self.FIELDS + ") VALUES(" +
-                                    ",".join(["%s"] * 13) + ")", (id_, ref["repo_id"], *fields))
-                            else:
-                                cursor.execute("UPDATE " + self.TABLE + " SET path=%s,path_hash=%s,kind=%s,subject_type=%s,provider=%s,namespace=%s,external_id=%s,subject_hash=%s,permission=%s,inherit=%s,revision=%s WHERE id=%s AND repo_id=%s",
-                                    (*fields, id_, ref["repo_id"]))
+                            id_ = rule_id or str(uuid4())
+                            revision = str(uuid4())
+                            if value is None:
+                                cursor.execute("DELETE FROM " + self.TABLE + " WHERE id=%s AND repo_id=%s", (id_, ref["repo_id"]))
                                 if cursor.rowcount != 1: raise ValueError()
-                            result = dict(id=id_, repo_id=ref["repo_id"], **value, revision=revision, etag='"' + revision + '"')
-                        self.events.append(cursor, dict(event_id=str(uuid4()), request_id=self.request_id,
-                            occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                            actor_user_id=self.actor, actor_kind="user", source="hub",
-                            action=self.ACTION_PREFIX + (".deleted" if value is None else ".updated" if previous else ".created"),
-                            result="succeeded", repo_id=ref["repo_id"], path=ref["path"], resource_kind=ref["kind"], policy_revision=revision))
+                                result = dict(id=id_, deleted=True)
+                            else:
+                                s = value["subject"]
+                                fields = (ref["path"], digest(ref["path"]), ref["kind"], s["type"], s["provider"],
+                                    s["namespace"], s["external_id"], self._subject_hash(s), value["permission"],
+                                    int(value["inherit"]), revision)
+                                if previous is None:
+                                    cursor.execute("INSERT INTO " + self.TABLE + "(" + self.FIELDS + ") VALUES(" +
+                                        ",".join(["%s"] * 13) + ")", (id_, ref["repo_id"], *fields))
+                                else:
+                                    cursor.execute("UPDATE " + self.TABLE + " SET path=%s,path_hash=%s,kind=%s,subject_type=%s,provider=%s,namespace=%s,external_id=%s,subject_hash=%s,permission=%s,inherit=%s,revision=%s WHERE id=%s AND repo_id=%s",
+                                        (*fields, id_, ref["repo_id"]))
+                                    if cursor.rowcount != 1: raise ValueError()
+                                result = dict(id=id_, repo_id=ref["repo_id"], **value, revision=revision, etag='"' + revision + '"')
+                            self.events.append(cursor, dict(event_id=str(uuid4()), request_id=self.request_id,
+                                occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                                actor_user_id=self.actor, actor_kind="user", source="hub",
+                                action=self.ACTION_PREFIX + (".deleted" if value is None else ".updated" if previous else ".created"),
+                                result="succeeded", repo_id=ref["repo_id"], path=ref["path"], resource_kind=ref["kind"], policy_revision=revision))
                         if request_key is not None:
                             cursor.execute("INSERT INTO cf_policy_request(request_key,request_digest,result_json,inherited_effect,created_at) VALUES(%s,%s,%s,%s,UTC_TIMESTAMP(6))",
                                 (request_key, request_digest, json.dumps(result, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
