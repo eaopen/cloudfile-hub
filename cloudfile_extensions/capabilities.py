@@ -186,6 +186,24 @@ def library_share_implementation_registry(base, host, *, sso_enabled):
     return SimpleNamespace(implementations=implementations)
 
 
+def administrator_policy_implementation_registry(base, host, *, enabled):
+    if enabled is not True:
+        return base
+    from dataclasses import replace
+    from types import SimpleNamespace
+    from .authorization.admin_management import admin_resources
+    from .common.errors import ContractError
+    try:
+        admin_resources(host)
+    except ContractError:
+        return base
+    implementations = dict(base.implementations)
+    implementations['directory.acl.manage'] = replace(
+        registry.implementations['directory.acl.manage'], implemented=True, default_enabled=True,
+        provider='native-admin')
+    return SimpleNamespace(implementations=implementations)
+
+
 def legacy_implementation_registry(base, *, authorization_enabled, dir_acl_enabled,
                                    sso_enabled):
     """Advertise only the legacy endpoints installed by this deployment."""

@@ -139,7 +139,9 @@ def projection_required(value):
         policy_fields = {"event_id", "occurred_at", "request_id", "actor_user_id", "actor_kind",
             "source", "action", "result", "repo_id", "path", "resource_kind", "policy_revision"}
         if (value["action"] in {"acl.created", "acl.updated", "acl.deleted", "admin.created", "admin.updated", "admin.deleted"}
-                and set(value) == policy_fields and value["actor_kind"] == "user"
+                and set(value) == policy_fields and (value["actor_kind"] == "user" or
+                    value["actor_kind"] == "service" and value["source"] == "hub" and
+                    value["actor_user_id"].startswith("native-account:"))
                 and value["result"] == "succeeded" and value.get("repo_id") and value.get("path")
                 and value.get("resource_kind") in {"file", "dir"}):
             try:

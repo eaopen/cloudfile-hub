@@ -67,7 +67,7 @@ class DirectoryShareService:
 
     def _change(self, ref, change, *, idempotency_key=None, payload=None):
         authority = self.management
-        authority.preparation.prepare(authority.actor)
+        authority.prepare_policy_actor()
         connection = authority.state.connection
         scopes = [dict(type='provider', provider=authority.state.provider, external_id=authority.state.provider),
             dict(type='user', provider=authority.state.provider, external_id=authority.actor),
@@ -110,7 +110,7 @@ class DirectoryShareService:
                             EventWriter().append(cursor, dict(event_id=str(uuid4()),
                                 occurred_at=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                                 request_id=authority.rules.request_id, actor_user_id=authority.actor,
-                                actor_kind='user', source='hub', action='directory_share.' + action,
+                                actor_kind=getattr(authority.rules, 'actor_kind', 'user'), source='hub', action='directory_share.' + action,
                                 result='succeeded', repo_id=ref['repo_id'], path=ref['path'],
                                 resource_kind='dir', policy_revision=result['revision']))
                         if key is not None:

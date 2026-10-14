@@ -280,3 +280,23 @@ class NativeLibraryShareCapabilityTest(LocalEditRuntimeCapabilityTest):
         host.deployment.factory.resources = None
         closed = library_share_implementation_registry(ImplementationRegistry(), host, sso_enabled=False)
         self.assertFalse(build_capability_document(implementation_registry=closed)['capabilities']['library.shares.manage']['enabled'])
+
+
+class AdministratorPolicyCapabilityTest(unittest.TestCase):
+    def test_native_admin_routes_require_live_storage_and_explicit_enablement(self):
+        from unittest.mock import Mock
+        from cloudfile_extensions.authorization.resources import PolicyResources
+        from cloudfile_extensions.capabilities import administrator_policy_implementation_registry, local_edit_implementation_registry
+        host = LocalEditRuntimeCapabilityTest().host()
+        host.deployment.factory.resources = Mock(spec=PolicyResources)
+        base = local_edit_implementation_registry(ImplementationRegistry(), host, local_edit_enabled=True, oidc_enabled=True)
+        ready = administrator_policy_implementation_registry(base, host, enabled=True)
+        caps = build_capability_document(implementation_registry=ready)['capabilities']
+        self.assertTrue(caps['directory.acl.manage']['enabled'])
+        self.assertEqual(caps['directory.acl.manage']['provider'], 'native-admin')
+        for candidate, enabled in ((host, False), (None, True)):
+            closed = administrator_policy_implementation_registry(base, candidate, enabled=enabled)
+            self.assertFalse(build_capability_document(implementation_registry=closed)['capabilities']['directory.acl.manage']['enabled'])
+        host.draining = True
+        closed = administrator_policy_implementation_registry(base, host, enabled=True)
+        self.assertFalse(build_capability_document(implementation_registry=closed)['capabilities']['directory.acl.manage']['enabled'])

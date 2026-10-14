@@ -194,6 +194,9 @@ class LibraryOwnerManagement:
         if current is None or self.epoch is None or current["context_epoch"] != self.epoch:
             raise ContractError("SUBJECT_UNAVAILABLE", "Management subject changed", 503)
 
+    def prepare_policy_actor(self):
+        self.preparation.prepare(self.actor)
+
     def list_target(self, reference, *, limit=50, after=None):
         self.preparation.prepare(self.actor)
         self.epoch = None

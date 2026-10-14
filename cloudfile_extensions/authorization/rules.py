@@ -54,7 +54,7 @@ class ACLRules:
     validate = staticmethod(rule_value)
     FIELDS = "id,repo_id,path,path_hash,kind,subject_type,provider,namespace,external_id,subject_hash,permission,inherit,revision,share_mode,lifecycle_ref"
 
-    def __init__(self, connection, *, provider, actor, request_id, authorize, finalize=None, authorize_change=None, lifecycle_reader=None):
+    def __init__(self, connection, *, provider, actor, request_id, authorize, finalize=None, authorize_change=None, lifecycle_reader=None, actor_kind="user"):
         if self.TABLE not in ("cf_dir_acl", "cf_dir_admin"):
             raise ValueError("fixed policy table required")
         if not connection.get_autocommit() or not callable(authorize):
@@ -62,6 +62,9 @@ class ACLRules:
         identifier(provider, maximum=32)
         identifier(actor, maximum=225)
         identifier(request_id)
+        if actor_kind not in ("user", "service") or (actor_kind == "service" and not actor.startswith("native-account:")):
+            raise ValueError("invalid trusted policy actor kind")
+        self.actor_kind = actor_kind
         if finalize is not None and not callable(finalize):
             raise ValueError("transactional final assertion required")
         if authorize_change is not None and not callable(authorize_change):
@@ -467,7 +470,7 @@ class ACLRules:
                                     result['lifecycle_ref'] = birth
                             self.events.append(cursor, dict(event_id=str(uuid4()), request_id=self.request_id,
                                 occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
-                                actor_user_id=self.actor, actor_kind="user", source="hub",
+                                actor_user_id=self.actor, actor_kind=self.actor_kind, source="hub",
                                 action=self.ACTION_PREFIX + (".deleted" if value is None else ".updated" if previous else ".created"),
                                 result="succeeded", repo_id=ref["repo_id"], path=ref["path"], resource_kind=ref["kind"], policy_revision=revision))
                         if request_key is not None:
