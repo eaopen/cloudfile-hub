@@ -100,6 +100,12 @@ def policy_service(request, request_id):
     return _host.service(request, request_id)
 
 
+def directory_service(request, request_id):
+    if _host is None or _host.pid != os.getpid():
+        raise ContractError("POLICY_UNAVAILABLE", "Directory worker is unavailable", 503)
+    return _host.directory_service(request, request_id)
+
+
 def login_resources_scope():
     """Late post-fork resolution for explicitly mounted hosted login routes."""
     if _host is None or _host.pid != os.getpid():

@@ -57,6 +57,7 @@ class ReadTicketTests(unittest.TestCase):
         conditions = json.loads(args[-1])
         self.assertEqual(conditions["oidc_session"]["session_key"], "b" * 32)
         self.assertEqual(conditions["context"]["userId"], "user-1")
+        self.assertNotIn("directory_access", conditions)
         self.request.session.get.assert_called_with(SESSION_REFERENCE_KEY)
 
     def test_missing_file_never_issues_ticket(self):
@@ -66,3 +67,10 @@ class ReadTicketTests(unittest.TestCase):
                     {"head_cmmt_id": "f" * 40}, None]) as calls, self.assertRaises(ContractError):
             self.issuer.issue(self.request, self.ref)
         self.assertEqual(calls.call_count, 2)
+
+    def test_only_directory_entry_marks_native_directory_qualification(self):
+        self.issuer.directory_access = True
+        with patch("cloudfile_extensions.identity.read_ticket.resolve_and_issue_native_ticket",
+                return_value=self.token) as issue:
+            self.issuer.issue(self.request, self.ref)
+        self.assertIs(json.loads(issue.call_args.args[-1])["directory_access"], True)

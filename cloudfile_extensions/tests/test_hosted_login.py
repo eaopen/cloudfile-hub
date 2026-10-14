@@ -168,3 +168,10 @@ class HostedLoginHTTPTests(unittest.TestCase):
         self.assertEqual(response.status_code, 503)
         self.assertIn("no-store", response["Cache-Control"])
         self.assertNotIn(b"private deployment diagnostic", response.content)
+
+    def test_directory_transfer_routes_are_separate_from_library_routes(self):
+        routes = hosted_login_routes(resources_scope=lambda: None, read_tickets_enabled=True)
+        mapped = {str(route.pattern): route.callback.view_initkwargs['operation'] for route in routes}
+        for suffix, operation in (('read-tickets', 'read'), ('manual-update', 'update'), ('manual-upload', 'upload')):
+            self.assertEqual(mapped[suffix + '/'], operation)
+            self.assertEqual(mapped['directory-access/' + suffix + '/'], 'directory-' + operation)

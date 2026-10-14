@@ -47,6 +47,22 @@ class ACLRulesTest(DatabaseTestCase):
             cursor.execute("SELECT COUNT(*) FROM cf_audit_event WHERE repo_id=%s", (self.repo,))
             self.assertEqual(cursor.fetchone()[0], 3)
 
+    def test_unchanged_replace_preserves_revision_and_audit_count(self):
+        one = self.rules.mutate(self.ref(), value=self.value())
+        two = self.rules.mutate(self.ref(), value=self.value(), rule_id=one["id"],
+            if_match=one["etag"], idempotency_key="unchanged")
+        self.assertEqual(two, one)
+        self.assertEqual(self.rules.mutate(self.ref(), value=self.value(), rule_id=one["id"],
+            if_match=one["etag"], idempotency_key="unchanged"), one)
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM cf_audit_event WHERE repo_id=%s", (self.repo,))
+            self.assertEqual(cursor.fetchone()[0], 1)
+        # Same value never bypasses the current authorization boundary.
+        self.authorize.return_value = False
+        with self.assertRaises(ContractError) as caught:
+            self.rules.mutate(self.ref(), value=self.value(), rule_id=one["id"], if_match=one["etag"])
+        self.assertEqual(caught.exception.status, 403)
+
     def test_upgrade_enrolls_existing_policy_libraries(self):
         from cloudfile_extensions.schema.runner import SchemaRunner
         self.rules.mutate(self.ref(), value=self.value())

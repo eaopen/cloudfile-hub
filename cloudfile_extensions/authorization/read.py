@@ -52,8 +52,11 @@ class ContentReadAuthority(DirectoryManagement):
             permission = ('invisible' if not self.effective_visible else 'rw' if decision['write']
                           else 'r' if decision['read'] else 'none')
             return dict(native_permission=self.native_permission, effective_permission=permission,
-                        can_manage=self.can_manage_library())
+                        can_manage=self.management_permission(cursor, ref))
         return self._consume(reference, diagnostic, diagnostic=True)
+
+    def management_permission(self, cursor, reference):
+        return self.can_manage_library()
 
     def consume(self, reference, reader):
         return self._consume(reference, reader, diagnostic=False)
@@ -66,7 +69,9 @@ class ContentReadAuthority(DirectoryManagement):
         must return equally ordered values; denied slots remain None. It obeys
         consume's same-connection/no-commit contract, not a deferred grant.
         """
-        if (type(self) is not ContentReadAuthority or not isinstance(references, (list, tuple)) or
+        from .scoped_read import ScopedContentReadAuthority
+        scoped = type(self) is ScopedContentReadAuthority
+        if (type(self) not in (ContentReadAuthority, ScopedContentReadAuthority) or not isinstance(references, (list, tuple)) or
                 type(batch_size) is not int or not 1 <= batch_size <= 50 or
                 (reader is not None and not callable(reader))):
             raise ValueError("bounded content-read batch required")
@@ -96,16 +101,20 @@ class ContentReadAuthority(DirectoryManagement):
                             permission = self.prepare_authorization(cursor, self.actor, group[0])
                             group_results = [None] * len(group)
                             authorized, accesses, positions = [], [], []
-                            if permission in ("r", "rw") and self.current_subject is not None:
+                            eligible = self.qualification_ready if scoped else permission in ("r", "rw")
+                            if eligible and self.current_subject is not None:
                                 candidates = self.rules.candidates_many(group, locking=True)
                                 if len(candidates) != len(group):
                                     raise ContractError("POLICY_UNAVAILABLE", "Incomplete batch candidates", 503)
+                                shares = self.shares.candidates_many(cursor, group, self.subjects()) if scoped else None
                                 for index, (ref, rules) in enumerate(zip(group, candidates)):
-                                    decision = self.core.evaluate(ref, provider=self.state.provider,
+                                    evaluate = self.core.evaluate_scoped if scoped else self.core.evaluate
+                                    options = {"directory_shares": shares[index]} if scoped else {}
+                                    decision = evaluate(ref, provider=self.state.provider,
                                         subject=self.current_subject, rules=rules,
                                         ce_permission=permission,
                                         attribute_allowlist=self.preparation.contexts.allowlist,
-                                        hard_readonly=self.hard_readonly)
+                                        hard_readonly=self.hard_readonly, **options)
                                     allowed = self.decision_allowed(decision) and self.scope_allowed(ref)
                                     if allowed:
                                         group_results[index] = "rw" if self.effective_access["write"] else "r"

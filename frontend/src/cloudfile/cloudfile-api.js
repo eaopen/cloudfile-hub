@@ -1,5 +1,4 @@
 import axios from 'axios';
-import FormData from 'form-data';
 import Cookies from 'js-cookie';
 import { siteRoot } from '@/utils/constants';
 
@@ -29,27 +28,28 @@ class CloudFileAPI {
 
   // -- directory ACL ------------------------------------------------------
 
-  listDirACL(repoID, path) {
-    const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/dir-acl/';
-    return this.req.get(url, { params: { path: path } });
+  listDirectoryPolicy(repoID, path, domain = 'rules', after = null) {
+    const url = this.server + '/api/v2.1/cloudfile/extensions/authorization/v1/directory-' + domain + '/';
+    return this.req.get(url, { params: { repo_id: repoID, path, kind: 'dir', limit: 50, ...(after ? { after } : {}) } });
   }
 
-  setDirACL(repoID, path, subjectType, subject, permission, inherit) {
-    const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/dir-acl/';
-    const form = new FormData();
-    form.append('path', path);
-    form.append('subject_type', subjectType);
-    form.append('subject', subject);
-    form.append('permission', permission);
-    form.append('inherit', inherit ? 'true' : '');
-    return this.req.post(url, form);
+  createDirectoryPolicy(reference, value, domain, requestKey) {
+    const url = this.server + '/api/v2.1/cloudfile/extensions/authorization/v1/directory-' + domain + '/';
+    return this.req.post(url, { reference, value }, { headers: { 'Idempotency-Key': requestKey } });
   }
 
-  deleteDirACL(repoID, path, subjectType, subject) {
-    const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/dir-acl/';
-    return this.req.delete(url, {
-      params: { path: path, subject_type: subjectType, subject: subject }
-    });
+  deleteDirectoryPolicy(reference, rule, domain, requestKey) {
+    const url = this.server + '/api/v2.1/cloudfile/extensions/authorization/v1/directory-' + domain + '/' + rule.id + '/';
+    return this.req.delete(url, { data: { reference }, headers: {
+      'If-Match': rule.etag, 'Idempotency-Key': requestKey,
+    } });
+  }
+
+  replaceDirectoryRule(reference, value, rule, requestKey) {
+    const url = this.server + '/api/v2.1/cloudfile/extensions/authorization/v1/directory-rules/' + rule.id + '/';
+    return this.req.put(url, { reference, value }, { headers: {
+      'If-Match': rule.etag, 'Idempotency-Key': requestKey,
+    } });
   }
 
   // Answers "why can this user not open that folder" -- inheritance across

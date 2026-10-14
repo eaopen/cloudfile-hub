@@ -28,6 +28,10 @@ class Result(c.Structure):
     _fields_ = [("visible", c.c_int), ("read", c.c_int), ("write", c.c_int)]
 
 
+class DirectoryShare(c.Structure):
+    _fields_ = [("path", c.c_char_p), ("subject_id", c.c_char_p), ("subject_type", c.c_int)]
+
+
 def identity(type_, provider, namespace, external):
     return json.dumps(dict(type=type_, provider=provider, namespace=namespace,
         external_id=external), sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()
@@ -53,6 +57,25 @@ class PolicyCore:
 
     def evaluate(self, reference, *, provider, subject, rules, ce_permission,
                  attribute_allowlist=(), hard_readonly=False):
+        return self._evaluate(reference, provider=provider, subject=subject, rules=rules,
+            ce_permission=ce_permission, attribute_allowlist=attribute_allowlist,
+            hard_readonly=hard_readonly, directory_shares=None)
+
+    def evaluate_scoped(self, reference, *, provider, subject, rules, ce_permission,
+                        directory_shares, attribute_allowlist=(), hard_readonly=False):
+        """Explicit v0.9 policy entry; callers must verify share lifecycle first.
+
+        An empty share list still enables independent directory ACL qualification.
+        This does not grant a native library or issue byte-transfer credentials.
+        """
+        if not isinstance(directory_shares, list) or len(directory_shares) > 4096:
+            raise ContractError("POLICY_UNAVAILABLE", "Invalid directory share candidates", 503)
+        return self._evaluate(reference, provider=provider, subject=subject, rules=rules,
+            ce_permission=ce_permission, attribute_allowlist=attribute_allowlist,
+            hard_readonly=hard_readonly, directory_shares=directory_shares)
+
+    def _evaluate(self, reference, *, provider, subject, rules, ce_permission,
+                  attribute_allowlist, hard_readonly, directory_shares):
         ref = resource_ref(reference)
         identifier(provider, maximum=32)
         if (len(ref["path"].encode()) > 4096 or len(ref["path"].split("/")) > 130 or
@@ -81,7 +104,31 @@ class PolicyCore:
                 int(value["inherit"]), int(value["kind"] == "file")))
         array = (Rule * len(values))(*values)
         output = Result()
-        if self.evaluate_native(c.byref(context), ref["path"].encode(), int(ref["kind"] == "file"),
-                                array, len(values), c.byref(output)) != 0:
+        arguments = (c.byref(context), ref["path"].encode(), int(ref["kind"] == "file"), array, len(values))
+        if directory_shares is None:
+            status = self.evaluate_native(*arguments, c.byref(output))
+        else:
+            from .shares import share_value
+            candidates = []
+            for item in directory_shares:
+                value = share_value(item)
+                s = value['subject']
+                candidates.append(DirectoryShare(value['path'].encode(),
+                    identity(s['type'], s['provider'], s['namespace'], s['external_id']),
+                    {'user': 3, 'dept': 2, 'group': 1}[s['type']]))
+            shared = (DirectoryShare * len(candidates))(*candidates)
+            try:
+                version = self.library.cf_acl_scoped_abi_version
+                version.argtypes, version.restype = [], c.c_int
+                if version() != 1:
+                    raise ValueError('unsupported scoped policy ABI')
+                evaluate = self.library.cf_acl_evaluate_scoped
+                evaluate.argtypes = [c.POINTER(Context), c.c_char_p, c.c_int,
+                    c.POINTER(Rule), c.c_size_t, c.POINTER(DirectoryShare), c.c_size_t, c.POINTER(Result)]
+                evaluate.restype = c.c_int
+                status = evaluate(*arguments, shared, len(candidates), c.byref(output))
+            except (AttributeError, ValueError):
+                raise ContractError('POLICY_UNAVAILABLE', 'Scoped policy core is unavailable', 503) from None
+        if status != 0:
             raise ContractError("POLICY_UNAVAILABLE", "Native policy evaluation failed", 503)
         return dict(visible=bool(output.visible), read=bool(output.read), write=bool(output.write))

@@ -8,6 +8,7 @@ from django.middleware.csrf import CsrfViewMiddleware
 
 from ..authorization.http import DirectoryPolicyView
 from ..authorization.core import PolicyCore
+from ..authorization.scoped_read import native_scoped_authority
 from ..authorization.read import ContentReadAuthority
 from ..authorization.runtime import AuthenticatedPolicyActor
 from ..local_edit.private_http import transport_allowed
@@ -51,10 +52,11 @@ def native_download_actor(request):
 
 
 class OIDCReadTicketFactory:
-    def __init__(self, resources):
+    def __init__(self, resources, *, directory_access=False):
         if not isinstance(resources, LoginResources):
             raise ValueError("actual login resources required")
         self.resources = resources
+        self.directory_access = directory_access
 
     @contextmanager
     def __call__(self, request, request_id):
@@ -66,10 +68,11 @@ class OIDCReadTicketFactory:
         with self.resources.resources.preparation(actor.user_id, request_id) as preparation:
             if preparation.state.username(actor.user_id) != actor.native_username:
                 raise ContractError("ACCESS_DENIED", "Download identity does not match", 403)
-            yield OIDCReadTicketIssuer(preparation, authority)
+            yield OIDCReadTicketIssuer(preparation, authority, directory_access=self.directory_access)
 
 
 class OIDCReadTicketView(DirectoryPolicyView):
+    directory_access = False
     http_method_names = ["post"]
 
     def dispatch(self, request, *args, **kwargs):
@@ -95,7 +98,10 @@ class OIDCReadTicketView(DirectoryPolicyView):
                 raise ContractError("POLICY_UNAVAILABLE", "Download ticket runtime is unavailable", 503)
             with self.service_factory(request, request_id) as issuer:
                 config = settings.CLOUDFILE_POLICY_CONFIG
-                preflight = ContentReadAuthority(issuer.preparation, PolicyCore(config['core_library']),
+                if self.service_factory.directory_access != self.directory_access:
+                    raise ContractError("POLICY_UNAVAILABLE", "Transfer entry does not match", 503)
+                authority_factory = native_scoped_authority if self.directory_access else ContentReadAuthority
+                preflight = authority_factory(issuer.preparation, PolicyCore(config['core_library']),
                     request_id=request_id, cloud_mode=config['cloud_mode'])
                 try:
                     preflight.consume(reference, lambda cursor, target: None)

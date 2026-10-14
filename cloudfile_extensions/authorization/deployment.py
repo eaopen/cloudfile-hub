@@ -140,7 +140,7 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
             authorization=directory_authorization, attribute_allowlist=value["attribute_allowlist"],
             core_library=value["core_library"], cloud_mode=value["cloud_mode"],
             prefix=value.get("subject_prefix", "cf:subjects:"),
-            ca_bundle=value.get("directory_ca_bundle"))
+            ca_bundle=value.get("directory_ca_bundle"), lifecycle_reader=lifecycle_reader)
         resource_factory = None
         if resource_secret is not None:
             from ..resources.runtime import ResourceServiceFactory

@@ -10,7 +10,10 @@ from .runner import MigrationError, SchemaRunner
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("plan", "apply", "status", "check"))
+    parser.add_argument("command", choices=("plan", "apply", "status", "check",
+                                           "directory-plan", "directory-apply", "directory-check"))
+    parser.add_argument("--offline", action="store_true",
+                        help="confirm all directory readers/writers are stopped before directory-apply")
     arguments = parser.parse_args()
     # Reuse the mysqlclient driver already shipped by CE; no extra runtime driver.
     import MySQLdb
@@ -26,7 +29,17 @@ def main():
             charset="utf8mb4", autocommit=True, connect_timeout=5,
         )
         try:
-            result = getattr(SchemaRunner(connection), "require_current" if arguments.command == "check" else arguments.command)()
+            if arguments.command.startswith('directory-'):
+                from .directory import DirectorySchemaRunner
+                runner = DirectorySchemaRunner(connection)
+                if arguments.command == 'directory-apply':
+                    result = runner.apply(offline=arguments.offline)
+                elif arguments.command == 'directory-check':
+                    result = runner.require_current()
+                else:
+                    result = runner.inspect()
+            else:
+                result = getattr(SchemaRunner(connection), "require_current" if arguments.command == "check" else arguments.command)()
             print(json.dumps(result if result is not None else {"current": True}))
         finally:
             connection.close()

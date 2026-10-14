@@ -12,11 +12,13 @@ from .ticket_transport import resolve_and_issue_native_ticket
 
 
 class OIDCReadTicketIssuer:
-    def __init__(self, preparation, authority):
+    directory_access = False
+    def __init__(self, preparation, authority, *, directory_access=False):
         if (not isinstance(preparation, SubjectPreparation)
                 or not isinstance(authority, OIDCSessionAuthority)):
             raise ValueError("actual subject preparation and session authority required")
         self.preparation, self.authority = preparation, authority
+        self.directory_access = directory_access
 
     def issue(self, request, reference, *, operation="download"):
         ref = resource_ref(reference)
@@ -44,6 +46,8 @@ class OIDCReadTicketIssuer:
                 dict(type="user", provider=provider, external_id=actor),
                 dict(type="repo", provider="cloudfile", external_id=ref["repo_id"])],
             oidc_session=dict(session_reference, session_key=session_key))
+        if self.directory_access:
+            conditions["directory_access"] = True
         encoded = json.dumps(conditions, ensure_ascii=False, separators=(",", ":"))
         if len(encoded.encode("utf-8")) > 16384:
             raise ContractError("INVALID_REQUEST", "Native ticket conditions exceed budget", 400)

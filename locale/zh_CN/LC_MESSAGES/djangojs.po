@@ -12689,3 +12689,27 @@ msgstr "用户标签（每行一个）"
 #: frontend/src/components/resource-annotations/index.js
 msgid "Invalid tags"
 msgstr "标签格式无效"
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Directory sharing"
+msgstr "目录共享"
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Read only by default"
+msgstr "默认只读"
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Directory namespace"
+msgstr "目录命名空间"
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Subject ID"
+msgstr "用户、部门或角色标识"
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Directory rules also apply to users without library access. Inherited rules apply to child folders."
+msgstr "目录权限同样适用于没有库权限的用户。继承规则对子目录生效。"
+
+#: frontend/src/cloudfile/acl/dir-acl-panel.js
+msgid "Sharing gives read access by default. Directory permissions determine write access and restrictions. Removing a share keeps directory rules."
+msgstr "目录共享默认提供只读权限，读写权限及访问限制由目录权限决定。取消共享不会删除目录权限规则。"
