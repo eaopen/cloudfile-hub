@@ -76,6 +76,9 @@ def configure_oidc_host(settings):
     settings.CLOUDFILE_OIDC_CONFIG = oidc
     settings.CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE = login_resources_scope
     settings.CLOUDFILE_OIDC_RETURN_PATH = return_path
+    # Seahub's login decorators must reach the guarded login after the legacy
+    # OAuth routes are disabled; retaining /oauth/login/ strands browser users.
+    settings.LOGIN_URL = site_root + LOGIN_PREFIX + "begin/"
     settings.MIDDLEWARE = [GUARDED_MIDDLEWARE if entry == SESSION_MIDDLEWARE else entry
                            for entry in middleware]
     settings.AUTHENTICATION_BACKENDS = backends if BACKEND in backends else backends + (BACKEND,)

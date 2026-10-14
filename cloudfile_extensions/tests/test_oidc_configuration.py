@@ -50,6 +50,7 @@ class OIDCHostConfigurationTests(unittest.TestCase):
         self.assertTrue(settings.SESSION_COOKIE_SECURE)
         self.assertTrue(settings.SESSION_COOKIE_HTTPONLY)
         self.assertTrue(settings.CSRF_COOKIE_SECURE)
+        self.assertEqual(settings.LOGIN_URL, '/' + LOGIN_PREFIX + 'begin/')
         before = vars(settings).copy()
         configure_oidc_host(settings)
         self.assertEqual(vars(settings), before)

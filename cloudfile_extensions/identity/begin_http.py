@@ -24,7 +24,10 @@ class LoginBeginView(View):
                 raise ContractError("METHOD_NOT_ALLOWED", "Login initiation only accepts GET", 405)
             if not transport_allowed(request):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure login is required", 401)
-            if request.GET or request.read(1):
+            # Native login decorators append next. Accept that single framework
+            # hint but retain the configured return path, never a caller's URL.
+            if (set(request.GET) - {"next"} or any(len(request.GET.getlist(key)) != 1 for key in request.GET)
+                    or request.read(1)):
                 raise ContractError("INVALID_REQUEST", "Login initiation takes no query or body", 400)
             if not isinstance(self.resources, LoginResources):
                 raise ContractError("IDENTITY_UNAVAILABLE", "Login runtime is unavailable", 503)

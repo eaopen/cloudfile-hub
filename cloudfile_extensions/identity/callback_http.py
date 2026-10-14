@@ -44,8 +44,15 @@ class LoginCallbackView(View):
                     if (not isinstance(value.status_token, str)
                             or not re.fullmatch(r"[A-Za-z0-9_-]{43}", value.status_token)):
                         raise RuntimeError("pending browser proof unavailable")
-                    response = JsonResponse(dict(job_id=value.job_id, status="pending",
-                        status_token=value.status_token), status=202)
+                    if 'text/html' in request.headers.get('Accept', ''):
+                        # A first browser login must wait for JIT and retry the
+                        # guarded flow, not strand the user on raw pending JSON.
+                        from django.conf import settings
+                        from .browser_pending import pending_page
+                        response = pending_page(value.status_token, settings.SITE_ROOT)
+                    else:
+                        response = JsonResponse(dict(job_id=value.job_id, status="pending",
+                            status_token=value.status_token), status=202)
                 else:
                     response = value
                     created_session = True
