@@ -110,3 +110,37 @@ def test_explicit_invalid_claim_is_not_defaulted(monkeypatch, service_module, cl
         secret=SECRET, auth_mode='v2', key_id='k1', **{claim: value})
     with pytest.raises(service_module.ExternalServiceError):
         client._headers()
+
+
+@pytest.mark.parametrize('construction', ['direct', 'settings'])
+def test_directory_defaults_to_v2_without_auth_mode(monkeypatch, service_module, construction):
+    # Missing mode must not silently restore old Token authentication on upgrade.
+    monkeypatch.setitem(sys.modules, 'jwt', types.SimpleNamespace(encode=_jwt_encode))
+    if construction == 'direct':
+        client = service_module.ExternalService('SSO_DIRECTORY', 'https://directory.invalid',
+            secret=SECRET, key_id='default-v2-key')
+    else:
+        service_module.settings = types.SimpleNamespace(
+            CF_SERVICE_SSO_DIRECTORY_URL='https://directory.invalid',
+            CF_SERVICE_SSO_DIRECTORY_SECRET=SECRET,
+            CF_SERVICE_SSO_DIRECTORY_KEY_ID='default-v2-key')
+        client = service_module.ExternalService.from_settings('sso-directory')
+    auth = client._headers()['Authorization']
+    assert auth.startswith('Bearer ')
+    header, claims = _decode(auth[7:])
+    assert header['kid'] == 'default-v2-key'
+    assert claims['scope'] == 'directory.read'
+
+
+def test_directory_legacy_requires_explicit_mode(monkeypatch, service_module):
+    # Old peers can be configured explicitly, without a v2-error fallback.
+    monkeypatch.setitem(sys.modules, 'jwt', types.SimpleNamespace(encode=_jwt_encode))
+    client = service_module.ExternalService('SSO_DIRECTORY', 'https://directory.invalid',
+        secret=SECRET, auth_mode='legacy')
+    assert client._headers()['Authorization'].startswith('Token ')
+
+
+def test_default_directory_mode_refuses_incomplete_credentials(service_module):
+    client = service_module.ExternalService('SSO_DIRECTORY', 'https://directory.invalid', secret=SECRET)
+    with pytest.raises(service_module.ExternalServiceError):
+        client._headers()

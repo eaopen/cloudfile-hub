@@ -52,15 +52,15 @@ class ExternalServiceError(Exception):
 class ExternalService(object):
     """A configured HTTP endpoint belonging to the deployment's operator.
 
-    Two explicit authentication modes. The default legacy mode preserves
-    existing Token HS256 senders while deployments migrate. V2 uses scoped,
+    SSO directory calls default to v2; unrelated external services retain
+    their existing protocol. Explicit legacy mode remains available. V2 uses scoped,
     short-lived Bearer HS256 with kid/sub/jti/iat and never falls back.
     The operator configures both ends with matching credentials.
     """
 
     def __init__(self, name, url, secret='', timeout=DEFAULT_TIMEOUT,
                  retries=DEFAULT_RETRIES, on_failure=FAIL_CLOSED,
-                 auth_mode='legacy', key_id='', service_id='cloudfile',
+                 auth_mode=None, key_id='', service_id='cloudfile',
                  issuer='cloudfile-sso', audience='eap-directory'):
         self.name = name
         self.url = url.rstrip('/')
@@ -68,6 +68,11 @@ class ExternalService(object):
         self.timeout = timeout
         self.retries = retries
         self.on_failure = on_failure
+        # Directory credentials target EAP v2 by default; other integrations
+        # must not silently change their established wire protocol.
+        if auth_mode is None:
+            directory_service = name.upper().replace('-', '_') == 'SSO_DIRECTORY'
+            auth_mode = 'v2' if directory_service else 'legacy'
         if auth_mode not in ('legacy', 'v2'):
             raise ValueError('Unsupported external-service auth mode: %s' % auth_mode)
         self.auth_mode = auth_mode
@@ -98,7 +103,7 @@ class ExternalService(object):
             timeout=getattr(settings, prefix + 'TIMEOUT', DEFAULT_TIMEOUT),
             retries=getattr(settings, prefix + 'RETRIES', DEFAULT_RETRIES),
             on_failure=getattr(settings, prefix + 'ON_FAILURE', on_failure),
-            auth_mode=getattr(settings, prefix + 'AUTH_MODE', 'legacy'),
+            auth_mode=getattr(settings, prefix + 'AUTH_MODE', None),
             key_id=getattr(settings, prefix + 'KEY_ID', ''),
             service_id=getattr(settings, prefix + 'SERVICE_ID', 'cloudfile'),
             issuer=getattr(settings, prefix + 'ISSUER', 'cloudfile-sso'),
@@ -109,7 +114,7 @@ class ExternalService(object):
 
     def _headers(self):
         headers = {'Content-Type': 'application/json'}
-        # The EAP directory v2 channel is explicitly opt-in. Refuse incomplete
+        # The EAP directory v2 channel is the default. Refuse incomplete
         # credentials rather than silently issuing an unauthenticated request.
         if self.auth_mode == 'v2':
             if (not self.key_id or not self.service_id
