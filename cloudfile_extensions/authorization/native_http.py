@@ -121,7 +121,7 @@ class NativeRepoView(RepoView):
                 return dict(repo_id=repo_id, repo_name=repo.name, name=repo.name,
                     permission='rw' if current.effective_access['write'] else 'r',
                     user_perm='rw' if current.effective_access['write'] else 'r',
-                    is_admin=bool(current.is_owner or current.is_library_admin),
+                    is_admin=bool(current.can_manage_library()),
                     size=repo.size, encrypted=repo.encrypted, is_virtual=repo.is_virtual,
                     status=repo.status, repo_type=repo.repo_type,
                     owner_email=seafile_api.get_repo_owner(repo_id))

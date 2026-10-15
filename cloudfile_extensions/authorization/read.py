@@ -11,10 +11,11 @@ class ContentReadAuthority(DirectoryManagement):
         return bool(getattr(self, "_management_diagnostic", False))
 
     def requires_system_admin(self):
-        return bool(getattr(self, "_management_diagnostic", False))
+        # Reuse the existing live global-library qualification for content.
+        return True
 
     def system_admin_qualification_override(self):
-        return False
+        return True
 
     def library_status_allowed(self, status):
         # Native read-only affects writes, not otherwise-authorized reads.

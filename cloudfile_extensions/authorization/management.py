@@ -103,7 +103,7 @@ class LibraryOwnerManagement:
             self.is_global_library_admin = self._global_library_admin(cursor, username)
         permission = self.qualification(cursor, reference, username, owner)
         if permission is None and self.is_global_library_admin and self.system_admin_qualification_override():
-            permission = "rw"  # Management-only qualification; content read subclasses disable this.
+            permission = "rw"  # Qualification only; content still passes through its policy evaluation.
         if (permission is not None and not self.is_owner and not self.is_global_library_admin
                 and self.requires_library_admin()):
             self.is_library_admin = self._library_admin(cursor, repo, username)
@@ -248,6 +248,10 @@ class DirectoryManagement(LibraryOwnerManagement):
         super().__init__(preparation, core, request_id=request_id)
 
     def qualification(self, cursor, reference, username, owner):
+        # Global library management supplies a content baseline; the caller
+        # still evaluates directory ACLs and native hard-readonly state.
+        if self.is_global_library_admin:
+            return "rw"
         return self.native_qualification.read(cursor, repo_id=reference["repo_id"],
             username=username, owner=owner)
 

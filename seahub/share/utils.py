@@ -45,6 +45,12 @@ def is_repo_admin(username, repo_id, *, strict=False):
         native_permission = seafile_api.check_permission(repo_id, username)
         if native_permission not in (PERMISSION_READ_WRITE, 'r'):
             return False
+        from seahub.base.accounts import User
+        # Reuse native role capabilities; daily_admin is intentionally included
+        # when can_manage_library is enabled, without per-library grant rows.
+        native_user = User.objects.get(email=username)
+        if native_user.admin_permissions.can_manage_library():
+            return True
         user_share_permission = ExtraSharePermission.objects. \
             get_user_permission(repo_id, username)
         if user_share_permission == PERMISSION_ADMIN:

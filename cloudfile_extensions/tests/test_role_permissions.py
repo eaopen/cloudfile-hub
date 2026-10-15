@@ -36,7 +36,7 @@ class RolePermissionTests(unittest.TestCase):
         self.assertFalse(authority.authorize(None, 'other', {}))
         self.assertFalse(authority.can_manage_library())
 
-    def test_system_scope_manages_unshared_library_but_cannot_read_its_files(self):
+    def test_global_library_admin_content_still_obeys_directory_acl(self):
         actor = 'system-user-id'
         username = 'admin@example.com'
         reference = dict(repo_id='repo', path='/', kind='dir')
@@ -74,8 +74,8 @@ class RolePermissionTests(unittest.TestCase):
                                           profiles='Profiles', native_schema='ccnet_db',
                                           identity_schema='seahub_db', provider='fixture')
             value.is_owner = value.is_library_admin = value.is_global_library_admin = False
-            value.core = SimpleNamespace(evaluate=lambda *args, **kwargs: dict(
-                visible=False, read=False, write=False))
+            value.core = SimpleNamespace(evaluate=Mock(return_value=dict(
+                visible=False, read=False, write=False)))
             value.rules = SimpleNamespace(candidates=lambda *args, **kwargs: [])
             value._barriers = lambda repo: None
             value._global_library_admin = lambda cursor, user: True
@@ -86,6 +86,12 @@ class RolePermissionTests(unittest.TestCase):
         content = authority(ContentReadAuthority)
         content._management_diagnostic = False
         self.assertFalse(content.authorize(Cursor(), actor, reference))
+        self.assertEqual(content.core.evaluate.call_args.kwargs['ce_permission'], 'rw')
+        # Removing global qualification leaves an unshared library inaccessible.
+        content._global_library_admin = lambda cursor, user: False
+        content.core.evaluate.reset_mock()
+        self.assertFalse(content.authorize(Cursor(), actor, reference))
+        content.core.evaluate.assert_not_called()
 
     def test_admin_role_api_exposes_default_system_role_and_restricts_assignment(self):
         class RoleStore:
@@ -227,6 +233,6 @@ class RolePermissionTests(unittest.TestCase):
             self.assertTrue(authority._global_library_admin(cursor, 'admin@example.com'))
 
         content = object.__new__(ContentReadAuthority)
-        self.assertFalse(content.system_admin_qualification_override())
+        self.assertTrue(content.system_admin_qualification_override())
         manager = object.__new__(LibraryWideManagementAuthority)
         self.assertTrue(manager.system_admin_qualification_override())
