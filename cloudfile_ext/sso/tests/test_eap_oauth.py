@@ -69,6 +69,8 @@ def callback_runtime(monkeypatch):
     error = Mock(return_value='refused')
     monkeypatch.setitem(sys.modules, 'django.conf', NS(settings=settings))
     monkeypatch.setitem(sys.modules, 'django.http', NS(HttpResponseRedirect=redirect))
+    rotate = Mock()
+    monkeypatch.setitem(sys.modules, 'django.middleware.csrf', NS(rotate_token=rotate))
     monkeypatch.setitem(sys.modules, 'requests_oauthlib', NS(OAuth2Session=factory))
     monkeypatch.setitem(sys.modules, 'seahub.auth', auth)
     monkeypatch.setitem(sys.modules, 'seahub', NS(auth=auth))
@@ -85,7 +87,7 @@ def callback_runtime(monkeypatch):
         'cf_eap_oidc': dict(state='state', nonce='nonce', verifier='verifier', issued=time.time()),
         'oauth_redirect': '/library/'})
     return NS(request=request, client=client, auth=auth, validator=validator,
-              provision=provision, redirect=redirect, response=response, info=info)
+              provision=provision, redirect=redirect, response=response, info=info, rotate=rotate)
 
 
 def test_callback_consumes_flow_checks_token_then_provisions(callback_runtime):
@@ -98,10 +100,12 @@ def test_callback_consumes_flow_checks_token_then_provisions(callback_runtime):
     assert r.validator.validate.call_args.kwargs['nonce'] == 'nonce'
     r.provision.assert_called_once_with('authentik:files', r.info)
     r.auth.login.assert_called_once()
+    r.rotate.assert_called_once_with(r.request)
     r.redirect.assert_called_once_with('/library/')
     # A consumed flow cannot be replayed even with the same browser session.
     assert callback(r.request) == 'refused'
     assert r.auth.login.call_count == 1
+    assert r.rotate.call_count == 1
 
 
 @pytest.mark.parametrize('failure', ['state', 'expired', 'signature', 'uid', 'directory'])
@@ -120,6 +124,7 @@ def test_callback_never_logs_in_on_protocol_or_identity_failure(callback_runtime
         r.provision.side_effect = IdentityConflict('directory unavailable')
     assert callback(r.request) == 'refused'
     r.auth.login.assert_not_called()
+    r.rotate.assert_not_called()
     assert 'cf_eap_oidc' not in r.request.session
 
 
