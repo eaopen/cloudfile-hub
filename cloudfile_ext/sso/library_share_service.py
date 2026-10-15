@@ -17,12 +17,9 @@ decision (2026-08-27 §4.4; revision gate 2026-08-28 §8.2) fixed:
 
 import logging
 from contextlib import contextmanager
-import time
 
 from cloudfile_ext.sso import library_share_policy
 from cloudfile_ext.sso.library_shares import ManagedLibraryShare
-from cloudfile_ext.sso.models import SSOGroupMap
-from cloudfile_ext.sso.service import PROVIDER
 
 logger = logging.getLogger(__name__)
 
@@ -65,22 +62,20 @@ def _connection():
 def _read_accepted_revision(repo_id):
     with _connection().cursor() as cursor:
         cursor.execute(
-            'SELECT policy_revision FROM %s WHERE provider = %%s '
-            'AND repo_id = %%s' % REVISION_TABLE,
-            [PROVIDER, repo_id])
+            'SELECT revision FROM %s WHERE repo_id = %%s' % REVISION_TABLE,
+            [repo_id])
         row = cursor.fetchone()
     return row[0] if row else None
 
 
 def _record_revision(repo_id, revision):
-    now = int(time.time())
+    # Migration 035 owns one monotonic revision per library; legacy columns
+    # must never be reintroduced into the canonical table by an adapter.
     with _connection().cursor() as cursor:
         cursor.execute(
-            'INSERT INTO %s (provider, repo_id, policy_revision, ctime, '
-            'mtime) VALUES (%%s, %%s, %%s, %%s, %%s) ON DUPLICATE KEY '
-            'UPDATE policy_revision = VALUES(policy_revision), '
-            'mtime = VALUES(mtime)' % REVISION_TABLE,
-            [PROVIDER, repo_id, revision, now, now])
+            'INSERT INTO %s (repo_id, revision) VALUES (%%s, %%s) '
+            'ON DUPLICATE KEY UPDATE revision = GREATEST(revision, VALUES(revision))'
+            % REVISION_TABLE, [repo_id, revision])
 
 
 def check_revision(repo_id, revision):
@@ -98,10 +93,26 @@ def check_revision(repo_id, revision):
 
 
 def _resolved_groups():
-    """``{external_group_id: seafile_group_id}`` from the live group map."""
-    return {external_id: row['group_id']
-            for external_id, row
-            in SSOGroupMap.objects.as_dict(PROVIDER).items()}
+    """Resolve current directory/role namespaces without flattening equal IDs."""
+    # The current eTech schema scopes IDs by namespace. The old ORM lookup
+    # used cloudfile-sso and could miss departments or confuse a role with one.
+    with _connection().cursor() as cursor:
+        cursor.execute(
+            "SELECT subject_type, namespace, external_id, group_id FROM cf_sso_group_map "
+            "WHERE provider = %s AND ((subject_type = 'dept' AND namespace = 'directory') "
+            "OR (subject_type = 'group' AND namespace = 'role'))", ['etech'])
+        rows = cursor.fetchall()
+    resolved = {}
+    for kind, namespace, external_id, group_id in rows:
+        if ((kind, namespace) not in (('dept', 'directory'), ('group', 'role'))
+                or not isinstance(external_id, str) or not external_id
+                or type(group_id) is not int or group_id <= 0):
+            raise ValueError('Invalid managed group mapping')
+        key = 'role:' + external_id if kind == 'group' else external_id
+        if key in resolved:
+            raise ValueError('Ambiguous managed group mapping')
+        resolved[key] = group_id
+    return resolved
 
 
 def _seafile_api():
@@ -156,14 +167,13 @@ def _revision_lock(repo_id):
     from django.db import transaction
     connection = _connection()
     with transaction.atomic(using=connection.alias):
-        now = int(time.time())
         with connection.cursor() as cursor:
             cursor.execute(
-                'INSERT INTO %s (provider, repo_id, policy_revision, ctime, mtime) '
-                'VALUES (%%s, %%s, 0, %%s, %%s) ON DUPLICATE KEY UPDATE provider = provider'
-                % REVISION_TABLE, [PROVIDER, repo_id, now, now])
-            cursor.execute('SELECT policy_revision FROM %s WHERE provider = %%s '
-                           'AND repo_id = %%s FOR UPDATE' % REVISION_TABLE, [PROVIDER, repo_id])
+                'INSERT INTO %s (repo_id, revision) VALUES (%%s, 0) '
+                'ON DUPLICATE KEY UPDATE repo_id = repo_id'
+                % REVISION_TABLE, [repo_id])
+            cursor.execute('SELECT revision FROM %s WHERE repo_id = %%s FOR UPDATE'
+                           % REVISION_TABLE, [repo_id])
             cursor.fetchone()
         yield
 

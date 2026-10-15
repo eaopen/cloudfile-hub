@@ -244,3 +244,78 @@ def test_directory_transport_failure_is_still_a_whole_sync_error(svc, monkeypatc
     monkeypatch.setattr(service, '_record', lambda status, detail: {'status': status, 'detail': detail})
     assert service.sync()['status'] == service.STATUS_ERROR
     apply.assert_not_called()
+
+
+def _current_schema_service(svc, monkeypatch):
+    """Execute real adapter SQL against only the current schema's columns."""
+    import sqlite3
+    from contextlib import nullcontext
+    from types import SimpleNamespace
+    module = importlib.reload(svc)
+    database = sqlite3.connect(':memory:')
+    database.execute('CREATE TABLE cf_library_share_revision (repo_id TEXT PRIMARY KEY, revision INTEGER NOT NULL)')
+    database.execute('CREATE TABLE cf_sso_group_map (provider TEXT, subject_type TEXT, namespace TEXT, external_id TEXT, group_id INTEGER)')
+
+    class Cursor:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+        def execute(self, sql, parameters):
+            # SQLite executes the actual column references; translate only
+            # MySQL's locking/upsert syntax, never the selected schema shape.
+            sql = sql.replace(' FOR UPDATE', '').replace('%s', '?')
+            sql = sql.replace('ON DUPLICATE KEY UPDATE repo_id = repo_id',
+                              'ON CONFLICT(repo_id) DO NOTHING')
+            sql = sql.replace('ON DUPLICATE KEY UPDATE revision = GREATEST(revision, VALUES(revision))',
+                              'ON CONFLICT(repo_id) DO UPDATE SET revision = MAX(revision, excluded.revision)')
+            self.result = database.execute(sql, parameters)
+
+        def fetchone(self):
+            return self.result.fetchone()
+
+        def fetchall(self):
+            return self.result.fetchall()
+
+    connection = SimpleNamespace(alias='cloudfile', cursor=Cursor)
+    monkeypatch.setattr(module, '_connection', lambda: connection)
+    monkeypatch.setattr(sys.modules['django.db'], 'transaction',
+                        SimpleNamespace(atomic=lambda **kwargs: nullcontext()), raising=False)
+    return module, database
+
+
+def test_current_revision_schema_roundtrip_and_stale_guard(svc, monkeypatch):
+    module, database = _current_schema_service(svc, monkeypatch)
+    try:
+        with module._revision_lock('repo'):
+            assert module._read_accepted_revision('repo') == 0
+            module._record_revision('repo', 17)
+        with module._revision_lock('repo'):
+            with pytest.raises(module.StaleRevision):
+                module.check_revision('repo', 16)
+            module._record_revision('repo', 16)
+            assert module._read_accepted_revision('repo') == 17
+            module._record_revision('repo', 18)
+            assert module._read_accepted_revision('repo') == 18
+    finally:
+        database.close()
+
+
+def test_current_group_map_keeps_department_and_role_ids_separate(svc, monkeypatch):
+    module, database = _current_schema_service(svc, monkeypatch)
+    try:
+        database.executemany('INSERT INTO cf_sso_group_map VALUES(?,?,?,?,?)', [
+            ('etech', 'dept', 'directory', '27', 585),
+            ('etech', 'group', 'role', '27', 901),
+            ('another', 'dept', 'directory', '27', 999),
+            ('etech', 'group', 'unrelated', '27', 998),
+        ])
+        assert module._resolved_groups() == {'27': 585, 'role:27': 901}
+        database.execute('INSERT INTO cf_sso_group_map VALUES(?,?,?,?,?)',
+                         ('etech', 'dept', 'directory', '27', 902))
+        with pytest.raises(ValueError, match='Ambiguous'):
+            module._resolved_groups()
+    finally:
+        database.close()
