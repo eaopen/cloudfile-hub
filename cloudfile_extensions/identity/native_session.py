@@ -1,6 +1,7 @@
 """Actual CE non-local-MFA finalizer, explicitly unregistered pending MFA work."""
 from django.conf import settings
 from django.http import HttpResponseRedirect
+from django.middleware.csrf import rotate_token
 
 from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError
@@ -80,6 +81,8 @@ class NativeOIDCSession:
                     session_id=prepared.session_id, authenticated_at=prepared.issued_at, expires_at=expiry)
                 response = HttpResponseRedirect(prepared.redirect)
                 runtime.browser.clear(binding, response)
+            # Rotate only after session and browser authorization finalize.
+            rotate_token(request)
             return response
         except Exception:
             if attempted:

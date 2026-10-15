@@ -184,6 +184,7 @@ def login(request):
 def callback(request):
     from django.conf import settings
     from django.http import HttpResponseRedirect
+    from django.middleware.csrf import rotate_token
     from requests_oauthlib import OAuth2Session
     from seahub import auth
     from seahub.api2.utils import get_api_token
@@ -220,6 +221,9 @@ def callback(request):
         response = HttpResponseRedirect(request.session.get('oauth_redirect', settings.SITE_ROOT))
         response.set_cookie('seahub_auth', user.username + '@' + api_token.key)
         response.set_cookie('via_oauth', 'true')
+        # EAP may redirect straight back to the portal without loading Seahub.
+        # Publish a fresh sfcsrftoken through Django's CSRF middleware.
+        rotate_token(request)
         return response
     except Exception as error:
         import logging
