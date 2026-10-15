@@ -222,6 +222,11 @@ class ContentMetadataWriteAuthority(ContentReadAuthority):
 
 class LibraryWideManagementAuthority(ContentReadAuthority):
     """Whole-library management, not an exact root or subdirectory grant."""
+    def _global_library_admin(self, cursor, username):
+        # Management-only consumers retain daily-admin capabilities; the
+        # stricter content predicate must not leak through this inheritance.
+        return DirectoryManagement._global_library_admin(self, cursor, username)
+
     def requires_library_admin(self):
         return True
 

@@ -10,7 +10,7 @@ from unittest.mock import Mock, patch
 
 from cloudfile_extensions.authorization.global_admin import is_system_library_admin
 from cloudfile_extensions.authorization.management import LibraryOwnerManagement
-from cloudfile_extensions.authorization.read import ContentReadAuthority
+from cloudfile_extensions.authorization.read import ContentReadAuthority, LibraryWideManagementAuthority
 
 
 CASES = json.loads((Path(os.environ.get('CF_TEST_DOCKER_ROOT',
@@ -84,9 +84,10 @@ class SystemAdministratorContentTests(unittest.TestCase):
                         self.assertIs(actual, case['expected'])
                     # Daily administrators retain their background management capability.
                     if role == 'daily_admin':
-                        manager = object.__new__(LibraryOwnerManagement)
-                        manager.state = authority.state
-                        self.assertTrue(manager._global_library_admin(Cursor(), username))
+                        for kind in (LibraryOwnerManagement, LibraryWideManagementAuthority):
+                            manager = object.__new__(kind)
+                            manager.state = authority.state
+                            self.assertTrue(manager._global_library_admin(Cursor(), username))
 
     def test_native_role_storage_failure_is_not_a_missing_role(self):
         native = ModuleType('seaserv')
