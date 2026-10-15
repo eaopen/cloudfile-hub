@@ -143,6 +143,14 @@ except ImportError:
     def _cf_feature_enabled(name):
         return False
 
+try:
+    from cloudfile_extensions.permission_middleware import (
+        mark_permission_unavailable as _cf_mark_permission_unavailable,
+    )
+except ImportError:
+    def _cf_mark_permission_unavailable(request):
+        pass
+
 
 def _cloudfile_dir_acl_enabled():
     return _cf_feature_enabled('CF_ENABLE_DIR_ACL')
@@ -171,6 +179,11 @@ def check_folder_permission(request, repo_id, path):
         permission = seafile_api.check_permission_by_path(repo_id, path, username)
     except SearpcError as e:
         logger.warning(e)
+        # A permission-runtime/RPC failure is not a permission decision. Keep
+        # denying here (fail closed) and mark the request so the CloudFile
+        # middleware answers 503 with a distinguishable code instead of a
+        # false 403 "Permission denied."
+        _cf_mark_permission_unavailable(request)
         return None
     if not permission or permission == PERMISSION_INVISIBLE:
         return None
