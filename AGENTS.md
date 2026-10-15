@@ -32,9 +32,9 @@ workspace/
 ```
 
 跨仓规格与部署说明在 `cloudfile-docker/`：
-[BRANCHING.md](../cloudfile-docker/BRANCHING.md)、
-[docs/BRANCHES.md](../cloudfile-docker/docs/BRANCHES.md)、
-[deploy/compose/README.md](../cloudfile-docker/deploy/compose/README.md)。
+[BRANCHING.md](https://github.com/eaopen/cloudfile-docker/blob/dev/BRANCHING.md)、
+[docs/BRANCHES.md](https://github.com/eaopen/cloudfile-docker/blob/dev/docs/BRANCHES.md)、
+[deploy/compose/README.md](https://github.com/eaopen/cloudfile-docker/blob/dev/deploy/compose/README.md)。
 
 ## 最重要的一条：不要改上游文件
 
@@ -119,7 +119,7 @@ cloudfile_ext/
 基线里本就有不受开关约束的补丁——`seahub/api2/endpoints/internal_api.py` 的字节
 通道按目标路径判定、`file_tag.py` 的标签按目标路径判定、`groups.py` 的 CE 群组
 配额兼容、`oauth/views.py` 的 SSO 回填，都不带开关。理由与裁决顺序见
-[cloudfile-docker/BRANCHING.md](../cloudfile-docker/BRANCHING.md)。）
+[cloudfile-docker/BRANCHING.md](https://github.com/eaopen/cloudfile-docker/blob/dev/BRANCHING.md)。）
 
 **2. 扩展只能收紧权限，不能放宽。**
 
@@ -172,7 +172,7 @@ python3 -m pytest tests/ -q
 
 ## 约定
 
-- 代码、注释、commit message 用英文；文档（`*.md`）用中文。
+- 代码、注释、commit message 用英文；公开入口 `README.md` 用英文，`README.zh-CN.md` 用中文；成对文档同次更新并提供语言切换。既有未翻译技术参考保留中文并明确标注；内部记录以中文为主。
 - 注释解释**为什么**，不解释**做了什么**。上游代码里的既有风格优先于个人偏好。
 - 新 API 走 `api/v2.1/cloudfile/...`，管理端走 `api/v2.1/admin/cloudfile/...`。
 - REST 视图沿用 Seahub 的写法：`TokenAuthentication + SessionAuthentication`、
@@ -192,3 +192,7 @@ python3 -m pytest tests/ -q
   `CloudFileConfig.ready()` 里完成。
 
 锁与 Checkout 当前统一实现为 `cloudfile_extensions/editing/`；不再新增独立的 locks/checkout 状态服务。普通锁与 Checkout 共用 `cf_edit_guard`，提交事实进入 `cf_commit_intent`。原生发布未接通前不挂载写入入口。
+
+## 文档归属（2026-10-13）
+
+公开产品方案、架构概览、路线图、AI 方向、使用导航与服务信息统一在 [cloudfile](https://github.com/eaopen/cloudfile/blob/main/docs/zh-CN/README.md) 中英维护。本仓维护随代码更新的技术说明；Docker 保留构建、部署、发布矩阵及共享技术契约。内部方案权衡、开发排期与复盘归私有内部管理仓库，客户配置与交付归客户私有工程。公开说明不得依赖私有文档，一项正式内容只保留一个权威正文。

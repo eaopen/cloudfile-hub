@@ -1,9 +1,11 @@
-<!-- generated-by: gsd-doc-writer -->
 # Hub 能力矩阵
+
+> 阅读边界：本文包含早期实现与验证快照，原记录日期保留。当前构建、配置和跨组件支持范围见 [Docker 能力矩阵](https://github.com/eaopen/cloudfile-docker/blob/dev/docs/feature-matrix.md)，不能将历史“已完成”解释为所有当前入口均已验收。
+
 
 > 用途：按代码和测试证据标记 Hub/Web/API 的真实能力状态。
 > 适用版本：Seafile CE 14.x。
-> 状态：已完成（状态快照：`dev`，2026-08-15；状态已与 `cloudfile-docker/docs/feature-matrix.md` 对齐）。
+> 状态：历史能力快照（2026-08-15）；原日期之后的变更按当前组件与发行说明核对。
 >
 > 默认值提示（2026-09-22）：本表的“状态”描述能力成熟度，**不等于默认开关**。
 > 不依赖第三方的已验收能力已默认打开，逐项默认值见

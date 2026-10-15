@@ -1,23 +1,20 @@
-[CloudFile product home / 产品总入口](https://github.com/eaopen/cloudfile) · [English](https://github.com/eaopen/cloudfile/blob/main/README.md) · [简体中文](https://github.com/eaopen/cloudfile/blob/main/README.zh-CN.md)
-
-<!-- generated-by: gsd-doc-writer -->
 # CloudFile Hub
 
-> 用途：说明 CloudFile 的 Web/API 仓库定位、边界和最短验证路径。
-> 适用版本：Seafile CE 14.x；当前基线来自 `haiwen/seahub`。
-> 状态：已完成（文档与 `dev` 分支代码核对，2026-08-11）。
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-CloudFile Hub 是 Seahub 的长期跟随型 fork：复用 Seafile CE 14 的 Web、API、认证与文件预览能力，在 `cloudfile_ext/` 和 `frontend/src/cloudfile/` 中补充企业集成与文件协作扩展。
+CloudFile's Web/API layer, maintained as a fork of Seahub against the Seafile CE 14 baseline. It reuses CE Web, API, authentication and preview capabilities, adding enterprise integration and collaboration in `cloudfile_ext/` and `frontend/src/cloudfile/`.
 
-## 产品边界
+[Product documentation](https://github.com/eaopen/cloudfile/blob/main/docs/en/README.md). Technical references linked here are in Chinese unless indicated otherwise. The original capability snapshot dates to 2026-08-11; use the documentation and checks matching your installed release.
 
-| 边界 | 当前做法 |
-|---|---|
-| CE 复用 | 登录认证、库/目录/文件基础 API、权限基线、原生预览、SeaSearch/Elasticsearch 路径 |
-| 本项目新增 | 扩展注册中心、目录 ACL、组织映射、操作审计、Meilisearch、外部文件源、统一文件动作与本地软件会话 |
-| 外部组件 | `cloudfile-server` 负责不可绕过的底层权限/锁校验；`cloudfile-docker` 负责构建、配置、数据库建表和部署；Meilisearch、IdP、客户目录服务和挂载目录由部署侧提供 |
+## Scope
 
-本仓库不是独立可部署产品。完整运行需要三个仓库并排检出：
+| Area | Responsibility |
+| --- | --- |
+| CE reuse | Authentication, library/directory/file APIs, baseline permissions, native previews and SeaSearch/Elasticsearch paths |
+| CloudFile extensions | Extension registration, directory ACLs, organization mapping, auditing, Meilisearch, external sources, file actions and local application sessions |
+| External components | Server enforces low-level permissions and locks; Docker handles builds, configuration, database schema and deployment; operators provide search, identity, directory services and mounts |
+
+Hub is part of a multi-repository system:
 
 ```text
 workspace/
@@ -26,36 +23,34 @@ workspace/
 └── cloudfile-docker/
 ```
 
-部署入口与跨仓规格以 `cloudfile-docker` 为准；本仓文档只描述 Hub/Web/API 的真实实现。
+Deployment and shared contracts are maintained in `cloudfile-docker`. This repository documents the Hub/Web/API implementation.
 
-## 当前状态
+## Status
 
-- 扩展框架与 `CF_ENABLE_*` 默认关闭语义已完成；关闭全部开关时应保持原生 CE 行为。
-- Hub 扩展测试当前为 `217 passed`；这不等同于三仓集成或部署验收。
-- 目录 ACL、搜索、外部源、SSO 组织映射、审计和文件动作已有代码；逐项状态与缺口见 [能力矩阵](docs/CAPABILITIES.md)。
-- CloudFile 自有 `metadata`/标签扩展仍是占位，但 CE 已有 `repo_metadata`、`repo_tags`/`file_tags` 前端和 API；跨仓部署已验证标签定义生命周期，目录/文件绑定闭环仍未验收。转换导出与监控也不应按“已验收”宣传。
+- The extension framework and feature flags are implemented. New capabilities default to disabled; selected defaults follow deployment configuration. Disabling all extensions does not remove baseline compatibility patches.
+- The historical snapshot recorded `217 passed` for Hub extension tests. This is not a current test run or system acceptance result.
+- ACLs, search, external sources, SSO mapping, auditing and file actions have implementations. Check the dated [capability snapshot (Chinese)](docs/CAPABILITIES.md) and the selected release for support and gaps.
+- CloudFile's own metadata/tag extension was a placeholder in that snapshot; CE provides metadata and tag APIs/UI. Tag definitions and directory/file binding have separate validation scopes. Conversion and monitoring must not be described as accepted merely because code exists.
 
-## 最短验证
+## Verification
 
 ```bash
 .venv/bin/python -m pytest cloudfile_ext/ -q
 ```
 
-三仓并排且依赖就绪时运行统一门禁：
+With sibling repositories and dependencies available:
 
 ```bash
 ../cloudfile-docker/tools/run-checks.sh
 ```
 
-## 文档入口
+## Documentation
 
-- [文档索引](docs/README.md)
-- [架构](docs/ARCHITECTURE.md)
-- [扩展注册中心](docs/EXTENSIONS.md)
-- [能力矩阵](docs/CAPABILITIES.md)
-- [Hub API](docs/API.md)
-- [Hub 配置](docs/CONFIGURATION.md)
-- [测试与证据](docs/TESTING.md)
-- [本地专业软件](docs/local-professional-software.md)
+These references are currently in Chinese:
 
-开发约束见 [AGENTS.md](AGENTS.md)。
+- [Index](docs/README.md) and [architecture](docs/ARCHITECTURE.md)
+- [Extension registry](docs/EXTENSIONS.md) and [capability snapshot](docs/CAPABILITIES.md)
+- [API](docs/API.md) and [configuration](docs/CONFIGURATION.md)
+- [Testing](docs/TESTING.md) and [local professional applications](docs/local-professional-software.md)
+
+Development rules: [AGENTS.md](AGENTS.md). Upstream introduction and licensing: [README.markdown](README.markdown) and [LICENSE.txt](LICENSE.txt).

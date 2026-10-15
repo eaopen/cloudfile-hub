@@ -3,15 +3,30 @@
 
 > 用途：列出本仓运行时可注册的 CloudFile HTTP 接口及认证/开关边界。
 > 适用版本：Seafile CE 14.x。
-> 状态：已完成（路由与视图方法已核对，2026-08-11；真实部署联调仍按能力状态执行）。
+> 状态：基础接口清单与增补导航。原表来自 2026-08-11；2026-10-13 核对存储 API 并补充设备编辑导航。未逐项复验的旧接口不得视为当前完整 API 清单。
 
 ## 约定
 
-- 用户接口沿用 Seahub 的 `TokenAuthentication` 与 `SessionAuthentication`；token 使用 Seahub 原生 `Authorization: Token ...` 形式，浏览器会话使用 CSRF。
+- 本页基础接口表中的用户接口沿用 Seahub 的 `TokenAuthentication` 与 `SessionAuthentication`；token 使用 Seahub 原生 `Authorization: Token ...` 形式，浏览器会话使用 CSRF。
 - 管理接口使用 `IsAdminUser`；普通用户接口使用 `IsAuthenticated`，并由 `UserRateThrottle` 限流。
 - URL 以部署的 Seahub 根地址和 `SITE_ROOT` 为准；本仓不定义生产域名。
 - 功能关闭时能力接口返回 404 或根本不注册。前端隐藏入口不是鉴权依据。
 - 表中 `{repo_id}` 为 UUID，`{source_id}` 为整数，`{session_id}` 为 UUID。
+
+## 存储类与建库
+
+`CF_ENABLE_S3_STORAGE` 开启时注册；使用 Token/Session 认证、`IsAuthenticated` 与用户限流。
+
+| 方法 | 路径 | 输入/返回与边界 |
+| --- | --- | --- |
+| GET | `/api/v2.1/cloudfile/storage-classes/` | 返回 `storage_classes` 数组；读取失败为 500 |
+| POST | `/api/v2.1/cloudfile/repos/` | `name` 必填，`desc`、`storage_id`、`repo_key` 按配置选用；owner 固定为当前用户。成功 201，返回 `repo_id`，自动分库另返回 `repo_key` 和 `storage_id` |
+
+`repo_key` 只在自动分库模式可用，不与显式 `storage_id` 同传；非法或冲突输入拒绝。接口没有新增用户选择 UI。实现见 [存储视图](../cloudfile_ext/storage/views.py)，配置与迁移见 [存储说明](https://github.com/eaopen/cloudfile-docker/blob/dev/docs/features/storage-backends.md)。
+
+## 设备编辑与新扩展
+
+设备签名与上传使用独立认证流程，不能套用本页基础 Token/Session 约定。入口及恢复语义见 [设备上传契约](https://github.com/eaopen/cloudfile-local-agent/blob/dev/docs/device-upload-contract.md)和[Agent 兼容说明](AGENT-COMPATIBILITY.md)。是否开放由当前版本能力及服务端开关决定。
 
 ## 框架
 
@@ -67,22 +82,18 @@
 
 `CF_ENABLE_WATCH` 只把上游 `is_pro_version()` gate 扩展为“Pro 或 CloudFile 开关开启”；模型、接口形状和缓存仍由 CE 提供。当前没有 CloudFile 专项测试或通知消费链的本仓验收。
 
-## 文件动作、锁与本地 Agent
+## 文件动作、本地会话与正式库嵌入
 
-| 方法 | 路径 | 认证 | 说明 |
-|---|---|---|---|
-| GET | `/api/v2.1/cloudfile/repos/{repo_id}/file-actions/` | 用户 | 根据真实路径权限、扩展名和锁 provider 返回可用动作 |
-| POST | `/api/v2.1/cloudfile/repos/{repo_id}/local-sessions/` | 用户 | 创建 `local-view` 或 `local-edit` 一次性 ticket |
-| POST | `/api/v2.1/cloudfile/agent-sessions/claim/` | 一次性 ticket | 原子领取 ticket，返回短时文件 capability |
-| PATCH | `/api/v2.1/cloudfile/agent-sessions/{session_id}/heartbeat/` | Bearer capability | 续租当前 generation 的本地编辑会话 |
-| PUT | `/api/v2.1/cloudfile/agent-sessions/{session_id}/content/` | Bearer capability | `multipart/form-data` 的 `file` 字段回写新版本 |
-| POST/DELETE | `/api/v2.1/cloudfile/repos/{repo_id}/checkout/` | 用户 | 创建/释放手工或第三方签出租约；释放必须带 generation |
-| GET/PUT/PATCH/DELETE | `/api/v2.1/cloudfile/repos/{repo_id}/file-lock/` | 用户 | 查询、获取、续租、释放文件锁 |
-| POST | `/api/v2.1/admin/cloudfile/repos/{repo_id}/file-lock/force-release/` | 管理员 | 按管理员已查看的 generation 强制释放 |
+2026-10-13 按 `cloudfile_ext/file_actions/__init__.py` 和 `apis.py` 核对：
 
-读取动作由 `CF_ENABLE_FILE_PREVIEW`/`CF_ENABLE_LOCAL_APP` 控制；写动作还受 `CF_ENABLE_CHECKOUT`/`CF_ENABLE_FILE_LOCK`、编辑权限和 server 锁 provider 控制。Agent claim/content/heartbeat 不接受普通登录凭据，只接受一次性 ticket 或单会话 capability。
+| 方法 | 路径 | 认证与范围 |
+| --- | --- | --- |
+| GET | `/api/v2.1/cloudfile/repos/{repo_id}/file-actions/` | 用户认证；按路径权限返回动作，受功能开关限制 |
+| GET | `/api/v2.1/cloudfile/integration/v1/resources/resolve/` | 用户认证；`resource_key` 映射到整库根，`view_mode` 只接受 `CFILE_EMBED`；不承诺子目录隔离 |
+| POST | `/api/v2.1/cloudfile/repos/{repo_id}/local-sessions/` | `CF_ENABLE_LOCAL_APP`；支持 `local-view` 和需编辑权限的 `local-edit`；`local-edit-exclusive` 返回 503 |
+| POST | `/api/v2.1/cloudfile/agent-sessions/claim/` | 一次性 ticket；非法输入 400，过期或不可用 410；不能用普通登录凭据替代 ticket |
 
-已知限制：会话创建响应当前未返回前端下载函数需要的 `session.file.name`，所以 `.cloudfile` 浏览器下载流程仍为部分完成。
+旧文档列出的 `agent-sessions/{session_id}/content/`、`heartbeat/`、`repos/{repo_id}/checkout/`、`file-lock/` 与 `force-release/` 不在当前 file_actions 注册表中，不作为接入契约。受控编辑使用独立的 `extensions/local-edit/` 与 `extensions/editing/` 路径，详见 [Agent 兼容](AGENT-COMPATIBILITY.md)。原普通本地会话与设备提交不能互换凭据。
 
 ## 外部文件源
 

@@ -3,9 +3,7 @@
 `cf_search_reconcile` 是 `cf_search_backfill_directories` 的**只读**对照命令。
 补索引回答“我写了多少文档”，本命令回答“现在这个资料库到底有多少原生条目在索引里有对应文档”。
 
-背景：2026-10-06 对资料库 `etech01`（`4f09f8a8-40c0-4ded-bec9-6c42691034f5`）做过一次全量补索引，
-当时记录 862,177 个原生文件对应 862,233 条文件文档、899,804 条总文档，但那是**一次性抽样**，
-没有可重复的复核手段。本命令把“覆盖率”变成一个可重复、可加门槛的标准动作。
+本命令将索引覆盖率转为可重复检查的指标。它比较同一资料库原生条目与对应索引文档，不能使用索引总文档数除以原生文件数代替覆盖率。
 
 ## 范围与明确限制
 
@@ -18,12 +16,14 @@
 
 ## 命令
 
+以下 UUID 为占位示例，执行前替换为目标资料库 ID，并为每个资料库使用独立检查点。
+
 ```sh
 S=/opt/seafile/seafile-server-latest
 cd $S/seahub
 python3 manage.py cf_search_reconcile \
-  --repo-id 4f09f8a8-40c0-4ded-bec9-6c42691034f5 \
-  --checkpoint /shared/seafile/search-file-repair/reconcile-etech01.json \
+  --repo-id 00000000-0000-4000-8000-000000000001 \
+  --checkpoint /shared/seafile/search-file-repair/reconcile-example.json \
   --max-pages 100
 ```
 
@@ -47,17 +47,17 @@ python3 manage.py cf_search_reconcile \
 
 ```json
 {
-  "repo_id": "4f09f8a8-40c0-4ded-bec9-6c42691034f5",
+  "repo_id": "00000000-0000-4000-8000-000000000001",
   "head": "<固定提交 head_cmmt_id>",
-  "native_files": 862177,
-  "native_dirs": 37571,
-  "indexed_files": 862233,
-  "indexed_dirs": 37571,
+  "native_files": 100,
+  "native_dirs": 10,
+  "indexed_files": 100,
+  "indexed_dirs": 10,
   "missing_files": 0,
   "missing_dirs": 0,
   "coverage_ratio": 1.0,
-  "sample_missing": [{"path": "/some/gone.txt", "object_type": "file"}],
-  "pages": 8622,
+  "sample_missing": [],
+  "pages": 2,
   "complete": true
 }
 ```
@@ -82,10 +82,9 @@ python3 manage.py cf_search_reconcile \
 - 遍历未完成（`complete=false`）且未给 `--allow-incomplete` → 退出码 `2`。
 - 未完成时**不**评估门槛：此时 `coverage_ratio` 只覆盖已走到的部分树，不代表整库覆盖率。
 - 其他错误（参数非法、检查点损坏、head 变化、索引请求失败）走 Django `CommandError`，退出码 1。
-- 无论是否失败，JSON 报告都先打印，便于定位门槛失败的原因。
+- 遍历结束后的覆盖率/未完成门槛失败（退出码 2/3）先输出 JSON 报告；参数、检查点或运行中错误可能在生成报告之前失败。
 
-默认 `0.999` 是“标准门槛”而不是“容忍部分补索引”：历史上少量陈旧文档会带来一点差距，
-而真正的回退会把比率推得很低，所以门槛宁可严格。
+默认阈值 `0.999` 要求已遍历的原生文件至少 99.9% 有对应索引文档；需要零缺失时显式设置 `--threshold 1`。陈旧的额外索引文档不提高正向覆盖率，另用 `--stale` 检查。
 
 ## 批量存在性与版本探测
 
@@ -143,5 +142,4 @@ POST /indexes/cloudfile_files/documents/fetch
 - 非法参数在触碰资料库与索引之前被拒绝。
 
 代码测试不等于生产对账已完成。生产验收应看：真实运行的 `complete=true` 与最终
-`coverage_ratio`，并与既有记录（862,233 / 862,177）比对；少量差异来自历史陈旧文档，
-属预期，不应强行对齐。
+`coverage_ratio`，并核对 `indexed_files + missing_files = native_files`。多余的陈旧文档不进入正向命中计数，也不能使覆盖率超过 1；反向检查结果单独处理。
