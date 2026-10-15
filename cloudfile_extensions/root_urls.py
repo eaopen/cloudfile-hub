@@ -39,7 +39,7 @@ urlpatterns = [
 if getattr(settings, "CLOUDFILE_OIDC_ENABLED", False):
     urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/identity/v1/",
         include("cloudfile_extensions.identity.urls")))
-if getattr(settings, "CLOUDFILE_ADMIN_POLICY_ENABLED", False):
+if getattr(settings, "CLOUDFILE_ADMIN_POLICY_ENABLED", not getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False)):
     if getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False):
         raise ImproperlyConfigured("Administrator and session policy route ownership must be distinct")
     from .authorization.admin_http import AdministratorPolicyView

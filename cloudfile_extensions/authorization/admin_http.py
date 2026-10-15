@@ -3,7 +3,6 @@
 Accepts the existing authenticated Seahub administrator, never an asserted
 business user. It shares the native transactions, revisions and retry ledger.
 """
-import os
 from contextlib import contextmanager
 from uuid import uuid4
 
@@ -14,12 +13,8 @@ from seaserv import seafile_api
 
 from ..common.errors import ContractError, invalid
 from ..common.validation import object_fields
-from ..directory.project import qualified
 from ..resources.paths import resource_ref
-from . import gunicorn
-from .host import PolicyHost
-from .resources import PolicyResources
-from .admin_management import SystemAdministratorManagement, admin_resources
+from .admin_management import SystemAdministratorManagement, NativeAdministratorResources
 from .share_service import DirectoryShareService
 from .http import DirectoryPolicyView
 
@@ -32,7 +27,7 @@ class AdministratorPolicyView(AdminLibraryAdministrator):
 
     @contextmanager
     def rules(self, request, reference, request_id):
-        if getattr(settings, 'CLOUDFILE_ADMIN_POLICY_ENABLED', False) is not True:
+        if getattr(settings, 'CLOUDFILE_ADMIN_POLICY_ENABLED', True) is not True:
             raise ContractError('POLICY_UNAVAILABLE', 'Administrator policy is disabled', 503)
         user = request.user
         if (user.is_authenticated is not True or user.is_active is not True
@@ -41,13 +36,14 @@ class AdministratorPolicyView(AdminLibraryAdministrator):
         denied = self._authorize(request, reference['repo_id'])
         if denied is not None:
             raise ContractError('ACCESS_DENIED', 'Library management is not allowed', denied.status_code)
-        resources = admin_resources(gunicorn._host)
-        host = gunicorn._host
-        with host.login_resources_scope(), resources.connection() as connection:
+        # Native account authority is independent of the browser OIDC runtime.
+        resources = NativeAdministratorResources()
+        from ..resources.native import NativeResourceReader
+        with resources.connection() as connection:
             authority = SystemAdministratorManagement(resources, connection,
                 username=user.username, reference=reference, request_id=request_id,
                 authorize_library=lambda ref: self._authorize(request, ref['repo_id']) is None,
-                lifecycle_reader=getattr(settings, 'CLOUDFILE_RESOURCE_LIFECYCLE_READER', None))
+                lifecycle_reader=NativeResourceReader(seafile_api))
             yield authority
 
     def run(self, request, rule_id=None):

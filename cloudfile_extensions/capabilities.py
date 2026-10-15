@@ -186,7 +186,7 @@ def library_share_implementation_registry(base, host, *, sso_enabled):
     return SimpleNamespace(implementations=implementations)
 
 
-def administrator_policy_implementation_registry(base, host, *, enabled):
+def administrator_policy_implementation_registry(base, host, *, enabled, native_ready=None):
     if enabled is not True:
         return base
     from dataclasses import replace
@@ -194,13 +194,18 @@ def administrator_policy_implementation_registry(base, host, *, enabled):
     from .authorization.admin_management import admin_resources
     from .common.errors import ContractError
     try:
-        admin_resources(host)
+        if native_ready is not None:
+            if native_ready() is not True:
+                return base
+        else:
+            admin_resources(host)
     except ContractError:
         return base
     implementations = dict(base.implementations)
     implementations['directory.acl.manage'] = replace(
         registry.implementations['directory.acl.manage'], implemented=True, default_enabled=True,
-        provider='native-admin')
+        # Native management authenticates the system account independently of session ACL routes.
+        provider='native-admin', dependencies=('auth.basic',))
     return SimpleNamespace(implementations=implementations)
 
 

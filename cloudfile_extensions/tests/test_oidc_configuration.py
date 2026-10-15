@@ -202,6 +202,7 @@ class OIDCHostConfigurationTests(unittest.TestCase):
             values = vars(OIDCHostConfigurationTests.configured())
             settings.configure(**values, SECRET_KEY="fixture-only", ALLOWED_HOSTS=["testserver"],
                 ROOT_URLCONF="cloudfile_extensions.root_urls", INSTALLED_APPS=["cloudfile_extensions"],
+                CLOUDFILE_ADMIN_POLICY_ENABLED=False, # This fixture isolates the OIDC route host.
                 REST_FRAMEWORK={"UNAUTHENTICATED_USER": None})
             import django
             django.setup()

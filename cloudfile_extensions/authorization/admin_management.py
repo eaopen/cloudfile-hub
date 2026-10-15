@@ -1,5 +1,6 @@
 """Native system account authority for administrator-only policy commands."""
 import os
+from contextlib import contextmanager
 from ..common.errors import ContractError
 from .host import PolicyHost
 from .resources import PolicyResources
@@ -83,3 +84,48 @@ class SystemAdministratorManagement(DirectoryManagement):
     def finalize(self, cursor):
         if self.authorize(cursor, self.actor, self.reference) is not True:
             raise ContractError('ACCESS_DENIED', 'Administrator authority changed', 403)
+
+
+class NativeAdministratorResources:
+    """Request-owned SQL using the existing Seahub/CloudFile database settings.
+
+    Native administrators never require an OIDC session, directory HTTP client,
+    Redis pool or extra secret. Keep the authority locks and schema checks intact.
+    """
+    def __init__(self):
+        from django.conf import settings
+        from cloudfile_ext.db_router import _alias
+        from django.db import connections
+        self.database = connections[_alias()]
+        if self.database.vendor != 'mysql':
+            raise ContractError('POLICY_UNAVAILABLE', 'Native policy requires MySQL', 503)
+        self.native_schema = getattr(settings, 'CF_NATIVE_DATABASE_NAME', 'ccnet_db')
+        self.identity_schema = settings.DATABASES['default']['NAME']
+        self.provider = 'etech'
+        qualified(self.native_schema, 'EmailUser')
+        qualified(self.identity_schema, 'profile_profile')
+
+    @contextmanager
+    def connection(self):
+        from ..schema.runner import SchemaRunner
+        # A private wrapper preserves TLS/options without borrowing a request
+        # transaction; ACLRules owns its transaction on this raw connection.
+        wrapper = self.database.copy(alias='cloudfile_admin_policy')
+        try:
+            wrapper.ensure_connection()
+            wrapper.set_autocommit(True)
+            connection = wrapper.connection
+            with connection.cursor() as cursor:
+                cursor.execute('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ')
+            SchemaRunner(connection).require_current()
+            yield connection
+        finally:
+            wrapper.close()
+
+
+def native_administrator_ready():
+    try:
+        with NativeAdministratorResources().connection():
+            return True
+    except Exception:
+        return False
