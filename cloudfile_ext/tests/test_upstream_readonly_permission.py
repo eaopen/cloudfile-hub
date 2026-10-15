@@ -18,13 +18,20 @@ def permission_entry():
                     and node.name == 'check_folder_permission')
     api = Mock()
     hook = Mock(side_effect=lambda username, repo_id, path, permission: permission)
+    marker = Mock()
     namespace = dict(seafile_api=api, _cf_check_permission=hook,
+                     _cf_mark_permission_unavailable=marker,
                      PERMISSION_READ='r', PERMISSION_INVISIBLE='invisible',
                      SearpcError=RuntimeError, logger=Mock())
     exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'),
          namespace)
     request = SimpleNamespace(user=SimpleNamespace(username='user@example.com'))
     return namespace['check_folder_permission'], request, api, hook
+
+
+@pytest.fixture
+def permission_marker(permission_entry):
+    return permission_entry[0].__globals__['_cf_mark_permission_unavailable']
 
 
 @pytest.mark.parametrize('read_only', [0, 1])
@@ -66,8 +73,19 @@ def test_missing_username_does_not_query_permissions(permission_entry):
     hook.assert_not_called()
 
 
-def test_rpc_error_fails_closed(permission_entry):
+def test_rpc_error_fails_closed(permission_entry, permission_marker):
     check, request, api, hook = permission_entry
     api.check_permission_by_path.side_effect = RuntimeError('RPC unavailable')
     assert check(request, 'repo', '/private') is None
     hook.assert_not_called()
+    # Still a denial here, but marked so the response middleware publishes 503
+    # with a distinguishable code instead of a false 403 "Permission denied."
+    permission_marker.assert_called_once_with(request)
+
+
+def test_only_an_rpc_failure_marks_the_request(permission_entry, permission_marker):
+    check, request, api, hook = permission_entry
+    api.check_permission_by_path.return_value = None
+    api.get_repo_status.return_value = 0
+    assert check(request, 'repo', '/private') is None
+    permission_marker.assert_not_called()
