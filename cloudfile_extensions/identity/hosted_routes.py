@@ -17,7 +17,7 @@ from .resources import LoginResources
 from .rp_logout_http import RPLogoutView
 from .logout_backchannel_http import BackchannelLogoutView
 from .logout_resources import LogoutResources
-from .read_ticket_http import OIDCReadTicketFactory, OIDCReadTicketView
+from .read_ticket_http import ReadTicketFactory, ReadTicketView
 from .manual_update_http import OIDCManualUpdateView
 
 
@@ -41,8 +41,8 @@ class HostedLoginView(View):
                     adapter = BackchannelLogoutView.as_view(resources=LogoutResources(resources, enabled=True))
                 elif self.operation in ("read", "directory-read"):
                     directory = self.operation == "directory-read"
-                    adapter = OIDCReadTicketView.as_view(
-                        service_factory=OIDCReadTicketFactory(resources, directory_access=directory),
+                    adapter = ReadTicketView.as_view(
+                        service_factory=ReadTicketFactory(resources, directory_access=directory),
                         directory_access=directory)
                 elif self.operation in ("update", "upload", "directory-update", "directory-upload"):
                     adapter = OIDCManualUpdateView.as_view(resources=resources,

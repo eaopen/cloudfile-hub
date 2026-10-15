@@ -1,4 +1,9 @@
-"""Explicitly unregistered OIDC ticket HTTP adapter and owned service scope."""
+"""Explicitly unregistered read-ticket HTTP adapter and owned service scope.
+
+The adapter accepts whichever native browser session the deployment issued
+(native OIDC or the legacy Authentik OAuth preset) and never lets the client
+choose the authentication protocol.
+"""
 from contextlib import contextmanager
 from uuid import uuid4
 
@@ -15,7 +20,7 @@ from ..local_edit.private_http import transport_allowed
 from ..common.errors import ContractError, invalid
 from ..common.validation import object_fields
 from ..resources.paths import resource_ref
-from .read_ticket import OIDCReadTicketIssuer
+from .read_ticket import BrowserReadTicketIssuer, OIDCReadTicketIssuer
 from .resources import LoginResources
 from .session_authority import OIDCSessionAuthority
 from .native_backend import CloudFileOIDCBackend
@@ -56,7 +61,13 @@ def _native_actor(request, *, backend):
         raise ContractError("AUTHENTICATION_REQUIRED", "Native download identity is unavailable", 401) from None
 
 
-class OIDCReadTicketFactory:
+class ReadTicketFactory:
+    """Select the trusted session by its server backend, never by a client hint.
+
+    The native OIDC session and the legacy OAuth browser session are both
+    first-class here; they differ only in the native session proof the Server
+    re-checks, so both reach the same business identity and permission result.
+    """
     def __init__(self, resources, *, directory_access=False):
         if not isinstance(resources, LoginResources):
             raise ValueError("actual login resources required")
@@ -65,18 +76,19 @@ class OIDCReadTicketFactory:
 
     @contextmanager
     def __call__(self, request, request_id):
-        actor = native_download_actor(request)
-        if not isinstance(actor, AuthenticatedPolicyActor):
-            raise ContractError("AUTHENTICATION_REQUIRED", "Authenticated download identity is required", 401)
-        authority = OIDCSessionAuthority(self.resources)
+        # Imported lazily: browser_session imports this module's actor seam.
+        from .browser_session import browser_session
+        actor, authority = browser_session(request, self.resources)
         authority.check(request)  # Before directory allocation or external I/O.
+        issuer = (OIDCReadTicketIssuer if isinstance(authority, OIDCSessionAuthority)
+            else BrowserReadTicketIssuer)
         with self.resources.resources.preparation(actor.user_id, request_id) as preparation:
             if preparation.state.username(actor.user_id) != actor.native_username:
                 raise ContractError("ACCESS_DENIED", "Download identity does not match", 403)
-            yield OIDCReadTicketIssuer(preparation, authority, directory_access=self.directory_access)
+            yield issuer(preparation, authority, directory_access=self.directory_access)
 
 
-class OIDCReadTicketView(DirectoryPolicyView):
+class ReadTicketView(DirectoryPolicyView):
     directory_access = False
     http_method_names = ["post"]
 
@@ -99,7 +111,7 @@ class OIDCReadTicketView(DirectoryPolicyView):
             operation = body.get("operation", "download")
             if reference["kind"] != "file" or operation not in ("view", "download"):
                 raise invalid("Download tickets require a file and supported read operation")
-            if not isinstance(self.service_factory, OIDCReadTicketFactory):
+            if not isinstance(self.service_factory, ReadTicketFactory):
                 raise ContractError("POLICY_UNAVAILABLE", "Download ticket runtime is unavailable", 503)
             with self.service_factory(request, request_id) as issuer:
                 config = settings.CLOUDFILE_POLICY_CONFIG
@@ -131,9 +143,9 @@ class OIDCReadTicketView(DirectoryPolicyView):
         return response
 
 
-def oidc_read_ticket_routes(*, resources):
+def read_ticket_routes(*, resources):
     """For explicit trusted URL inclusion only; never installs itself."""
     from django.urls import path
-    factory = OIDCReadTicketFactory(resources)
-    return [path("read-tickets/", OIDCReadTicketView.as_view(service_factory=factory),
+    factory = ReadTicketFactory(resources)
+    return [path("read-tickets/", ReadTicketView.as_view(service_factory=factory),
         name="cloudfile-oidc-read-ticket")]

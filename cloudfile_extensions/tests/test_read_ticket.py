@@ -74,3 +74,48 @@ class ReadTicketTests(unittest.TestCase):
                 return_value=self.token) as issue:
             self.issuer.issue(self.request, self.ref)
         self.assertIs(json.loads(issue.call_args.args[-1])["directory_access"], True)
+
+    def browser_issuer(self):
+        from cloudfile_extensions.identity.read_ticket import BrowserReadTicketIssuer
+        issuer = object.__new__(BrowserReadTicketIssuer)
+        issuer.preparation = self.issuer.preparation
+        issuer.authority = self.issuer.authority
+        issuer.directory_access = False
+        return issuer
+
+    def test_legacy_browser_session_carries_its_own_native_proof(self):
+        with patch("cloudfile_extensions.identity.read_ticket.resolve_and_issue_native_ticket",
+                return_value=self.token) as issue:
+            result = self.browser_issuer().issue(self.request, self.ref)
+        self.assertEqual(result, dict(ticket=self.token, expires_in=60))
+        conditions = json.loads(issue.call_args.args[-1])
+        self.assertEqual(conditions["browser_session"], dict(session_key="b" * 32))
+        self.assertNotIn("oidc_session", conditions)
+        self.assertNotIn("directory_access", conditions)
+        # No synthetic cf_oidc_* scope may be invented for a non-OIDC login.
+        self.assertEqual([scope["type"] for scope in conditions["scopes"]],
+            ["provider", "user", "repo"])
+        self.request.session.get.assert_not_called()
+
+    def test_legacy_browser_session_requires_a_persisted_key(self):
+        for key in (None, "", "short", "B" * 32, "z" * 31 + "-"):
+            self.request.session.session_key = key
+            with self.subTest(key=key):
+                with self.assertRaises(ContractError):
+                    self.browser_issuer().issue(self.request, self.ref)
+
+    def test_oidc_reference_shape_is_validated_before_issuance(self):
+        with patch("cloudfile_extensions.identity.read_ticket.resolve_and_issue_native_ticket") as issue:
+            for reference in (None, {}, {"scope_hash": "short"},
+                    dict(scope_hash="c" * 64, subject_hash="d" * 64, sid_hash=None,
+                         authenticated_at=123, extra="x")):
+                self.request.session.get.return_value = reference
+                with self.subTest(reference=reference):
+                    with self.assertRaises(ContractError):
+                        self.issuer.issue(self.request, self.ref)
+        issue.assert_not_called()
+
+    def test_browser_issuer_rejects_an_oidc_authority(self):
+        from cloudfile_extensions.identity.read_ticket import BrowserReadTicketIssuer
+        with self.assertRaises(ValueError):
+            BrowserReadTicketIssuer(self.issuer.preparation, self.issuer.authority)
