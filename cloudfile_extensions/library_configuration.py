@@ -73,7 +73,15 @@ class LibraryConfiguration(AdminLibraryAdministrator):
             denied = self._authorize(request, repo_id)
             if denied is not None:
                 return denied
+            # A repeated sync must not publish a new native commit for an unchanged
+            # name. Managed-library guards reject that legacy write path; read-back
+            # after authorization confirms the requested state without bypassing it.
             if key == 'name':
+                current = self._document(request, repo_id)
+                if current.status_code != status.HTTP_200_OK:
+                    return current
+                if current.data['name'] == value:
+                    return current
                 if seafile_api.edit_repo(repo_id, value, '', None) == -1:
                     raise ValueError('Native rename failed')
             elif key == 'history_keep_days':

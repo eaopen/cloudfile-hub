@@ -90,6 +90,17 @@ class LibraryConfigurationTests(unittest.TestCase):
         self.assertEqual(self.request('put', {'status': 'read-only'}).data['status'], 1)
         self.assertEqual(self.audit.send.call_count, 3)
 
+    def test_unchanged_name_confirms_state_without_native_write_or_audit(self):
+        self.native.edit_repo.side_effect = AssertionError('must not publish unchanged name')
+        result = self.request('put', {'name': 'Original'})
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(result.data['name'], 'Original')
+        self.native.edit_repo.assert_not_called()
+        self.audit.send.assert_not_called()
+        # The no-op must still require management authorization.
+        self.actor.can_manage = False
+        self.assertEqual(self.request('put', {'name': 'Original'}).status_code, 403)
+
     def test_library_manager_cannot_change_system_status(self):
         manager = Mock(is_authenticated=True, is_staff=False, username='manager@example.com', can_manage=True)
         result = self.request('put', {'status': 'read-only'}, actor=manager)
