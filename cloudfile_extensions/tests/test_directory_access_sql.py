@@ -35,6 +35,32 @@ class DirectoryAccessSQLTest(fixtures.ScopedReadSQLTest):
         with self.assertRaises(ContractError):
             service.resolve(dict(reference=child, shared_root='/folder/child'))
 
+    def test_library_member_internal_link_uses_repository_root(self):
+        ref = {**self.references(1)[0], 'path': '/folder/child', 'kind': 'dir'}
+        result = DirectoryAccessService(self.authority).resolve(dict(reference=ref))
+        self.assertEqual(result['root_path'], '/')
+        self.assertEqual(result['initial_path'], '/folder/child')
+        self.assertEqual(result['permission'], 'rw')
+
+    def test_internal_link_loses_directory_only_access_after_share_revocation(self):
+        _, root, shared = self.shared()
+        child = {**root, 'path': '/folder/child'}
+        access = DirectoryAccessService(self.authority)
+        self.assertEqual(access.resolve(dict(reference=child))['root_path'], '/folder')
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as cursor:
+                self.authority.shares.delete(cursor, root, shared['id'], if_match=shared['etag'])
+            self.connection.commit()
+        finally:
+            self.connection.rollback()
+        with self.assertRaises(ContractError) as error:
+            access.resolve(dict(reference=child))
+        self.assertEqual(error.exception.status, 403)
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT permission,share_mode FROM cf_dir_acl WHERE id=%s', (shared['id'],))
+            self.assertEqual(cursor.fetchone(), ('r', 0))
+
     def test_independent_acl_address_not_added_to_shared_list(self):
         ref = {**self.references(1)[0], 'path': '/folder', 'kind': 'dir'}
         with self.connection.cursor() as cursor:

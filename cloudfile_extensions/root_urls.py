@@ -43,13 +43,19 @@ if getattr(settings, "CLOUDFILE_ADMIN_POLICY_ENABLED", not getattr(settings, "CL
     if getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False):
         raise ImproperlyConfigured("Administrator and session policy route ownership must be distinct")
     from .authorization.admin_http import AdministratorPolicyView
-    from .authorization.native_http import NativeEffectiveView, NativeRepoView
+    from .authorization.native_http import NativeEffectiveView, NativeRepoView, NativeDirectoryAccessView
     urlpatterns.extend([
         re_path(r"^api/v2.1/repos/(?P<repo_id>[-0-9a-f]{36})/$",
             NativeRepoView.as_view(), name="native-policy-repo"),
         # Native authentication shares the deployed C policy; no administrator content grant.
         re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/effective-permission/$",
             NativeEffectiveView.as_view(), name="native-effective-permission"),
+        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/shared-directories/$",
+            NativeDirectoryAccessView.as_view(operation='shared'), name="shared-directories"),
+        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-address/$",
+            NativeDirectoryAccessView.as_view(operation='resolve'), name="directory-address"),
+        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-entries/$",
+            NativeDirectoryAccessView.as_view(operation='entries'), name="directory-entries"),
         re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-rules/$",
             AdministratorPolicyView.as_view(), name="administrator-policy-list"),
         re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-rules/(?P<rule_id>[-0-9a-f]{36})/$",

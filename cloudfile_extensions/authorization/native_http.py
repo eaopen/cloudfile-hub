@@ -26,6 +26,61 @@ class NativeEffectiveView(APIView):
         return response(request, inspect)
 
 
+
+class NativeDirectoryAccessView(APIView):
+    """The same directory API under existing authenticated CE sessions.
+
+    v0.9 native OAuth deployments and hosted authorization deployments expose
+    exactly the same read-only directory paths and result shapes. No EAP
+    endpoint, new login or administrator impersonation is involved.
+    """
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAuthenticated,)
+    http_method_names = ('get',)
+    operation = 'resolve'
+
+    def get(self, request):
+        from .directory_access import DirectoryAccessService
+        from .directory_entries import DirectoryEntriesService
+
+        def read(current):
+            params = request.GET
+            # Match the hosted directory view: GET bodies are not another way
+            # to smuggle an actor, subject or hidden access-mode selector.
+            if request._request.read(1):
+                raise invalid('Directory queries must not contain a body')
+            if any(len(params.getlist(key)) != 1 for key in params):
+                raise invalid('Repeated directory query parameter')
+            if self.operation == 'shared':
+                if set(params) - {'limit', 'after'}:
+                    raise invalid('Invalid shared-directory query')
+            elif self.operation in ('resolve', 'entries'):
+                required = {'repo_id', 'path', 'kind'}
+                optional = {'shared_root'} | ({'limit', 'after'} if self.operation == 'entries' else set())
+                if not required <= set(params) or set(params) - required - optional:
+                    raise invalid('Directory reference required')
+            else:
+                raise ContractError('POLICY_UNAVAILABLE', 'Unknown native directory operation', 503)
+
+            limit = params.get('limit', '50')
+            if self.operation != 'resolve':
+                if (not re.fullmatch(r'[1-9][0-9]{0,2}', limit)
+                        or int(limit) > 100):
+                    raise invalid('Invalid directory page limit')
+            if self.operation == 'shared':
+                return DirectoryAccessService(current).shared_with_me(
+                    limit=int(limit), after=params.get('after'))
+
+            value = {'reference': resource_ref({key: params[key]
+                for key in ('repo_id', 'path', 'kind')})}
+            if 'shared_root' in params:
+                value['shared_root'] = params['shared_root']
+            if self.operation == 'resolve':
+                return DirectoryAccessService(current).resolve(value)
+            return DirectoryEntriesService(current).list(
+                value, limit=int(limit), after=params.get('after'))
+        return response(request, read)
+
 def directory_page(request, repo_id):
     """CE response shape with native snapshots and current per-entry C decisions.
 

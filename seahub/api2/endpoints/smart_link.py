@@ -80,10 +80,27 @@ class SmartLink(APIView):
                 error_msg = 'File %s not found.' % path
                 return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
-        # permission check
-        if not check_folder_permission(request, repo_id, '/'):
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+        # An Internal Link is a locator, not an authorization token. For
+        # directories, use CloudFile's current scoped directory authority when
+        # available, including users with only an independently shared folder.
+        # No fallback to plain repo permission after policy failure.
+        # CE-compatible requests must stay on the stock path when the native
+        # repository permission already works. Once a library is managed, the
+        # native C legacy guard rejects that path and we verify scoped ACL
+        # instead; never downgrade after a failed scoped decision.
+        ce_allowed = check_folder_permission(request, repo_id, '/')
+        location = None
+        if not ce_allowed and is_dir:
+            from cloudfile_extensions.authorization.internal_link import scoped_directory_address
+            from cloudfile_extensions.common.errors import ContractError
+            try:
+                location = scoped_directory_address(request, repo_id, path)
+            except ContractError as error:
+                return api_error(error.status, error.message)
+            except Exception:
+                return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Directory policy unavailable.')
+        if not ce_allowed and location is None:
+            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         # make sure path:
         # 1. starts with '/'
@@ -140,16 +157,33 @@ class SmartLinkToken(APIView):
         filename = uuid_map.filename
         is_dir = uuid_map.is_dir
 
-        # permission check
-        if not check_folder_permission(request, repo_id, parent_path):
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
         full_path = posixpath.join(parent_path, filename)
+
+        # Use the same currently authenticated location/ACL semantics as
+        # directory-address; do not grant based on possession of this UUID.
+        ce_allowed = check_folder_permission(request, repo_id, parent_path)
+        location = None
+        if is_dir and not ce_allowed:
+            from cloudfile_extensions.authorization.internal_link import scoped_directory_address
+            from cloudfile_extensions.common.errors import ContractError
+            try:
+                location = scoped_directory_address(request, repo_id, full_path)
+            except ContractError as error:
+                return api_error(error.status, error.message)
+            except Exception:
+                return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Directory policy unavailable.')
+        if not ce_allowed and location is None:
+            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         result = {}
         result['repo_id'] = repo_id
         result['path'] = full_path
         result['is_dir'] = is_dir
+        if location is not None:
+            # Additive response fields: old consumers still use repo_id/path,
+            # while a directory-only consumer must respect root_path.
+            result.update(root_path=location['root_path'],
+                          initial_path=location['initial_path'],
+                          permission=location['permission'])
 
         return Response(result)
