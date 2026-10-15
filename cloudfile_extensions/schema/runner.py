@@ -181,9 +181,8 @@ class SchemaRunner:
             for index, step in enumerate(migration.steps, 1):
                 # DDL may have committed before a crash. Verify actual structure before replay.
                 if not self._verify(step):
-                    if migration.version == '042_unified_directory_acl' and step['sql'] == 'DROP TABLE cf_dir_share':
-                        from .unified_acl import merge_shares
-                        merge_shares(self)
+                    # Retired independent sharing was never enabled. Version
+                    # 042 drops the table without importing old grants.
                     self._query(step["sql"])
                     self.connection.commit()
                 if not self._verify(step):
