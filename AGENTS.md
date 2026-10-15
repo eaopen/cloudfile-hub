@@ -154,8 +154,13 @@ is_enabled` 要**放在 `register()` 内部**而不是模块顶层——否则 `
 ## 测试
 
 ```bash
-python3 -m pytest cloudfile_ext/ -q
+python3 -m pytest cloudfile_extensions/tests cloudfile_ext/ -q
 ```
+
+两个包都要跑。`cloudfile_extensions/` 承载 v0.9 身份、授权、schema 与编辑运行时，
+测试数量最多；`cloudfile_ext/` 是 CE 14 扩展与旧接口门面。只跑其中一个会漏掉另一半
+（例如 `cloudfile_ext/tests/test_directory_page.py` 覆盖旧包侧的调用点，改动
+`cloudfile_extensions/authorization/` 时它同样会红）。
 
 `dev` 已包含框架以及 ACL、SSO 组织映射、审计、搜索、外部源和文件动作测试。
 当前状态与未完成项见 `docs/CAPABILITIES.md`，不要把“存在开关或包”当成已交付。
@@ -163,6 +168,14 @@ python3 -m pytest cloudfile_ext/ -q
 跨层语义（同一套规则同时在 Hub 和 seafile-server 实现）必须用共享用例集驱动
 两端，规格放在 `cloudfile-docker/docs/`。改语义的正确顺序：先改规格 → 再改
 用例集 → 最后同时改两处实现。只改一处 = 引入漂移。
+
+`test_scoped_policy_core.py` 现场编译 `cloudfile-server` 的
+`server/cloudfile-acl.c`，并读取 `cloudfile-docker` 的
+`docs/directory-access-v09-cases.json`，因此它要求两个兄弟仓都停在 `dev`：
+`cf_acl_scoped_abi_version` 必须与 Hub 适配层要求的版本一致（旧检出返回 1，
+`dev` 返回 2），用例集也必须是同一条 `dev` 的版本。兄弟仓落后时这个文件会整片
+变红——ABI 不符报 `Scoped policy core is unavailable`，用例集不符报 expected
+与 actual 语义不一致。那是检出状态问题，不要当成本次改动引入的缺陷去改代码。
 
 上游自带的回归：
 
