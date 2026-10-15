@@ -9,6 +9,7 @@ from ..directory.project import qualified
 from .core import PolicyCore
 from .rules import ACLRules
 from .qualification import NativeLibraryQualification
+from .global_admin import system_admin_content_role
 
 
 class LibraryOwnerManagement:
@@ -141,7 +142,7 @@ class LibraryOwnerManagement:
             raise ContractError("POLICY_UNAVAILABLE", "Invalid library management grant", 503)
         return bool(groups)
 
-    def _global_library_admin(self, cursor, username):
+    def _global_library_admin(self, cursor, username, *, content=False):
         """Resolve the account's administrator role under the same transaction."""
         from seahub.constants import SYSTEM_ADMIN
         from seahub.role_permissions.utils import get_enabled_admin_role_permissions_by_role
@@ -156,7 +157,11 @@ class LibraryOwnerManagement:
         if len(assigned) > 1 or any(len(row) != 1 or not isinstance(row[0], str) for row in assigned):
             raise ContractError("POLICY_UNAVAILABLE", "Administrator role is invalid", 503)
         role = assigned[0][0] if assigned else SYSTEM_ADMIN
-        return get_enabled_admin_role_permissions_by_role(role)["can_manage_library"] is True
+        permissions = get_enabled_admin_role_permissions_by_role(role)
+        # Content qualification is narrower than background management and is
+        # re-read under the same lock as account status, ACL and library state.
+        return (system_admin_content_role(role, permissions) if content else
+                permissions["can_manage_library"] is True)
 
     def can_manage_library(self):
         return (self.is_owner or getattr(self, "is_library_admin", False) or

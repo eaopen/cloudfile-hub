@@ -10,6 +10,7 @@ import seaserv
 from seaserv import seafile_api, ccnet_api
 
 from django.core.cache import cache
+from cloudfile_extensions.authorization.global_admin import is_system_library_admin
 
 logger = logging.getLogger(__name__)
 
@@ -45,12 +46,6 @@ def is_repo_admin(username, repo_id, *, strict=False):
         native_permission = seafile_api.check_permission(repo_id, username)
         if native_permission not in (PERMISSION_READ_WRITE, 'r'):
             return False
-        from seahub.base.accounts import User
-        # Reuse native role capabilities; daily_admin is intentionally included
-        # when can_manage_library is enabled, without per-library grant rows.
-        native_user = User.objects.get(email=username)
-        if native_user.admin_permissions.can_manage_library():
-            return True
         user_share_permission = ExtraSharePermission.objects. \
             get_user_permission(repo_id, username)
         if user_share_permission == PERMISSION_ADMIN:
@@ -89,6 +84,15 @@ def is_repo_admin(username, repo_id, *, strict=False):
         group_id = int(repo_owner.split('@')[0])
         if is_group_admin(group_id, username):
             return True
+
+    # Resolve global content qualification only after native per-library paths;
+    # loading User here would pull unrelated Seahub settings into those paths.
+    try:
+        return is_system_library_admin(username)
+    except Exception as e:
+        logger.error(e)
+        if strict:
+            raise
 
     return False
 

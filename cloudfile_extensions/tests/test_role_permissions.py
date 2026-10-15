@@ -43,10 +43,11 @@ class RolePermissionTests(unittest.TestCase):
 
         class Cursor:
             rows = ()
+            active = staff = 1
 
             def execute(self, query, params):
                 if 'email,is_active,is_staff' in query:
-                    self.rows = ((username, 1, 1),)
+                    self.rows = ((username, self.active, self.staff),)
                 elif 'user,login_id' in query:
                     self.rows = ((username, actor),)
                 elif 'information_schema' in query:
@@ -91,6 +92,15 @@ class RolePermissionTests(unittest.TestCase):
         content._global_library_admin = lambda cursor, user: False
         content.core.evaluate.reset_mock()
         self.assertFalse(content.authorize(Cursor(), actor, reference))
+        content.core.evaluate.assert_not_called()
+        # Revocation must clear an earlier allow on this very authority object.
+        content._global_library_admin = Mock(return_value=True)
+        for active, staff in ((0, 1), (1, 0)):
+            cursor = Cursor()
+            cursor.active, cursor.staff = active, staff
+            self.assertFalse(content.authorize(cursor, actor, reference))
+            self.assertFalse(content.is_global_library_admin)
+        content._global_library_admin.assert_not_called()
         content.core.evaluate.assert_not_called()
 
     def test_admin_role_api_exposes_default_system_role_and_restricts_assignment(self):

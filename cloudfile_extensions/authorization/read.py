@@ -11,8 +11,11 @@ class ContentReadAuthority(DirectoryManagement):
         return bool(getattr(self, "_management_diagnostic", False))
 
     def requires_system_admin(self):
-        # Reuse the existing live global-library qualification for content.
+        # Only the live system role can add implicit content qualification.
         return True
+
+    def _global_library_admin(self, cursor, username):
+        return super()._global_library_admin(cursor, username, content=True)
 
     def system_admin_qualification_override(self):
         return True

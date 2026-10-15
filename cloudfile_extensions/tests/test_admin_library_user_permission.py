@@ -457,7 +457,8 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         native.check_permission.return_value = 'rw'
         native.get_repo_owner.return_value = 'owner@example.com'
         namespace = dict(ExtraSharePermission=shares, logger=Mock(), PERMISSION_ADMIN='admin',
-                         PERMISSION_READ_WRITE='rw', seafile_api=native)
+                         PERMISSION_READ_WRITE='rw', seafile_api=native,
+                         is_system_library_admin=lambda _: False)
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'), namespace)
         self.assertFalse(namespace['is_repo_admin']('user', 'repo'))
         with self.assertRaises(RuntimeError):
@@ -476,7 +477,8 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
         native.get_group_shared_repo_by_path.return_value = None
         namespace = dict(ExtraSharePermission=users, ExtraGroupsSharePermission=groups,
                          logger=Mock(), PERMISSION_ADMIN='admin', PERMISSION_READ_WRITE='rw',
-                         seafile_api=native, is_group_admin=lambda group, user: True)
+                         seafile_api=native, is_group_admin=lambda group, user: True,
+                         is_system_library_admin=lambda _: False)
         exec(compile(ast.Module(body=[function], type_ignores=[]), str(source), 'exec'), namespace)
         self.assertFalse(namespace['is_repo_admin']('manager@example.com', 'repo'))
         native.get_group_shared_repo_by_path.return_value = object()
