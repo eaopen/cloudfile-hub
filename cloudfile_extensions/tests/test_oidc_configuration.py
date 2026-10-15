@@ -70,6 +70,45 @@ class OIDCHostConfigurationTests(unittest.TestCase):
         self.assertIn(legacy, settings.AUTHENTICATION_BACKENDS)
         self.assertEqual(settings.AUTHENTICATION_BACKENDS.count(BACKEND), 1)
 
+    def test_http_oauth_entry_keeps_nonsecure_cookies_despite_https_callback(self):
+        # Etech's case: users log in over HTTP through Authentik OAuth while the
+        # native OIDC callback is registered on HTTPS. The OIDC callback must not
+        # flip sessionid/csrftoken to Secure or the HTTP browser drops them.
+        settings = self.configured()
+        settings.ENABLE_OAUTH = True
+        settings.OAUTH_REDIRECT_URL = "http://files.example/oauth/callback/"
+        settings.LOGIN_URL = "/oauth/login/"
+        with patch.dict(os.environ, {}, clear=False):
+            configure_oidc_host(settings)
+            self.assertIs(settings.SESSION_COOKIE_SECURE, False)
+            self.assertIs(settings.CSRF_COOKIE_SECURE, False)
+            self.assertTrue(settings.SESSION_COOKIE_HTTPONLY)
+            # The HTTPS callback is still registered and the OAuth login entry
+            # is untouched; only cookie security followed the public entry.
+            self.assertEqual(settings.LOGIN_URL, "/oauth/login/")
+            self.assertTrue(settings.ENABLE_OAUTH)
+
+    def test_explicit_public_url_is_authoritative_for_cookies(self):
+        for public, secure in (("http://files.example", False), ("https://files.example/", True)):
+            settings = self.configured()
+            settings.CLOUDFILE_PUBLIC_URL = public
+            with self.subTest(public=public), patch.dict(os.environ, {}, clear=False):
+                configure_oidc_host(settings)
+                self.assertIs(settings.SESSION_COOKIE_SECURE, secure)
+                self.assertIs(settings.CSRF_COOKIE_SECURE, secure)
+                self.assertTrue(settings.SESSION_COOKIE_HTTPONLY)
+
+    def test_invalid_public_url_rejected_without_mutation(self):
+        for public in ("files.example", "https://files.example/seafile", "ftp://files.example",
+                "https://files.example/?next=/", " https://files.example", "https://files.example\\x"):
+            with self.subTest(public=public):
+                settings = self.configured()
+                settings.CLOUDFILE_PUBLIC_URL = public
+                before = vars(settings).copy()
+                with self.assertRaises(ImproperlyConfigured):
+                    configure_oidc_host(settings)
+                self.assertEqual(vars(settings), before)
+
     def test_http_callback_configures_nonsecure_browser_cookies_and_oauthlib(self):
         settings = self.configured()
         settings.CLOUDFILE_OIDC_CONFIG = dict(settings.CLOUDFILE_OIDC_CONFIG,

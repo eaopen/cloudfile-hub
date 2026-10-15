@@ -1,6 +1,7 @@
 """Opt-in OIDC host wiring; no connections, authentication or readiness claim."""
 
 from urllib.parse import urlsplit
+import logging
 import os
 
 from django.core.exceptions import ImproperlyConfigured
@@ -8,10 +9,59 @@ from django.core.exceptions import ImproperlyConfigured
 from .oidc import OIDCConfig
 
 
+logger = logging.getLogger(__name__)
+
 LOGIN_PREFIX = "api/v2.1/cloudfile/extensions/identity/v1/"
 SESSION_MIDDLEWARE = "django.contrib.sessions.middleware.SessionMiddleware"
 GUARDED_MIDDLEWARE = "cloudfile_extensions.identity.session_middleware.CloudFileSessionMiddleware"
 BACKEND = "cloudfile_extensions.identity.native_backend.CloudFileOIDCBackend"
+
+
+def public_browser_scheme(settings, oidc):
+    """Return 'http' or 'https' for the deployment's public CloudFile entry.
+
+    Cookie security must follow the address real browsers use, never one login
+    callback. Etech logs in over HTTP through the legacy Authentik OAuth entry,
+    so inferring Secure from an HTTPS native OIDC callback would mark sessionid
+    and csrftoken Secure and the browser would stop sending them -- every user
+    logged out while the OIDC login itself was never used.
+
+    ``CLOUDFILE_PUBLIC_URL`` declares the single public entry and wins. Without
+    it every configured login redirect must agree; the legacy OAuth entry is
+    preferred when they disagree because that is the entry existing users
+    already have, and the mismatch is reported instead of silently flipping
+    cookies. Both entries stay under the same SITE_ROOT, so one cookie path
+    continues to serve both.
+    """
+    explicit = getattr(settings, "CLOUDFILE_PUBLIC_URL", None)
+    if explicit is not None and explicit != "":
+        if (not isinstance(explicit, str) or explicit != explicit.strip()
+                or len(explicit) > 255):
+            raise ValueError()
+        parsed = urlsplit(explicit)
+        if (parsed.scheme not in ("http", "https") or not parsed.hostname
+                or parsed.username or parsed.password or parsed.query or parsed.fragment
+                or parsed.path not in ("", "/") or parsed.netloc != parsed.netloc.lower()
+                or any(ord(char) < 33 or ord(char) > 126 for char in explicit)
+                or any(mark in explicit for mark in ("%", "\\"))):
+            raise ValueError()
+        return parsed.scheme
+    oidc_scheme = urlsplit(oidc.redirect_uri).scheme
+    oauth_scheme = None
+    if getattr(settings, "ENABLE_OAUTH", False) is True:
+        value = getattr(settings, "OAUTH_REDIRECT_URL", None)
+        if isinstance(value, str) and value.strip():
+            oauth_scheme = urlsplit(value).scheme
+    if oauth_scheme not in ("http", "https"):
+        oauth_scheme = None
+    if oidc_scheme not in ("http", "https"):
+        raise ValueError()
+    if oauth_scheme is None or oauth_scheme == oidc_scheme:
+        return oidc_scheme
+    logger.warning("CloudFile: the legacy OAuth and native OIDC login entries use "
+        "different schemes; cookie security follows the legacy OAuth entry. Declare "
+        "CLOUDFILE_PUBLIC_URL to state one public entry explicitly.")
+    return oauth_scheme
 
 
 def configure_oidc_host(settings):
@@ -67,6 +117,9 @@ def configure_oidc_host(settings):
         existing_scope = getattr(settings, "CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE", None)
         if existing_scope is not None and existing_scope is not login_resources_scope:
             raise ValueError()
+        # Resolve the browser cookie scheme here, before any mutation, so an
+        # ambiguous public entry fails the whole host instead of half-applying.
+        public_secure = public_browser_scheme(settings, oidc) == "https"
     except Exception:
         raise ImproperlyConfigured("CloudFile OIDC host requires valid OIDC/policy configuration, "
             "fixed callback paths, database sessions and one session middleware; "
@@ -81,16 +134,19 @@ def configure_oidc_host(settings):
     settings.MIDDLEWARE = [GUARDED_MIDDLEWARE if entry == SESSION_MIDDLEWARE else entry
                            for entry in middleware]
     settings.AUTHENTICATION_BACKENDS = backends if BACKEND in backends else backends + (BACKEND,)
-    # Browser cookies follow the actual application scheme. On internal
-    # HTTP, Secure would make the browser discard the session entirely.
-    callback_secure = urlsplit(oidc.redirect_uri).scheme == "https"
-    if not callback_secure or any(urlsplit(value).scheme == "http" for value in (
-            oidc.issuer, oidc.authorization_url, oidc.token_url,
-            oidc.userinfo_url, oidc.jwks_url)):
+    # Browser cookies follow the deployment's public CloudFile entry, not the
+    # OIDC callback scheme: an HTTPS callback on an HTTP deployment would mark
+    # the legacy OAuth session Secure and the browser would stop sending it.
+    # HttpOnly, SameSite and CSRF stay at their Django defaults; both login
+    # entries live under SITE_ROOT, so one cookie path still serves both.
+    if not public_secure or any(urlsplit(value).scheme == "http" for value in (
+            oidc.redirect_uri, oidc.issuer, oidc.authorization_url,
+            oidc.token_url, oidc.userinfo_url, oidc.jwks_url)):
         # oauthlib refuses HTTP authorization even when the deployment's
-        # fixed callback/IdP URL is explicitly HTTP; this is required for
-        # native HTTP-mode OIDC. No redirect endpoint is taken from requests.
+        # fixed public entry or IdP URL is explicitly HTTP; this is required
+        # for HTTP-mode deployments. It is independent of cookie security. No
+        # redirect endpoint is taken from requests.
         os.environ["OAUTHLIB_INSECURE_TRANSPORT"] = "1"
-    settings.SESSION_COOKIE_SECURE = callback_secure
+    settings.SESSION_COOKIE_SECURE = public_secure
     settings.SESSION_COOKIE_HTTPONLY = True
-    settings.CSRF_COOKIE_SECURE = callback_secure
+    settings.CSRF_COOKIE_SECURE = public_secure
