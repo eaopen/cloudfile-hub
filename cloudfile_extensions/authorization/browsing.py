@@ -52,6 +52,12 @@ def web_list(kind):
     def decorate(view):
         @wraps(view)
         def guarded(self, request, *args, **kwargs):
+            # Native EAP logins use the same scoped policy without requiring a second OIDC setup.
+            if kind == 'directory' and getattr(settings, 'CF_ENABLE_SSO', False):
+                from .native_read import enabled as native_enabled
+                if native_enabled():
+                    from .native_http import directory_page
+                    return directory_page(request, kwargs.get('repo_id') or args[0])
             scope = getattr(settings, 'CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE', None)
             resources = getattr(settings, 'CLOUDFILE_OIDC_LOGIN_RESOURCES', None)
             if scope is None and resources is None:

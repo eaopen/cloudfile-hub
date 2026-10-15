@@ -39,6 +39,9 @@ class CapabilitiesView(APIView):
         implementations = administrator_policy_implementation_registry(implementations, gunicorn._host,
             enabled=getattr(settings, 'CLOUDFILE_ADMIN_POLICY_ENABLED', not getattr(settings, 'CLOUDFILE_AUTHORIZATION_ENABLED', False)),
             native_ready=native_administrator_ready)
+        from .authorization.native_read import ready
+        from .capabilities import native_read_implementation_registry
+        implementations = native_read_implementation_registry(implementations, ready=ready)
         return Response(build_capability_document(
             configured, seafile_version=seafile_version, webdav_enabled=webdav_enabled,
             implementation_registry=implementations

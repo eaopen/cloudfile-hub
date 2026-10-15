@@ -287,3 +287,16 @@ def local_edit_implementation_registry(base, host, *, local_edit_enabled, oidc_e
                                          dependencies=registry.implementations[name].dependencies,
                                          default_enabled=True)
     return SimpleNamespace(implementations=implementations)
+
+
+def native_read_implementation_registry(base, *, ready):
+    """Advertise installed native reads only after dependencies are available."""
+    from dataclasses import replace
+    from types import SimpleNamespace
+    if ready() is not True:
+        return base
+    implementations = dict(base.implementations)
+    for name in ('directory.acl', 'directory.acl.effective'):
+        implementations[name] = replace(implementations[name], implemented=True,
+            default_enabled=True, provider='native-session', dependencies=('auth.basic',))
+    return SimpleNamespace(implementations=implementations)
