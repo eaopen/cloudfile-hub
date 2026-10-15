@@ -73,9 +73,8 @@ class EditingUploadView(View):
     def dispatch(self, request, *args, **kwargs):
         request_id = str(uuid4())
         try:
+            from ..identity.browser_session import browser_session
             from ..identity.native_session import SESSION_REFERENCE_KEY
-            from ..identity.read_ticket_http import native_download_actor
-            from ..identity.session_authority import OIDCSessionAuthority
             from ..identity.ticket_transport import _call
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "File commit requires POST", 405)
@@ -83,9 +82,8 @@ class EditingUploadView(View):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure session is required", 401)
             if request.GET or request.headers.get("Authorization") or request.headers.get("Content-Encoding"):
                 raise invalid("File commit requires a native session multipart form")
-            actor = native_download_actor(request)
             with login_resources_scope() as resources:
-                authority = OIDCSessionAuthority(resources)
+                actor, authority = browser_session(request, resources)
                 authority.check(request)
                 csrf = CsrfViewMiddleware(lambda _: None)
                 csrf.process_request(request)
@@ -225,8 +223,7 @@ class EditingCheckinView(DirectoryPolicyView):
     def dispatch(self, request, *args, **kwargs):
         request_id = str(uuid4())
         try:
-            from ..identity.read_ticket_http import native_download_actor
-            from ..identity.session_authority import OIDCSessionAuthority
+            from ..identity.browser_session import browser_session
             from ..identity.ticket_transport import _call
             if request.method != "POST" or args or kwargs:
                 raise ContractError("METHOD_NOT_ALLOWED", "Checkin requires POST", 405)
@@ -234,9 +231,8 @@ class EditingCheckinView(DirectoryPolicyView):
                 raise ContractError("AUTHENTICATION_REQUIRED", "Secure session is required", 401)
             if request.GET or request.headers.get("Authorization") or request.headers.get("Content-Encoding"):
                 raise invalid("Checkin requires a native session JSON request")
-            actor = native_download_actor(request)
             with login_resources_scope() as resources:
-                authority = OIDCSessionAuthority(resources)
+                actor, authority = browser_session(request, resources)
                 authority.check(request)
                 csrf = CsrfViewMiddleware(lambda _: None)
                 csrf.process_request(request)

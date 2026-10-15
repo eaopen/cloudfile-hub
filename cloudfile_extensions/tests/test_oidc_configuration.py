@@ -55,6 +55,21 @@ class OIDCHostConfigurationTests(unittest.TestCase):
         configure_oidc_host(settings)
         self.assertEqual(vars(settings), before)
 
+    def test_parallel_oauth_preserves_login_provider_and_backend(self):
+        settings = self.configured()
+        settings.ENABLE_OAUTH = True
+        settings.LOGIN_URL = '/oauth/login/'
+        settings.OAUTH_PROVIDER = 'existing-provider'
+        legacy = 'seahub.oauth.backends.OauthRemoteUserBackend'
+        settings.AUTHENTICATION_BACKENDS += (legacy,)
+        configure_oidc_host(settings)
+        configure_oidc_host(settings)
+        self.assertTrue(settings.ENABLE_OAUTH)
+        self.assertEqual(settings.LOGIN_URL, '/oauth/login/')
+        self.assertEqual(settings.OAUTH_PROVIDER, 'existing-provider')
+        self.assertIn(legacy, settings.AUTHENTICATION_BACKENDS)
+        self.assertEqual(settings.AUTHENTICATION_BACKENDS.count(BACKEND), 1)
+
     def test_http_callback_configures_nonsecure_browser_cookies_and_oauthlib(self):
         settings = self.configured()
         settings.CLOUDFILE_OIDC_CONFIG = dict(settings.CLOUDFILE_OIDC_CONFIG,
@@ -85,8 +100,8 @@ class OIDCHostConfigurationTests(unittest.TestCase):
         configure_oidc_host(settings)
         self.assertTrue(settings.CLOUDFILE_OIDC_BACKCHANNEL_ENABLED)
 
-    def test_missing_policy_legacy_oauth_and_unguarded_sessions_rejected_without_mutation(self):
-        for field, value in (("CLOUDFILE_POLICY_CONFIG", None), ("ENABLE_OAUTH", True),
+    def test_missing_policy_and_unguarded_sessions_rejected_without_mutation(self):
+        for field, value in (("CLOUDFILE_POLICY_CONFIG", None),
                 ("SESSION_ENGINE", "django.contrib.sessions.backends.cache"),
                 ("MIDDLEWARE", []), ("MIDDLEWARE", [SESSION_MIDDLEWARE, GUARDED_MIDDLEWARE]),
                 ("CLOUDFILE_OIDC_LOGIN_RESOURCES", object()),

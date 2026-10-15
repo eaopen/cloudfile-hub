@@ -71,13 +71,14 @@ class EditingUploadTests(unittest.TestCase):
         @contextmanager
         def guard(request):
             yield None
+        authority = Mock()
+        authority.guard.side_effect = guard
         with patch.dict("os.environ", {"SEAFILE_DATA_DIR": directory}), \
-             patch("cloudfile_extensions.identity.read_ticket_http.native_download_actor",
-                   return_value=Mock(user_id="employee", native_username="employee")), \
+             patch("cloudfile_extensions.identity.browser_session.browser_session",
+                   return_value=(Mock(user_id="employee", native_username="employee"),
+                                 authority)), \
              patch("cloudfile_extensions.editing.upload.login_resources_scope", login_scope), \
-             patch("cloudfile_extensions.identity.session_authority.OIDCSessionAuthority") as oidc, \
              patch("cloudfile_extensions.identity.ticket_transport._call", side_effect=native_result) as rpc:
-            oidc.return_value.guard.side_effect = guard
             yield rpc
 
     def test_commit_receipt_is_read_after_native_ack(self):

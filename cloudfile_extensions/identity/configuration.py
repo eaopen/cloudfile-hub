@@ -32,8 +32,6 @@ def configure_oidc_host(settings):
             raise ValueError()
         if getattr(settings, "CLOUDFILE_POLICY_CONFIG", None) is None:
             raise ValueError()
-        if getattr(settings, "ENABLE_OAUTH", False):
-            raise ValueError()  # Do not expose the legacy OAuth callback as a parallel login.
         if settings.SESSION_ENGINE != "django.contrib.sessions.backends.db":
             raise ValueError()
         if getattr(settings, "CLOUDFILE_OIDC_LOGIN_RESOURCES", None) is not None:
@@ -72,13 +70,14 @@ def configure_oidc_host(settings):
     except Exception:
         raise ImproperlyConfigured("CloudFile OIDC host requires valid OIDC/policy configuration, "
             "fixed callback paths, database sessions and one session middleware; "
-            "legacy OAuth and alternative login resource ownership must be disabled") from None
+            "alternative login resource ownership must be disabled") from None
     settings.CLOUDFILE_OIDC_CONFIG = oidc
     settings.CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE = login_resources_scope
     settings.CLOUDFILE_OIDC_RETURN_PATH = return_path
-    # Seahub's login decorators must reach the guarded login after the legacy
-    # OAuth routes are disabled; retaining /oauth/login/ strands browser users.
-    settings.LOGIN_URL = site_root + LOGIN_PREFIX + "begin/"
+    # Preserve the established login entry when OAuth is enabled. Native OIDC
+    # always has its own route and never replaces the legacy callback.
+    if not getattr(settings, "ENABLE_OAUTH", False):
+        settings.LOGIN_URL = site_root + LOGIN_PREFIX + "begin/"
     settings.MIDDLEWARE = [GUARDED_MIDDLEWARE if entry == SESSION_MIDDLEWARE else entry
                            for entry in middleware]
     settings.AUTHENTICATION_BACKENDS = backends if BACKEND in backends else backends + (BACKEND,)

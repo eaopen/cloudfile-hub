@@ -43,6 +43,26 @@ class DownloadActorTests(unittest.TestCase):
             'seahub.base.accounts': accounts, 'seahub.profile.models': profiles}
         with patch.dict(sys.modules, modules):
             self.check_invalid_actors(User, BACKEND_SESSION_KEY, SESSION_KEY)
+            from django.test import override_settings
+            from cloudfile_extensions.identity.browser_session import legacy_browser_actor, LEGACY_BACKEND
+            user = User("native-user")
+            user.is_active = True
+            request = SimpleNamespace(user=user, session={
+                BACKEND_SESSION_KEY: LEGACY_BACKEND, SESSION_KEY: user.username},
+                is_secure=lambda: True)
+            profile = SimpleNamespace(user=user.username, login_id="business-uid")
+            profiles.Profile.objects.get = lambda **kwargs: profile
+            with override_settings(ENABLE_OAUTH=True, AUTHENTICATION_BACKENDS=(LEGACY_BACKEND,)), \
+                    patch("cloudfile_extensions.identity.read_ticket_http.CloudFileOIDCBackend") as backend:
+                backend.return_value.get_user.return_value = user
+                actor = legacy_browser_actor(request)
+                self.assertEqual((actor.user_id, actor.native_username), ("business-uid", user.username))
+                # A legacy session remains ineligible for native OIDC tickets.
+                with self.assertRaises(ContractError):
+                    native_download_actor(request)
+                backend.return_value.get_user.return_value = None
+                with self.assertRaises(ContractError):
+                    legacy_browser_actor(request)
 
     def check_invalid_actors(self, User, BACKEND_SESSION_KEY, SESSION_KEY):
         for fixture in ("fake", "missing", "wrong-name", "wrong-backend", "inactive"):

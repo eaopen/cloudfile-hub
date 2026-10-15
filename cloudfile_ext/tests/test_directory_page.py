@@ -148,8 +148,9 @@ class HubEnvelopeTest(unittest.TestCase):
                    nullcontext=nullcontext, wraps=__import__('functools').wraps,
                    uuid4=__import__('uuid').uuid4, posixpath=__import__('posixpath'),
                    Response=Response, ContractError=DirectoryPageError, LoginResources=Resources,
-                   native_download_actor=lambda request: SimpleNamespace(user_id='id', native_username='user'),
-                   OIDCSessionAuthority=lambda resources: SimpleNamespace(check=lambda request: None),
+                   browser_session=lambda request, resources: (
+                       SimpleNamespace(user_id='id', native_username='user'),
+                       SimpleNamespace(check=lambda request: None)),
                    PolicyCore=lambda config: None, ContentReadAuthority=lambda *args, **kwargs: Authority())
         exec(compile(ast.Module(body=functions, type_ignores=[]), 'current-browsing.py', 'exec'), env)
         view = endpoint(api)

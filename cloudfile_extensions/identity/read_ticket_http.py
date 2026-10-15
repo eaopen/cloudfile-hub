@@ -25,6 +25,11 @@ from .transfer_audit import record_transfer, audit_peer_ip
 
 def native_download_actor(request):
     """Fixed OIDC session/backend and bidirectional native Profile binding."""
+    return _native_actor(request, backend=BACKEND)
+
+
+def _native_actor(request, *, backend):
+    """Reload a fixed trusted backend's native account and Profile mapping."""
     from seahub.auth import BACKEND_SESSION_KEY, SESSION_KEY
     from seahub.base.accounts import User
     from seahub.profile.models import Profile
@@ -32,7 +37,7 @@ def native_download_actor(request):
     user = getattr(request, "user", None)
     session = getattr(request, "session", None)
     if (not transport_allowed(request) or session is None
-            or session.get(BACKEND_SESSION_KEY) != BACKEND
+            or session.get(BACKEND_SESSION_KEY) != backend
             or not isinstance(user, User) or user.is_authenticated is not True
             or session.get(SESSION_KEY) != user.username or user.is_active is not True):
         raise ContractError("AUTHENTICATION_REQUIRED", "Native OIDC login is required", 401)

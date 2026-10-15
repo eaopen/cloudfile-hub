@@ -68,19 +68,42 @@ def identity_lock(provider, uid, employee, subject):
                 cursor.execute('SELECT RELEASE_LOCK(%s)', [name])
 
 
+def identity_context(uid):
+    """Reuse the configured native directory without enabling the old publisher."""
+    from django.conf import settings
+    scope = getattr(settings, 'CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE', None)
+    if callable(scope):
+        from cloudfile_extensions.identity.resources import LoginResources
+        from cloudfile_extensions.directory.provider import DirectoryProvider
+        with scope() as resources:
+            if (not isinstance(resources, LoginResources)
+                    or resources.oidc.issuer != settings.CF_SSO_EAP_OIDC_ISSUER):
+                raise IdentityConflict('directory issuer mismatch')
+            source = resources.resources.directory_factory()
+            if not isinstance(source, DirectoryProvider):
+                raise IdentityConflict('directory unavailable')
+            try:
+                return source.fetch(uid)
+            finally:
+                source.client.session.close()
+    from cloudfile_ext.registry import registry
+    from . import directory
+    source = directory.active(registry)
+    if source is None:
+        raise IdentityConflict('directory unavailable')
+    return source.context_for_user_id(uid)
+
+
 def provision(provider, info):
     from django.conf import settings
     from django.db import transaction
     from seahub.auth.models import SocialAuthUser
     from seahub.base.accounts import User
     from seahub.profile.models import Profile
-    from cloudfile_ext.registry import registry
-    from . import directory
     uid, employee = identity_pair(info)
     subject = info['sub']
     # Check the same authenticated directory used by membership reconciliation.
-    source = directory.active(registry)
-    context = source.context_for_user_id(uid)
+    context = identity_context(uid)
     if (context['status'] != 'active'
             or context['attributes'].get('employee_no') != employee):
         raise IdentityConflict('directory identity mismatch')
@@ -198,7 +221,7 @@ def callback(request):
         response.set_cookie('seahub_auth', user.username + '@' + api_token.key)
         response.set_cookie('via_oauth', 'true')
         return response
-    except Exception:
+    except Exception as error:
         import logging
-        logging.getLogger(__name__).warning('EAP OIDC login refused; identity or provider unavailable')
+        logging.getLogger(__name__).warning('EAP OIDC login refused; failure_type=%s', type(error).__name__)
         return render_error(request, '统一认证身份暂不可用，请重试或联系管理员。')

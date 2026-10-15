@@ -8,9 +8,8 @@ from django.conf import settings
 from rest_framework.response import Response
 
 from ..common.errors import ContractError
-from ..identity.read_ticket_http import native_download_actor
+from ..identity.browser_session import browser_session
 from ..identity.resources import LoginResources
-from ..identity.session_authority import OIDCSessionAuthority
 from .core import PolicyCore
 from .read import ContentReadAuthority
 
@@ -63,11 +62,10 @@ def web_list(kind):
                 return view(self, request, *args, **kwargs)
             request_id = str(uuid4())
             try:
-                actor = native_download_actor(request)
                 with (scope() if callable(scope) else nullcontext(resources)) as resources:
                     if not isinstance(resources, LoginResources):
                         raise ContractError('POLICY_UNAVAILABLE', 'Browsing authority is unavailable', 503)
-                    session = OIDCSessionAuthority(resources)
+                    actor, session = browser_session(request, resources)
                     session.check(request)
                     with resources.resources.preparation(actor.user_id, request_id) as preparation:
                         preparation.prepare(actor.user_id)

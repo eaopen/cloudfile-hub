@@ -27,8 +27,18 @@ def native_file_version(sql, reference, evidence):
 
 
 def native_session_holder(request, resources):
-    from ..identity.read_ticket_http import native_download_actor
-    actor = native_download_actor(request)
+    """Accept whichever native session the deployment issued, like browsing.
+
+    Selection is by the server session backend, never a client protocol hint:
+    the same dispatch the shared browsing lists use decides whether this is the
+    native OIDC session or the legacy OAuth one, and each is checked at its own
+    strength before it can name an editing holder.
+    """
+    from ..authorization.gunicorn import login_resources_scope
+    from ..identity.browser_session import browser_session
+    with login_resources_scope() as login_resources:
+        actor, authority = browser_session(request, login_resources)
+        authority.check(request)
     if (actor.user_id != resources.write_authority.actor or
             actor.native_username != resources.write_authority.state.username(actor.user_id)):
         raise ContractError('AUTHENTICATION_REQUIRED', 'Editing identity changed', 401)
