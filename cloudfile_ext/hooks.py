@@ -178,10 +178,10 @@ def search_backend_state():
 def is_search_path_denied(username, repo_id, path):
     """Whether a directory ACL hides `path` for `username` in search/metadata.
 
-    Called from seahub.search.utils.is_invisible_path so result sets honour
-    directory-ACL ``invisible``/``none`` rules the same way directory listing
-    does. The import is lazy so this module stays importable when the ACL
-    capability is not installed; returns False when it is off.
+    修改逻辑（2026-10-15 v0.9-only）：不再委托 v0.8 ``is_path_denied``——统一
+    schema 下该读取器恒失败并返回 True，等于把搜索结果全部判为不可见。v0.8
+    规则源已退役，本缝不再有第二套裁决；受管库的结果裁剪由 v0.9 搜索路径
+    （``cloudfile_extensions.search`` 的 native guards）负责，入口权限仍由
+    原生检查约束。保留函数与接缝是为了不改动上游 ``seahub.search.utils``。
     """
-    from cloudfile_ext.acl import service
-    return service.is_path_denied(username, repo_id, path)
+    return False

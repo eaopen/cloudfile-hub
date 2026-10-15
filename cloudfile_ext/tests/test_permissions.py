@@ -54,19 +54,19 @@ def svc(monkeypatch):
     return importlib.import_module('cloudfile_ext.acl.service')
 
 
-def test_effective_perm_forwards_to_apply_dir_acl(svc, monkeypatch):
+def test_effective_perm_passes_path_aware_native_through(svc):
+    """修改逻辑（2026-10-15 v0.9-only）：Hub 不再有第二套目录求解器。
+
+    effective_perm 必须原样返回 path-aware native：受管库由 v0.9 scoped 核心
+    与 C 层受管边界终判，非受管库保持原生 CE 权限。若有人在这里重新接入
+    v0.8 apply_dir_acl 或复制 v0.9 裁决，本用例先失败。
+    """
     from cloudfile_ext.permissions import PermissionService
 
-    calls = []
-
-    def fake_apply(username, repo_id, path, native):
-        calls.append((username, repo_id, path, native))
-        return 'rw'
-
-    monkeypatch.setattr(svc, 'apply_dir_acl', fake_apply)
-    got = PermissionService.effective_perm('u@e.com', 'repo', '/a', 'rw')
-    assert got == 'rw'
-    assert calls == [('u@e.com', 'repo', '/a', 'rw')]
+    assert PermissionService.effective_perm('u@e.com', 'repo', '/secret', 'rw') == 'rw'
+    assert PermissionService.effective_perm('u@e.com', 'repo', '/open', 'r') == 'r'
+    # 无原生权限时保持 None，绝不凭空造权限。
+    assert PermissionService.effective_perm('u@e.com', 'repo', '/x', None) is None
 
 
 def test_can_manage_forwards_to_service_can_manage(svc, monkeypatch):
@@ -81,28 +81,6 @@ def test_can_manage_forwards_to_service_can_manage(svc, monkeypatch):
     monkeypatch.setattr(svc, 'can_manage', fake_can_manage)
     assert PermissionService.can_manage('u@e.com', 'repo', '/a') is True
     assert calls == [('u@e.com', 'repo', '/a')]
-
-
-def test_effective_perm_matches_canonical_behavior(svc, monkeypatch):
-    from cloudfile_ext.permissions import PermissionService
-
-    monkeypatch.setattr(svc, 'is_enabled', lambda name: True)
-    deny = [{'path': '/secret', 'subject_type': 'user',
-             'subject': 'u@e.com', 'permission': 'none', 'inherit': 1}]
-    monkeypatch.setattr(svc, '_load_rules', lambda repo_id: deny)
-    monkeypatch.setattr(svc, '_load_subjects',
-                        lambda username: resolver.subject_set(username))
-
-    # denying rule vetoes, grant path keeps the native
-    assert PermissionService.effective_perm(
-        'u@e.com', 'repo', '/secret', 'rw') is None
-    assert PermissionService.effective_perm(
-        'u@e.com', 'repo', '/open', 'rw') == 'rw'
-
-    # switch off: native passes through unchanged
-    monkeypatch.setattr(svc, 'is_enabled', lambda name: False)
-    assert PermissionService.effective_perm(
-        'u@e.com', 'repo', '/secret', 'rw') == 'rw'
 
 
 def test_can_manage_matches_canonical_behavior(svc, monkeypatch):

@@ -4,9 +4,7 @@ import re
 from django.db import connection
 from seaserv import ccnet_api, seafile_api
 from seahub.utils.db_api import SeafileDB
-from cloudfile_ext.acl.models import DirACL
 from cloudfile_ext.acl.resolver import subject_set
-from cloudfile_ext.features import is_enabled
 
 
 def read_snapshot(username, repo_id):
@@ -46,11 +44,10 @@ def read_snapshot(username, repo_id):
                     raise ValueError('department ancestry unavailable')
             dept_ids.append(parent_id)
             parent_id = parents[parent_id]
-    enabled = is_enabled('CF_ENABLE_DIR_ACL')
-    rules = list(DirACL.objects.filter(repo_id=repo_id).values(
-        'path', 'subject_type', 'subject', 'permission', 'inherit')[:4097]) if enabled else []
-    if len(rules) > 4096:
-        raise ValueError('policy budget exceeded')
+    # 修改逻辑（2026-10-15 v0.9-only）：v0.8 规则源已退役——统一 cf_dir_acl 无
+    # subject 列，旧读取恒失败。快照中的 rules 恒为空：原生 Folder 权限仍是
+    # path-aware 收窄的输入，受管库的目录级裁剪由 v0.9 搜索路径负责。
+    rules = []
     native_ids.update(dept_ids)
     if len(native_ids) > 4095:
         raise ValueError('native membership budget exceeded')

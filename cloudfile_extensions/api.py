@@ -23,11 +23,10 @@ class CapabilitiesView(APIView):
         implementations = management_implementation_registry(implementations, gunicorn._host,
             authorization_enabled=getattr(settings, 'CLOUDFILE_AUTHORIZATION_ENABLED', False),
             oidc_enabled=getattr(settings, 'CLOUDFILE_OIDC_ENABLED', False))
-        # The old ACL and managed-share APIs are still live on legacy SSO deployments.
-        # Publish their actual provider only when the compatibility routes are installed.
+        # The legacy managed-share API is still live on legacy SSO deployments;
+        # the v0.8 directory-ACL runtime is retired and no longer advertised.
         implementations = legacy_implementation_registry(implementations,
             authorization_enabled=getattr(settings, 'CLOUDFILE_AUTHORIZATION_ENABLED', False),
-            dir_acl_enabled=getattr(settings, 'CF_ENABLE_DIR_ACL', False),
             sso_enabled=getattr(settings, 'CF_ENABLE_SSO', False))
         implementations = library_share_implementation_registry(implementations, gunicorn._host,
             sso_enabled=getattr(settings, 'CF_ENABLE_SSO', False))

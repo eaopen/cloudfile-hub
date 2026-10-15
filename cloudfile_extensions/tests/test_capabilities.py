@@ -5,20 +5,23 @@ from cloudfile_extensions.registry import CapabilityImplementation, Implementati
 
 
 class CapabilityDocumentTest(unittest.TestCase):
-    def test_legacy_provider_is_advertised_only_with_its_installed_routes(self):
+    def test_legacy_registry_advertises_only_the_live_managed_share_route(self):
+        # 修改逻辑（2026-10-15 v0.9-only）：v0.8 目录 ACL 运行时已退役，
+        # directory.acl / directory.acl.effective 不得再按 legacy 发布；
+        # 仍真实装配的只有旧 SSO 受管分享端点。
         base = ImplementationRegistry()
         ready = legacy_implementation_registry(base, authorization_enabled=False,
-                                               dir_acl_enabled=True, sso_enabled=True)
+                                               sso_enabled=True)
         capabilities = build_capability_document(implementation_registry=ready)['capabilities']
-        for name in ('directory.acl', 'directory.acl.effective', 'library.shares.manage'):
-            self.assertEqual(capabilities[name], {'enabled': True, 'version': '1',
-                                                  'provider': 'legacy'})
-        self.assertFalse(capabilities['directory.acl.manage']['enabled'])
+        self.assertEqual(capabilities['library.shares.manage'],
+                         {'enabled': True, 'version': '1', 'provider': 'legacy'})
+        for name in ('directory.acl', 'directory.acl.effective', 'directory.acl.manage'):
+            self.assertFalse(capabilities[name]['enabled'])
 
         disabled = legacy_implementation_registry(base, authorization_enabled=False,
-                                                  dir_acl_enabled=False, sso_enabled=False)
+                                                  sso_enabled=False)
         self.assertFalse(build_capability_document(
-            implementation_registry=disabled)['capabilities']['directory.acl.effective']['enabled'])
+            implementation_registry=disabled)['capabilities']['library.shares.manage']['enabled'])
 
     def test_base_contract_is_enabled(self):
         document = build_capability_document()

@@ -33,12 +33,9 @@ def _extension_urlconfs():
 urlpatterns = [
     re_path(r"^api/v2.1/cloudfile/", include("cloudfile_extensions.urls")),
 ]
-if (getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False) is False
-        and getattr(settings, "CF_ENABLE_DIR_ACL", False) is True):
-    from .legacy_compat import LegacyEffectivePermission
-    urlpatterns.append(re_path(
-        r"^api/v2.1/cloudfile/extensions/authorization/v1/effective-permission/$",
-        LegacyEffectivePermission.as_view(), name="cloudfile-legacy-effective-permission"))
+# 修改逻辑（2026-10-15 v0.9-only）：v0.8 目录 ACL 运行时已退役，不再在
+# CF_ENABLE_DIR_ACL 下挂载指向旧视图的 effective-permission 兼容路由。
+# 目录级有效权限只由 CLOUDFILE_AUTHORIZATION_ENABLED 下的 v0.9 路由提供。
 if getattr(settings, "CLOUDFILE_OIDC_ENABLED", False):
     urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/identity/v1/",
         include("cloudfile_extensions.identity.urls")))

@@ -204,24 +204,25 @@ def administrator_policy_implementation_registry(base, host, *, enabled):
     return SimpleNamespace(implementations=implementations)
 
 
-def legacy_implementation_registry(base, *, authorization_enabled, dir_acl_enabled,
-                                   sso_enabled):
-    """Advertise only the legacy endpoints installed by this deployment."""
+def legacy_implementation_registry(base, *, authorization_enabled, sso_enabled):
+    """Advertise only the legacy endpoints installed by this deployment.
+
+    修改逻辑（2026-10-15 v0.9-only）：``directory.acl`` / ``directory.acl.effective``
+    不再按 legacy 发布——v0.8 目录 ACL 运行时已退役（读取器在统一 schema 上恒
+    失败），目录级裁决只由 v0.9 授权路由（``CLOUDFILE_AUTHORIZATION_ENABLED``）
+    提供。保留的只有 ``library.shares.manage``：旧 SSO 受管分享端点
+    （``cloudfile_ext.sso.apis.AdminLibrarySharesDesiredView``）仍真实装配，
+    provider=legacy 让调用方选择正确的管理 URL。
+    """
     from dataclasses import replace
     from types import SimpleNamespace
-    if authorization_enabled is True or (dir_acl_enabled is not True and sso_enabled is not True):
+    if authorization_enabled is True or sso_enabled is not True:
         return base
     implementations = dict(base.implementations)
-    if dir_acl_enabled is True:
-        for name in ('directory.acl', 'directory.acl.effective'):
-            implementations[name] = replace(implementations[name], implemented=True,
-                                            provider='legacy', dependencies=('auth.basic',),
-                                            default_enabled=True)
-    if sso_enabled is True:
-        name = 'library.shares.manage'
-        implementations[name] = replace(implementations[name], implemented=True,
-                                        provider='legacy', dependencies=('auth.basic',),
-                                        default_enabled=True)
+    name = 'library.shares.manage'
+    implementations[name] = replace(implementations[name], implemented=True,
+                                    provider='legacy', dependencies=('auth.basic',),
+                                    default_enabled=True)
     return SimpleNamespace(implementations=implementations)
 
 
