@@ -1,13 +1,13 @@
 # -*- coding: utf-8 -*-
-"""Directory ACL enforcement at the Hub layer.
+"""Legacy v0.8 directory-ACL service -- readers retired, manage stubs remain.
 
-``apply_dir_acl`` is what the patched ``seahub.views.check_folder_permission``
-delegates to. That one function is called 353 times across Seahub -- web views,
-REST endpoints, thumbnails, metadata -- so hooking it covers every Hub entry
-point at once.
+修改逻辑（2026-10-15 v0.9-only）：``apply_dir_acl`` / ``is_path_denied`` /
+``_load_rules`` 已删除——统一 ``cf_dir_acl`` 无 ``subject`` 列，这些读取器在
+每次调用上失败并对所有库 fail-closed。目录级内容裁决由 v0.9 唯一负责
+（seafile-server scoped 核心 + ``cloudfile_extensions.authorization``）。
 
-This is *not* the authoritative check. seafile-server enforces the same rules
-below the Hub so that WebDAV and the desktop sync client cannot go around it.
+本模块只保留尚未删除的 legacy 管理视图所需的 ``can_manage`` 及其加载/缓存
+辅助；这些视图不再注册路由，随 v0.8 清理一并退出。
 """
 
 import logging
@@ -45,24 +45,6 @@ def directory_inputs():
 def _cache_ttl():
     return getattr(settings, 'CF_ACL_CACHE_TTL', 60)
 
-
-def _load_rules(repo_id):
-    key = RULES_CACHE_KEY % repo_id
-    local = _page_inputs.get()
-    if local is not None and key in local:
-        return local[key]
-    # A writer switches the namespace: an in-flight old DB read cannot refill
-    # the newly invalidated cache. Old generations expire with the normal TTL.
-    generation = cache.get(RULES_GENERATION_KEY % repo_id, '0')
-    shared_key = key + ':' + generation
-    rules = cache.get(shared_key)
-    if rules is None:
-        from cloudfile_ext.acl.models import DirACL
-        rules = DirACL.objects.rules_for_repo(repo_id)
-        cache.set(shared_key, rules, _cache_ttl())
-    if local is not None:
-        local[key] = rules
-    return rules
 
 
 def _load_admin_rules(repo_id):
@@ -147,79 +129,6 @@ def invalidate_user(username):
     cache.delete(SUBJECTS_CACHE_KEY % username)
 
 
-def apply_dir_acl(username, repo_id, path, permission):
-    """Narrow `permission` according to the directory ACL.
-
-    Returns the permission unchanged when the feature is off, so that a
-    CloudFile build with every switch off behaves exactly like native CE.
-    """
-    if not is_enabled('CF_ENABLE_DIR_ACL'):
-        return permission
-
-    if permission is None or not username:
-        return permission
-
-    try:
-        rules = _load_rules(repo_id)
-    except Exception:
-        # Fail closed. This is a security control, and seafile-server would
-        # deny the actual data access anyway; letting the Hub fall open here
-        # would leak directory names that an `invisible` rule is meant to hide.
-        logger.exception(
-            'cloudfile: failed to load directory ACL for repo %s, denying '
-            'access', repo_id)
-        return None
-
-    if not rules:
-        return permission
-
-    try:
-        subjects = _load_subjects(username)
-    except Exception:
-        logger.exception(
-            'cloudfile: failed to resolve subjects for %s, denying access',
-            username)
-        return None
-
-    return resolver.resolve(rules, subjects, path, permission)
-
-
-def is_path_denied(username, repo_id, path):
-    """Whether a directory ACL denies `username` access at `path`.
-
-    Search and metadata reuse this: a hit under an ``invisible`` or ``none``
-    directory must be dropped from results just as it would be from a
-    directory listing. Unlike ``apply_dir_acl`` there is no native permission
-    to tighten, so this asks the narrower visibility question and fails closed
-    -- when rules cannot be loaded the path is reported denied rather than
-    leaked.
-    """
-    if not is_enabled('CF_ENABLE_DIR_ACL'):
-        return False
-
-    if not username:
-        return False
-
-    try:
-        rules = _load_rules(repo_id)
-    except Exception:
-        logger.exception(
-            'cloudfile: failed to load directory ACL for repo %s, treating '
-            'search paths as denied', repo_id)
-        return True
-
-    if not rules:
-        return False
-
-    try:
-        subjects = _load_subjects(username)
-    except Exception:
-        logger.exception(
-            'cloudfile: failed to resolve subjects for %s, treating search '
-            'paths as denied', username)
-        return True
-
-    return resolver.denies(rules, subjects, path)
 
 
 def _is_library_admin(username, repo_id):
