@@ -7,7 +7,6 @@ from datetime import datetime, timezone
 import os
 from pathlib import Path
 import re
-import subprocess
 import unittest
 from unittest.mock import Mock
 from uuid import uuid4
@@ -61,8 +60,12 @@ class FreshDatabaseTest(unittest.TestCase):
                 for kind, name in self.names.items():
                     cursor.execute('CREATE DATABASE ' + name + ' CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci')
                     cursor.execute('USE ' + name)
+                    # The upstream SQL dump intentionally disables FK checks
+                    # while creating tables in dump order, before their targets.
+                    cursor.execute('SET FOREIGN_KEY_CHECKS=0')
                     for match in re.finditer(r'CREATE TABLE[\s\S]+?;', self.native_ddl[kind]):
                         cursor.execute(match[0])
+                    cursor.execute('SET FOREIGN_KEY_CHECKS=1')
             self.connection = pymysql.connect(host='127.0.0.1', port=int(os.environ['CF_TEST_DB_PORT']), user='root',
                                               database=self.names['files'], charset='utf8mb4', autocommit=True)
             self.schema = FreshSchema(self.connection, self.ddl)
