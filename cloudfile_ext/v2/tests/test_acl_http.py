@@ -54,6 +54,27 @@ class HTTPTests(TestCase):
             self.assertEqual(result.status_code,200)
             self.assertEqual(result.data['root_path'],'/shared')
 
+    def test_directory_entries_tags_are_opt_in_and_failure_is_explicit(self):
+        page = lambda: dict(data=[dict(repo_id=RID, path='/shared/a.txt', name='a.txt', kind='file', permission='r')],
+                            root_path='/shared', next_offset=None)
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority, \
+                patch('cloudfile_ext.v2.acl_http.tag_display.tags_for_entries') as tags:
+            authority.return_value.entries.side_effect = lambda *a, **k: page()
+            result = self.request(DirectoryEntries, dict(repo_id=RID, path='/shared'))
+            self.assertNotIn('tags_status', result.data)
+            tags.assert_not_called()
+            tags.return_value = {('/shared/a.txt', 'file'): [dict(file_tag_id=1, repo_tag_id=2, tag_name='t', tag_color='#f00')]}
+            result = self.request(DirectoryEntries, dict(repo_id=RID, path='/shared', with_tags='true'))
+            self.assertEqual(result.data['tags_status'], 'OK')
+            self.assertEqual(result.data['data'][0]['tags'][0]['tag_name'], 't')
+            tags.assert_called_with(RID, '/shared', [('/shared/a.txt', 'file')])
+            tags.side_effect = OSError()
+            result = self.request(DirectoryEntries, dict(repo_id=RID, path='/shared', with_tags='true'))
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.data['tags_status'], 'FAILED')
+            self.assertIsNone(result.data['data'][0]['tags'])
+            self.assertEqual(self.request(DirectoryEntries, dict(repo_id=RID, path='/shared', with_tags='1')).status_code, 400)
+
     def native(self, claims, data=None):
         token = jwt.encode(claims,KEY,algorithm='HS256')
         request = APIRequestFactory().post('/native/', data or dict(username='native',repo_id=RID,

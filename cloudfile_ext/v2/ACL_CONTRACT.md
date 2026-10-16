@@ -54,6 +54,10 @@ Under `api/v2.1/cloudfile/authorization/v1/`:
 - `directory-entries/?repo_id=...&path=...&offset=0&limit=50` — at most 100 native
   candidates per page, filtered by the same authority. An empty page may have a
   next offset when candidates were hidden. `root_path` is the navigation boundary.
+  Optional `with_tags=true` adds display-only CE tags (`RepoTags + FileTags +
+  FileUUIDMap`, files and directories) to the visible items only, plus
+  `tags_status`. `FAILED` sets item `tags` to null; it never means "no tags" and
+  never fails the listing. Tags are not an authorization input.
 
 All require a native session/token, use its username, reject subject overrides,
 and return `Cache-Control: no-store`. These are content checks, not management
