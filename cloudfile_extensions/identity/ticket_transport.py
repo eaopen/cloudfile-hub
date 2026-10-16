@@ -19,6 +19,7 @@ def _call(function, arguments, deadline):
     from seaserv.service import seafile_pipe_path
     counts = {"seafile_get_repo": 1, "seafile_get_file_id_by_commit_and_path": 3,
         "seafile_cloudfile_issue_read_ticket": 7,
+        "seafile_cloudfile_issue_token_read_ticket": 7,
         "seafile_cloudfile_put_file_with_barriers": 6,
         "seafile_cloudfile_publish_edit": 6,
         "seafile_cloudfile_checkin_edit": 4,
@@ -77,7 +78,7 @@ def _call(function, arguments, deadline):
         return response["ret"]
 
 
-def resolve_and_issue_native_ticket(repo_id, path, operation, username, conditions, *, expected_object_id=None):
+def resolve_and_issue_native_ticket(repo_id, path, operation, username, conditions, *, expected_object_id=None, token_bound=False):
     """All native target I/O shares one absolute five-second budget."""
     if expected_object_id is not None and (not isinstance(expected_object_id, str) or
             not re.fullmatch(r"[0-9a-f]{40}", expected_object_id)):
@@ -99,7 +100,10 @@ def resolve_and_issue_native_ticket(repo_id, path, operation, username, conditio
         raise ValueError("native file unavailable")
     if expected_object_id is not None and obj != expected_object_id:
         raise ValueError("native file changed before ticket issue")
-    ticket = _call("seafile_cloudfile_issue_read_ticket",
+    # The dedicated native entry prevents mixed-version deployments from
+    # accepting a token proof that an older Server would silently ignore.
+    function = "seafile_cloudfile_issue_token_read_ticket" if token_bound else "seafile_cloudfile_issue_read_ticket"
+    ticket = _call(function,
         (repo_id, path, head, obj, operation, username, conditions), deadline)
     if not isinstance(ticket, str) or len(ticket) != 36 or str(UUID(ticket)) != ticket:
         raise ValueError("native ticket response rejected")
