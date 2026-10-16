@@ -41,6 +41,22 @@ class HierarchicalDirectoryTests(unittest.TestCase):
         extra = Principal('etech', 'uid-a', frozenset({('org','dept','42'),('org','dept','99')}))
         self.assertEqual(permission('/A', rows, principal=extra).permission, 'invisible')
 
+    def test_same_level_positive_groups_merge_to_readwrite(self):
+        rows = [rule('/A', 'org', '42', 'r'), rule('/A', 'org', '99', 'rw')]
+        user = Principal('etech', 'uid-a', frozenset({('org', 'dept', '42'), ('org', 'dept', '99')}))
+        self.assertEqual(permission('/A', rows, principal=user).permission, 'rw')
+        self.assertEqual(permission('/A/child', rows, principal=user).permission, 'rw')
+
+    def test_deny_has_priority_even_if_other_group_grants_write(self):
+        rows = [rule('/A', 'org', '42', 'none'), rule('/A', 'org', '99', 'rw')]
+        user = Principal('etech', 'uid-a', frozenset({('org', 'dept', '42'), ('org', 'dept', '99')}))
+        self.assertFalse(permission('/A', rows, principal=user).can_read)
+
+    def test_deeper_group_grant_replaces_ancestor_deny_in_same_track(self):
+        rows = [rule('/A', 'org', '42', 'none'), rule('/A/B', 'org', '42', 'rw')]
+        self.assertEqual(permission('/A/B', rows).permission, 'invisible')  # Cannot traverse denied parent
+        self.assertEqual(permission('/A', rows).permission, 'none')
+
     def test_org_priority_precedes_role_track(self):
         rows = [rule('/A', 'org', '42', 'r'),rule('/A/B','role','writer','rw')]
         self.assertEqual(permission('/A/B',rows).permission,'r')
