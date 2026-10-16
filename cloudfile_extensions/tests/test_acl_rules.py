@@ -190,6 +190,18 @@ class ACLRulesTest(DatabaseTestCase):
         with self.connection.cursor() as cursor:
             self.assertEqual(shares.candidates(cursor, self.ref(), [one['subject']]), [])
 
+    def test_sharing_deny_update_requires_explicit_share_disable(self):
+        from cloudfile_extensions.resources.store import ResourceEvidence
+        self.rules.lifecycle_reader = Mock(return_value=ResourceEvidence('birth'))
+        current = self.rules.mutate(self.ref(), value=dict(self.value(permission='r'), share_mode=1))
+        with self.assertRaises(ContractError):
+            self.rules.mutate(self.ref(), value=self.value(permission='none'),
+                rule_id=current['id'], if_match=current['etag'])
+        # A client may tighten permission and turn sharing off together.
+        changed = self.rules.mutate(self.ref(), value=dict(self.value(permission='none'), share_mode=0),
+            rule_id=current['id'], if_match=current['etag'])
+        self.assertEqual((changed['permission'], changed['share_mode']), ('none', 0))
+
     def test_shared_mode_validation_and_missing_lifecycle_fail_closed(self):
         for mode in (True, '1', -1, 2):
             with self.assertRaises(ContractError):

@@ -431,6 +431,9 @@ class ACLRules:
                             # but do not silently grant non-members on old-style creates.
                             value = {**value, "share_mode": value.get("share_mode",
                                 previous["share_mode"] if previous else 0)}
+                            # A legacy update can inherit share_mode implicitly. Always
+                            # recheck the merged state, not only the incoming fields.
+                            value = self.validate(value)
                             if value["share_mode"]:
                                 from ..resources.store import ResourceStore
                                 if not callable(self.lifecycle_reader):

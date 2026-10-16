@@ -16,3 +16,7 @@
 本次新增 `CloudFileV2SharingContractTest` 检查授权不放宽不变量；完整 Python/C、真实 MySQL、Etech SSO/ACL/文件上传、跨仓构建与 DEV 部署分别执行，不把静态合同或 CI 合格等同于业务验收。
 
 后续 M1/M2 重点：`login_name + external_user_id` 身份绑定与组 TTL 投影、仅两张核心执行事实的新装 Schema、去掉旧受管/管理授权表的**安全迁移**、EAP 两表发布回执兼容、路径 ACL 在真实文件读写与 Branch 提交终判，以及 Etech 真实用户联验。当前不可标记这些为已完成。
+
+### 兼容入口守卫补充（2026-10-16）
+
+旧版 `DirectoryShares.create` 在更新同一目录的既有 ACL 时，不得把 `none/invisible` 直接改为 `share_mode=1`；旧版 ACL 修改若省略 `share_mode`，必须对继承后的**完整合并状态**重新校验，不可将共享状态和拒绝权限组合发布。新增两条隔离 SQL 回归分别覆盖这两种绕行路径；仍需真实 MariaDB 测试运行结果。

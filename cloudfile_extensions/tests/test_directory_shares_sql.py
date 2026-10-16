@@ -53,6 +53,21 @@ class DirectorySharesSQLTest(DatabaseTestCase):
         finally:
             self.connection.rollback()
 
+    def test_legacy_create_never_promotes_existing_deny(self):
+        self.connection.begin()
+        try:
+            with self.connection.cursor() as cursor:
+                item, _ = self.store.create(cursor, self.ref, self.value, actor='admin')
+                cursor.execute("UPDATE cf_dir_acl SET share_mode=0,lifecycle_ref='',permission='none' WHERE id=%s",
+                               (item['id'],))
+                with self.assertRaises(ContractError) as result:
+                    self.store.create(cursor, self.ref, self.value, actor='admin')
+                self.assertEqual(result.exception.status, 409)
+                cursor.execute('SELECT permission,share_mode FROM cf_dir_acl WHERE id=%s', (item['id'],))
+                self.assertEqual(cursor.fetchall(), (('none', 0),))
+        finally:
+            self.connection.rollback()
+
     def test_wrong_revision_cannot_delete_share(self):
         self.connection.begin()
         try:

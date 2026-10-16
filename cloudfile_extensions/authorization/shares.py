@@ -61,6 +61,9 @@ class DirectoryShares:
             current = ACLRules._decode(rows[0])
             if current['path'] != ref['path'] or current['subject'] != s:
                 raise ContractError('POLICY_UNAVAILABLE', 'Shared ACL identity mismatch', 503)
+            # Legacy create cannot promote an existing deny into directory access.
+            if current['permission'] not in ('r', 'rw'):
+                raise ContractError('INVALID_SHARED_ACL', 'Sharing requires positive directory access', 409)
             if current['share_mode']:
                 if current['lifecycle_ref'] != birth:
                     raise ContractError('PATH_STATE_PENDING', 'Disable stale sharing before regranting', 409)
