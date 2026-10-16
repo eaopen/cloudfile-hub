@@ -43,8 +43,9 @@ def rule_value(value):
         raise invalid("Invalid ACL permission or inheritance")
     if "share_mode" in value and (type(value["share_mode"]) is not int or
             value["share_mode"] not in (0, 1) or
-            (value["share_mode"] and (value["kind"] != "dir" or path == "/"))):
-        raise invalid("Sharing requires a non-root directory and mode 0 or 1")
+            (value["share_mode"] and (value["kind"] != "dir" or path == "/" or
+                                      value["permission"] not in ("r", "rw")))):
+        raise invalid("Sharing requires a positive r/rw ACL on a non-root directory and mode 0 or 1")
     return {**value, "path": path, "subject": dict(subject)}
 
 

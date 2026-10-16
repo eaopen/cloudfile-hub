@@ -2,10 +2,11 @@
 
 Execution is deferred until overall feature verification, per user request.
 """
+import unittest
 from uuid import uuid4
 from unittest.mock import Mock
 
-from cloudfile_extensions.authorization.rules import ACLRules
+from cloudfile_extensions.authorization.rules import ACLRules, rule_value
 from cloudfile_extensions.common.errors import ContractError
 from cloudfile_extensions.schema.runner import SchemaRunner
 from cloudfile_extensions.tests.test_schema import DatabaseTestCase
@@ -198,3 +199,20 @@ class ACLRulesTest(DatabaseTestCase):
         with self.assertRaises(ContractError):
             self.rules.mutate(self.ref(), value=dict(self.value(), share_mode=1))
         self.assertEqual(self.rules.candidates(self.ref()), [])
+
+
+class CloudFileV2SharingContractTest(unittest.TestCase):
+    """A shared root is an attribute of a positive ACL, never a separate grant."""
+
+    def test_shared_grants_require_positive_content_permission(self):
+        base = dict(path="/team", kind="dir", inherit=True, share_mode=1,
+                    subject=dict(type="user", provider="etech", namespace="user",
+                                 external_id="10086"))
+        for permission in ("invisible", "none"):
+            with self.subTest(permission=permission), self.assertRaises(ContractError):
+                rule_value(dict(base, permission=permission))
+        for permission in ("r", "rw"):
+            with self.subTest(permission=permission):
+                self.assertEqual(rule_value(dict(base, permission=permission))["share_mode"], 1)
+        # A deny still exists in the ACL; it simply cannot create shared-root access.
+        self.assertEqual(rule_value(dict(base, permission="none", share_mode=0))["permission"], "none")
