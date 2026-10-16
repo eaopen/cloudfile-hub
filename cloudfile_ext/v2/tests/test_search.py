@@ -38,7 +38,7 @@ class IndexDocumentTests(unittest.TestCase):
         self.assertEqual(doc["description"], "业务文档")
 
     def test_rejects_untrusted_path_and_malformed_tags(self):
-        for path in ("/", "/A/../B", "/A//B", "/A/", "relative.txt"):
+        for path in ("/", "/A/../B", "/A//B", "/A/", "relative.txt", "/A" + chr(0) + "/B"):
             with self.subTest(path=path), self.assertRaises(InvalidIndexDocument):
                 index_document(repo_id=REPO, path=path, kind="file")
         with self.assertRaises(InvalidIndexDocument):
