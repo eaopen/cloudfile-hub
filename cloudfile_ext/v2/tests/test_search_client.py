@@ -3,7 +3,7 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
-from cloudfile_ext.v2.search.client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, checked_reference
+from cloudfile_ext.v2.search.client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, checked_reference, native_extension
 from cloudfile_ext.v2.search.worker import Indexer, confirm, doc_id
 
 RID = 'a6fbc97c-1000-4000-8000-010101010101'
@@ -103,6 +103,11 @@ class ExistingIndexTests(unittest.TestCase):
         client.page(RID, '/', 'b', 0, 51)
         self.assertEqual([call.args[0] for call in client.call.call_args_list],
                          ['POST', 'GET', 'POST'])
+
+    def test_extensionless_and_dotfiles_are_not_indexed_as_suffixes(self):
+        self.assertEqual(native_extension('/folder/pdf'), '')
+        self.assertEqual(native_extension('/folder/.pdf'), '')
+        self.assertEqual(native_extension('/folder/a.PDF'), 'pdf')
 
     def test_untrusted_endpoint_and_index_are_rejected(self):
         for url in ('file:///tmp/index', 'http://user:password@host', 'http://host/path'):
