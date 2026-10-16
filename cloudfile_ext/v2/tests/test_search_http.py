@@ -58,8 +58,11 @@ class SearchHttpTests(TestCase):
     def test_matching_native_tag_survives_explicit_filter(self):
         authority = Mock(version='a'*64, snapshot={'head': 'b'*40}, assert_current=Mock())
         authority.resolve.return_value = [dict(ITEM, tags=['工艺'])]
+        client = Mock()
+        client.page.return_value = [dict(repo_id=RID, path=ITEM['path'], kind='file')]
         response, _, client = self.call(dict(repo_id=RID, q='file', kind='file',
-                                             extension='TXT', tag='工艺'), authority=authority)
+                                             extension='TXT', tag='工艺'),
+                                        authority=authority, client=client)
         self.assertEqual(response.status_code, 200)
         self.assertEqual(len(response.data['data']), 1)
         self.assertEqual(response.data['data'][0]['tags'], ['工艺'])
