@@ -233,6 +233,8 @@ from seahub.api2.endpoints.webhook import WebhooksView
 
 
 urlpatterns = [
+    # Fresh V2 discovery is additive; do not import the retired CF framework.
+    path('api/v2.1/cloudfile/', include('cloudfile_ext.v2.urls')),
     path('accounts/', include('seahub.base.registration_urls')),
     path('mobile-login/', mobile_login, name="mobile_login"),
 
