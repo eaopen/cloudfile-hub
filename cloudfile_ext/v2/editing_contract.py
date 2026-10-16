@@ -135,7 +135,7 @@ class CommitRequest:
         ).hexdigest()
 
 
-def verify_proof(row, principal, proof):
+def verify_proof(row, principal, proof, *, allow_expired=False):
     """Compare secrets in constant time. Must be called on an SQL-locked row."""
     if (row["guard_id"] != proof.guard_id or
             row["generation"] != proof.generation or
@@ -146,7 +146,9 @@ def verify_proof(row, principal, proof):
             row["client_id"] != principal.client_id or
             not hmac.compare_digest(row["proof_digest"] or "", proof.token_digest)):
         raise EditDenied("stale or unauthorized editing credential")
-    if not row["active"]:
+    # A matching expired credential can ONLY cancel a prepared intent or
+    # release a failed Checkout. All publish/renew/resume calls require live.
+    if not allow_expired and not row["active"]:
         raise EditConflict("Checkout is expired; never revive old credentials")
 
 
