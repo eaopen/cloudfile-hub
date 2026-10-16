@@ -2,7 +2,13 @@ name: V2 Meilisearch isolated checks
 
 on:
   push:
-    branches: [feature/v2-meilisearch]
+    branches: [dev, feature/v2-meilisearch]
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'cloudfile_ext/v2/search/**'
+      - 'cloudfile_ext/v2/tests/test_search*.py'
+      - '.github/workflows/v2-meilisearch.yml'
   workflow_dispatch:
 
 permissions:
@@ -17,7 +23,7 @@ jobs:
         with:
           python-version: "3.12"
       - name: Verify isolated search core
-        run: python -m unittest cloudfile_ext.v2.tests.test_search -v
+        run: python -m unittest cloudfile_ext.v2.tests.test_search cloudfile_ext.v2.tests.test_search_client -v
       - name: Reject new extension SQL tables
         run: |
           python - <<'PY'
