@@ -104,9 +104,9 @@ class ExistingMeiliIndex:
         if root != '/':
             filters.append('dirs IN ' + json.dumps([root], ensure_ascii=False))
         payload = dict(q=query, offset=offset, limit=limit, filter=' AND '.join(filters),
-                       matchingStrategy='all', attributesToSearchOn=['name', 'path', 'tags'],
-                       attributesToRetrieve=['repo_id', 'path', 'object_type', 'tags'],
-                       attributesToHighlight=['name', 'path', 'tags'])
+                       matchingStrategy='all', attributesToSearchOn=['name', 'tags'],
+                       attributesToRetrieve=['repo_id', 'path', 'name', 'object_type', 'tags'],
+                       attributesToHighlight=['name', 'tags'])
         try:
             data = self.call('POST', self.index_path + '/search', payload)
             hits = data.get('hits') if isinstance(data, dict) else None
@@ -134,7 +134,7 @@ class ExistingMeiliIndex:
                     for word in highlighted:
                         if isinstance(word, str) and '<em>' in word:
                             matched.append(word.replace('<em>', '').replace('</em>', ''))
-                text_match = any(isinstance(formatted.get(k), str) and '<em>' in formatted[k] for k in ('name', 'path'))
+                text_match = isinstance(formatted.get('name'), str) and '<em>' in formatted['name']
                 items.append(dict(**reference, text_match=text_match, matched_tags=matched))
             return items
         except (HTTPError, URLError, OSError, UnicodeError, ValueError, KeyError, TypeError) as exc:

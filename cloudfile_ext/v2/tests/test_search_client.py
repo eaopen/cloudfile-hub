@@ -37,6 +37,23 @@ class ExistingIndexTests(unittest.TestCase):
         with self.assertRaises(SearchWindowExceeded):
             self.client(hits, estimatedTotalHits=1000).page(RID, '/', 'A', 950, 51)
 
+    def test_keyword_matches_basename_and_tags_without_searching_parent_path(self):
+        hit = dict(repo_id=RID, path='/其他/科室文件.txt', name='科室文件.txt', object_type='file',
+                   _formatted={'name': '<em>科室文件</em>.txt'})
+        client = self.client([hit])
+        result = client.page(RID, '/其他', '科室文件', 0, 51)
+        payload = client.call.call_args_list[0].args[2]
+        self.assertEqual(payload['attributesToSearchOn'], ['name', 'tags'])
+        self.assertEqual(payload['attributesToHighlight'], ['name', 'tags'])
+        self.assertIn('name', payload['attributesToRetrieve'])
+        self.assertTrue(result[0]['text_match'])
+
+    def test_parent_path_highlight_cannot_count_as_a_name_match(self):
+        hit = dict(repo_id=RID, path='/科室文件/其他.txt', name='其他.txt', object_type='file',
+                   _formatted={'name': '其他.txt', 'path': '/<em>科室文件</em>/其他.txt'})
+        result = self.client([hit]).page(RID, '/', '科室文件', 0, 51)
+        self.assertFalse(result[0]['text_match'])
+
     def test_untrusted_endpoint_and_index_are_rejected(self):
         for url in ('file:///tmp/index', 'http://user:password@host', 'http://host/path'):
             with self.assertRaises(ValueError):
