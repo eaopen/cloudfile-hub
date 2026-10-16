@@ -63,6 +63,27 @@ def directory_service(monkeypatch):
     return importlib.import_module('cloudfile_ext.sso.service')
 
 
+def test_subject_ttl_mode_blocks_legacy_member_writers(monkeypatch, directory_service):
+    from types import SimpleNamespace
+    from unittest.mock import Mock
+    import sys
+    import cloudfile_extensions.directory.configuration as configuration
+    monkeypatch.setattr(configuration, 'uses_subject_projection', lambda: True)
+    source = Mock(side_effect=AssertionError('legacy directory must not be used'))
+    monkeypatch.setattr(directory_service.directory, 'active', source)
+    assert directory_service.sync_user('native') is None
+    assert directory_service.sync_user_id('u1', dry_run=False)['status'] == 'refused'
+    catalog = Mock(return_value={'status': 'OK', 'applied': {'add': 0}})
+    monkeypatch.setattr(directory_service, '_record', lambda status, detail: {'status': status, 'detail': detail})
+    monkeypatch.setitem(sys.modules, 'cloudfile_extensions.directory.sync', SimpleNamespace(sync=catalog))
+    assert directory_service.sync()['status'] == 'ok'
+    catalog.assert_called_once_with()
+    catalog.side_effect = RuntimeError('private upstream details')
+    result = directory_service.sync()
+    assert result == {'status': 'error', 'detail': 'directory catalog unavailable'}
+    source.assert_not_called()
+
+
 def test_v2_member_resolution_uses_login_not_email(monkeypatch, directory_service):
     monkeypatch.setattr(directory_service, 'load_login_identities',
                         lambda logins: {'employee-001': 'native-42'})

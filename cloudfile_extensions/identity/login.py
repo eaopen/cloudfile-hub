@@ -13,6 +13,7 @@ from .sql_bindings import SQLIdentityBindings
 from .jit import SQLJITProvisioner
 from .provisioning import ProvisioningJobs
 from .pending import PendingLoginProofs
+from .external import assert_login_identity
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,8 @@ class PreparedOIDCLogin:
         if not isinstance(preparation, SubjectPreparation) or preparation.actor != identity["userId"]:
             raise ContractError("IDENTITY_UNAVAILABLE", "Login preparation is unavailable", 503)
         context = preparation.prepare(identity["userId"], trigger="login")
+        if "login_name" in identity:
+            assert_login_identity(identity, context["subject"])
         # Recheck binding after source I/O/projection, not just before it.
         current = self.bindings.resolve(issuer=identity["issuer"], subject=identity["sub"],
                                         user_id=identity["userId"])

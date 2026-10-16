@@ -52,6 +52,34 @@ class ProvisioningTest(DatabaseTestCase):
         self.pipeline = ProvisioningJobs(JobStore(self.connection), jit, preparation_factory=preparation)
         self.worker = JobWorker(self.pipeline.store, owner="jit-test", handlers={self.pipeline.KIND: self.pipeline.handler})
 
+    def test_generic_uid_two_subjects_and_renamed_login_reuse_one_native_account(self):
+        from cloudfile_extensions.common.errors import ContractError
+        from cloudfile_extensions.identity.external import assert_login_identity
+        self.directory.attribute_allowlist = frozenset({'login_name'})
+        self.transport.get.return_value['attributes'] = {'login_name': 'employee@example.test'}
+        identity = {**self.claims, 'login_name': 'employee@example.test'}
+        username = self.pipeline.jit.ensure(identity)
+        self.assertNotEqual(username, 'employee@example.test@auth.local')
+        # A second verified entrance with the same directory UID adds a native
+        # OIDC binding, preserving the original CE account and its file owner.
+        second = {**identity, 'sub': 'another-trusted-entrance'}
+        self.assertEqual(self.pipeline.jit.ensure(second), username)
+        self.transport.get.return_value['attributes']['login_name'] = 'renamed-employee'
+        third = {**identity, 'sub': 'after-rename', 'login_name': 'renamed-employee'}
+        self.assertEqual(self.pipeline.jit.ensure(third), username)
+        prepared = self.pipeline.factory('u1').prepare('u1', trigger='login')
+        assert_login_identity(third, prepared['subject'])
+        with self.admin.cursor() as cursor:
+            cursor.execute('SELECT email FROM ' + self.native + '.EmailUser')
+            self.assertEqual(cursor.fetchall(), ((username,),))
+            cursor.execute('SELECT user,login_id FROM ' + self.identity + '.profile_profile')
+            self.assertEqual(cursor.fetchall(), ((username, 'u1'),))
+        # Neither a recycled subject nor a Directory UID mismatch can claim it.
+        with self.assertRaises(ContractError):
+            self.pipeline.jit.ensure({**third, 'userId': 'different-uid'})
+        with self.assertRaises(ContractError):
+            self.pipeline.jit.ensure({**third, 'sub': 'new-entrance', 'login_name': 'stale-name'})
+
     def test_epoch_invalidated_after_projection_does_not_complete_provisioning(self):
         original_factory = self.pipeline.factory
         def factory(user):
@@ -153,7 +181,7 @@ class ProvisioningTest(DatabaseTestCase):
             settings.configure(DEFAULT_CHARSET="utf-8")
         from django.http import HttpResponse
         import time
-        runtime = self.runtime(jit_enabled=True)
+        runtime = self.runtime(jit_enabled=True, subject_ttl=600)
         request = Mock()
         request.is_secure.return_value = True
         request.COOKIES = {}
@@ -172,6 +200,8 @@ class ProvisioningTest(DatabaseTestCase):
         self.assertEqual(runtime.pending.status(token, binding)["status"], "succeeded")
         context = runtime.preparation("u1").prepare("u1")
         self.assertEqual(context["status"], "ready")
+        self.assertEqual(runtime.preparation("u1").contexts.ttl, 600)
+        self.assertLessEqual(context["expires_at"] - context["fetched_at"], 600)
         self.assertIs(runtime.jit.bindings.connection, runtime.store.connection)
         self.assertIs(runtime.proofs.redis, runtime.browser.redis)
         runtime.browser.clear(binding, response)

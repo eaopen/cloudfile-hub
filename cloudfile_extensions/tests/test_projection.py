@@ -345,3 +345,56 @@ class ProjectionTest(DatabaseTestCase):
         with self.assertRaises(ContractError):
             self.apply()
         self.assertEqual(self.memberships(), ((4, 0), (5, 0), (6, 1)))
+
+    @unittest.skipUnless(os.environ.get("CF_TEST_REDIS_PORT"), "requires isolated Redis")
+    def test_ttl_revocation_login_rename_and_outage_with_real_native_memberships(self):
+        import redis
+        from unittest.mock import Mock
+        from cloudfile_extensions.directory.preparation import SubjectPreparation
+        from cloudfile_extensions.directory.provider import DirectoryProvider
+        client = redis.Redis(host=os.environ.get("CF_TEST_REDIS_HOST", "127.0.0.1"),
+                             port=int(os.environ["CF_TEST_REDIS_PORT"]))
+        transport = Mock()
+        transport.get.return_value = {**self.subject, "attributes": {"login_name": "old-login"}}
+        source = DirectoryProvider("https://directory.example.invalid/v2", authorization=lambda: "Bearer fixture",
+            attribute_allowlist={"login_name"}, client=transport, require_organization_ancestors=True)
+        runtime = SubjectPreparation(self.connection, client, provider_id="directory", directory=source,
+            native_schema=self.native, identity_schema=self.identity, actor_user_id="u1", request_id="v2-ttl",
+            prefix="cf:test:" + uuid4().hex + ":", ttl=60)
+        clock = [int(runtime.contexts.clock())]
+        runtime.contexts.clock = lambda: clock[0]
+        runtime.contexts.jitter = lambda: 0
+        try:
+            first = runtime.prepare("u1", trigger="login")
+            self.assertEqual(first["expires_at"] - first["fetched_at"], 60)
+            self.assertEqual(self.memberships(), ((1, 0), (2, 0), (3, 0), (5, 0), (6, 1)))
+            # A changed source is allowed to remain cached until the fixed TTL.
+            transport.get.return_value = {**transport.get.return_value, "roles": [], "etag": "revoked",
+                                          "attributes": {"login_name": "new-login"}}
+            clock[0] += 30
+            self.assertEqual(runtime.prepare("u1")["context_epoch"], first["context_epoch"])
+            self.assertEqual(transport.get.call_count, 1)
+            clock[0] += 31
+            second = runtime.prepare("u1")
+            self.assertNotEqual(second["context_epoch"], first["context_epoch"])
+            self.assertEqual(second["subject"]["attributes"]["login_name"], "new-login")
+            self.assertEqual(runtime.state.username("u1"), self.username)
+            self.assertEqual(self.memberships(), ((1, 0), (2, 0), (5, 0), (6, 1)))
+            # The source outage does not extend readiness or turn into an empty
+            # snapshot. Existing SQL rows are retained but cannot prove ready.
+            clock[0] += 61
+            transport.get.side_effect = ContractError("UPSTREAM_UNAVAILABLE", "Directory unavailable", 503)
+            with self.assertRaises(ContractError):
+                runtime.prepare("u1")
+            self.assertIsNone(runtime.contexts.current("u1"))
+            self.assertEqual(self.memberships(), ((1, 0), (2, 0), (5, 0), (6, 1)))
+            transport.get.side_effect = None
+            transport.get.return_value = {**transport.get.return_value, "status": "disabled",
+                                          "organizations": [], "organization_ancestors": [], "roles": []}
+            with self.assertRaises(ContractError) as caught:
+                runtime.prepare("u1", trigger="login")
+            self.assertEqual(caught.exception.code, "SUBJECT_DISABLED")
+            self.assertEqual(self.memberships(), ((5, 0), (6, 1)))
+        finally:
+            client.delete(*runtime.contexts._keys("u1"))
+            client.close()

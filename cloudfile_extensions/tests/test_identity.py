@@ -94,6 +94,29 @@ class OIDCTest(unittest.TestCase):
         self.validate()
         self.assertEqual(self.calls, 1)
 
+    def test_generic_claims_require_verified_login_name_and_matching_userinfo(self):
+        from dataclasses import replace
+        self.config = replace(self.config, user_id_claim="external_user_id",
+                              login_name_claim="preferred_username")
+        self.validator.config = self.config
+        self.claims.pop("userId")
+        self.claims.update(external_user_id="stable-uid", preferred_username="工号-001")
+        info = dict(sub="authentik-user-1", external_user_id="stable-uid", preferred_username="工号-001")
+        identity = self.validate(userinfo=info)
+        self.assertEqual((identity["userId"], identity["login_name"]), ("stable-uid", "工号-001"))
+        for changed in (dict(info, preferred_username="other"), {key: value for key, value in info.items() if key != "preferred_username"}):
+            with self.assertRaises(ContractError):
+                self.validate(userinfo=changed)
+        for label in (None, "", " leading", "a\nb", 123):
+            with self.assertRaises(ContractError):
+                self.validate(dict(preferred_username=label), userinfo=info)
+
+    def test_login_name_cannot_be_the_stable_identity_claim(self):
+        from dataclasses import replace
+        for claim in ("userId", "sub", "iss", "aud", "nonce"):
+            with self.assertRaises(ValueError):
+                replace(self.config, login_name_claim=claim)
+
     def test_issuer_audience_nonce_signature_userinfo_and_claim_types(self):
         cases = [({"iss": "https://wrong.example.com"}, {}), ({"aud": "wrong"}, {}),
                  ({"exp": self.claims["iat"] - 60}, {}), ({"iat": str(self.claims["iat"])}, {}),

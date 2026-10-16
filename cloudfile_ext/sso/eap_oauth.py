@@ -153,6 +153,30 @@ def provision(provider, info):
     return user
 
 
+def prepare_login_subject(uid, native_username):
+    """The deployed OAuth callback shares the native TTL projector in v2."""
+    from cloudfile_extensions.directory.configuration import uses_subject_projection
+    if not uses_subject_projection():
+        return
+    from django.conf import settings
+    from uuid import uuid4
+    from cloudfile_extensions.identity.resources import LoginResources
+    scope = getattr(settings, 'CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE', None)
+    if not callable(scope):
+        raise IdentityConflict('subject preparation unavailable')
+    with scope() as resources:
+        if (not isinstance(resources, LoginResources) or
+                resources.oidc.issuer != settings.CF_SSO_EAP_OIDC_ISSUER):
+            raise IdentityConflict('directory issuer mismatch')
+        with resources.resources.preparation(uid, str(uuid4())) as preparation:
+            if preparation.state.username(uid) != native_username:
+                raise IdentityConflict('native identity mismatch')
+            value = preparation.prepare(uid, trigger='login')
+            current = preparation.contexts.current(uid)
+            if current is None or current['context_epoch'] != value['context_epoch']:
+                raise IdentityConflict('subject expired during login')
+
+
 class JsonClient:
     """Fixed deployment URLs only; bounded replies and no ambient proxy/netrc."""
     def get(self, url, headers=None):
@@ -212,6 +236,7 @@ def callback(request):
         if validated['userId'] != info.get('userId'):
             raise IdentityConflict('missing business UID')
         user = provision(settings.OAUTH_PROVIDER, info)
+        prepare_login_subject(validated['userId'], user.username)
         user.backend = 'seahub.oauth.backends.OauthRemoteUserBackend'
         request.user = user
         # Profile is committed before the login signal refreshes UID permissions.

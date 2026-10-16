@@ -5,7 +5,6 @@ rows and audit are locally atomic; directory projection/Redis ready are later
 steps, so this result is not a login session or file authorization.
 """
 import json
-import secrets
 import time
 from datetime import datetime, timezone
 from uuid import uuid4
@@ -19,6 +18,7 @@ from ..jobs.authority import scope_locks
 from ..schema.runner import SchemaRunner
 from .bindings import IdentityBindings, conflict
 from .sql_bindings import SQLIdentityBindings
+from .external import assert_login_identity, new_native_username
 
 
 class SQLJITProvisioner:
@@ -49,15 +49,8 @@ class SQLJITProvisioner:
         source = self.directory.fetch(user_id)
         if source["status"] != "active":
             raise ContractError("SUBJECT_DISABLED", "Business subject is disabled", 403)
-        # Employee numbers name new EAP accounts only; login_id remains the UID.
-        # Generic directories without this attribute retain opaque account names.
-        employee = source["attributes"].get("employee_no")
-        if employee is not None:
-            if (not isinstance(employee, str) or not employee or len(employee) > 200
-                    or not all(c.isascii() and (c.isalnum() or c in "._-") for c in employee)
-                    or employee.lower() == "cfadmin"):
-                raise conflict()
-        default_username = employee + "@auth.local" if employee else secrets.token_hex(16) + "@auth.local"
+        assert_login_identity(identity, source)
+        default_username = new_native_username(source)
         connection = self.bindings.connection
         scopes = [dict(type="provider", provider=self.bindings.provider, external_id=self.bindings.provider),
                   dict(type="user", provider=self.bindings.provider, external_id=user_id),

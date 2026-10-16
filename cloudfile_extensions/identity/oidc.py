@@ -74,6 +74,7 @@ class OIDCConfig:
     ca_bundle: str = None
     end_session_url: str = None
     post_logout_redirect_uri: str = None
+    login_name_claim: str = None
 
     def __post_init__(self):
         for url in (self.issuer, self.redirect_uri, self.authorization_url,
@@ -81,6 +82,10 @@ class OIDCConfig:
             trusted_https_url(url)
         for value in (self.client_id, self.user_id_claim):
             identifier(value)
+        if self.login_name_claim is not None:
+            identifier(self.login_name_claim)
+            if self.login_name_claim in {self.user_id_claim, "sub", "iss", "aud", "nonce", "iat", "exp"}:
+                raise ValueError("login name and stable identity claims must be distinct")
         if not isinstance(self.client_secret, str) or not self.client_secret:
             raise ValueError("OIDC client secret is required")
         if self.ca_bundle is not None and (not isinstance(self.ca_bundle, str) or not os.path.isfile(self.ca_bundle)):
@@ -183,6 +188,14 @@ class IDTokenValidator:
                 raise ValueError()
             if userinfo.get(self.config.user_id_claim, user_id) != user_id:
                 raise ValueError()
+            login = {}
+            name_claim = getattr(self.config, "login_name_claim", None)
+            if name_claim is not None:
+                from .external import login_name
+                name = login_name(claims.get(name_claim))
+                if userinfo.get(name_claim) != name:
+                    raise ValueError()
+                login["login_name"] = name
             if "at_hash" in claims:
                 expected = base64.urlsafe_b64encode(hashlib.sha256(access_token.encode()).digest()[:16]).rstrip(b"=").decode()
                 if not isinstance(claims["at_hash"], str) or not hmac.compare_digest(expected, claims["at_hash"]):
@@ -190,7 +203,7 @@ class IDTokenValidator:
             # Only claims verified here can identify the business subject.
             return {"issuer": claims["iss"], "sub": claims["sub"], "userId": user_id,
                     "sid": claims.get("sid"), "issued_at": claims["iat"],
-                    "expires_at": claims["exp"], "userinfo": userinfo}
+                    "expires_at": claims["exp"], "userinfo": userinfo, **login}
         except (jwt.PyJWTError, ValueError, TypeError, AttributeError, ContractError):
             raise rejected() from None
 

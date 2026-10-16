@@ -78,6 +78,10 @@ def test_provision_with_real_orm_preserves_accounts_and_rejects_collisions():
             assert Profile.objects.get(user=first.username).login_id == '123'
             assert eap_oauth.provision('authentik', info()).username == first.username
             assert Profile.objects.count() == Social.objects.count() == 1
+            employee[0] = 'renamed-1022'
+            assert eap_oauth.provision('authentik', info()).username == first.username
+            assert Profile.objects.get(user=first.username).login_id == '123'
+            employee[0] = '1022'
             def rejected(data):
                 try: eap_oauth.provision('authentik', data)
                 except eap_oauth.IdentityConflict: return

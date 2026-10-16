@@ -49,7 +49,11 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
                          "directory_url", "attribute_allowlist", "core_library", "cloud_mode"),
                          ("subject_prefix", "directory_ca_bundle", "directory_bearer_token",
                           "service_credentials", "refresh_provider_grants",
-                          "delegation_signing_keys", "service_revocation_prefix"))
+                          "delegation_signing_keys", "service_revocation_prefix",
+                          "membership_mode", "subject_ttl"))
+    from ..directory.configuration import membership_mode, subject_ttl
+    membership_mode(value)
+    ttl = subject_ttl(value)
     if type(oidc_jit_enabled) is not bool or (oidc is None and oidc_jit_enabled):
         raise ValueError("explicit OIDC configuration required before JIT")
     if type(local_edit_enabled) is not bool:
@@ -140,7 +144,8 @@ def configure_policy(value, *, directory_authorization, resource_secret=None, li
             authorization=directory_authorization, attribute_allowlist=value["attribute_allowlist"],
             core_library=value["core_library"], cloud_mode=value["cloud_mode"],
             prefix=value.get("subject_prefix", "cf:subjects:"),
-            ca_bundle=value.get("directory_ca_bundle"), lifecycle_reader=lifecycle_reader)
+            ca_bundle=value.get("directory_ca_bundle"), lifecycle_reader=lifecycle_reader,
+            subject_ttl=ttl)
         resource_factory = None
         if resource_secret is not None:
             from ..resources.runtime import ResourceServiceFactory

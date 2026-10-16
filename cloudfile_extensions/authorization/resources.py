@@ -11,7 +11,7 @@ from ..schema.runner import SchemaRunner
 
 class PolicyResources:
     def __init__(self, *, environment, redis, provider_id, directory_factory,
-                 native_schema, identity_schema, prefix="cf:subjects:"):
+                 native_schema, identity_schema, prefix="cf:subjects:", subject_ttl=1800):
         if not callable(directory_factory):
             raise ValueError("owned directory client factory required")
         # Validate identifiers now; schemas are deployment configuration, not
@@ -23,6 +23,8 @@ class PolicyResources:
         self.directory_factory = directory_factory
         self.native_schema, self.identity_schema = native_schema, identity_schema
         self.prefix = prefix
+        from ..directory.configuration import subject_ttl as validate_ttl
+        self.subject_ttl = validate_ttl({"subject_ttl": subject_ttl})
 
     @contextmanager
     def connection(self):
@@ -69,6 +71,6 @@ class PolicyResources:
             yield SubjectPreparation(connection, self.redis, provider_id=self.provider,
                 directory=directory, native_schema=self.native_schema,
                 identity_schema=self.identity_schema, actor_user_id=actor,
-                request_id=request_id, prefix=self.prefix)
+                request_id=request_id, prefix=self.prefix, ttl=self.subject_ttl)
         finally:
             directory.client.session.close()

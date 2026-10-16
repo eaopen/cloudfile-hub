@@ -83,11 +83,13 @@ def callback_runtime(monkeypatch):
     monkeypatch.setattr(eap_oauth.JsonClient, 'get', Mock(return_value=info))
     provision = Mock(return_value=NS(username='old@auth.local'))
     monkeypatch.setattr(eap_oauth, 'provision', provision)
+    prepare = Mock()
+    monkeypatch.setattr(eap_oauth, 'prepare_login_subject', prepare)
     request = NS(GET={'code': 'code', 'state': 'state'}, session={
         'cf_eap_oidc': dict(state='state', nonce='nonce', verifier='verifier', issued=time.time()),
         'oauth_redirect': '/library/'})
     return NS(request=request, client=client, auth=auth, validator=validator,
-              provision=provision, redirect=redirect, response=response, info=info, rotate=rotate)
+              provision=provision, redirect=redirect, response=response, info=info, rotate=rotate, prepare=prepare)
 
 
 def test_callback_consumes_flow_checks_token_then_provisions(callback_runtime):
@@ -99,6 +101,7 @@ def test_callback_consumes_flow_checks_token_then_provisions(callback_runtime):
     assert r.client.fetch_token.call_args.kwargs['allow_redirects'] is False
     assert r.validator.validate.call_args.kwargs['nonce'] == 'nonce'
     r.provision.assert_called_once_with('authentik:files', r.info)
+    r.prepare.assert_called_once_with('123', 'old@auth.local')
     r.auth.login.assert_called_once()
     r.rotate.assert_called_once_with(r.request)
     r.redirect.assert_called_once_with('/library/')
@@ -108,7 +111,7 @@ def test_callback_consumes_flow_checks_token_then_provisions(callback_runtime):
     assert r.rotate.call_count == 1
 
 
-@pytest.mark.parametrize('failure', ['state', 'expired', 'signature', 'uid', 'directory'])
+@pytest.mark.parametrize('failure', ['state', 'expired', 'signature', 'uid', 'directory', 'projection'])
 def test_callback_never_logs_in_on_protocol_or_identity_failure(callback_runtime, failure):
     from cloudfile_ext.sso.eap_oauth import callback
     r = callback_runtime
@@ -120,8 +123,10 @@ def test_callback_never_logs_in_on_protocol_or_identity_failure(callback_runtime
         r.validator.validate.side_effect = ValueError('invalid signature')
     elif failure == 'uid':
         r.info['userId'] = '456'
-    else:
+    elif failure == 'directory':
         r.provision.side_effect = IdentityConflict('directory unavailable')
+    else:
+        r.prepare.side_effect = IdentityConflict('projection unavailable')
     assert callback(r.request) == 'refused'
     r.auth.login.assert_not_called()
     r.rotate.assert_not_called()
@@ -199,3 +204,32 @@ def test_legacy_callback_uses_owned_directory_and_closes_client(monkeypatch, fai
     else:
         source.fetch.assert_called_once_with('123')
         source.client.session.close.assert_called_once()
+
+
+@pytest.mark.parametrize('failure', [None, 'scope', 'issuer', 'binding', 'expired'])
+def test_ttl_oauth_prepares_the_exact_native_subject_before_login(monkeypatch, failure):
+    import sys
+    from contextlib import nullcontext
+    from types import SimpleNamespace as NS
+    from unittest.mock import Mock
+    from cloudfile_extensions.identity.resources import LoginResources
+    from cloudfile_ext.sso.eap_oauth import prepare_login_subject
+    preparation = Mock()
+    preparation.state.username.return_value = 'other@auth.local' if failure == 'binding' else 'native@auth.local'
+    preparation.prepare.return_value = {'context_epoch': 'a' * 32}
+    preparation.contexts.current.return_value = None if failure == 'expired' else {'context_epoch': 'a' * 32}
+    resources = Mock(spec=LoginResources)
+    resources.oidc = NS(issuer='https://other.test/' if failure == 'issuer' else 'https://idp.test/')
+    resources.resources = NS(preparation=lambda *args: nullcontext(preparation))
+    settings = NS(CLOUDFILE_POLICY_CONFIG={'membership_mode': 'subject_ttl'},
+                  CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE=None if failure == 'scope' else lambda: nullcontext(resources),
+                  CF_SSO_EAP_OIDC_ISSUER='https://idp.test/')
+    monkeypatch.setitem(sys.modules, 'django.conf', NS(settings=settings))
+    if failure:
+        with pytest.raises(IdentityConflict):
+            prepare_login_subject('123', 'native@auth.local')
+    else:
+        prepare_login_subject('123', 'native@auth.local')
+        preparation.prepare.assert_called_once_with('123', trigger='login')
+    if failure in ('scope', 'issuer', 'binding'):
+        preparation.prepare.assert_not_called()

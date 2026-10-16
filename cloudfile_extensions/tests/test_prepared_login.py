@@ -51,6 +51,17 @@ class PreparedLoginTest(unittest.TestCase):
         self.bindings.resolve.assert_not_called()
         self.factory.assert_not_called()
 
+    def test_verified_login_label_must_match_current_uid_context_even_for_prebound_accounts(self):
+        identity = self.flow.complete.return_value[0]
+        identity["login_name"] = "new-login"
+        self.preparation.prepare.return_value.update(subject=dict(
+            userId="u1", attributes=dict(login_name="new-login")))
+        self.assertEqual(self.complete().username, "native@example.invalid")
+        self.preparation.prepare.return_value["subject"]["attributes"]["login_name"] = "stale-login"
+        with self.assertRaises(ContractError) as caught:
+            self.complete()
+        self.assertEqual(caught.exception.code, "IDENTITY_CONFLICT")
+
     def test_unbound_identity_does_not_create_or_merge(self):
         self.bindings.resolve.return_value = None
         with self.assertRaises(ContractError) as caught:

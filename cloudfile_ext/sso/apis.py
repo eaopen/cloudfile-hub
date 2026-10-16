@@ -138,6 +138,10 @@ class AdminSSOGroupMapView(APIView):
     def delete(self, request):
         if not is_enabled('CF_ENABLE_SSO'):
             return _feature_off()
+        from cloudfile_extensions.directory.configuration import uses_subject_projection
+        if uses_subject_projection():
+            return api_error(status.HTTP_409_CONFLICT,
+                             'TTL projection requires retaining group ownership mappings.')
 
         external_id = request.GET.get('external_id', '').strip()
         if not external_id:

@@ -91,6 +91,36 @@ def test_directory_unavailable_still_prevents_application(runtime, monkeypatch):
     apply.assert_not_called()
 
 
+def test_ttl_catalog_ignores_population_and_never_reads_or_writes_group_members(runtime, monkeypatch):
+    from contextlib import nullcontext
+    from cloudfile_extensions.jobs import authority
+    monkeypatch.setattr(authority, 'scope_locks', lambda *args: nullcontext())
+    # Exercise the real adapter and RPC calls; only native transport is a fixture.
+    runtime.api.create_group.return_value = 42
+    monkeypatch.setattr(runtime.module, '_prepare', Mock(side_effect=AssertionError('population lookup')))
+    result = runtime.module._sync(catalog_only=True)
+    assert result['status'] == 'OK'
+    assert result['applied'] == dict(create=1, rename=0, add=0, remove=0, unmap=0)
+    runtime.api.create_group.assert_called_once_with('Dept', 'technical', None, -1)
+    runtime.api.group_add_member.assert_not_called()
+    runtime.api.group_remove_member.assert_not_called()
+    runtime.api.get_group_members.assert_not_called()
+
+
+def test_ttl_catalog_refuses_ownership_mismatch_before_effects(runtime, monkeypatch):
+    from contextlib import nullcontext
+    from cloudfile_extensions.jobs import authority
+    monkeypatch.setattr(authority, 'scope_locks', lambda *args: nullcontext())
+    monkeypatch.setattr(runtime.module, '_read_mapped', lambda *args: {
+        '27': dict(group_id=42, name='Dept', parent_external_id=None)})
+    runtime.api.get_group.return_value = SimpleNamespace(creator_name='somebody-else')
+    with pytest.raises(ValueError, match='owner differs'):
+        runtime.module._sync(catalog_only=True)
+    runtime.api.group_add_member.assert_not_called()
+    runtime.api.group_remove_member.assert_not_called()
+    runtime.api.create_group.assert_not_called()
+
+
 @pytest.mark.parametrize('rows', [
     [('native-a', 'broken'), ('native-b', 'broken'), ('native-good', 'healthy')],
     [('native-shared', 'broken'), ('native-shared', 'also-broken'), ('native-good', 'healthy')],

@@ -7,6 +7,7 @@ existing native group ID.
 """
 import logging
 import time
+from contextlib import ExitStack
 
 from django.conf import settings
 from seaserv import ccnet_api, seafile_api
@@ -93,7 +94,7 @@ def _prepare(entries, cursor, identity_schema):
     return resolved, sorted(unresolved), quarantined
 
 
-def _native_state(mapped, entries, cursor, native_schema, owner=None):
+def _native_state(mapped, entries, cursor, native_schema, owner=None, *, catalog_only=False):
     groups = qualified(native_schema, 'Group')
     by_id = {entry['external_id']: entry for entry in entries}
     members, protected = {}, {}
@@ -102,6 +103,8 @@ def _native_state(mapped, entries, cursor, native_schema, owner=None):
         group = ccnet_api.get_group(group_id)
         if group is None:
             raise ValueError('mapped native group is missing')
+        if catalog_only and group.creator_name != owner:
+            raise ValueError('mapped native group owner differs')
         cursor.execute('SELECT parent_group_id FROM ' + groups + ' WHERE group_id=%s', (group_id,))
         native = cursor.fetchall()
         expected = by_id.get(external_id)
@@ -114,7 +117,8 @@ def _native_state(mapped, entries, cursor, native_schema, owner=None):
                 raise ValueError('mapped native group hierarchy differs')
         elif len(native) != 1:
             raise ValueError('mapped native group is missing')
-        members[group_id] = [member.user_name for member in ccnet_api.get_group_members(group_id)]
+        members[group_id] = ([] if catalog_only else
+                             [member.user_name for member in ccnet_api.get_group_members(group_id)])
         # Legacy groups may have another creator; the configured technical
         # owner is infrastructure and must survive employee reconciliation.
         protected[group_id] = list({group.creator_name, owner} - {None})
@@ -186,6 +190,12 @@ def _apply(plan, cursor, provider, owner, mapped):
 
 
 def sync():
+    from .configuration import membership_mode
+    config = getattr(settings, 'CLOUDFILE_POLICY_CONFIG', None)
+    return _sync(catalog_only=membership_mode(config) == 'subject_ttl')
+
+
+def _sync(*, catalog_only=False):
     config = getattr(settings, 'CLOUDFILE_POLICY_CONFIG', None)
     owner = getattr(settings, 'CF_SSO_GROUP_OWNER', None)
     if not isinstance(config, dict) or not isinstance(owner, str) or not owner:
@@ -201,7 +211,7 @@ def sync():
     except Exception:
         raise ValueError('configured directory group owner is unavailable') from None
     provider = config['provider']
-    if provider != 'etech':
+    if not catalog_only and provider != 'etech':
         raise ValueError('directory sync requires the eTech provider')
     source = trusted_https_url(config['directory_url']).rstrip('/') + '/groups'
     authorize = directory_authorization(config, getattr(settings, 'CLOUDFILE_DIRECTORY_AUTHORIZATION', None))
@@ -212,25 +222,45 @@ def sync():
         client.session.close()
     if not isinstance(payload.get('groups'), list):
         raise snapshot.SnapshotRejected('directory service returned no groups list')
-    entries = snapshot.validate(payload['groups'])
+    raw = payload['groups']
+    if catalog_only:
+        # Discard full-population relationships even when an older source
+        # still sends them. They cannot participate in planning or writes.
+        if any(not isinstance(entry, dict) for entry in raw):
+            raise snapshot.SnapshotRejected('invalid catalog entry')
+        raw = [{key: value for key, value in entry.items()
+                if key not in ('members', 'member_user_ids', 'member_accounts', 'member_login_ids', 'member_identities')}
+               for entry in raw]
+    entries = snapshot.validate(raw)
     for entry in entries:
         _mapping(entry['external_id'], entry['subject_type'])
     connection = _database()
     locked = False
     try:
-        with connection.cursor() as cursor:
+        with ExitStack() as stack:
+            if catalog_only:
+                from ..jobs.authority import scope_locks
+                # Fetch first; no remote I/O while blocking subject publication.
+                stack.enter_context(scope_locks(connection, [dict(type='provider', provider=provider, external_id=provider)]))
+            cursor = stack.enter_context(connection.cursor())
             cursor.execute("SELECT GET_LOCK('cf.directory.sync',5)")
             locked = cursor.fetchone() == (1,)
             if not locked:
                 raise ValueError('directory sync is busy')
             mapped = _read_mapped(cursor, provider)
-            resolved, unresolved, quarantined = _prepare(entries, cursor, config['identity_schema'])
-            members, protected = _native_state(mapped, resolved, cursor, config['native_schema'], owner)
-            # Preserve the v0.1 removal guard and its explicit operator override.
-            ratio = getattr(settings, 'CF_SSO_MAX_REMOVAL_RATIO', reconcile.DEFAULT_MAX_REMOVAL_RATIO)
-            ratio = None if ratio in ('', None) else float(ratio)
-            plan = reconcile.build(resolved, mapped, members, protected=protected,
-                                   quarantined=quarantined, max_removal_ratio=ratio)
+            if catalog_only:
+                from .catalog import plan_catalog
+                _native_state(mapped, entries, cursor, config['native_schema'], owner, catalog_only=True)
+                unresolved, quarantined = [], set()
+                plan = plan_catalog(entries, mapped)
+            else:
+                resolved, unresolved, quarantined = _prepare(entries, cursor, config['identity_schema'])
+                members, protected = _native_state(mapped, resolved, cursor, config['native_schema'], owner)
+                # Preserve the v0.1 removal guard and its explicit operator override.
+                ratio = getattr(settings, 'CF_SSO_MAX_REMOVAL_RATIO', reconcile.DEFAULT_MAX_REMOVAL_RATIO)
+                ratio = None if ratio in ('', None) else float(ratio)
+                plan = reconcile.build(resolved, mapped, members, protected=protected,
+                                       quarantined=quarantined, max_removal_ratio=ratio)
             done, errors = _apply(plan, cursor, provider, owner, mapped)
             # Local failures are operational exceptions, not a full-sync failure.
             # Keep retrying on future runs while healthy changes remain active.

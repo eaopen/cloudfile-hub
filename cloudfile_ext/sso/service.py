@@ -399,6 +399,17 @@ def sync(registry=None):
     outcome lands in cf_sso_sync_state, which is what the admin endpoint and
     the capability gate both read.
     """
+    from cloudfile_extensions.directory.configuration import uses_subject_projection
+    if uses_subject_projection():
+        from cloudfile_extensions.directory.sync import sync as sync_catalog
+        try:
+            result = sync_catalog()
+            result['status'] = STATUS_OK if result['status'] == 'OK' else STATUS_PARTIAL
+            _record(result['status'], _describe(result))
+            return result
+        except Exception as error:
+            logger.warning('Directory catalog sync failed; failure_type=%s', type(error).__name__)
+            return _record(STATUS_ERROR, 'directory catalog unavailable')
     from cloudfile_ext.registry import registry as default_registry
 
     source = directory.active(registry or default_registry)
@@ -449,6 +460,9 @@ def sync_user_id(user_id, *, dry_run=True, registry=None):
     all desired EAP groups already mapped, and an explicit operator-controlled
     apply flag. No synchronization of other employees or group creation occurs.
     """
+    from cloudfile_extensions.directory.configuration import uses_subject_projection
+    if uses_subject_projection():
+        return {'status': 'refused', 'reason': 'subject TTL projection owns memberships'}
     from django.conf import settings
     from cloudfile_ext.registry import registry as default_registry
     from cloudfile_ext.sso.incremental import IncrementalRefused, plan_uid_delta
@@ -554,6 +568,9 @@ def sync_user(username, registry=None):
     *after* ``auth.login()`` fires the signal) must not burn the throttle
     window. Keep the two apart if this is ever refactored.
     """
+    from cloudfile_extensions.directory.configuration import uses_subject_projection
+    if uses_subject_projection():
+        return None
     from cloudfile_ext.registry import registry as default_registry
     from cloudfile_ext.identity import login_of
     from seaserv import ccnet_api

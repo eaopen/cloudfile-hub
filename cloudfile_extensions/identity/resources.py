@@ -31,7 +31,8 @@ class LoginResources:
                     directory=directory, provider_id=self.resources.provider,
                     native_schema=self.resources.native_schema,
                     identity_schema=self.resources.identity_schema,
-                    request_id=request_id, jit_enabled=self.jit_enabled, prefix=self.prefix)
+                    request_id=request_id, jit_enabled=self.jit_enabled, prefix=self.prefix,
+                    subject_ttl=self.resources.subject_ttl)
                 yield runtime
             finally:
                 try:

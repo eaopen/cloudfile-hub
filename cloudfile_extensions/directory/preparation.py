@@ -20,7 +20,7 @@ from .provider import DirectoryProvider
 class SubjectPreparation:
     def __init__(self, connection, redis, *, provider_id, directory,
                  native_schema, identity_schema, actor_user_id, request_id,
-                 prefix="cf:subjects:"):
+                 prefix="cf:subjects:", ttl=1800):
         identifier(actor_user_id, maximum=225)
         identifier(request_id)
         if not isinstance(directory, DirectoryProvider):
@@ -50,7 +50,7 @@ class SubjectPreparation:
             account_active=self.state.account_active, barrier_active=self.state.barrier_active,
             refresh_guard=self.state.refresh_guard,
             project=lambda subject, epoch: self.projector.apply(subject, epoch,
-                native_username=self.state.username(subject["userId"])), prefix=prefix)
+                native_username=self.state.username(subject["userId"])), prefix=prefix, ttl=ttl)
 
     def prepare(self, user_id, *, trigger="request"):
         identifier(user_id, maximum=225)

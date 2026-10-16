@@ -23,7 +23,7 @@ from .sql_bindings import SQLIdentityBindings
 class LoginRuntime:
     def __init__(self, connection, redis, *, oidc, directory, provider_id,
                  native_schema, identity_schema, request_id, jit_enabled=False,
-                 prefix="cf:"):
+                 prefix="cf:", subject_ttl=1800):
         if (not isinstance(oidc, OIDCConfig) or not isinstance(directory, DirectoryProvider)
                 or type(jit_enabled) is not bool):
             raise ValueError("trusted OIDC and directory configuration required")
@@ -38,6 +38,8 @@ class LoginRuntime:
         self.directory, self.provider = directory, provider_id
         self.native_schema, self.identity_schema = native_schema, identity_schema
         self.request_id, self.prefix = request_id, prefix
+        from ..directory.configuration import subject_ttl as validate_ttl
+        self.subject_ttl = validate_ttl({"subject_ttl": subject_ttl})
         # This adapter may resolve bindings but must never grant management writes.
         def reject_management(*args):
             raise ContractError("ACCESS_DENIED", "Login cannot manage identity bindings", 403)
@@ -69,4 +71,4 @@ class LoginRuntime:
         return SubjectPreparation(self.connection, self.redis, provider_id=self.provider,
             directory=self.directory, native_schema=self.native_schema,
             identity_schema=self.identity_schema, actor_user_id=user_id,
-            request_id=self.request_id, prefix=self.prefix + "subjects:")
+            request_id=self.request_id, prefix=self.prefix + "subjects:", ttl=self.subject_ttl)
