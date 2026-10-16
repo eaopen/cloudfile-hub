@@ -49,6 +49,7 @@ class HTTPTests(TestCase):
         from seaserv import seafile_api
         user = SimpleNamespace(username='native', is_staff=False)
         with patch.object(seafile_api, 'get_repo', return_value=SimpleNamespace(is_virtual=False)), \
+             patch.object(seafile_api, 'check_permission', return_value='rw'), \
              patch('seahub.share.utils.is_repo_admin', return_value=False) as native:
             with self.assertRaises(PermissionError):
                 require_repo_manage(user, RID)  # Native ordinary rw is not administrative.
