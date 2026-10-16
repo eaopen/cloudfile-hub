@@ -1,5 +1,4 @@
 """Current-user TTL projection into native GroupUser, without task/outbox state."""
-from contextlib import ExitStack
 from datetime import datetime, timezone
 import hashlib
 import json
@@ -59,11 +58,9 @@ class Memberships:
         uid, username = text(uid), text(username, 255)
         key = self._key(uid, username)
         try:
-            # Catalog mutation and user refresh share the provider lock. No
-            # uncommitted mapping can be published as a fresh membership grant.
-            with ExitStack() as stack:
-                for lock in ('groups:' + self.provider, 'subject:' + self.provider + ':' + uid):
-                    stack.enter_context(database_lock(self.connection, lock))
+            # Network fetches serialize only this user. Catalog mutation and
+            # SQL publication share the much shorter provider critical section.
+            with database_lock(self.connection, 'subject:' + self.provider + ':' + uid):
                 self.identity.active(username, uid)
                 cached, remaining = self.redis.eval(
                     "local v=redis.call('GET',KEYS[1]); return {v or '',redis.call('PTTL',KEYS[1])}", 1, key)
@@ -74,12 +71,13 @@ class Memberships:
                 self.redis.delete(key)
                 current = self.fetch(uid) if subject is None else subject
                 _, desired = validate_subject(current, uid)
-                self._project(uid, username, desired)
-                if current['status'] != 'active':
-                    raise IdentityUnavailable('Directory account disabled')
-                # Readiness is written only after SQL commit. Cache failure
-                # refuses this request; it cannot turn old GroupUser into proof.
-                self.redis.set(key, json.dumps({'uid': uid, 'username': username}), ex=self.ttl)
+                with database_lock(self.connection, 'groups:' + self.provider):
+                    self._project(uid, username, desired)
+                    if current['status'] != 'active':
+                        raise IdentityUnavailable('Directory account disabled')
+                    # Readiness is written only after SQL commit. Cache failure
+                    # refuses this request; old GroupUser is never freshness proof.
+                    self.redis.set(key, json.dumps({'uid': uid, 'username': username}), ex=self.ttl)
         except IdentityUnavailable:
             raise
         except Exception:
@@ -88,7 +86,7 @@ class Memberships:
     def _project(self, uid, username, desired):
         self.connection.begin()
         try:
-            self.identity.active(username, uid)
+            self.identity.active(username, uid, locked=True)
             with self.connection.cursor() as cursor:
                 cursor.execute('SELECT subject_type,namespace,external_id,group_id FROM cf_sso_group_map WHERE provider=%s ORDER BY group_id FOR UPDATE', (self.provider,))
                 rows = cursor.fetchall()

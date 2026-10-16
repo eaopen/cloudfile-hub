@@ -31,12 +31,13 @@ class NativeIdentity:
         self.provider = 'cfv2_' + hashlib.sha256(issuer.encode()).hexdigest()[:26]
         self.create_account = create_account
 
-    def active(self, username, uid):
+    def active(self, username, uid, *, locked=False):
+        suffix = ' FOR UPDATE' if locked else ''
         with self.connection.cursor() as cursor:
-            cursor.execute('SELECT user,login_id FROM ' + self.profiles + ' WHERE user=%s OR login_id=%s', (username, uid))
+            cursor.execute('SELECT user,login_id FROM ' + self.profiles + ' WHERE user=%s OR login_id=%s' + suffix, (username, uid))
             if cursor.fetchall() != ((username, uid),):
                 raise IdentityConflict('native UID binding changed')
-            cursor.execute('SELECT email,is_active FROM ' + self.accounts + ' WHERE email=%s', (username,))
+            cursor.execute('SELECT email,is_active FROM ' + self.accounts + ' WHERE email=%s' + suffix, (username,))
             if cursor.fetchall() != ((username, 1),):
                 raise IdentityUnavailable('native account inactive')
 
@@ -56,8 +57,11 @@ class NativeIdentity:
                     if len(rows) != 1:
                         raise IdentityConflict('ambiguous OAuth binding')
                     username, provider, saved_subject, raw = rows[0]
-                    if (provider != self.provider or saved_subject != subject or
-                            json.loads(raw) != metadata):
+                    try:
+                        saved = json.loads(raw)
+                    except (TypeError, ValueError):
+                        raise IdentityConflict('invalid OAuth UID binding') from None
+                    if (provider != self.provider or saved_subject != subject or saved != metadata):
                         raise IdentityConflict('OAuth UID binding changed')
                     self.active(username, uid)
                     return username
