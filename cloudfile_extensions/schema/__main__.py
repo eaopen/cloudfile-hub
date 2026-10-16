@@ -15,6 +15,8 @@ def main():
                                            "directory-plan", "directory-apply", "directory-check"))
     parser.add_argument("--offline", action="store_true",
                         help="confirm all directory readers/writers are stopped before directory-apply")
+    parser.add_argument("--profile", choices=("legacy", "m1"), default=None,
+                        help="m1 is a fresh configuration, never a legacy data migration")
     arguments = parser.parse_args()
     # Reuse the mysqlclient driver already shipped by CE; no extra runtime driver.
     import MySQLdb
@@ -31,6 +33,8 @@ def main():
         )
         try:
             if arguments.command.startswith('directory-'):
+                if arguments.profile == "m1" or SchemaRunner(connection).profile == "m1":
+                    raise MigrationError("M1 directory schema is managed by the M1 profile")
                 from .directory import DirectorySchemaRunner
                 runner = DirectorySchemaRunner(connection)
                 if arguments.command == 'directory-apply':
@@ -40,7 +44,7 @@ def main():
                 else:
                     result = runner.inspect()
             else:
-                result = getattr(SchemaRunner(connection), "require_current" if arguments.command == "check" else arguments.command)()
+                result = getattr(SchemaRunner(connection, profile=arguments.profile), "require_current" if arguments.command == "check" else arguments.command)()
             print(json.dumps(result if result is not None else {"current": True}))
         finally:
             connection.close()

@@ -70,7 +70,11 @@ class ACLRules:
             raise ValueError("transactional final assertion required")
         if authorize_change is not None and not callable(authorize_change):
             raise ValueError("transactional change authorization required")
-        SchemaRunner(connection).require_current()
+        schema = SchemaRunner(connection)
+        schema.require_current()
+        self.schema_profile = schema.profile
+        if self.TABLE == 'cf_dir_admin' and self.schema_profile == 'm1':
+            raise ContractError('NOT_SUPPORTED', 'Directory management is external in M1', 410)
         self.connection, self.provider, self.actor = connection, provider, actor
         self.request_id, self.authorize = request_id, authorize
         self.finalize = finalize

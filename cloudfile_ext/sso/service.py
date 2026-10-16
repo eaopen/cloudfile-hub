@@ -405,11 +405,10 @@ def sync(registry=None):
         try:
             result = sync_catalog()
             result['status'] = STATUS_OK if result['status'] == 'OK' else STATUS_PARTIAL
-            _record(result['status'], _describe(result))
             return result
         except Exception as error:
             logger.warning('Directory catalog sync failed; failure_type=%s', type(error).__name__)
-            return _record(STATUS_ERROR, 'directory catalog unavailable')
+            return {'status': STATUS_ERROR, 'detail': 'directory catalog unavailable'}
     from cloudfile_ext.registry import registry as default_registry
 
     source = directory.active(registry or default_registry)

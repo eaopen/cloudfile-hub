@@ -30,6 +30,8 @@ class ScopedContentReadAuthority(ContentReadAuthority):
         from .directory_management import DirectoryAdminRules, subject_keys
         if self.can_manage_library():
             return True
+        if getattr(self.rules, 'schema_profile', 'legacy') == 'm1':
+            return False
         if not self.qualification_ready:
             return False
         keys = subject_keys(self.current_subject, self.state.provider)

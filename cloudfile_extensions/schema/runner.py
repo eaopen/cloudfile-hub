@@ -56,12 +56,23 @@ def load_migrations(directory=None):
 
 
 class SchemaRunner:
-    def __init__(self, connection, migrations=None):
+    def __init__(self, connection, migrations=None, *, profile=None):
         if not connection.get_autocommit():
             raise MigrationError("schema runner requires a dedicated autocommit connection")
         self.connection = connection
         self.offline = False
-        self.migrations = load_migrations() if migrations is None else tuple(migrations)
+        if profile not in (None, "legacy", "m1") or (migrations is not None and profile is not None):
+            raise MigrationError("invalid schema profile")
+        self.profile = "custom" if migrations is not None else profile
+        if self.profile is None:
+            self.profile = "legacy"
+            if self._exists() and self._query("SELECT version FROM cf_schema_migration WHERE version='100_m1_storage'"):
+                self.profile = "m1"
+        if self.profile == "m1":
+            from .m1 import migrations as m1_migrations
+            self.migrations = m1_migrations()
+        else:
+            self.migrations = load_migrations() if migrations is None else tuple(migrations)
         if len({item.version for item in self.migrations}) != len(self.migrations):
             raise MigrationError("duplicate migration version")
 
@@ -130,6 +141,9 @@ class SchemaRunner:
 
     def apply(self):
         with self._locked():
+            if self.profile == "m1":
+                from .m1 import preflight
+                preflight(self)
             self._check_directory_layouts(upgrading=True)
             self._bootstrap()
             plan = {item["version"]: item for item in self.plan()}
@@ -139,6 +153,8 @@ class SchemaRunner:
         return self.status()
 
     def _check_directory_layouts(self, *, upgrading=False):
+        if self.profile == "m1":
+            return
         # CREATE IF NOT EXISTS would hide legacy/type drift. Reject it before
         # applying any unrelated DDL; the explicit offline directory upgrade
         # is the only operation allowed to archive old directory tables.
@@ -207,6 +223,10 @@ class SchemaRunner:
             raise MigrationError("schema upgrade is required")
         if not all(self._verify(step) for migration in self.migrations for step in migration.steps):
             raise MigrationError("schema structure has drifted")
+        if self.profile == "m1":
+            from .m1 import require_layout
+            require_layout(self)
+            return
         from .directory import VERSIONS, verify_indexes
         if VERSIONS.issubset(m.version for m in self.migrations) and not verify_indexes(self):
             raise MigrationError('directory index contract has drifted')
