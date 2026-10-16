@@ -2,7 +2,7 @@ name: V2 Meilisearch isolated checks
 
 on:
   push:
-    branches: [dev, feature/v2-meilisearch]
+    branches: [dev, feature/v2-meilisearch, feature/v2-search-filters]
   pull_request:
     branches: [dev]
     paths:
