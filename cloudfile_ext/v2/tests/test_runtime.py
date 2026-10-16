@@ -17,7 +17,7 @@ def settings(**values):
 
 
 def directory_settings(**values):
-    base = {'CF_DIRECTORY_URL': 'https://directory.example.test/directory', 'CF_DIRECTORY_TOKEN': 'token'}
+    base = {'CF_DIRECTORY_URL': 'https://directory.example.test/directory', 'CF_DIRECTORY_SECRET': 's' * 32, 'CF_DIRECTORY_KEY_ID': 'test', 'CF_DIRECTORY_ISSUER': 'eap', 'CF_DIRECTORY_AUDIENCE': 'directory', 'CF_DIRECTORY_SERVICE_ID': 'cloudfile'}
     base.update(values)
     return settings(**base)
 
@@ -37,7 +37,7 @@ class ConfigurationTest(unittest.TestCase):
 
     def test_one_consistent_bounded_ttl(self):
         self.assertEqual(runtime.configuration(directory_settings()),
-                         {'url': 'https://directory.example.test/directory', 'token': 'token',
+                         {'url': 'https://directory.example.test/directory', 'credentials': {'secret': 's' * 32, 'key_id': 'test', 'issuer': 'eap', 'audience': 'directory', 'service_id': 'cloudfile'},
                           'provider': 'etech', 'ttl': 1800, 'timeout': 5, 'insecure': False})
         for ttl in (30, 60, 1800):
             self.assertEqual(runtime.configuration(directory_settings(CF_SUBJECT_TTL=ttl))['ttl'], ttl)
@@ -55,9 +55,9 @@ class ConfigurationTest(unittest.TestCase):
                 runtime.configuration(directory_settings(**values))
 
     def test_bare_whitespace_configuration_is_stripped_not_accepted_verbatim(self):
-        config = runtime.configuration(settings(CF_DIRECTORY_URL=' https://directory.example.test/d ',
-                                                CF_DIRECTORY_TOKEN=' token '))
-        self.assertEqual((config['url'], config['token']), ('https://directory.example.test/d', 'token'))
+        config = runtime.configuration(directory_settings(CF_DIRECTORY_URL=' https://directory.example.test/d '))
+        self.assertEqual(config['url'], 'https://directory.example.test/d')
+
 
 
 class StubProjector:

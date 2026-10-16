@@ -10,6 +10,7 @@ from rest_framework.views import APIView
 from seahub.api2.authentication import TokenAuthentication, SessionAuthentication
 from seahub.api2.utils import JWT_PRIVATE_KEY
 
+from .permissions import SubjectReady
 from .acl_policy import PolicyError, Rule
 from .acl_runtime import Authority, store
 from .acl_store import uuid
@@ -31,7 +32,7 @@ def failure(error):
 
 class AuthenticatedACL(APIView):
     authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, SubjectReady,)
 
 
 class EffectivePermission(AuthenticatedACL):
@@ -59,7 +60,7 @@ class SharedDirectories(AuthenticatedACL):
 
 class DirectoryRules(AuthenticatedACL):
     # Minimal native administrator maintenance read. rw never means manage.
-    permission_classes = (IsAdminUser,)
+    permission_classes = (IsAdminUser, SubjectReady,)
 
     def get(self, request):
         try:

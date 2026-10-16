@@ -14,7 +14,7 @@ the only place that reads them.
 import os
 import threading
 
-from .directory import DEFAULT_TIMEOUT, DirectorySubjectClient
+from .directory import DEFAULT_TIMEOUT, DirectorySubjectClient, DirectoryMachineToken
 from .errors import IdentityUnavailable, SubjectNotBound
 from .identity import NativeAccountBinding, text
 from .memberships import Memberships
@@ -35,17 +35,21 @@ def configuration(settings):
     """Return the validated Directory configuration, or None when V2 identity is off.
 
     A deployment that configures neither ``CF_DIRECTORY_URL`` nor
-    ``CF_DIRECTORY_TOKEN`` keeps the native CE login and authorization path
+    the machine credentials keeps the native CE login and authorization path
     untouched, including CE-only accounts. A half-configured deployment denies
     subjects rather than guessing which half was intended.
     """
     url = getattr(settings, 'CF_DIRECTORY_URL', None)
-    token = getattr(settings, 'CF_DIRECTORY_TOKEN', None)
-    if not url and not token:
+    fields = ('SECRET', 'KEY_ID', 'ISSUER', 'AUDIENCE', 'SERVICE_ID')
+    credentials = {name.lower(): getattr(settings, 'CF_DIRECTORY_' + name, None) for name in fields}
+    if getattr(settings, 'CF_DIRECTORY_TOKEN', None):
+        raise IdentityUnavailable('static Directory bearer tokens are not supported')
+    if not url and not any(credentials.values()):
         return None
-    if (not isinstance(url, str) or not isinstance(token, str)
-            or not url.strip() or not token.strip()):
+    if not isinstance(url, str) or not url.strip():
         raise IdentityUnavailable('incomplete CloudFile Directory configuration')
+    # Validate before creating Redis/DB clients. Never include values in errors.
+    DirectoryMachineToken(**credentials)
     ttl = getattr(settings, 'CF_SUBJECT_TTL', DEFAULT_TTL)
     timeout = getattr(settings, 'CF_DIRECTORY_TIMEOUT', DEFAULT_TIMEOUT)
     if type(ttl) is not int or not MINIMUM_TTL <= ttl <= MAXIMUM_TTL:
@@ -55,7 +59,7 @@ def configuration(settings):
     provider = getattr(settings, 'CF_DIRECTORY_PROVIDER', None) or DEFAULT_PROVIDER
     return {
         'url': url.strip(),
-        'token': token.strip(),
+        'credentials': credentials,
         'provider': text(provider, 32),
         'ttl': ttl,
         'timeout': timeout,
@@ -79,7 +83,7 @@ class MembershipRuntime:
 
     @staticmethod
     def _directory_client(config):
-        return DirectorySubjectClient(config['url'], config['token'],
+        return DirectorySubjectClient(config['url'], DirectoryMachineToken(**config['credentials']),
                                       timeout=config['timeout'], insecure=config['insecure'])
 
     def _projector(self):
@@ -214,4 +218,18 @@ def require_ready(username, settings=None):
     if runtime is None:
         return False
     runtime.require_ready(username, bound_uid(username))
+    return True
+
+
+def ensure_acl_subject(uid, username):
+    """B's (uid, username) contract, backed by A's exact native binding/TTL."""
+    settings = _settings()
+    runtime = _runtime_for(settings)
+    if runtime is None:
+        raise IdentityUnavailable('ACL requires Directory subject readiness')
+    if getattr(settings, 'CF_ACL_PROVIDER', '') != runtime.config['provider']:
+        raise IdentityUnavailable('ACL and Directory providers must match')
+    if uid != bound_uid(username):
+        raise SubjectNotBound('ACL subject does not match native UID binding')
+    runtime.require_ready(username, uid)
     return True

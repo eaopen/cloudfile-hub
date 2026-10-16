@@ -35,7 +35,7 @@ class FakeOpener:
 
 def client(result, **kwargs):
     opener = FakeOpener(result)
-    return DirectorySubjectClient('https://directory.example.test/directory', 'machine-token',
+    return DirectorySubjectClient('https://directory.example.test/directory', lambda: 'machine-token',
                                   opener=opener, **kwargs), opener
 
 
@@ -90,7 +90,7 @@ class DirectoryClientTest(unittest.TestCase):
     def test_bounded_timeout_is_required(self):
         for timeout in (0, 31, True, '5'):
             with self.subTest(timeout=timeout), self.assertRaises(ValueError):
-                DirectorySubjectClient('https://directory.example.test/', 'token', timeout=timeout)
+                DirectorySubjectClient('https://directory.example.test/', lambda: 'token', timeout=timeout)
 
 
 if __name__ == '__main__':

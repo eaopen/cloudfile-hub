@@ -52,13 +52,14 @@ identity table.
   and an unproven subject never authorize a CloudFile request.
 
 Configuration is administrator-owned and optional. A deployment that sets no
-`CF_DIRECTORY_URL`/`CF_DIRECTORY_TOKEN` keeps the native CE login and
+`CF_DIRECTORY_URL` or machine credentials keeps the native CE login and
 authorization path untouched, including CE-only accounts.
 
 | Setting | Meaning | Bound |
 | --- | --- | --- |
 | `CF_DIRECTORY_URL` | Trusted Directory base URL, exact-UID `GET /users/{uid}/context` | HTTPS origin, no credentials/query/fragment |
-| `CF_DIRECTORY_TOKEN` | Directory machine credential (`Authorization: Bearer`) | required with the URL; never from a request |
+| `CF_DIRECTORY_SECRET` | HS256 machine signing key from deployment secrets | at least 32 UTF-8 bytes; never from a request |
+| `CF_DIRECTORY_KEY_ID` / `CF_DIRECTORY_ISSUER` / `CF_DIRECTORY_AUDIENCE` / `CF_DIRECTORY_SERVICE_ID` | EAP verifier kid / iss / aud / sub | all required with URL/key |
 | `CF_DIRECTORY_PROVIDER` | `cf_sso_group_map.provider` namespace | default `etech` |
 | `CF_SUBJECT_TTL` | Published-subject readiness lifetime | default 1800, 30-1800 |
 | `CF_DIRECTORY_TIMEOUT` | Per-read network timeout in seconds | default 5, 1-30 |
@@ -70,7 +71,12 @@ oversized or non-JSON bodies, and returns the snapshot unvalidated so
 One autocommit MySQL connection per worker thread serves the projector and is
 revalidated before reuse. Readiness records live in the deployment's Redis
 (`CACHES['default']['LOCATION']`); a non-Redis cache denies subjects rather than
-falling back to native groups, and no new table is added. This wiring still does
-not activate directory ACL runtime, the shared root or C/Go final file
-authorization.
+falling back to native groups, and no new table is added. B uses `CF_ACL_SUBJECT_ENSURE=cloudfile_ext.v2.runtime.ensure_acl_subject`;
+`CF_ACL_PROVIDER` must equal `CF_DIRECTORY_PROVIDER`. Native ACL activation and
+public rule publication remain separate deployment/acceptance gates.
+
+Directory requests mint unique 60-second HS256 JWTs with `directory.read` scope.
+Static `CF_DIRECTORY_TOKEN` is rejected. Rotate machine credentials in deployment
+configuration and restart workers; do not persist issued tokens. The server clock
+must be synchronized with EAP. Never reuse browser/admin credentials.
 

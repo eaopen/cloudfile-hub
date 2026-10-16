@@ -7,6 +7,11 @@ subject is and never substitutes cached or partial membership data when the
 provider fails.
 """
 import json
+import base64
+import hashlib
+import hmac
+import time
+import uuid
 from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -34,6 +39,34 @@ def trusted_url(value, *, insecure=False):
     raise IdentityUnavailable('CloudFile Directory URL must be a trusted HTTPS origin')
 
 
+class DirectoryMachineToken:
+    """Issue one purpose-bound, short-lived machine JWT per Directory read.
+
+    The deployment supplies the signing key; tokens are never persisted or
+    accepted from a browser. Restart workers when rotating the configured key.
+    """
+    def __init__(self, secret, key_id, issuer, audience, service_id):
+        if not isinstance(secret, str) or len(secret.encode('utf-8')) < 32:
+            raise IdentityUnavailable('invalid Directory machine credential')
+        self.secret = secret.encode('utf-8')
+        self.key_id, self.issuer, self.audience, self.service_id = (
+            text(value, 255) for value in (key_id, issuer, audience, service_id))
+
+    def __call__(self):
+        now = int(time.time())
+        def encode(value):
+            return base64.urlsafe_b64encode(value).rstrip(b'=')
+        def part(value):
+            return encode(json.dumps(value, separators=(',', ':')).encode('utf-8'))
+        header = part({'alg': 'HS256', 'typ': 'JWT', 'kid': self.key_id})
+        claims = part({'iss': self.issuer, 'aud': self.audience, 'sub': self.service_id,
+                       'jti': uuid.uuid4().hex, 'scope': 'directory.read',
+                       'iat': now, 'exp': now + 60})
+        message = header + b'.' + claims
+        signature = encode(hmac.new(self.secret, message, hashlib.sha256).digest())
+        return (message + b'.' + signature).decode('ascii')
+
+
 class _RejectRedirects(HTTPRedirectHandler):
     def redirect_request(self, request, file_pointer, code, message, headers, new_url):
         # Following a redirect would read the subject from an unconfigured origin.
@@ -45,7 +78,9 @@ class DirectorySubjectClient:
 
     def __init__(self, base_url, token, *, timeout=DEFAULT_TIMEOUT, insecure=False, opener=None):
         self.base_url = trusted_url(text(base_url, 2048), insecure=insecure)
-        self.token = text(token, 4096)
+        if not callable(token):
+            raise IdentityUnavailable('Directory requires a machine token issuer')
+        self.token = token
         if type(timeout) is not int or not 1 <= timeout <= MAXIMUM_TIMEOUT:
             raise ValueError('bounded Directory timeout required')
         self.timeout = timeout
@@ -59,7 +94,7 @@ class DirectorySubjectClient:
         if uid in ('.', '..'):
             raise IdentityUnavailable('invalid Directory user id')
         request = Request(self.base_url + '/users/' + quote(uid, safe='') + '/context',
-                          headers={'Authorization': 'Bearer ' + self.token,
+                          headers={'Authorization': 'Bearer ' + text(self.token(), 4096),
                                    'Accept': 'application/json',
                                    'Cache-Control': 'no-store'})
         try:

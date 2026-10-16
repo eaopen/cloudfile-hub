@@ -34,7 +34,7 @@ jobs:
         with:
           python-version: '3.12'
       - name: Subject runtime policy and Directory client (no web stack)
-        run: python -m unittest cloudfile_ext.v2.tests.test_runtime cloudfile_ext.v2.tests.test_directory -v
+        run: python -m unittest cloudfile_ext.v2.tests.test_runtime cloudfile_ext.v2.tests.test_directory cloudfile_ext.v2.tests.test_directory_machine -v
       - name: Native patch syntax
         run: python -m py_compile seahub/oauth/views.py cloudfile_ext/v2/search/http.py
       - run: python -m pip install "Django==5.2.*" "djangorestframework==3.16.*"
