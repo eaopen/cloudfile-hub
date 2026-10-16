@@ -54,8 +54,9 @@ Under `api/v2.1/cloudfile/authorization/v1/`:
 - `directory-entries/?repo_id=...&path=...&offset=0&limit=50` — at most 100 native
   candidates per page, filtered by the same authority. An empty page may have a
   next offset when candidates were hidden. `root_path` is the navigation boundary.
-  Optional `with_tags=true` adds display-only CE tags (`RepoTags + FileTags +
-  FileUUIDMap`, files and directories) to the visible items only, plus
+  Optional `with_tags=true` adds current CE repo tags and legacy free tags
+  (display-only and marked `read_only=true`; never a new write source) to
+  the visible files and directories only, via per-page indexed reads, plus
   `tags_status`. `FAILED` sets item `tags` to null; it never means "no tags" and
   never fails the listing. Tags are not an authorization input.
 
@@ -131,3 +132,20 @@ The integrator must retain publication blocking until the real subject adapter,
 scoped management credentials, all exposed read/write routes, lifecycle behavior,
 and deployment acceptance are complete. This minimal seam is not full ACL release
 certification. Internal test adapters are not production authentication.
+
+## Cache Deployment
+
+ACL rules use bounded per-library snapshots in Seahub's configured shared
+Django cache, normally Redis. When the default Django cache is per-process
+`LocMemCache` (or `DummyCache`), ACL cross-request cache TTL is forced to zero
+so another worker cannot retain a stale grant after a local invalidation.
+Per-request authority reuse remains enabled. Use a shared cache in production.
+
+With Redis, use `noeviction` or a `volatile-*` policy for the dedicated/shared
+cache instance: generation keys do not have TTL, while snapshots do. Avoid
+`allkeys-*` policies that may evict generation keys and temporarily expose an
+older cache namespace. Failed invalidation or direct SQL rule edits remain
+bounded by the configured TTL (default 180 seconds). Do not promise instantaneous
+revocation under cache failures. Cache misses read authoritative SQL; SQL errors
+never grant access. Tags bypass shared cache entirely and read only authorized
+page/search references.

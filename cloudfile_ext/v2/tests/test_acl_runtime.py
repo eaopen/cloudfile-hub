@@ -116,6 +116,11 @@ class LibraryCacheTests(TestCase):
             'BACKEND': 'django.core.cache.backends.locmem.LocMemCache', 'LOCATION': 'cf-acl-library-test'}})
         self.override.enable()
         cache.clear()
+        # These tests exercise cache storage with LocMem intentionally; production
+        # rejects it. Override the TTL here to verify snapshot behavior itself.
+        self.ttl_override = patch('cloudfile_ext.v2.acl_runtime.cache_ttl', return_value=180)
+        self.ttl_override.start()
+        self.addCleanup(self.ttl_override.stop)
         self.denied = Rule(RID, '/projects/shared', 'etech', 'user', 'user', 'uid', 'none')
 
     def tearDown(self):
@@ -168,6 +173,47 @@ class LibraryCacheTests(TestCase):
         with self.assertRaises(OSError):
             auth.effective(RID, '/projects/shared')
 
+    def test_refill_started_before_invalidation_cannot_poison_new_generation(self):
+        from cloudfile_ext.v2.acl_runtime import invalidate_library
+        from django.core.cache import cache
+        from cloudfile_ext.v2 import acl_runtime
+        rules = Mock()
+        first = (Rule(RID, '/projects', 'etech', 'user', 'user', 'uid', 'rw'),)
+        second = (self.denied,)
+        def slow_read(_repo):
+            # Simulate a writer committing after this reader chose generation 0,
+            # but before the old SQL response fills its cache entry.
+            invalidate_library(RID)
+            return first
+        rules.library.side_effect = slow_read
+        self.assertEqual(acl_runtime.library_rules(rules, RID, 180), first)
+        self.assertIsNotNone(cache.get(acl_runtime.NAMESPACE + ':0:' + RID))
+        rules.library.side_effect = None
+        rules.library.return_value = second
+        self.assertEqual(acl_runtime.library_rules(rules, RID, 180), second)
+        self.assertEqual(rules.library.call_count, 2)
+
+    def test_cache_invalidation_failure_is_bounded_by_original_ttl(self):
+        import time
+        from django.core.cache import cache
+        from cloudfile_ext.v2 import acl_runtime
+        rules = Mock()
+        first = (Rule(RID, '/projects', 'etech', 'user', 'user', 'uid', 'rw'),)
+        rules.library.return_value = first
+        self.assertEqual(acl_runtime.library_rules(rules, RID, 180), first)
+        original_set = cache.set
+        def deny_generation(key, value, timeout=None, **kwargs):
+            if ':gen:' in key:
+                raise OSError('redis unavailable for invalidation')
+            return original_set(key, value, timeout, **kwargs)
+        with patch('django.core.cache.cache.set', side_effect=deny_generation):
+            acl_runtime.invalidate_library(RID)  # must not break rule write
+        rules.library.return_value = (self.denied,)
+        self.assertEqual(acl_runtime.library_rules(rules, RID, 180), first)
+        with patch('cloudfile_ext.v2.library_cache.time.time', return_value=time.time() + 181):
+            self.assertEqual(acl_runtime.library_rules(rules, RID, 180), (self.denied,))
+        self.assertEqual(rules.library.call_count, 2)
+
     def protected(self, rows_by_repo, repo=None):
         from cloudfile_ext.v2.acl_runtime import protected
         rules = Mock()
@@ -195,3 +241,22 @@ class LibraryCacheTests(TestCase):
         from cloudfile_ext.v2.acl_runtime import protected
         with self.assertRaises(Exception):
             protected(RID, None)
+
+
+class CacheBackendSafetyTests(TestCase):
+    def test_local_or_dummy_cache_disables_cross_request_acl_cache(self):
+        from django.test import override_settings
+        from cloudfile_ext.v2.acl_runtime import cache_ttl
+        for backend in ('django.core.cache.backends.locmem.LocMemCache',
+                        'django.core.cache.backends.dummy.DummyCache'):
+            with override_settings(CF_ACL_CACHE_TTL=180, CACHES={'default': {
+                    'BACKEND': backend, 'LOCATION': 'cache-safety-test'}}):
+                self.assertEqual(cache_ttl(), 0)
+
+    def test_shared_redis_cache_keeps_bounded_ttl(self):
+        from django.test import override_settings
+        from cloudfile_ext.v2.acl_runtime import cache_ttl
+        with override_settings(CF_ACL_CACHE_TTL=180, CACHES={'default': {
+                'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+                'LOCATION': 'redis://127.0.0.1:16394'}}):
+            self.assertEqual(cache_ttl(), 180)
