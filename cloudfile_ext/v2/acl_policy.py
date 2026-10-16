@@ -170,7 +170,8 @@ def resolve(repo_id, path, principal, native_permission, rules, *, hard_readonly
         if not within(level, root):
             continue
         perm, from_rule = _effective(selected, principal, level, base)
-        if perm == 'invisible':
+        if perm in ('none', 'invisible'):
+            # 'none' is an internal lack-of-grant sentinel, never a stored rule.
             # Distinguish an explicitly blocked, visible node from a hidden
             # ancestor. A denied ancestor always hides its unreachable child.
             return Decision('invisible', root, from_rule)
