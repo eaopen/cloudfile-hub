@@ -190,6 +190,15 @@ def oauth_callback(request):
     old_email = oauth_user_info.get('email', '')
 
     oauth_user = SocialAuthUser.objects.get_by_provider_and_uid(OAUTH_PROVIDER, uid)
+    # Reuse the native account already bound to the trusted business UID.
+    # Employee names and contact emails are not account-binding keys.
+    login_id = oauth_user_info.get('login_id', '')
+    profile_username = Profile.objects.get_username_by_login_id(login_id) if login_id else None
+    if oauth_user and login_id:
+        profile = Profile.objects.get_profile_by_user(oauth_user.username)
+        if ((profile_username and profile_username != oauth_user.username) or
+                (profile and profile.login_id and profile.login_id != login_id)):
+            return render_error(request, _('Error, please contact administrator.'))
     if not oauth_user and SSO_LDAP_USE_SAME_UID:
         oauth_user = SocialAuthUser.objects.get_by_provider_and_uid(LDAP_PROVIDER, uid)
         if oauth_user:
@@ -197,6 +206,9 @@ def oauth_callback(request):
     if oauth_user:
         email = oauth_user.username
         is_new_user = False
+    elif profile_username:
+        email = profile_username
+        is_new_user = True  # Add the OAuth binding after native account authentication.
     elif old_email:
         if not is_valid_email(str(old_email)):
             # In previous versions, if 'email' is not in mailbox format,
