@@ -45,6 +45,45 @@ class SearchHttpTests(TestCase):
         self.assertEqual(response.status_code, 403)
         self.assertNotIn('data', response.data)
 
+    def test_optional_filters_narrow_existing_get_without_breaking_default(self):
+        response, authority, client = self.call(dict(repo_id=RID, q='file',
+            kind='file', extension='.TXT', tag='工艺'))
+        self.assertEqual(response.status_code, 200)
+        client.page.assert_called_once_with(RID, '/', 'file', 0, 51,
+                                            kind='file', extension='txt', tag='工艺')
+        self.assertEqual(response.data['data'], [])
+        # The mock returns ITEM without current native Tag; no stale filtered hit leaks.
+        authority.assert_current.assert_called_once_with([])
+
+    def test_matching_native_tag_survives_explicit_filter(self):
+        authority = Mock(version='a'*64, snapshot={'head': 'b'*40}, assert_current=Mock())
+        authority.resolve.return_value = [dict(ITEM, tags=['工艺'])]
+        response, _, client = self.call(dict(repo_id=RID, q='file', kind='file',
+                                             extension='TXT', tag='工艺'), authority=authority)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(len(response.data['data']), 1)
+        self.assertEqual(response.data['data'][0]['tags'], ['工艺'])
+        self.assertEqual(client.page.call_args.kwargs['extension'], 'txt')
+
+    def test_invalid_filter_or_dir_extension_is_rejected_before_search(self):
+        for filters in ({'kind': 'admin'}, {'extension': '../pdf'},
+                        {'tag': ' 工艺'}, {'kind': 'dir', 'extension': 'pdf'},
+                        {'tag': ''}, {'extension': ''}):
+            response, _, client = self.call(dict(repo_id=RID, q='file', **filters))
+            self.assertEqual(response.status_code, 400)
+            client.page.assert_not_called()
+
+    def test_signed_cursor_cannot_change_requested_tag(self):
+        from django.core import signing
+        binding = dict(user='native@auth.local', repo=RID, q='file', root='/',
+                       limit=50, version='a'*64,
+                       filters=dict(kind=None, extension=None, tag='工艺'))
+        signed = signing.dumps(dict(scope=binding, offset=50),
+                               salt='cloudfile-v2-search')
+        response, _, client = self.call(dict(repo_id=RID, q='file', cursor=signed, tag='其他'))
+        self.assertEqual(response.status_code, 400)
+        client.page.assert_not_called()
+
     def test_meili_outage_is_503(self):
         client = Mock()
         client.page.side_effect = SearchUnavailable()
