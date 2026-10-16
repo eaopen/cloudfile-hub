@@ -324,6 +324,18 @@ def oauth_callback(request):
         profile.login_id = login_id.strip()
         profile.save()
 
+    # CloudFile V2: OAuth2 and OIDC must publish the same trusted UID subject
+    # before the new session can be used. A deployment without a configured
+    # CloudFile Directory, and every CE-only account, keeps the native flow.
+    from cloudfile_ext.v2.errors import IdentityUnavailable
+    from cloudfile_ext.v2.runtime import prepare_subject
+    try:
+        prepare_subject(email, login_id)
+    except IdentityUnavailable as error:
+        logger.error('CloudFile subject preparation failed: %s', type(error).__name__)
+        auth.logout(request)
+        return render_error(request, _('Error, please contact administrator.'))
+
     if CUSTOM_GET_USER_ROLE:
         remote_role_value = oauth_user_info.get('role', '')
         if remote_role_value:

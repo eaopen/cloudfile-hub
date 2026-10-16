@@ -36,7 +36,8 @@ class FreshDatabaseTest(unittest.TestCase):
         import pymysql
         import redis
         cls.admin = pymysql.connect(host='127.0.0.1', port=int(os.environ['CF_TEST_DB_PORT']),
-                                    user='root', charset='utf8mb4', autocommit=True)
+                                    user='root', password=os.environ.get('CF_TEST_DB_PASSWORD', ''),
+                                    charset='utf8mb4', autocommit=True)
         cls.redis = redis.Redis(host='127.0.0.1', port=int(os.environ['CF_TEST_REDIS_PORT']))
         cls.ddl = Path(os.environ['CF_V2_DDL']).read_text()
         # Exported CE source is the test input, never the modified fork's SQL.
@@ -67,6 +68,7 @@ class FreshDatabaseTest(unittest.TestCase):
                         cursor.execute(match[0])
                     cursor.execute('SET FOREIGN_KEY_CHECKS=1')
             self.connection = pymysql.connect(host='127.0.0.1', port=int(os.environ['CF_TEST_DB_PORT']), user='root',
+                                              password=os.environ.get('CF_TEST_DB_PASSWORD', ''),
                                               database=self.names['files'], charset='utf8mb4', autocommit=True)
             self.schema = FreshSchema(self.connection, self.ddl)
             self.schema.install()
@@ -207,6 +209,18 @@ class FreshDatabaseTest(unittest.TestCase):
         fetch.return_value = self.subject()
         projector.ensure('uid-1', self.username)
         self.assertEqual(self.query('SELECT group_id,is_staff FROM ' + self.names['account'] + '.GroupUser'), ((other, 1),))
+
+    def test_subject_ttl_has_one_bounded_maximum(self):
+        def projector_with(ttl):
+            return Memberships(self.connection, self.redis, self.identity, account_schema=self.names['account'],
+                               provider='etech', fetch=lambda uid: None, ttl=ttl)
+
+        for ttl in (29, 1801, 3600, True):
+            with self.subTest(ttl=ttl), self.assertRaises(ValueError):
+                projector_with(ttl)
+        for ttl in (30, 1800):
+            with self.subTest(ttl=ttl):
+                self.assertEqual(projector_with(ttl).ttl, ttl)
 
     def test_expired_source_failure_is_unavailable_and_does_not_extend_ttl(self):
         role = self.group()

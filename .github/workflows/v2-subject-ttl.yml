@@ -1,0 +1,89 @@
+name: V2 subject TTL runtime
+
+on:
+  push:
+    branches: [dev, feature/v2-subject-ttl]
+    paths:
+      - 'cloudfile_ext/v2/runtime.py'
+      - 'cloudfile_ext/v2/directory.py'
+      - 'cloudfile_ext/v2/permissions.py'
+      - 'cloudfile_ext/v2/memberships.py'
+      - 'cloudfile_ext/v2/identity.py'
+      - 'cloudfile_ext/v2/errors.py'
+      - 'cloudfile_ext/v2/search/http.py'
+      - 'cloudfile_ext/v2/tests/test_runtime.py'
+      - 'cloudfile_ext/v2/tests/test_directory.py'
+      - 'cloudfile_ext/v2/tests/test_subject_gate.py'
+      - 'cloudfile_ext/v2/tests/test_fresh.py'
+      - 'seahub/oauth/views.py'
+      - '.github/workflows/v2-subject-ttl.yml'
+  pull_request:
+    branches: [dev]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime:
+    name: Subject policy and gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Subject runtime policy and Directory client (no web stack)
+        run: python -m unittest cloudfile_ext.v2.tests.test_runtime cloudfile_ext.v2.tests.test_directory -v
+      - name: Native patch syntax
+        run: python -m py_compile seahub/oauth/views.py cloudfile_ext/v2/search/http.py
+      - run: python -m pip install "Django==5.2.*" "djangorestframework==3.16.*"
+      - name: Protected-request gate status codes
+        run: python -m unittest cloudfile_ext.v2.tests.test_subject_gate -v
+
+  projector:
+    name: Projector TTL, refresh and denial
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: test
+          MARIADB_DATABASE: seafile_db
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -ptest"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+      redis:
+        image: redis:7-alpine
+        ports: ["6379:6379"]
+        options: >-
+          --health-cmd="redis-cli ping"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      # The V2 DDL is owned by the server repository; this pin mirrors
+      # cloudfile-docker/build/v2/source-set.json, so a drifted extension schema
+      # fails here instead of silently becoming a deployment dependency.
+      - uses: actions/checkout@v4
+        with:
+          repository: eaopen/cloudfile-server
+          ref: 89f645f1e46a8b2d3d05e813a3a18aa980bc2735
+          path: seafile-server
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install "pymysql==1.1.1" "redis==7.1.*"
+      - name: Compose the reviewed native source tree
+        run: |
+          mkdir -p /tmp/v2-source/seahub
+          ln -s "$GITHUB_WORKSPACE/seafile-server" /tmp/v2-source/seafile-server
+          ln -s "$GITHUB_WORKSPACE/sql" /tmp/v2-source/seahub/sql
+      - name: Schema, subject projection, TTL refresh and fail-closed denial
+        env:
+          CF_TEST_DB_PORT: '3306'
+          CF_TEST_DB_PASSWORD: test
+          CF_TEST_REDIS_PORT: '6379'
+          CF_V2_DDL: ${{ github.workspace }}/seafile-server/scripts/sql/mysql/cloudfile-v2.sql
+          CF_V2_SOURCE: /tmp/v2-source
+        run: python -m unittest cloudfile_ext.v2.tests.test_fresh -v
