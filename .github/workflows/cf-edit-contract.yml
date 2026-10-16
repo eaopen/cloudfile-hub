@@ -1,0 +1,27 @@
+name: CF-EDIT contract (feature only)
+
+on:
+  push:
+    branches: [feature/cf-edit]
+    paths:
+      - "cloudfile_ext/v2/editing_*.py"
+      - "cloudfile_ext/v2/schema.py"
+      - "cloudfile_ext/v2/tests/test_cf_edit_contract.py"
+      - ".github/workflows/cf-edit-contract.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  contract:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Static syntax check
+        run: python -m py_compile cloudfile_ext/v2/editing_contract.py cloudfile_ext/v2/editing_store.py cloudfile_ext/v2/schema.py cloudfile_ext/v2/tests/test_cf_edit_contract.py
+      - name: Contract tests (no DB; no runtime claim)
+        run: python -m unittest cloudfile_ext.v2.tests.test_cf_edit_contract -v
