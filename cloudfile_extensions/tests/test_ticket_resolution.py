@@ -44,3 +44,11 @@ class TicketResolutionTests(unittest.TestCase):
         self.assertEqual(len({call.args[2] for call in calls.call_args_list}), 1)
         self.assertEqual(calls.call_args_list[2].args[1],
             ("repo", "/file", "a" * 40, "b" * 40, "download", "user", "{}"))
+
+    def test_token_proof_requires_new_native_entry_without_legacy_retry(self):
+        with patch("cloudfile_extensions.identity.ticket_transport._call", side_effect=[
+                {"head_cmmt_id": "a" * 40}, "b" * 40, ValueError("old server")]) as calls:
+            with self.assertRaises(ValueError):
+                resolve_and_issue_native_ticket("repo", "/file", "download", "user", "{}", token_bound=True)
+        self.assertEqual(calls.call_count, 3)
+        self.assertEqual(calls.call_args_list[2].args[0], "seafile_cloudfile_issue_token_read_ticket")

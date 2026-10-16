@@ -44,7 +44,10 @@ if getattr(settings, "CLOUDFILE_ADMIN_POLICY_ENABLED", not getattr(settings, "CL
         raise ImproperlyConfigured("Administrator and session policy route ownership must be distinct")
     from .authorization.admin_http import AdministratorPolicyView
     from .authorization.native_http import NativeEffectiveView, NativeRepoView, NativeDirectoryAccessView
+    from .authorization.native_file_http import NativeFileView
     urlpatterns.extend([
+        re_path(r"^api2/repos/(?P<repo_id>[-0-9a-f]{36})/file/$",
+            NativeFileView.as_view(), name="native-policy-file"),
         re_path(r"^api/v2.1/repos/(?P<repo_id>[-0-9a-f]{36})/$",
             NativeRepoView.as_view(), name="native-policy-repo"),
         # Native authentication shares the deployed C policy; no administrator content grant.
