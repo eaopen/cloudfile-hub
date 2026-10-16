@@ -1,7 +1,8 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 from django.urls import include, path, re_path
 from django.views.generic import TemplateView
-from cloudfile_ext.v2.http import IdentityResolve
+from cloudfile_ext.v2.http import IdentityResolve, GroupResolve
+from cloudfile_ext.v2.search.http import SearchQuery
 
 from seahub.api2.endpoints.file_comments import FileCommentsView, FileCommentView, FileCommentRepliesView, \
     FileCommentReplyView
@@ -235,6 +236,8 @@ from seahub.api2.endpoints.webhook import WebhooksView
 
 urlpatterns = [
     path('api/v2.1/admin/cloudfile/sso/identities/resolve/', IdentityResolve.as_view()),
+    path('api/v2.1/admin/cloudfile/sso/groups/resolve/', GroupResolve.as_view()),
+    path('api/v2.1/cloudfile/search/', SearchQuery.as_view()),
     path('accounts/', include('seahub.base.registration_urls')),
     path('mobile-login/', mobile_login, name="mobile_login"),
 

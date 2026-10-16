@@ -54,6 +54,9 @@ jobs:
         run: |
           echo "REDIS_HOST=localhost" >> $GITHUB_ENV
 
+      - name: Validate V2 directory ACL inheritance and deny precedence
+        run: python3 -m unittest -v cloudfile_ext.v2.tests.test_acl_policy
+
       - name: run pytest
         run: |
           cd $GITHUB_WORKSPACE

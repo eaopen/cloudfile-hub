@@ -70,3 +70,37 @@ class EtechOAuthBindingTests(TestCase):
         self.assertEqual(response, 'binding-error')
         authenticate.assert_not_called()
         bind.assert_not_called()
+
+
+class EtechGroupLookupTests(TestCase):
+    def request(self, external, rows=(), staff=True):
+        from cloudfile_ext.v2.http import GroupResolve
+        request = APIRequestFactory().post('/groups/resolve/', {'external_group_id': external}, format='json')
+        force_authenticate(request, SimpleNamespace(is_staff=staff, is_authenticated=True))
+        with patch('django.db.connection.cursor') as cursor, \
+                patch('seahub.utils.db_api.SeafileDB', return_value=SimpleNamespace(db_name='seafile_db')):
+            cursor.return_value.__enter__.return_value.fetchall.return_value = rows
+            response = GroupResolve.as_view()(request)
+        return response, cursor
+
+    def test_existing_mapping_uses_native_group_without_members(self):
+        response, cursor = self.request('2001', [(583,)])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'group_id': 583})
+        self.assertEqual(cursor.return_value.__enter__.return_value.execute.call_args.args[1],
+                         ('etech', 'dept', 'org', '2001'))
+
+    def test_role_namespace_is_distinct(self):
+        response, cursor = self.request('role:2001', [(584,)])
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(cursor.return_value.__enter__.return_value.execute.call_args.args[1],
+                         ('etech', 'group', 'role', '2001'))
+
+    def test_missing_and_conflicting_mappings_are_not_guessed(self):
+        self.assertEqual(self.request('2001')[0].status_code, 404)
+        self.assertEqual(self.request('2001', [(583,), (584,)])[0].status_code, 409)
+
+    def test_non_admin_cannot_resolve_mapping(self):
+        response, cursor = self.request('2001', staff=False)
+        self.assertEqual(response.status_code, 403)
+        cursor.assert_not_called()
