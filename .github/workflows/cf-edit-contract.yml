@@ -8,6 +8,8 @@ on:
       - "cloudfile_ext/v2/schema.py"
       - "cloudfile_ext/v2/tests/test_cf_edit_contract.py"
       - ".github/workflows/cf-edit-contract.yml"
+  pull_request:
+    branches: [dev]
   workflow_dispatch:
 
 permissions:
