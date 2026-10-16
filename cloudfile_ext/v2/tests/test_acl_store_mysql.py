@@ -77,6 +77,22 @@ class ACLSQLTests(TestCase):
         self.assertEqual(store.shared(Principal('etech', 'other')), [])
         self.assertEqual(store.shared(Principal('other-provider', 'uid')), [])
 
+    def test_library_read_and_committed_write_notification(self):
+        changed = []
+        store = self.store()
+        store.changed = changed.append
+        self.assertEqual(store.library(RID), ())
+        store.mutate(self.rule, expected=None, revision=self.revision)
+        store.mutate(self.rule, expected=None, revision=self.revision)  # replay: no change
+        other = Rule(RID, '/other', 'etech', 'role', 'role', 'r1', 'none')
+        store.mutate(other, expected=None, revision=str(uuid4()))
+        self.assertEqual(changed, [RID, RID])
+        self.assertEqual(sorted(store.library(RID), key=lambda r: r.path), [other, self.rule])
+        self.assertEqual(store.library('00000000-0000-4000-8000-000000000002'), ())
+        with self.assertRaises(RevisionConflict):
+            store.mutate(self.rule, expected=None, revision=str(uuid4()))
+        self.assertEqual(changed, [RID, RID])
+
     def test_corrupt_hash_and_sql_failure_never_fall_back(self):
         store = self.store()
         store.mutate(self.rule, expected=None, revision=self.revision)

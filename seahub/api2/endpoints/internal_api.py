@@ -197,7 +197,7 @@ class InternalCheckFileOperationAccess(APIView):
         # and independent shared roots. Repo API tokens lack current subjects.
         from cloudfile_ext.v2.acl_runtime import protected, Authority
         try:
-            if protected(repo_id):
+            if protected(repo_id, repo):
                 if not username:
                     return api_error(status.HTTP_403_FORBIDDEN, 'Current subject required.')
                 decision = Authority(username).effective(repo_id, file_path, 'file')

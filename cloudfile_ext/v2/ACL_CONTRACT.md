@@ -54,12 +54,19 @@ Under `api/v2.1/cloudfile/authorization/v1/`:
 - `directory-entries/?repo_id=...&path=...&offset=0&limit=50` — at most 100 native
   candidates per page, filtered by the same authority. An empty page may have a
   next offset when candidates were hidden. `root_path` is the navigation boundary.
+  Optional `with_tags=true` adds current CE repo tags and legacy free tags
+  (display-only and marked `read_only=true`; never a new write source) to
+  the visible files and directories only, via per-page indexed reads, plus
+  `tags_status`. `FAILED` sets item `tags` to null; it never means "no tags" and
+  never fails the listing. Tags are not an authorization input.
 
 All require a native session/token, use its username, reject subject overrides,
 and return `Cache-Control: no-store`. These are content checks, not management
 checks. Native file `check-access` also uses this authority for protected repos,
 so directory-only access does not fail a preliminary whole-library permission
 check. Repo API tokens cannot impersonate current users on protected repos.
+Whether a repo is protected is answered from the same library rule snapshot
+(a virtual repo also checks its origin; an over-budget library is protected).
 
 ## Native Decision Protocol
 
@@ -85,22 +92,26 @@ Only then does Hub read `cf_sso_group_map JOIN GroupUser`. Missing adapter means
 
 ## Revocation And Efficiency
 
-Reuse Seahub's configured Django cache. `CF_ACL_CACHE_TTL` defaults to 60 seconds;
-0 disables it, and the maximum is 300 seconds. The key binds native username,
-verified provider/UID/group set, repository and canonical directory. The value
-carries its expiry too. File reads/writes in the same directory share one policy
-result, and batch requests memoize repository facts and directory decisions.
-Native account readiness and repository hard-readonly checks remain outside the
-cross-request decision cache. Cache failure recomputes using the authoritative
-facts; authority/SQL failure on a miss fails closed.
+Rules are sparse compared with library files, so Hub caches **all rows of one
+library** in Seahub's configured Django cache and evaluates every user, directory
+and final-commit path in process. `CF_ACL_CACHE_TTL` defaults to 180 seconds;
+0 disables cross-request caching, and the maximum is 300 seconds. Expiry starts at
+the SQL read and is also stored in the value. A library over 4096 rows caches only
+that marker and falls back to per-directory candidate reads.
 
-ACL or native grant revocation may take effect after this TTL; no global cache
-flush, immediate revocation barrier, permission version table or second cache
-service is introduced. External group changes retain the existing subject TTL.
-Final Commit still binds the actual actor and diff paths, using the same valid
-cached decision as browsing and reading. Strict-mode tests set TTL=0; cache tests
-separately prove allowed staleness and expiry. A fresh check does not promise
-instant revocation while the policy TTL is enabled.
+Within one request the library rows are read once (also with TTL=0) and filtered
+to the current verified subject; directory decisions, native library permission
+and hard-readonly status are memoized only for that request. Native library grants
+and current subjects are never cached across requests by this layer.
+
+A committed `ACLStore` write switches the library's cache namespace
+(`cf-acl-rules-v1:gen:<repo>`, a cache key, not a table), so later checks read
+fresh rows; an older in-flight reader can only refill the abandoned namespace.
+Direct SQL edits, or a failed namespace switch, take effect within the TTL.
+Cache failure recomputes from SQL; SQL failure fails closed and is never cached.
+External group changes retain the existing subject TTL. Final Commit binds the
+actual actor and diff paths and may use the cached library rows. Strict-mode tests
+set TTL=0.
 
 ## Native Scope And Release Status
 
@@ -121,3 +132,20 @@ The integrator must retain publication blocking until the real subject adapter,
 scoped management credentials, all exposed read/write routes, lifecycle behavior,
 and deployment acceptance are complete. This minimal seam is not full ACL release
 certification. Internal test adapters are not production authentication.
+
+## Cache Deployment
+
+ACL rules use bounded per-library snapshots in Seahub's configured shared
+Django cache, normally Redis. When the default Django cache is per-process
+`LocMemCache` (or `DummyCache`), ACL cross-request cache TTL is forced to zero
+so another worker cannot retain a stale grant after a local invalidation.
+Per-request authority reuse remains enabled. Use a shared cache in production.
+
+With Redis, use `noeviction` or a `volatile-*` policy for the dedicated/shared
+cache instance: generation keys do not have TTL, while snapshots do. Avoid
+`allkeys-*` policies that may evict generation keys and temporarily expose an
+older cache namespace. Failed invalidation or direct SQL rule edits remain
+bounded by the configured TTL (default 180 seconds). Do not promise instantaneous
+revocation under cache failures. Cache misses read authoritative SQL; SQL errors
+never grant access. Tags bypass shared cache entirely and read only authorized
+page/search references.

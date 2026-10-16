@@ -54,6 +54,27 @@ class HTTPTests(TestCase):
             self.assertEqual(result.status_code,200)
             self.assertEqual(result.data['root_path'],'/shared')
 
+    def test_directory_entries_tags_are_opt_in_and_failure_is_explicit(self):
+        page = lambda: dict(data=[dict(repo_id=RID, path='/shared/a.txt', name='a.txt', kind='file', permission='r')],
+                            root_path='/shared', next_offset=None)
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority, \
+                patch('cloudfile_ext.v2.acl_http.tag_display.tags_for_entries') as tags:
+            authority.return_value.entries.side_effect = lambda *a, **k: page()
+            result = self.request(DirectoryEntries, dict(repo_id=RID, path='/shared'))
+            self.assertNotIn('tags_status', result.data)
+            tags.assert_not_called()
+            tags.return_value = {('/shared/a.txt', 'file'): [dict(file_tag_id=1, repo_tag_id=2, tag_name='t', tag_color='#f00')]}
+            result = self.request(DirectoryEntries, dict(repo_id=RID, path='/shared', with_tags='true'))
+            self.assertEqual(result.data['tags_status'], 'OK')
+            self.assertEqual(result.data['data'][0]['tags'][0]['tag_name'], 't')
+            tags.assert_called_with(RID, '/shared', [('/shared/a.txt', 'file')])
+            tags.side_effect = OSError()
+            result = self.request(DirectoryEntries, dict(repo_id=RID, path='/shared', with_tags='true'))
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.data['tags_status'], 'FAILED')
+            self.assertIsNone(result.data['data'][0]['tags'])
+            self.assertEqual(self.request(DirectoryEntries, dict(repo_id=RID, path='/shared', with_tags='1')).status_code, 400)
+
     def native(self, claims, data=None):
         token = jwt.encode(claims,KEY,algorithm='HS256')
         request = APIRequestFactory().post('/native/', data or dict(username='native',repo_id=RID,
@@ -77,40 +98,6 @@ class HTTPTests(TestCase):
         with patch('cloudfile_ext.v2.acl_http.Authority'):
             result=self.native(dict(is_internal=True,exp=int(time.time())+60),dict(username='native',repo_id=RID,checks=[]))
             self.assertEqual(result.status_code,400)
-
-
-class DecisionCacheTests(TestCase):
-    def test_revocation_uses_bounded_existing_cache_and_rechecks_after_expiry(self):
-        from django.test import override_settings
-        from django.core.cache import cache
-        from cloudfile_ext.v2.tests.test_acl_runtime import RuntimeTests
-        from cloudfile_ext.v2.acl_policy import Rule
-        now=time.time()
-        with override_settings(CF_ACL_CACHE_TTL=60,CACHES={'default':{'BACKEND':'django.core.cache.backends.locmem.LocMemCache','LOCATION':'acl-test'}}):
-            cache.clear()
-            first=RuntimeTests().authority()
-            self.assertTrue(first.effective(RID,'/projects/shared/file','file').can_write)
-            second=RuntimeTests().authority()
-            second.store.candidates.return_value=[]
-            denied=Rule(RID,'/projects/shared','etech','user','user','uid','none')
-            second.store.candidates.side_effect=lambda *args:[(denied,'revision')]
-            self.assertTrue(second.effective(RID,'/projects/shared/other','file').can_write)
-            second.store.candidates.assert_not_called()
-            third=RuntimeTests().authority()
-            third.store.candidates.side_effect=second.store.candidates.side_effect
-            with patch('cloudfile_ext.v2.acl_runtime.time.time',return_value=now+61):
-                self.assertFalse(third.effective(RID,'/projects/shared/other','file').can_read)
-            third.store.candidates.assert_called_once()
-
-    def test_cache_outage_recomputes_and_hard_readonly_is_not_cached_away(self):
-        from django.test import override_settings
-        from cloudfile_ext.v2.tests.test_acl_runtime import RuntimeTests
-        with override_settings(CF_ACL_CACHE_TTL=60),patch('django.core.cache.cache.get',side_effect=OSError()),patch('django.core.cache.cache.set',side_effect=OSError()):
-            auth=RuntimeTests().authority()
-            auth.api.get_repo_status.return_value=1
-            self.assertFalse(auth.effective(RID,'/projects/shared/file','file').can_write)
-            self.assertTrue(auth.effective(RID,'/projects/shared/file','file').can_read)
-            self.assertEqual(auth.store.candidates.call_count,1)
 
 
 class NativeFileAccessTests(TestCase):

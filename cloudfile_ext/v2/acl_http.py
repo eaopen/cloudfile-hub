@@ -1,5 +1,6 @@
 """V2 ACL reads and guarded management. No endpoint enables protected publication."""
 from dataclasses import asdict
+import logging
 import time
 
 import jwt
@@ -13,6 +14,9 @@ from seahub.api2.utils import JWT_PRIVATE_KEY
 from .acl_policy import PolicyError, Rule
 from .acl_runtime import Authority, store
 from .acl_store import uuid
+from . import tag_display
+
+logger = logging.getLogger(__name__)
 
 
 def response(data, status=200):
@@ -27,6 +31,22 @@ def failure(error):
     if isinstance(error, PermissionError):
         return response({'code': 'ACL_DENIED'}, 403)
     return response({'code': 'ACL_UNAVAILABLE'}, 503)
+
+
+def with_tags(repo_id, path, result):
+    # Display metadata for the already visible page only. Failure is reported,
+    # never shown as "no tags", and never fails the authorized listing.
+    items = result['data']
+    try:
+        tags = tag_display.tags_for_entries(repo_id, path, [(i['path'], i['kind']) for i in items])
+        for item in items:
+            item['tags'] = tags[(item['path'], item['kind'])]
+        result['tags_status'] = 'OK'
+    except Exception:
+        logger.exception('CloudFile directory tags unavailable')
+        for item in items:
+            item['tags'] = None
+        result['tags_status'] = 'FAILED'
 
 
 class AuthenticatedACL(APIView):
@@ -126,10 +146,13 @@ class DirectoryEntries(AuthenticatedACL):
     def get(self, request):
         try:
             args = request.query_params
-            if set(args) - {'repo_id', 'path', 'offset', 'limit'} or any(len(args.getlist(k)) != 1 for k in args):
+            if (set(args) - {'repo_id', 'path', 'offset', 'limit', 'with_tags'} or
+                    any(len(args.getlist(k)) != 1 for k in args) or args.get('with_tags', 'true') != 'true'):
                 raise ValueError()
             result = Authority(request.user.username).entries(args['repo_id'], args['path'],
                 offset=int(args.get('offset', '0')), limit=int(args.get('limit', '50')))
+            if 'with_tags' in args:
+                with_tags(args['repo_id'], args['path'], result)
             return response(result)
         except FileNotFoundError:
             return response({'code': 'DIRECTORY_NOT_FOUND'}, 404)
