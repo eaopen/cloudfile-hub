@@ -108,9 +108,12 @@ def _track_permission(rules, principal, path, kind):
                       and (level == path or rule.inherit)
                       and principal.matches(rule)]
         if candidates:
-            # More-specific directory replaces parent within one track.
-            # Same-level competing groups use deny-before-grant.
-            winner = min(candidates, key=STRICTNESS.__getitem__)
+            # A deeper explicit rule replaces the ancestor rule in this track.
+            # At the same path/type, any explicit deny wins; positive group
+            # permissions merge like native Seafile (rw outranks r).
+            denied = [p for p in candidates if p in ('invisible', 'none')]
+            winner = (min(denied, key=STRICTNESS.__getitem__) if denied
+                      else max(candidates, key=STRICTNESS.__getitem__))
     return winner
 
 
