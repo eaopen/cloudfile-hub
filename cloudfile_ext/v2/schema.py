@@ -5,7 +5,7 @@ import re
 
 
 TABLES = frozenset({'cf_library_storage', 'cf_dir_acl', 'cf_sso_group_map'})
-EDIT_TABLES = frozenset({'cf_edit_guard', 'cf_commit_intent'})
+EDIT_TABLES = frozenset({'cf_edit_guard'})
 
 
 class SchemaError(RuntimeError):
@@ -58,7 +58,7 @@ class FreshSchema:
     def __init__(self, connection, ddl, *, edit_ddl=None):
         if not connection.get_autocommit():
             raise ValueError('dedicated autocommit connection required')
-        # CF-EDIT is opt-in on the isolated feature branch; the standard MVP
+        # One-table CF-EDIT is opt-in; the standard MVP
         # stays three tables and rejects unexpected additions by default.
         self.connection = connection
         self.tables = TABLES | EDIT_TABLES if edit_ddl is not None else TABLES
