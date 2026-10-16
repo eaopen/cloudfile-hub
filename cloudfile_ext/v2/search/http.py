@@ -11,7 +11,7 @@ from seahub.api2.authentication import TokenAuthentication, SessionAuthenticatio
 from seahub.api2.throttling import UserRateThrottle
 from seahub.utils.timeutils import timestamp_to_isoformat_timestr
 
-from .client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, normalize_path, search_filters
+from .client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, normalize_path, search_filters, native_extension
 from .paging import page
 from .runtime import AccessDenied, NativeAuthority
 
@@ -80,7 +80,7 @@ class SearchQuery(APIView):
                     elif (kind is not None and item['kind'] != kind) or (
                             extension is not None and
                             (item['kind'] != 'file' or
-                             item['path'].rsplit('/', 1)[-1].rsplit('.', 1)[-1].lower() != extension)
+                             native_extension(item['path']) != extension)
                     ) or (tag is not None and tag not in item['tags']):
                         filtered.append(None)
                     else:
