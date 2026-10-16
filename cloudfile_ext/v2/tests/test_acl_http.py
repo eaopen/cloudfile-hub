@@ -22,14 +22,63 @@ class HTTPTests(TestCase):
             force_authenticate(request, SimpleNamespace(username='native', is_authenticated=True, is_staff=staff))
         return view.as_view()(request)
 
-    def test_public_rules_are_blocked_even_for_native_admin(self):
+    def test_public_mutation_remains_blocked_until_native_acl_is_enabled(self):
         for method in ('post', 'put', 'delete'):
-            with patch('cloudfile_ext.v2.acl_http.store') as store:
-                result = self.request(DirectoryRules, method=method, staff=True)
+            with patch('cloudfile_ext.v2.acl_http.store') as rules:
+                result = self.request(DirectoryRules, method=method)
                 self.assertEqual(result.status_code, 503)
                 self.assertEqual(result.data['code'], 'ACL_PUBLICATION_BLOCKED')
-                store.assert_not_called()
-                self.assertEqual(self.request(DirectoryRules, method=method).status_code, 403)
+                rules.assert_not_called()
+
+    def test_directory_rules_allow_native_repo_admin_without_system_staff(self):
+        with patch('cloudfile_ext.v2.acl_http.require_repo_manage') as guard, \
+             patch('cloudfile_ext.v2.acl_http.store') as rules, \
+             patch('cloudfile_ext.v2.acl_http.settings') as settings:
+            settings.CF_ACL_PROVIDER = 'etech'
+            rules.return_value.list_path.return_value = []
+            result = self.request(DirectoryRules, dict(repo_id=RID, path='/folder'))
+            self.assertEqual(result.status_code, 200)
+            guard.assert_called_once()
+            self.assertEqual(guard.call_args.args[1], RID)
+            self.assertEqual(result.data['data'], [])
+            guard.side_effect = PermissionError('no repo-admin rights')
+            self.assertEqual(self.request(DirectoryRules, dict(repo_id=RID,path='/folder')).status_code,403)
+
+    def test_native_repo_admin_marker_is_required_for_acl_delegation(self):
+        from cloudfile_ext.v2.acl_http import require_repo_manage
+        from seaserv import seafile_api
+        user = SimpleNamespace(username='native', is_staff=False)
+        with patch.object(seafile_api, 'get_repo', return_value=SimpleNamespace(is_virtual=False)), \
+             patch('seahub.share.utils.is_repo_admin', return_value=False) as native:
+            with self.assertRaises(PermissionError):
+                require_repo_manage(user, RID)  # Native ordinary rw is not administrative.
+            native.return_value = True
+            require_repo_manage(user, RID)
+        staff = SimpleNamespace(username='operator', is_staff=True,
+                                admin_permissions=SimpleNamespace(can_manage_library=lambda: True))
+        with patch.object(seafile_api, 'get_repo', return_value=SimpleNamespace(is_virtual=False)), \
+             patch('seahub.share.utils.is_repo_admin') as native:
+            require_repo_manage(staff, RID)
+            native.assert_not_called()
+
+    def test_public_rule_writer_uses_validated_three_permission_cas(self):
+        request = dict(repo_id=RID, path='/folder', subject_type='user', namespace='user',
+                       external_id='uid1', permission='invisible', inherit=True,
+                       share_mode=False, expected=None,
+                       revision='00000000-0000-4000-8000-000000000010')
+        with patch('cloudfile_ext.v2.acl_http.publication_ready', return_value=True), \
+             patch('cloudfile_ext.v2.acl_http.require_repo_manage'), \
+             patch('cloudfile_ext.v2.acl_http.store') as rules, \
+             patch('cloudfile_ext.v2.acl_http.settings') as settings:
+            settings.CF_ACL_PROVIDER = 'etech'
+            rules.return_value.mutate.return_value = request['revision']
+            result = self.request(DirectoryRules, request, method='post')
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(rules.return_value.mutate.call_args.kwargs['expected'], None)
+            self.assertEqual(rules.return_value.mutate.call_args.args[0].permission, 'invisible')
+            request['permission'] = 'none'
+            self.assertEqual(self.request(DirectoryRules, request, method='post').status_code, 400)
+            self.assertEqual(rules.return_value.mutate.call_count, 1)
 
     def test_effective_is_bound_to_authenticated_user(self):
         with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
@@ -89,7 +138,7 @@ class HTTPTests(TestCase):
             self.assertEqual(self.native(good).status_code,200)
             for bad in (dict(exp=int(time.time())+60),dict(is_internal=True,exp=1),dict(is_internal='true',exp=int(time.time())+60),dict(is_internal=True,exp=int(time.time())+3600)):
                 self.assertEqual(self.native(bad).status_code,403)
-            authority.return_value.effective.return_value = Decision('none','/shared',True)
+            authority.return_value.effective.return_value = Decision('invisible','/shared',True)
             self.assertEqual(self.native(good).status_code,403)
 
     def test_native_missing_subject_adapter_and_unknown_checks_fail_closed(self):
@@ -131,6 +180,6 @@ class NativeFileAccessTests(TestCase):
                 patch('cloudfile_ext.v2.acl_runtime.protected',return_value=True), \
                 patch('cloudfile_ext.v2.acl_runtime.Authority') as authority:
             api.get_file_id_by_path.return_value='f'*40
-            authority.return_value.effective.return_value=Decision('none','/shared',True)
+            authority.return_value.effective.return_value=Decision('invisible','/shared',True)
             result=InternalCheckFileOperationAccess.as_view()(request,repo_id=RID)
             self.assertEqual(result.status_code,403)
