@@ -7,9 +7,9 @@ This module does NOT activate cf_dir_acl; Server/Go must guard final commits.
 """
 from dataclasses import dataclass
 
-PERMISSIONS = frozenset(('r', 'rw', 'none', 'invisible'))
+PERMISSIONS = frozenset(('r', 'rw', 'invisible'))
 # Conservative merge of multiple matches of the same subject type and depth.
-STRICTNESS = {'invisible': 0, 'none': 1, 'r': 2, 'rw': 3}
+STRICTNESS = {'invisible': 0, 'r': 1, 'rw': 2}
 TYPES = ('user', 'org', 'role')
 
 
@@ -95,8 +95,8 @@ class Decision:
 
     @property
     def visible(self):
-        # 'none' may allow the name to be shown in an authorized parent list;
-        # 'invisible' must hide the entry. Both deny file bytes.
+        # Only the explicit 'invisible' rule denies and hides a directory.
+        # No configurable 'none' ACL exists in V2.
         return self.permission != 'invisible'
 
 
@@ -111,7 +111,7 @@ def _track_permission(rules, principal, path, kind):
             # A deeper explicit rule replaces the ancestor rule in this track.
             # At the same path/type, any explicit deny wins; positive group
             # permissions merge like native Seafile (rw outranks r).
-            denied = [p for p in candidates if p in ('invisible', 'none')]
+            denied = [p for p in candidates if p == 'invisible']
             winner = (min(denied, key=STRICTNESS.__getitem__) if denied
                       else max(candidates, key=STRICTNESS.__getitem__))
     return winner
@@ -170,10 +170,10 @@ def resolve(repo_id, path, principal, native_permission, rules, *, hard_readonly
         if not within(level, root):
             continue
         perm, from_rule = _effective(selected, principal, level, base)
-        if perm in ('none', 'invisible'):
+        if perm == 'invisible':
             # Distinguish an explicitly blocked, visible node from a hidden
             # ancestor. A denied ancestor always hides its unreachable child.
-            return Decision(perm if level == path else 'invisible', root, from_rule)
+            return Decision('invisible', root, from_rule)
         if level == path:
             return Decision('r' if hard_readonly and perm == 'rw' else perm, root, from_rule)
     raise PolicyError('unreachable path evaluation')
