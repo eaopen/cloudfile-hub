@@ -63,7 +63,7 @@ def search_filters(*, kind=None, extension=None, tag=None):
     if kind not in (None, 'file', 'dir'):
         raise ValueError('invalid search object kind')
     if extension is not None:
-        if not isinstance(extension, str) or not re.fullmatch(r'\\.?[A-Za-z0-9]{1,16}', extension):
+        if not isinstance(extension, str) or not re.fullmatch(r'[.]?[A-Za-z0-9]{1,16}', extension):
             raise ValueError('invalid file extension')
         extension = extension.lstrip('.').lower()
     if tag is not None:
