@@ -231,38 +231,71 @@ class EditingStore:
             )
         return self._receipt(cursor, request.intent_id, principal.uid)
 
+    @staticmethod
+    def _cancel_locked(cursor, *, repo_id, path, row, receipt):
+        """Atomically cancel ONLY an unpublished Intent under Branch -> Guard -> Intent locks.
+
+        Publishing races serialize on Branch. A native publisher that won first
+        leaves state='published', which cannot be cancelled or released here.
+        """
+        if (receipt is None or receipt["repo_id"] != repo_id or
+                receipt["path_hash"] != reference(repo_id, path) or
+                receipt["path"] != path or receipt["state"] != "prepared" or
+                receipt["result_file_id"] is not None or
+                receipt["result_commit_id"] is not None or
+                (receipt["guard_id"] is not None and
+                 (receipt["guard_id"] != row["guard_id"] or
+                  row["pending_intent"] != receipt["intent_id"] or
+                  receipt["generation"] != row["generation"] or
+                  receipt["credential_epoch"] != row["credential_epoch"]))):
+            raise EditConflict("prepared Intent cannot be safely cancelled")
+        cursor.execute(
+            "UPDATE cf_commit_intent SET state='cancelled',"
+            "updated_at=UTC_TIMESTAMP(6) WHERE intent_id=%s AND state='prepared' "
+            "AND result_file_id IS NULL AND result_commit_id IS NULL",
+            (receipt["intent_id"],),
+        )
+        if cursor.rowcount != 1:
+            raise EditConflict("Intent changed before cancellation")
+        if receipt["guard_id"] is not None:
+            cursor.execute(
+                "UPDATE cf_edit_guard SET pending_intent=NULL,updated_at=UTC_TIMESTAMP(6)"
+                " WHERE repo_id=%s AND path_hash=%s AND guard_id=%s "
+                "AND pending_intent=%s",
+                (repo_id, reference(repo_id, path), row["guard_id"],
+                 receipt["intent_id"]),
+            )
+            if cursor.rowcount != 1:
+                raise EditConflict("Guard changed before cancellation")
+
     def cancel_prepared(self, cursor, *, repo_id, path, principal,
                         intent_id, proof=None):
+        # Current write authority remains mandatory for this call. An expired
+        # proof can cancel but C native controlled publish cannot accept it.
+        if not isinstance(principal, Principal):
+            raise ValueError("trusted principal required")
         self.lock_branch(cursor, repo_id)
         row = self.lock_guard(cursor, repo_id, path)
         receipt = self._receipt(cursor, uuid(intent_id), principal.uid)
-        if (not receipt or receipt["repo_id"] != repo_id or
-                receipt["path_hash"] != reference(repo_id, path) or
-                receipt["path"] != path or receipt["state"] != "prepared"):
-            raise EditConflict("only a prepared Intent can be cancelled")
+        if receipt is None:
+            raise EditConflict("Intent not found")
         if receipt["guard_id"] is not None:
             if proof is None:
                 raise EditDenied("Checkout proof required")
-            verify_proof(row, principal, proof)
-            if receipt["guard_id"] != proof.guard_id or row["pending_intent"] != intent_id:
-                raise EditConflict("Intent is not current Checkout publication")
-            cursor.execute(
-                "UPDATE cf_edit_guard SET pending_intent=NULL,updated_at=UTC_TIMESTAMP(6)"
-                " WHERE repo_id=%s AND path_hash=%s",
-                (repo_id, reference(repo_id, path)),
-            )
-        cursor.execute(
-            "UPDATE cf_commit_intent SET state='cancelled',"
-            "updated_at=UTC_TIMESTAMP(6) WHERE intent_id=%s AND state='prepared'",
-            (intent_id,),
-        )
+            verify_proof(row, principal, proof, allow_expired=True)
+        self._cancel_locked(cursor, repo_id=repo_id, path=path,
+                            row=row, receipt=receipt)
         return intent_id
 
     def abandon(self, cursor, *, repo_id, path, principal, proof=None,
                 management=False, reason=None):
-        if management:
-            if not isinstance(reason, str) or not reason.strip() or len(reason) > 512:
-                raise ValueError("management reason required")
+        # Only a CURRENT management authority may set management=True; never
+        # accept it from a request body. Both paths lock the actual Branch.
+        if not isinstance(principal, Principal):
+            raise ValueError("trusted principal required")
+        if management and (not isinstance(reason, str) or not reason.strip()
+                           or len(reason) > 512):
+            raise ValueError("management reason required")
         self.lock_branch(cursor, repo_id)
         row = self.lock_guard(cursor, repo_id, path)
         if not row["guard_id"]:
@@ -270,16 +303,22 @@ class EditingStore:
         if not management:
             if proof is None:
                 raise EditDenied("proof required")
-            verify_proof(row, principal, proof)
+            verify_proof(row, principal, proof, allow_expired=True)
         if row["pending_intent"] is not None:
-            raise EditConflict("resolve prepared publication before release")
+            # A manager or the current owner may safely cancel an unpublished
+            # intent. This cannot discard a published receipt.
+            receipt = self._receipt(cursor, row["pending_intent"], row["owner_uid"])
+            self._cancel_locked(cursor, repo_id=repo_id, path=path,
+                                row=row, receipt=receipt)
         cursor.execute(
             "UPDATE cf_edit_guard SET guard_id=NULL,mode=NULL,owner_uid=NULL,"
             "owner_native_user=NULL,client_type=NULL,client_id=NULL,client_ref=NULL,"
             "checkout_policy=NULL,proof_digest=NULL,base_file_id=NULL,"
             "pending_intent=NULL,lease_expires_at=NULL,credential_epoch=0,"
             "updated_at=UTC_TIMESTAMP(6) "
-            "WHERE repo_id=%s AND path_hash=%s",
-            (repo_id, reference(repo_id, path)),
+            "WHERE repo_id=%s AND path_hash=%s AND guard_id=%s",
+            (repo_id, reference(repo_id, path), row["guard_id"]),
         )
+        if cursor.rowcount != 1:
+            raise EditConflict("Guard changed during release")
         return True
