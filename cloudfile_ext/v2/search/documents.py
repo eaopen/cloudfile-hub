@@ -32,7 +32,7 @@ def _path(value):
         if (not isinstance(value, str) or not value.startswith("/") or
                 value == "/" or value.endswith("/") or "//" in value or
                 any(part in (".", "..") for part in value.split("/")) or
-                "\\x00" in value or len(value.encode("utf-8")) > 4096):
+                chr(0) in value or len(value.encode("utf-8")) > 4096):
             raise ValueError()
     except (ValueError, UnicodeError):
         raise InvalidIndexDocument("path must be normalized and non-root") from None
