@@ -51,8 +51,9 @@ def decode(row):
 
 
 class ACLStore:
-    def __init__(self, connection, schema, atomic):
-        self.connection, self.atomic = connection, atomic
+    def __init__(self, connection, schema, atomic, changed=None):
+        # changed(repo_id) runs after a committed write, e.g. cache invalidation.
+        self.connection, self.atomic, self.changed = connection, atomic, changed
         self.table = identifier(schema) + '.cf_dir_acl'
         self.branch = identifier(schema) + '.Branch'
 
@@ -69,6 +70,15 @@ class ACLStore:
         selector, args = subject_filter(principal)
         return self._read('repo_id=%s AND path_hash IN (' + ','.join(['%s'] * len(hashes)) + ') AND ' + selector,
                           [uuid(repo_id), *hashes, *args])
+
+    def library(self, repo_id):
+        """All sparse rules of one library for the shared cache; None over budget."""
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT ' + COLUMNS + ' FROM ' + self.table + ' WHERE repo_id=%s LIMIT 4097', [uuid(repo_id)])
+            rows = cursor.fetchall()
+        if len(rows) > 4096:
+            return None
+        return tuple(decode(row)[0] for row in rows)
 
     def shared(self, principal):
         selector, args = subject_filter(principal)
@@ -120,4 +130,6 @@ class ACLStore:
                     cursor.execute('INSERT INTO ' + self.table + ' (' + COLUMNS + ') VALUES (' + ','.join(['%s'] * 11) + ')',
                                    [rule.repo_id, rule.path, rule.provider, rule.subject_type, rule.namespace,
                                     rule.external_id, rule.permission, int(rule.inherit), int(rule.share_mode), revision, key[1]])
+        if self.changed is not None:
+            self.changed(rule.repo_id)
         return revision

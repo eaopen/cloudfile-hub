@@ -60,6 +60,8 @@ and return `Cache-Control: no-store`. These are content checks, not management
 checks. Native file `check-access` also uses this authority for protected repos,
 so directory-only access does not fail a preliminary whole-library permission
 check. Repo API tokens cannot impersonate current users on protected repos.
+Whether a repo is protected is answered from the same library rule snapshot
+(a virtual repo also checks its origin; an over-budget library is protected).
 
 ## Native Decision Protocol
 
@@ -85,22 +87,26 @@ Only then does Hub read `cf_sso_group_map JOIN GroupUser`. Missing adapter means
 
 ## Revocation And Efficiency
 
-Reuse Seahub's configured Django cache. `CF_ACL_CACHE_TTL` defaults to 60 seconds;
-0 disables it, and the maximum is 300 seconds. The key binds native username,
-verified provider/UID/group set, repository and canonical directory. The value
-carries its expiry too. File reads/writes in the same directory share one policy
-result, and batch requests memoize repository facts and directory decisions.
-Native account readiness and repository hard-readonly checks remain outside the
-cross-request decision cache. Cache failure recomputes using the authoritative
-facts; authority/SQL failure on a miss fails closed.
+Rules are sparse compared with library files, so Hub caches **all rows of one
+library** in Seahub's configured Django cache and evaluates every user, directory
+and final-commit path in process. `CF_ACL_CACHE_TTL` defaults to 180 seconds;
+0 disables cross-request caching, and the maximum is 300 seconds. Expiry starts at
+the SQL read and is also stored in the value. A library over 4096 rows caches only
+that marker and falls back to per-directory candidate reads.
 
-ACL or native grant revocation may take effect after this TTL; no global cache
-flush, immediate revocation barrier, permission version table or second cache
-service is introduced. External group changes retain the existing subject TTL.
-Final Commit still binds the actual actor and diff paths, using the same valid
-cached decision as browsing and reading. Strict-mode tests set TTL=0; cache tests
-separately prove allowed staleness and expiry. A fresh check does not promise
-instant revocation while the policy TTL is enabled.
+Within one request the library rows are read once (also with TTL=0) and filtered
+to the current verified subject; directory decisions, native library permission
+and hard-readonly status are memoized only for that request. Native library grants
+and current subjects are never cached across requests by this layer.
+
+A committed `ACLStore` write switches the library's cache namespace
+(`cf-acl-rules-v1:gen:<repo>`, a cache key, not a table), so later checks read
+fresh rows; an older in-flight reader can only refill the abandoned namespace.
+Direct SQL edits, or a failed namespace switch, take effect within the TTL.
+Cache failure recomputes from SQL; SQL failure fails closed and is never cached.
+External group changes retain the existing subject TTL. Final Commit binds the
+actual actor and diff paths and may use the cached library rows. Strict-mode tests
+set TTL=0.
 
 ## Native Scope And Release Status
 

@@ -1,18 +1,18 @@
 """One trusted authority for Hub and native file service decisions."""
 import posixpath
 import stat
-import hashlib
-import json
-import time
-from dataclasses import asdict
+from dataclasses import asdict, astuple
 
 from django.conf import settings
 from django.db import connection, transaction
 from django.utils.module_loading import import_string
 
-from .acl_policy import Principal, Decision, PolicyError, canonical_path, resolve, within
+from . import library_cache
+from .acl_policy import Principal, Decision, PolicyError, Rule, canonical_path, resolve
 from .acl_store import ACLStore, uuid
 from .schema import identifier
+
+NAMESPACE = 'cf-acl-rules-v1'
 
 
 class ACLUnavailable(Exception):
@@ -21,7 +21,35 @@ class ACLUnavailable(Exception):
 
 def store():
     from seahub.utils.db_api import SeafileDB
-    return ACLStore(connection, SeafileDB().db_name, transaction.atomic)
+    changed = lambda repo_id: transaction.on_commit(lambda: invalidate_library(repo_id))
+    return ACLStore(connection, SeafileDB().db_name, transaction.atomic, changed)
+
+
+def cache_ttl():
+    try:
+        return library_cache.ttl('CF_ACL_CACHE_TTL', 180)
+    except ValueError:
+        raise ACLUnavailable('invalid ACL cache TTL') from None
+
+
+def invalidate_library(repo_id):
+    library_cache.invalidate(NAMESPACE, repo_id)
+
+
+def _decode_rules(repo_id):
+    def decode(rows):
+        rules = tuple(Rule(*row) for row in rows)
+        if any(rule.repo_id != repo_id for rule in rules):
+            raise ValueError('foreign cached ACL row')
+        return rules
+    return decode
+
+
+def library_rules(rules, repo_id, ttl):
+    """All sparse rules of one library, or None over the shared budget
+    (callers then read per-directory candidates). SQL failure denies."""
+    return library_cache.snapshot(NAMESPACE, repo_id, ttl, lambda: rules.library(repo_id),
+                                  lambda rows: [astuple(rule) for rule in rows], _decode_rules(repo_id))
 
 
 def current_principal(username):
@@ -65,52 +93,17 @@ class Authority:
         self._repos = {}
         self._decisions = {}
         self._native = {}
+        self._library = {}
 
-    def _cache(self, repo_id, directory):
-        # Reuse Seahub's cache; an unavailable cache is only a performance miss.
-        # Permission/auth/SQL failure still denies. No cache ledger or new table.
-        ttl = getattr(settings, 'CF_ACL_CACHE_TTL', 60) if settings.configured else 0
-        if type(ttl) is not int or not 0 <= ttl <= 300:
-            raise ACLUnavailable('invalid ACL cache TTL')
-        principal = self.principal
-        scope = [self.username, principal.provider, principal.uid, sorted(principal.groups),
-                 principal.active, principal.ready, repo_id, directory]
-        key = 'cf-acl-v1:' + hashlib.sha256(json.dumps(scope, ensure_ascii=True).encode()).hexdigest()
-        return key, ttl
-
-    @staticmethod
-    def _cached(key, ttl, directory):
-        if not ttl:
-            return None
-        from django.core.cache import cache
-        try:
-            value = cache.get(key)
-            if not isinstance(value, dict) or set(value) != {'expires', 'decision'}:
-                return None
-            now = time.time()
-            if not now < value['expires'] <= now + ttl:
-                return None
-            decision = Decision(**value['decision'])
-            if decision.permission not in ('r', 'rw', 'none', 'invisible') or type(decision.from_rule) is not bool:
-                return None
-            if decision.qualified_root is not None:
-                canonical_path(decision.qualified_root)
-                if not within(directory, decision.qualified_root):
-                    return None
-            elif decision.can_read:
-                return None
-            return decision
-        except Exception:
-            return None
-
-    @staticmethod
-    def _remember(key, ttl, decision):
-        if ttl:
-            from django.core.cache import cache
-            try:
-                cache.set(key, {'expires': time.time() + ttl, 'decision': asdict(decision)}, timeout=ttl)
-            except Exception:
-                pass
+    def _rules(self, repo_id, directory):
+        if repo_id not in self._library:
+            rows = library_rules(self.store, repo_id, cache_ttl())
+            # Only this subject's rows take part; resolve() filters by ancestry.
+            self._library[repo_id] = None if rows is None else [r for r in rows if self.principal.matches(r)]
+        rows = self._library[repo_id]
+        if rows is None:
+            return [r for r, _ in self.store.candidates(repo_id, directory, self.principal)]
+        return rows
 
     def effective(self, repo_id, path, kind='dir'):
         uuid(repo_id)
@@ -128,19 +121,18 @@ class Authority:
             if status not in (-1, 0, 1):
                 raise ACLUnavailable('unknown repository status')
             self._repos[repo_id] = status
-        key, ttl = self._cache(repo_id, directory)
-        decision = self._decisions.get(key) or self._cached(key, ttl, directory)
+        key = (repo_id, directory)
+        decision = self._decisions.get(key)
         if decision is None:
+            # Native library grants are read live once per request; only the
+            # sparse rule rows are shared across requests.
             if repo_id not in self._native:
                 base = self.api.check_permission(repo_id, self.username)
                 self._native[repo_id] = 'rw' if base == 'admin' else base or None
-            base = self._native[repo_id]
-            rules = self.store.candidates(repo_id, directory, self.principal)
-            decision = resolve(repo_id, directory, self.principal, base, [r for r, _ in rules])
-            self._remember(key, ttl, decision)
-        self._decisions[key] = decision
-        # Hard native repository status is still checked once per request and
-        # is never promoted by a cached positive directory rule.
+            decision = resolve(repo_id, directory, self.principal, self._native[repo_id],
+                               self._rules(repo_id, directory))
+            self._decisions[key] = decision
+        # Hard native repository status is still checked once per request.
         if self._repos[repo_id] == 1 and decision.can_write:
             return Decision('r', decision.qualified_root, decision.from_rule)
         return decision
@@ -182,14 +174,20 @@ class Authority:
         return result
 
 
-def protected(repo_id):
-    from seahub.utils.db_api import SeafileDB
+def protected(repo_id, repo):
+    """Served from the library rule snapshot; a virtual repo also checks its origin.
+
+    Over-budget libraries count as protected. SQL/RPC failure raises (denies).
+    """
     uuid(repo_id)
-    schema = identifier(SeafileDB().db_name)
-    with connection.cursor() as cursor:
-        cursor.execute('SELECT EXISTS(SELECT 1 FROM ' + schema + '.cf_dir_acl WHERE repo_id=%s OR repo_id IN '
-                       '(SELECT origin_repo FROM ' + schema + '.VirtualRepo WHERE repo_id=%s))', [repo_id, repo_id])
-        row = cursor.fetchone()
-    if row is None:
-        raise ACLUnavailable('ACL storage unavailable')
-    return bool(row[0])
+    if repo is None:
+        raise ACLUnavailable('repository unavailable')
+    libraries = [repo_id]
+    if repo.is_virtual:
+        libraries.append(uuid(repo.origin_repo_id))
+    rules, ttl = store(), cache_ttl()
+    for library in libraries:
+        rows = library_rules(rules, library, ttl)
+        if rows is None or rows:
+            return True
+    return False

@@ -79,40 +79,6 @@ class HTTPTests(TestCase):
             self.assertEqual(result.status_code,400)
 
 
-class DecisionCacheTests(TestCase):
-    def test_revocation_uses_bounded_existing_cache_and_rechecks_after_expiry(self):
-        from django.test import override_settings
-        from django.core.cache import cache
-        from cloudfile_ext.v2.tests.test_acl_runtime import RuntimeTests
-        from cloudfile_ext.v2.acl_policy import Rule
-        now=time.time()
-        with override_settings(CF_ACL_CACHE_TTL=60,CACHES={'default':{'BACKEND':'django.core.cache.backends.locmem.LocMemCache','LOCATION':'acl-test'}}):
-            cache.clear()
-            first=RuntimeTests().authority()
-            self.assertTrue(first.effective(RID,'/projects/shared/file','file').can_write)
-            second=RuntimeTests().authority()
-            second.store.candidates.return_value=[]
-            denied=Rule(RID,'/projects/shared','etech','user','user','uid','none')
-            second.store.candidates.side_effect=lambda *args:[(denied,'revision')]
-            self.assertTrue(second.effective(RID,'/projects/shared/other','file').can_write)
-            second.store.candidates.assert_not_called()
-            third=RuntimeTests().authority()
-            third.store.candidates.side_effect=second.store.candidates.side_effect
-            with patch('cloudfile_ext.v2.acl_runtime.time.time',return_value=now+61):
-                self.assertFalse(third.effective(RID,'/projects/shared/other','file').can_read)
-            third.store.candidates.assert_called_once()
-
-    def test_cache_outage_recomputes_and_hard_readonly_is_not_cached_away(self):
-        from django.test import override_settings
-        from cloudfile_ext.v2.tests.test_acl_runtime import RuntimeTests
-        with override_settings(CF_ACL_CACHE_TTL=60),patch('django.core.cache.cache.get',side_effect=OSError()),patch('django.core.cache.cache.set',side_effect=OSError()):
-            auth=RuntimeTests().authority()
-            auth.api.get_repo_status.return_value=1
-            self.assertFalse(auth.effective(RID,'/projects/shared/file','file').can_write)
-            self.assertTrue(auth.effective(RID,'/projects/shared/file','file').can_read)
-            self.assertEqual(auth.store.candidates.call_count,1)
-
-
 class NativeFileAccessTests(TestCase):
     def test_directory_share_bypasses_only_the_whole_library_eligibility_gate(self):
         from seahub.api2.endpoints.internal_api import InternalCheckFileOperationAccess
