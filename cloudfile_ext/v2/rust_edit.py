@@ -18,6 +18,7 @@ from rest_framework.views import APIView
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import JWT_PRIVATE_KEY
 from seaserv import seafile_api
+from seahub.profile.models import Profile
 
 from .acl_runtime import Authority
 
@@ -25,10 +26,12 @@ from .acl_runtime import Authority
 MAX_TICKET_SECONDS = 3600
 
 
-def issue_ticket(*, username, repo_id, path, mode, file_id, now, secret):
+def issue_ticket(*, username, uid, repo_id, path, mode, file_id, now, secret):
     """Stateless, path-scoped Agent permit. Never accept a caller-supplied actor."""
     if not isinstance(username, str) or not username or len(username) > 255:
         raise ValueError("invalid current user")
+    if not isinstance(uid, str) or not uid or len(uid) > 225:
+        raise ValueError("stable user UID required")
     UUID(repo_id)
     if mode not in ("optimistic-edit", "exclusive-edit"):
         raise ValueError("unsupported edit mode")
@@ -45,7 +48,7 @@ def issue_ticket(*, username, repo_id, path, mode, file_id, now, secret):
     return jwt.encode({
         "iss": "cloudfile-v2-edit",
         "aud": "cloudfile-edit-agent",
-        "sub": username, "jti": str(uuid4()),
+        "sub": username, "uid": uid, "jti": str(uuid4()),
         "iat": now, "nbf": now, "exp": now + MAX_TICKET_SECONDS,
         "repo_id": repo_id, "path": path, "file_id": file_id,
         "mode": mode,
@@ -67,6 +70,7 @@ class RustLocalEditOpen(APIView):
             path = request.data["path"]
             mode = request.data["mode"]
             user = request.user.username
+            uid = Profile.objects.get(user=user).login_id
             # V2 authority (including current SSO group mapping and deny) is
             # intentionally the sole browser-side policy resolver.
             decision = Authority(user).effective(repo_id, path, "file")
@@ -82,7 +86,7 @@ class RustLocalEditOpen(APIView):
                 return Response({"code": "FILE_MISSING"}, status=404)
             file_id = entry.id
             now = int(time.time())
-            token = issue_ticket(username=user, repo_id=repo_id, path=path,
+            token = issue_ticket(username=user, uid=uid, repo_id=repo_id, path=path,
                                  mode=mode, file_id=file_id, now=now,
                                  secret=JWT_PRIVATE_KEY)
             # Explicit origin, not forwarded claims from the caller body.
