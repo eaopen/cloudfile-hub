@@ -58,6 +58,12 @@ def checked_reference(hit, repo_id, root):
     return dict(repo_id=repo_id, path=path, kind=kind)
 
 
+def native_extension(path):
+    """File suffix only: no extension for dotfiles or names without a dot."""
+    name = path.rsplit('/', 1)[-1]
+    return name.rsplit('.', 1)[-1].lower() if '.' in name and not name.startswith('.') else ''
+
+
 def search_filters(*, kind=None, extension=None, tag=None):
     """Validate optional indexed fields without interpreting client filter SQL."""
     if kind not in (None, 'file', 'dir'):
@@ -161,7 +167,7 @@ class ExistingMeiliIndex:
                 if (kind is not None and reference['kind'] != kind) or (
                         extension is not None and
                         (reference['kind'] != 'file' or
-                         reference['path'].rsplit('/', 1)[-1].rsplit('.', 1)[-1].lower() != extension)):
+                         native_extension(reference['path']) != extension)):
                     raise SearchUnavailable('indexed result outside requested filters')
                 tags = hit.get('tags') or []
                 if not isinstance(tags, list) or any(not isinstance(t, str) or len(t) > 255 for t in tags):
