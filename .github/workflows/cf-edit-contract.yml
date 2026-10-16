@@ -8,6 +8,7 @@ on:
       - "cloudfile_ext/v2/schema.py"
       - "cloudfile_ext/v2/tests/test_cf_edit_contract.py"
       - ".github/workflows/cf-edit-contract.yml"
+      - "cloudfile_ext/v2/tests/test_cf_edit_mariadb.py"
   pull_request:
     branches: [dev]
   workflow_dispatch:
@@ -27,3 +28,34 @@ jobs:
         run: python -m py_compile cloudfile_ext/v2/editing_contract.py cloudfile_ext/v2/editing_store.py cloudfile_ext/v2/schema.py cloudfile_ext/v2/tests/test_cf_edit_contract.py
       - name: Contract tests (no DB; no runtime claim)
         run: python -m unittest cloudfile_ext.v2.tests.test_cf_edit_contract -v
+
+  mariadb:
+    runs-on: ubuntu-latest
+    services:
+      db:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: test
+          MARIADB_DATABASE: seafile_db
+        ports: ["3306:3306"]
+        options: >-
+          --health-cmd="mariadb-admin ping -h 127.0.0.1 -uroot -ptest"
+          --health-interval=5s --health-timeout=3s --health-retries=20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: eaopen/cloudfile-server
+          ref: feature/cf-edit
+          path: cloudfile-server
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: python -m pip install "pymysql==1.1.1"
+      - name: Real MariaDB Guard recovery and schema-drift tests
+        env:
+          CF_EDIT_MYSQL_HOST: 127.0.0.1
+          CF_EDIT_MYSQL_PASSWORD: test
+          CF_EDIT_MYSQL_DB: seafile_db
+          CF_EDIT_SERVER_TREE: cloudfile-server
+        run: python -m unittest cloudfile_ext.v2.tests.test_cf_edit_mariadb -v
