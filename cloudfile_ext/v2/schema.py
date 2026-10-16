@@ -92,7 +92,7 @@ class FreshSchema:
         with self.connection.cursor() as cursor:
             if self._tables(cursor) != self.tables:
                 raise SchemaError('V2 requires exactly the reviewed extension tables')
-            for name in sorted(TABLES):
+            for name in sorted(self.tables):
                 self._verify_one(cursor, name)
 
     def install(self):
