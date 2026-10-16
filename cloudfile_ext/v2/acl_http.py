@@ -79,14 +79,15 @@ class SharedDirectories(AuthenticatedACL):
             return failure(error)
 
 
-def require_repo_write(user, repo_id):
-    """Use native CE library permissions, not Django is_staff or folder ACL as a grant.
+def require_repo_manage(user, repo_id):
+    """Use CE owner/native repo-admin facts, not global Django IsAdminUser.
 
-    A system admin with native library-management capability can repair rules
-    without implicitly acquiring file content access. Other callers must have
-    native repo-root rw, not merely rw on a shared subdirectory.
+    A plain user with repo rw may edit files but cannot silently delegate ACL
+    authority to other people. Native repo admins also have rw file access.
+    System administrators may repair rules without implicit byte access.
     """
     from seaserv import seafile_api
+    from seahub.share.utils import is_repo_admin
     uuid(repo_id)
     repo = seafile_api.get_repo(repo_id)
     if repo is None or repo.is_virtual:
@@ -95,8 +96,8 @@ def require_repo_write(user, repo_id):
         admin = getattr(user, 'admin_permissions', None)
         if admin is not None and admin.can_manage_library():
             return
-    if seafile_api.check_permission(repo_id, user.username) not in ('rw', 'admin'):
-        raise PermissionError('native library rw required')
+    if not is_repo_admin(user.username, repo_id):
+        raise PermissionError('native repository administrator required')
 
 
 def publication_ready():
@@ -125,14 +126,14 @@ def publication_ready():
 
 
 class DirectoryRules(AuthenticatedACL):
-    """Native repo rw (or system library administrator), never global IsAdminUser."""
+    """CE repository owner/admin or system manager; no global IsAdminUser."""
 
     def get(self, request):
         try:
             args = request.query_params
             if set(args) != {'repo_id', 'path'} or any(len(args.getlist(k)) != 1 for k in args):
                 raise ValueError()
-            require_repo_write(request.user, args['repo_id'])
+            require_repo_manage(request.user, args['repo_id'])
             rows = store().list_path(args['repo_id'], args['path'], settings.CF_ACL_PROVIDER)
             return response({'data': [dict(**asdict(rule), revision=revision) for rule, revision in rows]})
         except Exception as error:
@@ -147,7 +148,7 @@ class DirectoryRules(AuthenticatedACL):
                         'permission', 'inherit', 'share_mode', 'expected', 'revision'}
             if not isinstance(data, dict) or set(data) != required:
                 raise ValueError()
-            require_repo_write(request.user, data['repo_id'])
+            require_repo_manage(request.user, data['repo_id'])
             if not isinstance(data['inherit'], bool) or not isinstance(data['share_mode'], bool):
                 raise ValueError()
             provider = settings.CF_ACL_PROVIDER
