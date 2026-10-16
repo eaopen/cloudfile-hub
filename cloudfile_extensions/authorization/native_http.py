@@ -171,12 +171,21 @@ class NativeRepoView(RepoView):
                 repo = seafile_api.get_repo(repo_id)
                 if repo is None:
                     raise ContractError('RESOURCE_NOT_FOUND', 'Library does not exist', 404)
-                # Management is independent from content rw. Only a positively
-                # established owner/library administrator may receive is_admin.
+                # Management is independent from content rw.
+                # is_admin keeps the meaning the running deployment already has
+                # (measured 2026-10-16: owner -> true, designated library
+                # administrator -> false, staff system administrator -> true),
+                # so shipping this line cannot change who sees admin-only UI.
+                # The library-management signal is published separately as
+                # can_manage: owner | designated administrator | system
+                # administrator. Callers that need "may manage this library"
+                # (EAP: CloudFileService#canManageLibrary) read can_manage
+                # instead of inferring it from content permission or is_admin.
                 return dict(repo_id=repo_id, repo_name=repo.name, name=repo.name,
                     permission='rw' if current.effective_access['write'] else 'r',
                     user_perm='rw' if current.effective_access['write'] else 'r',
-                    is_admin=bool(current.can_manage_library()),
+                    is_admin=bool(current.is_owner or current.is_global_library_admin),
+                    can_manage=bool(current.can_manage_library()),
                     size=repo.size, encrypted=repo.encrypted, is_virtual=repo.is_virtual,
                     status=repo.status, repo_type=repo.repo_type,
                     owner_email=seafile_api.get_repo_owner(repo_id))
