@@ -1,4 +1,4 @@
-"""Fresh M1 schema only: no legacy data conversion or native Repo mutation."""
+"""Superseded unpublished M1 experiment; not the V2 schema baseline."""
 from .runner import Migration, MigrationError, load_migrations
 
 PROFILE_VERSION = "100_m1_storage"
@@ -6,7 +6,7 @@ TABLES = frozenset({
     "cf_schema_migration", "cf_library_storage_key", "cf_dir_acl",
     "cf_sso_group_map", "cf_background_job", "cf_event_outbox", "cf_audit_event",
     "cf_policy_request", "cf_oidc_session", "cf_oidc_logout_fence",
-    "cf_library_share_revision", "cf_library_share_ledger", "cf_managed_library",
+    "cf_library_share_revision", "cf_library_share_ledger",
 })
 
 
@@ -24,9 +24,6 @@ def migrations():
         "verify": "SELECT IF((SELECT COUNT(*) FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_library_storage_key' AND engine='InnoDB')=1 AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_library_storage_key')=2 AND (SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='cf_library_storage_key' AND ((column_name='repo_key' AND data_type='varchar' AND character_maximum_length=80 AND is_nullable='NO' AND column_key='PRI') OR (column_name='repo_id' AND data_type='char' AND character_maximum_length=36 AND column_key='UNI')))=2,1,0)",
         "expected": 1,
     },))
-    # Keep the still-enforced native boundary; use an honest M1 receipt rather
-    # than claiming the legacy 032 data migration ran without cf_dir_admin.
-    boundary = Migration("101_m1_native_boundary", (existing["032_managed_libraries"].steps[0],))
     base = existing["008_directory_acl"].steps[0]
     sql = base["sql"].replace(") ENGINE=InnoDB", ",share_mode TINYINT NOT NULL DEFAULT 0,"
         "lifecycle_ref VARCHAR(512) CHARACTER SET utf8mb4 COLLATE utf8mb4_bin NOT NULL DEFAULT '',"
@@ -36,7 +33,7 @@ def migrations():
         *({**step, "sql": "SELECT 1"} for step in existing["042_unified_directory_acl"].steps[:2]),
         {**existing["036_library_acl_page"].steps[0], "sql": "SELECT 1"},
     ))
-    return (storage, *(existing[version] for version in selected), boundary, acl)
+    return (storage, *(existing[version] for version in selected), acl)
 
 
 def preflight(runner):
