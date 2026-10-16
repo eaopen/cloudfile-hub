@@ -84,7 +84,7 @@ class ACLSQLTests(TestCase):
         self.assertEqual(store.library(RID), ())
         store.mutate(self.rule, expected=None, revision=self.revision)
         store.mutate(self.rule, expected=None, revision=self.revision)  # replay: no change
-        other = Rule(RID, '/other', 'etech', 'role', 'role', 'r1', 'none')
+        other = Rule(RID, '/other', 'etech', 'role', 'role', 'r1', 'invisible')
         store.mutate(other, expected=None, revision=str(uuid4()))
         self.assertEqual(changed, [RID, RID])
         self.assertEqual(sorted(store.library(RID), key=lambda r: r.path), [other, self.rule])
