@@ -12,7 +12,7 @@ not alter policy.
 - Without library eligibility, a matching positive r/rw row **and** `share_mode=1`
   supplies eligibility at that directory. `qualified_root` / `root_path` is that
   directory; ancestors and siblings are inaccessible. Inheritance controls
-  descendants; none/invisible still deny. An ordinary positive row without
+  descendants; the only explicit deny value is `invisible` (hidden and unreadable). An ordinary positive row without
   sharing does not create library eligibility.
 - This is a directory-backed virtual **view**, not a CE `VirtualRepo`, new library,
   object copy, permission copy, or whole-library grant.
@@ -38,12 +38,27 @@ ACL row. Native final commit takes the same Branch lock before consulting Hub.
 All writers must use this protocol; direct SQL bypasses its concurrency guarantee.
 Permission decisions may remain valid until their bounded cache expiry.
 
-Authenticated administrator GET:
+Authenticated native repo owner/administrator GET:
 `api/v2.1/cloudfile/authorization/v1/directory-rules/?repo_id=...&path=...`.
-Public POST/PUT/DELETE return `503 ACL_PUBLICATION_BLOCKED`, even for staff.
-There is deliberately no setting that unlocks publication. Scoped publisher
-credentials and the release acceptance gate remain integration work; rw never
-implies rule-management authority. The internal CAS writer is not a browser API.
+A full system administrator with native `can_manage_library` may also manage
+ACL rules, without acquiring file bytes. No global `IsAdminUser` requirement
+blocks a delegated repository administrator. Ordinary r/rw file editors are
+**not** repo administrators and cannot delegate ACL rules merely because they
+can edit files. Etech business login and management scopes stay in Etech.
+
+POST/PUT/DELETE accept a strict rule record:
+`repo_id,path,subject_type,namespace,external_id,permission,inherit,share_mode,expected,revision`.
+Provider comes only from trusted `CF_ACL_PROVIDER`; a caller cannot override it.
+The only configurable directory permissions are **r/rw/invisible**, never
+`none`. `revision` uses the existing branch-serialized ACLStore CAS.
+
+Writes remain `503 ACL_PUBLICATION_BLOCKED` unless
+`CF_ACL_PUBLICATION_ENABLED=True` is explicitly set **and** the native
+`[cloudfile] v2_acl_enabled=true` option is present in the running services'
+seafile.conf. These flags do not certify a deployment: the integrator must
+verify matching Hub/C/Go image pins, current-subject TTL, server-side final
+authorization and Etech publication/rollback acceptance *before* enabling them.
+Default is disabled, including on existing instances.
 
 ## Content API
 
