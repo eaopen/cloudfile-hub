@@ -1,0 +1,27 @@
+name: V2 Meilisearch isolated checks
+
+on:
+  push:
+    branches: [feature/v2-meilisearch]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test-search-core:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Verify isolated search core
+        run: python -m unittest cloudfile_ext.v2.tests.test_search -v
+      - name: Reject new extension SQL tables
+        run: |
+          python - <<'PY'
+          from cloudfile_ext.v2.schema import TABLES
+          assert TABLES == frozenset({'cf_library_storage', 'cf_dir_acl', 'cf_sso_group_map'})
+          print('V2 reviewed extension tables unchanged')
+          PY
