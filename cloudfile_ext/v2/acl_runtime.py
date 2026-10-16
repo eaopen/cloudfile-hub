@@ -1,4 +1,5 @@
 """One trusted authority for Hub and native file service decisions."""
+import logging
 import posixpath
 import stat
 from dataclasses import asdict, astuple
@@ -13,6 +14,9 @@ from .acl_store import ACLStore, uuid
 from .schema import identifier
 
 NAMESPACE = 'cf-acl-rules-v1'
+logger = logging.getLogger(__name__)
+_warned_local_cache = set()
+
 
 
 class ACLUnavailable(Exception):
@@ -27,9 +31,18 @@ def store():
 
 def cache_ttl():
     try:
-        return library_cache.ttl('CF_ACL_CACHE_TTL', 180)
+        ttl = library_cache.ttl('CF_ACL_CACHE_TTL', 180)
     except ValueError:
         raise ACLUnavailable('invalid ACL cache TTL') from None
+    # A local invalidation cannot reach other workers. Never retain ACL grants
+    # across requests in process-local or non-persistent Django cache backends.
+    backend = settings.CACHES.get('default', {}).get('BACKEND', '') if settings.configured else ''
+    if backend.rsplit('.', 1)[-1] in ('LocMemCache', 'DummyCache'):
+        if ttl and backend not in _warned_local_cache:
+            logger.warning('CloudFile ACL cache is %s: cross-request caching disabled', backend)
+            _warned_local_cache.add(backend)
+        return 0
+    return ttl
 
 
 def invalidate_library(repo_id):

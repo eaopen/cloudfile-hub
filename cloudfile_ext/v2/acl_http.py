@@ -17,7 +17,6 @@ from .acl_store import uuid
 from . import tag_display
 
 logger = logging.getLogger(__name__)
-tag_display.connect_invalidation()
 
 
 def response(data, status=200):
