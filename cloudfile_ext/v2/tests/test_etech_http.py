@@ -4,6 +4,8 @@ from unittest import TestCase
 from unittest.mock import Mock, patch
 
 from rest_framework.test import APIRequestFactory, force_authenticate
+from cloudfile_ext.v2 import runtime
+from cloudfile_ext.v2.errors import IdentityUnavailable, SubjectNotBound
 from cloudfile_ext.v2.http import IdentityResolve
 from seahub.oauth import views
 
@@ -67,7 +69,6 @@ class EtechOAuthBindingTests(TestCase):
         session.get.return_value.status_code = 200
         session.get.return_value.json.return_value = {'sub': userinfo_sub, 'userId': 'business-uid'}
         profile = SimpleNamespace(login_id=profile_uid, save=Mock())
-        from cloudfile_ext.v2.errors import IdentityUnavailable
         with patch('cloudfile_ext.v2.oidc.configuration', return_value=('https://idp.example.test/', 'https://idp.example.test/jwks')), \
                 patch('cloudfile_ext.v2.oidc.verify_id_token', return_value={'sub': 'trusted-sub'},
                       side_effect=IdentityUnavailable('rejected') if invalid_token else None) as verify, \
@@ -79,6 +80,7 @@ class EtechOAuthBindingTests(TestCase):
                 patch.object(views.Profile.objects, 'get_profile_by_user', return_value=profile), \
                 patch.object(views.auth, 'authenticate', return_value=SimpleNamespace(username='existing@auth.local')) as authenticate, \
                 patch.object(views.auth, 'login'), \
+                patch.object(views.auth, 'logout') as logout, \
                 patch.object(views, 'get_api_token', return_value=SimpleNamespace(key='test-token')), \
                 patch.object(views, 'get_service_url', return_value='https://files.example.test/cfile'), \
                 patch.object(views, 'render_error', return_value='binding-error'):
@@ -89,39 +91,52 @@ class EtechOAuthBindingTests(TestCase):
         if oidc:
             verify.assert_called_once()
             self.assertNotIn('oauth_nonce', request.session)
-        return response, authenticate, bind
+        return response, authenticate, bind, logout
 
     def test_first_oauth_login_reuses_existing_business_uid_account(self):
-        response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid')
+        response, authenticate, bind, logout = self.callback(None, 'existing@auth.local', 'business-uid')
         self.assertEqual(response.status_code, 302)
         authenticate.assert_called_once_with(remote_user='existing@auth.local')
         bind.assert_called_once_with('existing@auth.local', views.OAUTH_PROVIDER, 'trusted-sub')
+        logout.assert_not_called()
 
     def test_conflicting_oauth_and_business_uid_bindings_cannot_rebind(self):
-        response, authenticate, bind = self.callback(SimpleNamespace(username='other@auth.local'), 'existing@auth.local', 'other-uid')
+        response, authenticate, bind, logout = self.callback(SimpleNamespace(username='other@auth.local'), 'existing@auth.local', 'other-uid')
         self.assertEqual(response, 'binding-error')
         authenticate.assert_not_called()
         bind.assert_not_called()
+        logout.assert_not_called()
 
     def test_oidc_reuses_the_same_native_uid_account_and_session(self):
-        response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True)
+        response, authenticate, bind, logout = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True)
         self.assertEqual(response.status_code, 302)
         authenticate.assert_called_once_with(remote_user='existing@auth.local')
         bind.assert_called_once_with('existing@auth.local', views.OAUTH_PROVIDER, 'trusted-sub')
+        logout.assert_not_called()
 
     def test_oidc_invalid_token_or_mismatched_userinfo_cannot_authenticate(self):
         for options in ({'invalid_token': True}, {'userinfo_sub': 'other-sub'}):
             with self.subTest(options=options):
-                response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True, **options)
+                response, authenticate, bind, _ = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True, **options)
                 self.assertEqual(response, 'binding-error')
                 authenticate.assert_not_called()
                 bind.assert_not_called()
 
     def test_native_uid_collation_alias_cannot_be_claimed(self):
-        response, authenticate, bind = self.callback(None, 'existing@auth.local', 'BUSINESS-UID')
+        response, authenticate, bind, _ = self.callback(None, 'existing@auth.local', 'BUSINESS-UID')
         self.assertEqual(response, 'binding-error')
         authenticate.assert_not_called()
         bind.assert_not_called()
+
+    def test_subject_preparation_failure_cannot_keep_the_new_session(self):
+        # The login hook runs after native binding, so a failed subject must revoke
+        # the session instead of leaving a usable CloudFile login behind.
+        with patch('cloudfile_ext.v2.runtime.prepare_subject',
+                   side_effect=IdentityUnavailable('directory unavailable')):
+            response, authenticate, bind, logout = self.callback(None, 'existing@auth.local', 'business-uid')
+        self.assertEqual(response, 'binding-error')
+        authenticate.assert_called_once_with(remote_user='existing@auth.local')
+        logout.assert_called_once()
 
     def test_missing_state_cannot_fetch_tokens(self):
         for saved, supplied in (({}, 'expected'), ({'oauth_state': 'expected'}, '错误-state')):
@@ -165,3 +180,18 @@ class EtechGroupLookupTests(TestCase):
         response, cursor = self.request('2001', staff=False)
         self.assertEqual(response.status_code, 403)
         cursor.assert_not_called()
+
+
+class CloudFileUidAnchorTests(TestCase):
+    """The native exact login_id binding is the only trusted UID anchor."""
+
+    def test_native_login_id_is_the_only_uid_anchor(self):
+        with patch('seahub.profile.models.Profile.objects.get_profile_by_user',
+                   return_value=SimpleNamespace(login_id='uid-1')):
+            self.assertEqual(runtime.bound_uid('user@auth.local'), 'uid-1')
+        for missing in (None, SimpleNamespace(login_id=None), SimpleNamespace(login_id='')):
+            with self.subTest(profile=missing), \
+                    patch('seahub.profile.models.Profile.objects.get_profile_by_user', return_value=missing):
+                with self.assertRaises(SubjectNotBound):
+                    runtime.bound_uid('user@auth.local')
+

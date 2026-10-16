@@ -11,6 +11,7 @@ from seahub.api2.authentication import TokenAuthentication, SessionAuthenticatio
 from seahub.api2.throttling import UserRateThrottle
 from seahub.utils.timeutils import timestamp_to_isoformat_timestr
 
+from ..permissions import SubjectReady
 from .client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, normalize_path
 from .paging import page
 from .runtime import AccessDenied, NativeAuthority
@@ -28,7 +29,7 @@ def configured_client():
 
 class SearchQuery(APIView):
     authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, SubjectReady)
     throttle_classes = (UserRateThrottle,)
 
     def get(self, request):
