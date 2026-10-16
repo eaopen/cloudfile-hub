@@ -40,8 +40,17 @@ def validate_subject(value, uid, *, now=None):
 
 
 class Memberships:
-    def __init__(self, connection, redis, identity, *, account_schema, provider, fetch, ttl=1800):
-        if not connection.get_autocommit() or not callable(fetch) or type(ttl) is not int or not 30 <= ttl <= 3600:
+    """Project the current subject; readiness is bounded by the configured TTL."""
+
+    # One consistent TTL: the reviewed design bounds readiness at 1800 seconds,
+    # so a subject can never be reused for longer than the agreed freshness.
+    DEFAULT_TTL = 1800
+    MINIMUM_TTL = 30
+    MAXIMUM_TTL = 1800
+
+    def __init__(self, connection, redis, identity, *, account_schema, provider, fetch, ttl=DEFAULT_TTL):
+        if (not connection.get_autocommit() or not callable(fetch) or type(ttl) is not int
+                or not self.MINIMUM_TTL <= ttl <= self.MAXIMUM_TTL):
             raise ValueError('dedicated connection, trusted Directory and bounded TTL required')
         self.connection, self.redis, self.identity = connection, redis, identity
         self.provider, self.fetch, self.ttl = text(provider, 32), fetch, ttl
