@@ -42,7 +42,8 @@ class NativeIdentity:
                 raise IdentityUnavailable('native account inactive')
 
     def bind(self, *, subject, uid, login_name):
-        # Caller must first validate OIDC and compare this pair with Directory.
+        # Both OAuth2 and OIDC callers must validate the external identity and
+        # compare this exact UID with the trusted Directory before binding.
         subject, uid, login_name = text(subject, 255), text(uid), text(login_name, 200)
         metadata = {'issuer': self.issuer, 'external_user_id': uid}
         keys = sorted(['identity:uid:' + uid, 'identity:sub:' + self.provider + ':' + subject])
@@ -66,23 +67,34 @@ class NativeIdentity:
                     self.active(username, uid)
                     return username
                 cursor.execute('SELECT user FROM ' + self.profiles + ' WHERE login_id=%s', (uid,))
-                if cursor.fetchall():
-                    raise IdentityConflict('UID already belongs to another binding')
-            if self.create_account is None:
-                raise IdentityUnavailable('native account creation disabled')
-            username = uuid4().hex + '@auth.local'
-            # Native RPC owns account creation. A later SQL failure leaves an
-            # unbound account, never a usable OAuth binding or group grant.
-            self.create_account(username)
+                profiles = cursor.fetchall()
+            if profiles:
+                if len(profiles) != 1:
+                    raise IdentityConflict('ambiguous native UID binding')
+                username = profiles[0][0]
+                # Reuse the same trusted UID's native account across login
+                # methods. active() compares exact values, rejecting aliases
+                # from the native case-insensitive login_id collation.
+                self.active(username, uid)
+            else:
+                if self.create_account is None:
+                    raise IdentityUnavailable('native account creation disabled')
+                username = uuid4().hex + '@auth.local'
+                # Native RPC owns account creation; failed SQL never publishes
+                # a usable OAuth binding or group grant.
+                self.create_account(username)
             self.connection.begin()
             try:
                 with self.connection.cursor() as cursor:
                     cursor.execute('SELECT email,is_active FROM ' + self.accounts + ' WHERE email=%s FOR UPDATE', (username,))
                     if cursor.fetchall() != ((username, 1),):
                         raise IdentityUnavailable('native account creation failed')
-                    cursor.execute('INSERT INTO ' + self.profiles +
-                        '(user,login_id,nickname,intro,lang_code,contact_email,is_manually_set_contact_email,institution,list_in_address_book) '
-                        "VALUES(%s,%s,%s,'',NULL,NULL,0,'',0)", (username, uid, login_name[:64]))
+                    if profiles:
+                        self.active(username, uid, locked=True)
+                    else:
+                        cursor.execute('INSERT INTO ' + self.profiles +
+                            '(user,login_id,nickname,intro,lang_code,contact_email,is_manually_set_contact_email,institution,list_in_address_book) '
+                            "VALUES(%s,%s,%s,'',NULL,NULL,0,'',0)", (username, uid, login_name[:64]))
                     cursor.execute('INSERT INTO ' + self.social + '(username,provider,uid,extra_data) VALUES(%s,%s,%s,%s)',
                                    (username, self.provider, subject, json.dumps(metadata, sort_keys=True)))
                 self.connection.commit()

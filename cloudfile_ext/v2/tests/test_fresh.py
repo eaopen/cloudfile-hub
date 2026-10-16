@@ -160,8 +160,27 @@ class FreshDatabaseTest(unittest.TestCase):
         self.assertEqual(self.identity.bind(subject='subject-one', uid='uid-1', login_name='E999'), self.username)
         with self.assertRaises(IdentityConflict):
             self.identity.bind(subject='subject-one', uid='uid-2', login_name='E001')
+
+    def test_second_verified_login_binding_reuses_native_account_and_permissions(self):
+        role = self.group()
+        self.query('INSERT INTO ' + self.names['account'] + '.GroupUser(group_id,user_name,is_staff) VALUES(%s,%s,0)',
+                   (role, self.username))
+        self.identity.create_account = Mock(side_effect=AssertionError('must reuse native account'))
+        self.assertEqual(self.identity.bind(subject='another-subject', uid='uid-1', login_name='E001'), self.username)
+        self.assertEqual(self.query('SELECT email FROM ' + self.names['account'] + '.EmailUser'), ((self.username,),))
+        self.assertEqual(self.query('SELECT group_id,user_name FROM ' + self.names['account'] + '.GroupUser'),
+                         ((role, self.username),))
+        self.assertEqual(self.identity.bind(subject='another-subject', uid='uid-1', login_name='renamed'), self.username)
         with self.assertRaises(IdentityConflict):
-            self.identity.bind(subject='another-subject', uid='uid-1', login_name='E001')
+            self.identity.bind(subject='another-subject', uid='uid-2', login_name='E001')
+
+    def test_native_oauth_profile_can_be_claimed_without_another_account(self):
+        self.query('DELETE FROM ' + self.names['hub'] + '.social_auth_usersocialauth')
+        self.identity.create_account = Mock(side_effect=AssertionError('must reuse native account'))
+        self.assertEqual(self.identity.bind(subject='verified-oidc-sub', uid='uid-1', login_name='E001'), self.username)
+        self.query('UPDATE ' + self.names['account'] + '.EmailUser SET is_active=0 WHERE email=%s', (self.username,))
+        with self.assertRaises(IdentityUnavailable):
+            self.identity.bind(subject='third-sub', uid='uid-1', login_name='E001')
 
     def test_collation_alias_uid_is_rejected(self):
         with self.assertRaises(IdentityConflict):

@@ -3,6 +3,8 @@
 import os
 import sys
 import logging
+import secrets
+from urllib.parse import urlsplit
 from django.http import HttpResponseRedirect
 from django.utils.translation import gettext as _
 
@@ -112,12 +114,26 @@ def oauth_login(request):
     Redirect the user/resource owner to the OAuth provider (i.e. Github)
     using an URL with a few key OAuth parameters.
     """
+    oidc = getattr(request, '_cloudfile_oidc', False)
+    request.session.pop('oauth_nonce', None)
+    request.session['oauth_protocol'] = 'oidc' if oidc else 'oauth2'
+    if oidc:
+        from cloudfile_ext.v2.oidc import configuration
+        try:
+            configuration(settings)
+            scopes = SCOPE.split() if isinstance(SCOPE, str) else SCOPE
+            if 'openid' not in scopes:
+                raise ValueError('OIDC requires openid scope')
+        except Exception:
+            return render_error(request, _('Error, please contact administrator.'))
+        request.session['oauth_nonce'] = secrets.token_urlsafe(32)
     session = OAuth2Session(client_id=CLIENT_ID,
                             scope=SCOPE,
                             redirect_uri=REDIRECT_URL)
 
     try:
-        authorization_url, state = session.authorization_url(AUTHORIZATION_URL)
+        extra = {'nonce': request.session['oauth_nonce']} if oidc else {}
+        authorization_url, state = session.authorization_url(AUTHORIZATION_URL, **extra)
     except Exception as e:
         logger.error(e)
         return render_error(request, _('Error, please contact administrator.'))
@@ -136,12 +152,20 @@ def oauth_callback(request):
     callback URL. With this redirection comes an authorization code included
     in the redirect URL. We will use that to obtain an access token.
     """
+    state = request.session.pop('oauth_state', None)
+    oidc = request.session.pop('oauth_protocol', 'oauth2') == 'oidc'
+    nonce = request.session.pop('oauth_nonce', None)
+    if (not isinstance(state, str) or not state or
+            not secrets.compare_digest(state.encode(), request.GET.get('state', '').encode())):
+        return render_error(request, _('Error, please contact administrator.'))
     session = OAuth2Session(client_id=CLIENT_ID,
                             scope=SCOPE,
-                            state=request.session.get('oauth_state', None),
+                            state=state,
                             redirect_uri=REDIRECT_URL)
 
-    service_url = get_service_url().strip('/')
+    # SERVICE_URL includes SITE_ROOT. get_full_path() already includes it too.
+    service_origin = urlsplit(get_service_url())
+    service_url = service_origin.scheme + '://' + service_origin.netloc
 
     try:
         token = session.fetch_token(
@@ -149,6 +173,13 @@ def oauth_callback(request):
             client_secret=CLIENT_SECRET,
             include_client_id=INCLUDE_CLIENT_ID,
             authorization_response=service_url + request.get_full_path())
+
+        verified_claims = None
+        if oidc:
+            from cloudfile_ext.v2.oidc import configuration, verify_id_token
+            issuer, jwks_uri = configuration(settings)
+            verified_claims = verify_id_token(token, issuer=issuer, client_id=CLIENT_ID,
+                                              nonce=nonce, jwks_uri=jwks_uri)
 
         if 'user_id' in session._client.__dict__['token']:
             # used for sjtu.edu.cn
@@ -169,7 +200,14 @@ def oauth_callback(request):
         return render_error(request, _('Error, please contact administrator.'))
 
     oauth_user_info = {}
-    user_info_json = user_info_resp.json()
+    try:
+        user_info_json = user_info_resp.json()
+    except ValueError:
+        return render_error(request, _('Error, please contact administrator.'))
+    if user_info_resp.status_code != 200 or not isinstance(user_info_json, dict):
+        return render_error(request, _('Error, please contact administrator.'))
+    if oidc and user_info_json.get('sub') != verified_claims['sub']:
+        return render_error(request, _('Error, please contact administrator.'))
     for oauth_attr, attr_tuple in OAUTH_ATTRIBUTE_MAP.items():
         required, user_attr = attr_tuple
         attr_value = user_info_json.get(oauth_attr, '')
@@ -180,6 +218,8 @@ def oauth_callback(request):
             logger.error(user_info_json)
             return render_error(request, _('Error, please contact administrator.'))
 
+    if oidc and (not isinstance(oauth_user_info.get('login_id'), str) or not oauth_user_info['login_id']):
+        return render_error(request, _('Error, please contact administrator.'))
     uid = oauth_user_info.get('uid', '') or oauth_user_info.get('email', '')
     if not uid:
         logger.error('oauth user uid and email not found.')
@@ -193,7 +233,20 @@ def oauth_callback(request):
     # Reuse the native account already bound to the trusted business UID.
     # Employee names and contact emails are not account-binding keys.
     login_id = oauth_user_info.get('login_id', '')
+    if login_id:
+        from cloudfile_ext.v2.identity import text
+        from cloudfile_ext.v2.errors import IdentityConflict
+        try:
+            text(login_id)
+        except IdentityConflict:
+            return render_error(request, _('Error, please contact administrator.'))
     profile_username = Profile.objects.get_username_by_login_id(login_id) if login_id else None
+    if profile_username:
+        profile = Profile.objects.get_profile_by_user(profile_username)
+        # Native login_id lookups use a case-insensitive database collation.
+        # A second login method must prove the exact same stable UID.
+        if not profile or profile.login_id != login_id:
+            return render_error(request, _('Error, please contact administrator.'))
     if oauth_user and login_id:
         profile = Profile.objects.get_profile_by_user(oauth_user.username)
         if ((profile_username and profile_username != oauth_user.username) or
