@@ -6,11 +6,15 @@ Seafile/CF-ACL and the native repository version are checked before issuance;
 Go Fileserver checks current permission again on every protected operation.
 """
 import time
+import hashlib
+import os
+import re
 from urllib.parse import urlencode
 from uuid import UUID, uuid4
 
 import jwt
 from django.conf import settings
+from django.db import connection
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
@@ -105,4 +109,71 @@ class RustLocalEditOpen(APIView):
             return Response({"code": "EDIT_DENIED"}, status=403)
         except Exception:
             # Do not downgrade to raw repo/file token on missing policy.
+            return Response({"code": "EDIT_UNAVAILABLE"}, status=503)
+
+
+class RustCheckoutInfo(APIView):
+    """Current Checkout visibility, never a publication credential."""
+    authentication_classes = (SessionAuthentication,)
+    permission_classes = (IsAuthenticated,)
+    throttle_classes = (UserRateThrottle,)
+
+    def get(self, request):
+        if not getattr(settings, "CF_V2_AGENT_EDIT_ENABLED", False):
+            return Response({"code": "EDIT_DISABLED"}, status=503)
+        try:
+            args = request.query_params
+            if set(args) != {"repo_id", "path"} or any(len(args.getlist(k)) != 1 for k in args):
+                raise ValueError()
+            repo_id, path = args["repo_id"], args["path"]
+            UUID(repo_id)
+            if (not path.startswith("/") or path == "/" or "\\" in path or
+                    "//" in path or len(path.encode("utf-8")) > 4096 or
+                    any(x in (".", "..") for x in path.split("/"))):
+                raise ValueError()
+            viewer = request.user.username
+            if not Authority(viewer).effective(repo_id, path, "file").can_read:
+                return Response({"code": "EDIT_DENIED"}, status=403)
+            # No table join to User/Device/Session: status comes from the one
+            # native Guard row and its stable Checkout owner.
+            db = os.environ.get("SEAFILE_MYSQL_DB_SEAFILE_DB_NAME", "")
+            if not re.fullmatch(r"[A-Za-z0-9_]{1,64}", db):
+                return Response({"code": "EDIT_UNAVAILABLE"}, status=503)
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    "SELECT guard_id,owner_uid,owner_native_user,terminal_type,"
+                    "terminal_name,checkout_ip,created_at,updated_at,lease_expires_at "
+                    "FROM `" + db + "`.cf_edit_guard WHERE repo_id=%s AND path_hash=%s",
+                    (repo_id, hashlib.sha256(path.encode("utf-8")).digest()),
+                )
+                rows = cursor.fetchall()
+            if len(rows) > 1:
+                return Response({"code": "EDIT_UNAVAILABLE"}, status=503)
+            if not rows or rows[0][0] is None:
+                return Response({"checked_out": False})
+            guard, owner_uid, owner_user, terminal, name, ip, started, active, expires = rows[0]
+            from django.utils import timezone
+            if expires is None or expires <= timezone.now().replace(tzinfo=None):
+                return Response({"checked_out": False})
+            current_uid = Profile.objects.get(user=viewer).login_id
+            privileged = owner_uid == current_uid or bool(request.user.is_staff)
+            details = {
+                "checked_out": True,
+                "owner_uid": owner_uid,
+                "owner": owner_user,
+                "checked_out_at": started.isoformat() + "Z",
+                "last_activity_at": active.isoformat() + "Z",
+                "expires_at": expires.isoformat() + "Z",
+            }
+            if privileged:
+                details.update(terminal_type=terminal, terminal_name=name,
+                               checkout_ip=ip)
+            response = Response(details)
+            response["Cache-Control"] = "no-store"
+            return response
+        except (ValueError, TypeError, KeyError):
+            return Response({"code": "INVALID_REQUEST"}, status=400)
+        except PermissionError:
+            return Response({"code": "EDIT_DENIED"}, status=403)
+        except Exception:
             return Response({"code": "EDIT_UNAVAILABLE"}, status=503)
