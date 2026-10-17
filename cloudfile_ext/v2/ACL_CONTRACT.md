@@ -161,9 +161,22 @@ Meilisearch index is never an authorization source.
   randomized rule trees. Over 256 rule paths, a 32 KiB filter, or an
   over-budget library fall back to per-hit decisions only.
 - Every returned hit is decided again by Authority and must still exist with
-  its kind. Cursors bind the library head, native grant, status, principal and
-  rule rows; a change invalidates the prepared page (503) and a lost root
-  grant returns 403.
+  its kind **before current CE tags are queried**; denied, missing or wrong-kind
+  candidates never enter a tag SQL batch. Cursors bind the library head,
+  native grant, status, freshly verified principal and rule rows. Before a
+  response is delivered the current user/UID/groups are checked again: a
+  snapshot change invalidates the prepared page (503), a lost root grant or
+  inactive account returns 403. Tags are display data, not grants.
+- **Dev deployment gate:** check the actual Meilisearch `cloudfile_files`
+  index settings for filterable `repo_id`, `path`, `dirs` and searchable
+  `name`, `tags`. The current search worker writes `dirs` as exact ancestor
+  paths, whereas `search/documents.py` also defines a different schema using
+  `ancestor_paths`: these fields are not interchangeable. Never assume the
+  live index supports filtering merely because one of these is present in
+  source code. Do not auto-alter index settings or start an index rebuild.
+  A separate local Meilisearch 1.31 fixture accepted the emitted predicates
+  and the real `ExistingMeiliIndex.page()` requests. That does **not** replace
+  a read-only check or user-scoped search on the existing Dev index.
 
 ## Native Decision Protocol
 

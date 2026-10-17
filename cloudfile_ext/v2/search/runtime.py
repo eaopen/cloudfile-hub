@@ -73,17 +73,29 @@ class SearchAuthority:
 
     def resolve(self, references, authority=None):
         authority = self.authority if authority is None else authority
-        tags = native_tags(self.repo_id, references)
-        result = []
+        # An index candidate is never a tag-read authority. Authorize and
+        # verify the current native object BEFORE selecting its tag bindings.
+        entries, visible = [], []
         for ref in references:
             path, kind = ref['path'], ref['kind']
             if not authority.effective(self.repo_id, path, kind).can_read:
-                result.append(None)
+                entries.append(None)
                 continue
             entry = seafile_api.get_dirent_by_path(self.repo_id, path)
             if entry is None or (stat.S_ISDIR(entry.mode) if kind == 'dir' else stat.S_ISREG(entry.mode)) is False:
+                entries.append(None)
+                continue
+            entries.append(entry)
+            visible.append(ref)
+        # Failure to read tags for valid hits remains an error, not an empty tag
+        # set. Unauthorized or stale hits cause no tag query at all.
+        tags = native_tags(self.repo_id, visible) if visible else {}
+        result = []
+        for ref, entry in zip(references, entries):
+            if entry is None:
                 result.append(None)
                 continue
+            path, kind = ref['path'], ref['kind']
             current = tags[path]
             matched = [t for t in ref.get('matched_tags', []) if t in current]
             if not ref.get('text_match', True) and not matched:
@@ -98,8 +110,12 @@ class SearchAuthority:
         repo = seafile_api.get_repo(self.repo_id)
         if repo is None:
             raise AccessDenied()
-        # Same subject; rules, native grant, status and head are read again.
-        fresh = Authority(self.username, principal=self.authority.principal)
+        # Revalidate native account and current UID/group projection; reusing
+        # the previous principal here would miss mid-request identity changes.
+        try:
+            fresh = Authority(self.username)
+        except PermissionError:
+            raise AccessDenied() from None
         if self.read_snapshot(fresh, repo) != self.snapshot:
             raise SearchUnavailable('library or authorization changed')
         # With every decision input unchanged the decisions are too, except in

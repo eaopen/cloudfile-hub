@@ -16,6 +16,13 @@ ITEM = dict(repo_id=RID, path='/A/file.txt', kind='file', size=15, mtime=100, ta
 
 
 class SearchHttpTests(TestCase):
+    def setUp(self):
+        # Authorization tests should not require an external Redis throttle
+        # service: throttle behavior belongs to separate HTTP middleware tests.
+        throttle = patch('cloudfile_ext.v2.search.http.SearchQuery.throttle_classes', ())
+        throttle.start()
+        self.addCleanup(throttle.stop)
+
     def call(self, params=None, user='native@auth.local', authority=None, client=None):
         request = APIRequestFactory().get('/api/v2.1/cloudfile/search/', params or {'repo_id': RID, 'q': 'file'})
         if user:
@@ -97,6 +104,7 @@ class SearchAuthorityTests(TestCase):
         self.rules = [Rule(RID, '/', 'etech', 'user', 'user', 'uid', 'r'),
                       Rule(RID, '/S', 'etech', 'user', 'user', 'uid', 'invisible')]
         self.base = 'rw'
+        self.current_principal = P
         self.authorities = []
         build = patch('cloudfile_ext.v2.search.runtime.Authority', side_effect=self.authority)
         build.start()
@@ -111,7 +119,7 @@ class SearchAuthorityTests(TestCase):
         api.get_repo.return_value = SimpleNamespace(is_virtual=False, version=1)
         api.get_repo_status.return_value = 0
         api.check_permission.side_effect = lambda repo, user: self.base
-        authority = Authority(username, principal=principal or P, rules=store, api=api)
+        authority = Authority(username, principal=principal or self.current_principal, rules=store, api=api)
         self.authorities.append(authority)
         return authority
 
@@ -135,6 +143,43 @@ class SearchAuthorityTests(TestCase):
             self.native.get_repo.return_value = SimpleNamespace(is_virtual=False, encrypted=False, head_cmmt_id='c'*40)
             with self.assertRaises(AccessDenied):
                 SearchAuthority('user', RID, '/')
+
+    def test_index_candidates_cannot_read_tags_before_native_authorization(self):
+        search = SearchAuthority('user', RID, '/')
+        references = [dict(ITEM, path='/S/private.txt'),
+                      dict(ITEM, path='/A/missing.txt'),
+                      dict(ITEM, path='/A/file.txt')]
+        def entry(repo_id, path):
+            if path == '/A/missing.txt':
+                return None
+            return SimpleNamespace(mode=0o100644, size=15, mtime=100)
+        self.native.get_dirent_by_path.side_effect = entry
+        with patch('cloudfile_ext.v2.search.runtime.native_tags',
+                   return_value={'/A/file.txt': ['current']}) as tags:
+            result = search.resolve(references)
+        self.assertEqual([i is not None for i in result], [False, False, True])
+        self.assertEqual(result[-1]['tags'], ['current'])
+        self.assertEqual([c.args[1] for c in self.native.get_dirent_by_path.call_args_list],
+                         ['/A/missing.txt', '/A/file.txt'])
+        tags.assert_called_once_with(RID, [references[-1]])
+
+    def test_entirely_denied_batch_never_reads_native_tags(self):
+        search = SearchAuthority('user', RID, '/')
+        with patch('cloudfile_ext.v2.search.runtime.native_tags') as tags:
+            result = search.resolve([dict(ITEM, path='/S/private.txt')])
+        self.assertEqual(result, [None])
+        tags.assert_not_called()
+        self.native.get_dirent_by_path.assert_not_called()
+
+    def test_principal_group_change_and_account_disable_are_rechecked(self):
+        search = SearchAuthority('user', RID, '/')
+        self.current_principal = Principal('etech', 'uid', frozenset({('role', 'role', 'new')}))
+        with self.assertRaises(SearchUnavailable):
+            search.assert_current([])
+        with patch('cloudfile_ext.v2.search.runtime.Authority',
+                   side_effect=PermissionError('native account disabled')):
+            with self.assertRaises(AccessDenied):
+                search.assert_current([])
 
     def test_directory_only_share_searches_inside_its_root(self):
         self.base = None
