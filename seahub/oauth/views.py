@@ -324,6 +324,20 @@ def oauth_callback(request):
         profile.login_id = login_id.strip()
         profile.save()
 
+    # Etech remains the master login. For its CloudFile SSO session, verify
+    # current UID memberships before permitting this native session to proceed.
+    # CE-only deployments with no Directory URL retain original native flow.
+    if getattr(settings, 'CF_DIRECTORY_URL', ''):
+        try:
+            if not login_id:
+                raise ValueError('stable UID missing')
+            from cloudfile_ext.v2.etech_directory import ensure_subject
+            ensure_subject(login_id, email)
+        except Exception:
+            logger.error('CloudFile SSO subject preparation unavailable')
+            auth.logout(request)
+            return render_error(request, _('Error, please contact administrator.'))
+
     if CUSTOM_GET_USER_ROLE:
         remote_role_value = oauth_user_info.get('role', '')
         if remote_role_value:

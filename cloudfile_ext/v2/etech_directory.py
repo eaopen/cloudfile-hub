@@ -177,3 +177,32 @@ def ensure_subject(uid, username):
             return subject
         memberships.fetch = fetch
         memberships.ensure(uid, username)
+
+
+def sync_entity_catalog():
+    """PowerJob/manual entity reconciliation, without any user/member writes.
+
+    Etech remains the only organization truth. Preserve deleted/retired CE
+    groups until a separate reviewed cleanup: they may own libraries.
+    """
+    from seaserv import ccnet_api
+    with runtime() as (directory, identity, catalog, memberships):
+        entities = directory.entities()  # Already validated /groups?view=entities.
+        if not entities:
+            raise IdentityUnavailable('empty entity catalog cannot be treated as a successful sync')
+        renamed = unchanged = 0
+        for key, name in sorted(entities.items()):
+            group_id = catalog.ensure(*key, name)
+            group = ccnet_api.get_group(group_id)
+            if group is None:
+                raise IdentityUnavailable('mapped native group missing')
+            if group.group_name != name:
+                ccnet_api.set_group_name(group_id, name)
+                actual = ccnet_api.get_group(group_id)
+                if actual is None or actual.group_name != name:
+                    raise IdentityUnavailable('native group rename not confirmed')
+                renamed += 1
+            else:
+                unchanged += 1
+        return dict(status='OK', entities=len(entities), renamed=renamed,
+                    unchanged=unchanged, membership_writes=0)

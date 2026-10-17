@@ -64,3 +64,24 @@ class GroupResolve(APIView):
             return api_error(status.HTTP_409_CONFLICT, 'Native group binding conflict.')
         except Exception:
             return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Trusted group preparation unavailable.')
+
+
+class CatalogSync(APIView):
+    """Etech PowerJob trigger; CloudFile reads only trusted entity catalog."""
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+
+    def post(self, request):
+        if request.data:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Catalog trigger accepts no user-supplied snapshot.')
+        if not request.user.admin_permissions.can_manage_group():
+            return api_error(status.HTTP_403_FORBIDDEN, 'Native group management denied.')
+        from .etech_directory import sync_entity_catalog
+        try:
+            result = sync_entity_catalog()
+        except Exception:
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
+                             'Trusted directory catalog reconciliation unavailable.')
+        response = Response(result)
+        response['Cache-Control'] = 'no-store'
+        return response
