@@ -72,7 +72,7 @@ jobs:
 
       # The stock Seahub suite discovers tests/ only, so V2's extension tests
       # must run explicitly rather than trusting the global green check.
-      - name: Validate V2 pagination, ACL and tag-batch contracts
+      - name: Validate V2 pagination, ACL, tag and subject-readiness contracts
         env:
           TRAVIS: "1"
           SEAFILE_MYSQL_DB_CCNET_DB_NAME: ccnet
@@ -83,7 +83,7 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE"
           export PYTHONPATH="/tmp/seafile-test-deploy/seafile-server/python:/tmp/seafile-test-deploy/libsearpc:$GITHUB_WORKSPACE/thirdpart:${PYTHONPATH:-}"
-          python3 -m pytest -q cloudfile_ext/v2/tests/test_directory_page.py cloudfile_ext/v2/tests/test_acl_runtime.py cloudfile_ext/v2/tests/test_tag_reads.py cloudfile_ext/v2/tests/test_tag_http.py
+          python3 -m pytest -q cloudfile_ext/v2/tests/test_directory_page.py cloudfile_ext/v2/tests/test_acl_runtime.py cloudfile_ext/v2/tests/test_tag_reads.py cloudfile_ext/v2/tests/test_tag_http.py cloudfile_ext/v2/tests/test_etech_directory.py
 
       - uses: actions/setup-node@v2
         with:
