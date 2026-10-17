@@ -103,16 +103,15 @@ def require_repo_manage(user, repo_id):
 
 
 def publication_ready():
-    """Never enable mutations on a build with native file enforcement off.
+    """Public ACL writes use native repo authorization and the real file gate.
 
-    Operations must explicitly opt in after C/Go + subject runtime acceptance.
-    Both native services share the reviewed seafile.conf at runtime.
+    No separate public-publication feature switch: the C/Go ACL enforcement
+    mode, not an arbitrary Hub admin flag, determines if rule writes are safe.
+    Missing native configuration fails closed.
     """
     import configparser
     import os
     from pathlib import Path
-    if getattr(settings, 'CF_ACL_PUBLICATION_ENABLED', False) is not True:
-        return False
     conf_dir = os.environ.get('SEAFILE_CENTRAL_CONF_DIR')
     if not conf_dir:
         return False
@@ -143,7 +142,7 @@ class DirectoryRules(AuthenticatedACL):
 
     def _write(self, request, *, delete=False):
         if not publication_ready():
-            return response({'code': 'ACL_PUBLICATION_BLOCKED'}, 503)
+            return response({'code': 'ACL_NATIVE_ENFORCEMENT_REQUIRED'}, 503)
         try:
             data = request.data
             required = {'repo_id', 'path', 'subject_type', 'namespace', 'external_id',
