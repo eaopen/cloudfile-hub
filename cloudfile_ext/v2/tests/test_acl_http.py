@@ -90,10 +90,10 @@ class HTTPTests(TestCase):
              patch.dict(os.environ, {'SEAFILE_CENTRAL_CONF_DIR': folder}), \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
             conf = Path(folder) / 'seafile.conf'
-            conf.write_text('[cloudfile]\\nv2_acl_enabled=false\\n')
+            conf.write_text('[cloudfile]\nv2_acl_enabled=false\n')
             settings.CF_ACL_PUBLICATION_ENABLED = True
             self.assertFalse(publication_ready())
-            conf.write_text('[cloudfile]\\nv2_acl_enabled=true\\n')
+            conf.write_text('[cloudfile]\nv2_acl_enabled=true\n')
             self.assertTrue(publication_ready())
             settings.CF_ACL_PUBLICATION_ENABLED = False
             self.assertFalse(publication_ready())
