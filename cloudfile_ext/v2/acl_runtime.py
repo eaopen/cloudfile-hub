@@ -14,6 +14,9 @@ from .acl_store import ACLStore, uuid
 from .schema import identifier
 
 NAMESPACE = 'cf-acl-rules-v1'
+# Native directory pages, matching v0.9 and the EAP items-page bounds.
+PAGE_LIMIT_MAX = 500
+PAGE_START_MAX = 2147483647 - PAGE_LIMIT_MAX - 1
 logger = logging.getLogger(__name__)
 _warned_local_cache = set()
 
@@ -21,6 +24,10 @@ _warned_local_cache = set()
 
 class ACLUnavailable(Exception):
     pass
+
+
+class DirectoryChanged(ACLUnavailable):
+    """The path no longer resolves to the directory object being paged."""
 
 
 def store():
@@ -108,6 +115,7 @@ class Authority:
             api = seafile_api
         self.api = api
         self._repos = {}
+        self._versions = {}
         self._decisions = {}
         self._native = {}
         self._library = {}
@@ -138,6 +146,8 @@ class Authority:
             if status not in (-1, 0, 1):
                 raise ACLUnavailable('unknown repository status')
             self._repos[repo_id] = status
+            # Validated only where it matters (page scans fail closed on unknown).
+            self._versions[repo_id] = getattr(repo, 'version', None)
         key = (repo_id, directory)
         decision = self._decisions.get(key)
         if decision is None:
@@ -154,32 +164,63 @@ class Authority:
             return Decision('r', decision.qualified_root, decision.from_rule)
         return decision
 
-    def entries(self, repo_id, path, *, offset=0, limit=50):
-        if type(offset) is not int or not 0 <= offset <= 1000000 or type(limit) is not int or not 1 <= limit <= 100:
+    def page(self, repo_id, path, *, start, limit, if_dir_id=None):
+        """One raw native window of a directory object, filtered by this authority.
+
+        The cursor counts native entries, not visible ones, so a window whose
+        children are all hidden is an empty page that may still have more.
+        """
+        if (type(start) is not int or not 0 <= start <= PAGE_START_MAX or
+                type(limit) is not int or not 1 <= limit <= PAGE_LIMIT_MAX):
             raise PolicyError('invalid page')
         decision = self.effective(repo_id, path)
         if not decision.can_read:
             raise PermissionError()
-        # Bound native enumeration, then independently evaluate each child.
-        # Hidden children never become navigation corridors or expose metadata.
         directory_id = self.api.get_dir_id_by_path(repo_id, path)
         if not directory_id:
             raise FileNotFoundError()
-        children = self.api.list_dir_by_dir_id(repo_id, directory_id, offset, limit + 1)
-        result = []
-        for entry in children[:limit]:
+        if if_dir_id is not None and if_dir_id != directory_id:
+            raise DirectoryChanged('directory changed; restart paging')
+        version = self._versions[repo_id]
+        if type(version) is not int or version < 0:
+            raise ACLUnavailable('unknown repository version')
+        if version == 0:
+            # Native list_dir skips v0 dirents with invalid ids inside the
+            # window, so a short window cannot prove the end. Page the whole
+            # object instead: positions stay stable for one directory id.
+            every = self.api.list_dir_by_dir_id(repo_id, directory_id, -1, -1)
+            children, more = every[start:start + limit], len(every) > start + limit
+        else:
+            # Version >= 1 JSON dir objects reject an invalid dirent id when
+            # loaded (fs-mgr.c parse_dirent), so that skip cannot shorten a
+            # window and one extra entry is an exact end-of-scan probe.
+            children = self.api.list_dir_by_dir_id(repo_id, directory_id, start, limit + 1)
+            if len(children) > limit + 1:
+                raise ACLUnavailable('native directory window exceeded')
+            children, more = children[:limit], len(children) > limit
+        # Independently evaluate each child. Hidden children never become
+        # navigation corridors or expose metadata.
+        visible = []
+        for entry in children:
             if not entry.obj_name or '/' in entry.obj_name or entry.obj_name in ('.', '..'):
                 raise ACLUnavailable('invalid native directory entry')
             child = posixpath.join(path, entry.obj_name)
             kind = 'dir' if stat.S_ISDIR(entry.mode) else 'file'
             access = self.effective(repo_id, child, kind)
             if access.can_read:
-                result.append(dict(repo_id=repo_id, path=child, name=entry.obj_name, kind=kind,
-                                   permission=access.permission))
+                visible.append((entry, child, kind, access.permission))
         if self.api.get_dir_id_by_path(repo_id, path) != directory_id:
-            raise ACLUnavailable('directory changed during listing')
-        return dict(data=result, root_path=decision.qualified_root,
-                    next_offset=offset + limit if len(children) > limit else None)
+            raise DirectoryChanged('directory changed during listing')
+        return dict(parent=decision, dir_id=directory_id, items=visible, scanned_count=len(children),
+                    next_start=start + limit if more else None)
+
+    def entries(self, repo_id, path, *, offset=0, limit=50):
+        if type(offset) is not int or not 0 <= offset <= 1000000 or type(limit) is not int or not 1 <= limit <= 100:
+            raise PolicyError('invalid page')
+        page = self.page(repo_id, path, start=offset, limit=limit)
+        result = [dict(repo_id=repo_id, path=child, name=entry.obj_name, kind=kind, permission=permission)
+                  for entry, child, kind, permission in page['items']]
+        return dict(data=result, root_path=page['parent'].qualified_root, next_offset=page['next_start'])
 
     def shared_roots(self):
         roots = sorted({(r.repo_id, r.path) for r, _ in self.store.shared(self.principal)})
