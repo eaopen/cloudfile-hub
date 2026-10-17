@@ -17,8 +17,20 @@ from seahub.views import check_folder_permission
 from seahub.constants import PERMISSION_READ_WRITE
 
 from seaserv import seafile_api
+from cloudfile_ext.v2.acl_runtime import Authority
+from cloudfile_ext.v2.acl_http import require_repo_manage
+from cloudfile_ext.v2.tag_native import authorize_tag_label
 
 logger = logging.getLogger(__name__)
+
+
+def _native_tag_root_permission(request, repo_id, write=False):
+    try:
+        decision = Authority(request.user.username).effective(repo_id, '/')
+        return decision.can_write if write else decision.can_read
+    except Exception:
+        logger.exception('Native CE repo-tag permission unavailable')
+        return False
 
 
 class RepoTagsView(APIView):
@@ -43,7 +55,7 @@ class RepoTagsView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if not check_folder_permission(request, repo_id, '/'):
+        if not _native_tag_root_permission(request, repo_id):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -104,7 +116,7 @@ class RepoTagsView(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         # permission check
-        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
+        if not _native_tag_root_permission(request, repo_id, write=True):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -134,7 +146,7 @@ class RepoTagsView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
         
         # permission check
-        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
+        if not _native_tag_root_permission(request, repo_id, write=True):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -192,7 +204,7 @@ class RepoTagView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
+        if not _native_tag_root_permission(request, repo_id, write=True):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -217,7 +229,7 @@ class RepoTagView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
+        if not _native_tag_root_permission(request, repo_id, write=True):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
