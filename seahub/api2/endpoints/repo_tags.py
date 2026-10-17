@@ -121,6 +121,11 @@ class RepoTagsView(APIView):
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         try:
+            authorize_tag_label(request.user, repo_id, tag_name)
+        except Exception:
+            return api_error(status.HTTP_403_FORBIDDEN, 'Reserved tag requires library manager.')
+
+        try:
             repo_tag = RepoTags.objects.create_repo_tag(repo_id, tag_name, tag_color)
         except Exception as e:
             logger.error(e)
@@ -156,8 +161,11 @@ class RepoTagsView(APIView):
                 name = tag.get('name' ,'')
                 color = tag.get('color', '')
                 if name and color:
+                    authorize_tag_label(request.user, repo_id, name)
                     obj = RepoTags(repo_id=repo_id, name=name, color=color)
                     tag_objs.append(obj)
+        except PermissionError:
+            return api_error(status.HTTP_403_FORBIDDEN, 'Reserved tag requires library manager.')
         except Exception as e:
             logger.error(e)
             error_msg = 'tags invalid.'
