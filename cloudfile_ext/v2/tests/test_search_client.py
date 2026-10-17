@@ -153,7 +153,7 @@ class CatchupTests(unittest.TestCase):
         with patch.dict('sys.modules', {'seahub': ModuleType('seahub'),
                                         'seahub.tags': ModuleType('seahub.tags'),
                                         'seahub.tags.models': fake}):
-            query = model.objects.filter.return_value
+            query = fake.FileUUIDMap.objects.filter.return_value
             query.filter.return_value = query
             query.order_by.return_value.values_list.return_value.__getitem__.return_value = []
             self.assertEqual(indexer.sweep(SimpleNamespace(id=RID), 'f' * 32), '')
