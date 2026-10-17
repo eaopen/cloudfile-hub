@@ -1,7 +1,7 @@
 """Existing-index protocol and commit catch-up regression checks."""
 import unittest
 from types import ModuleType, SimpleNamespace
-from unittest.mock import Mock, patch
+from unittest.mock import MagicMock, Mock, patch
 
 from cloudfile_ext.v2.search.client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, checked_reference
 from cloudfile_ext.v2.search.worker import Indexer, confirm, doc_id
@@ -130,7 +130,7 @@ class CatchupTests(unittest.TestCase):
         indexer.publish = Mock()
         row = ('f' * 32, '/folder', 'a.txt', False)
         fake = ModuleType('seahub.tags.models')
-        fake.FileUUIDMap = Mock()
+        fake.FileUUIDMap = MagicMock()
         with patch.dict('sys.modules', {'seahub': ModuleType('seahub'),
                                         'seahub.tags': ModuleType('seahub.tags'),
                                         'seahub.tags.models': fake}), \
@@ -149,7 +149,7 @@ class CatchupTests(unittest.TestCase):
         native = Mock()
         indexer = Indexer(Mock(), native)
         fake = ModuleType('seahub.tags.models')
-        fake.FileUUIDMap = Mock()
+        fake.FileUUIDMap = MagicMock()
         with patch.dict('sys.modules', {'seahub': ModuleType('seahub'),
                                         'seahub.tags': ModuleType('seahub.tags'),
                                         'seahub.tags.models': fake}):
