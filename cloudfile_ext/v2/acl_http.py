@@ -102,30 +102,6 @@ def require_repo_manage(user, repo_id):
         raise PermissionError('native repository administrator required')
 
 
-def publication_ready():
-    """Public ACL writes use native repo authorization and the real file gate.
-
-    No separate public-publication feature switch: the C/Go ACL enforcement
-    mode, not an arbitrary Hub admin flag, determines if rule writes are safe.
-    Missing native configuration fails closed.
-    """
-    import configparser
-    import os
-    from pathlib import Path
-    conf_dir = os.environ.get('SEAFILE_CENTRAL_CONF_DIR')
-    if not conf_dir:
-        return False
-    parser = configparser.ConfigParser()
-    try:
-        config_path = Path(conf_dir) / 'seafile.conf'
-        if not config_path.is_file():
-            return False
-        parser.read(config_path)
-        return parser.getboolean('cloudfile', 'v2_acl_enabled', fallback=False)
-    except (OSError, ValueError, configparser.Error):
-        return False
-
-
 class DirectoryRules(AuthenticatedACL):
     """CE repository owner/admin or system manager; no global IsAdminUser."""
 
@@ -141,8 +117,6 @@ class DirectoryRules(AuthenticatedACL):
             return failure(error)
 
     def _write(self, request, *, delete=False):
-        if not publication_ready():
-            return response({'code': 'ACL_NATIVE_ENFORCEMENT_REQUIRED'}, 503)
         try:
             data = request.data
             required = {'repo_id', 'path', 'subject_type', 'namespace', 'external_id',
