@@ -52,15 +52,14 @@ Provider comes only from trusted `CF_ACL_PROVIDER`; a caller cannot override it.
 The only configurable directory permissions are **r/rw/invisible**, never
 `none`. `revision` uses the existing branch-serialized ACLStore CAS.
 
-Public ACL POST/PUT/DELETE are no longer subject to a separate Hub
-publication-release switch. Their runtime prerequisite is the native
-`[cloudfile] v2_acl_enabled=true` option in the configured
-`seafile.conf`, verified fail-closed per request. Without native enforcement,
-they return `503 ACL_NATIVE_ENFORCEMENT_REQUIRED`.
-This does not automatically enable native enforcement or certify a deployment:
-matched Hub/C/Go image pins, verified identity, final-byte checks and Etech
-publisher readback remain necessary before activating ACL on shared DEV/PROD.
-Native enforcement remains disabled by default for existing installations.
+Public ACL POST/PUT/DELETE have no separate publication or
+`v2_acl_enabled` feature gate: CloudFile V2's directory ACL is built in.
+Each write still requires current native repository administrator authority,
+valid `r/rw/invisible` input, revision CAS and authoritative SQL; failures
+deny or reject the write. Native C/Go checks are likewise built in and
+must be deployed from matching source pins, with current subject, final-byte
+and Etech Publisher readback acceptance before promoting a shared instance.
+Do not treat a Hub-only code update as a safe deployment.
 
 ## Content API
 
@@ -132,8 +131,9 @@ set TTL=0.
 
 ## Native Scope And Release Status
 
-Both native processes read `[cloudfile] v2_acl_enabled=true`; default is off.
-Do not enable public rule publication merely because these hooks are configured.
+Both native C and Go enforce CloudFile V2 directory ACL unconditionally.
+There is no `v2_acl_enabled` setting; neither service may bypass protected
+library checks due to missing configuration.
 
 The first supported seam is current-path read/Range and fresh byte uploads /
 overwrites, with actual final-diff checks under Branch CAS. C trusted post/put
@@ -145,10 +145,12 @@ unprotected source is insufficient. Other structural operations on protected
 repos remain closed until lifecycle/source/destination checks are implemented.
 CF-EDIT remains an independent constraint and provides no ACL grants.
 
-The integrator must retain publication blocking until the real subject adapter,
-scoped management credentials, all exposed read/write routes, lifecycle behavior,
-and deployment acceptance are complete. This minimal seam is not full ACL release
-certification. Internal test adapters are not production authentication.
+The integrator must verify current subject adapter, native management
+credentials, exposed read/write route coverage, lifecycle behavior, and actual
+C/Go final-commit enforcement before deploying matching Hub/Server pins.
+There is no separate runtime publication switch. This minimal seam is not
+full ACL release certification; internal test adapters are not production
+authentication.
 
 ## Cache Deployment
 
