@@ -30,7 +30,7 @@ class RepoTagsView(APIView):
         """list all repo_tags by repo_id.
         """
         # argument check
-        include_file_count = request.GET.get('include_file_count', 'true')
+        include_file_count = request.GET.get('include_file_count', 'false')
         if include_file_count not in ['true', 'false']:
             error_msg = 'include_file_count invalid.'
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
