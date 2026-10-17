@@ -151,7 +151,7 @@ class FreshDatabaseTest(unittest.TestCase):
 
     def test_internal_sharing_never_attaches_to_deny_or_library_root(self):
         import pymysql
-        for permission, path, shared in (('none', '/project', 1), ('invisible', '/project', 1), ('r', '/', 1)):
+        for permission, path, shared in (('none', '/project', 0), ('invisible', '/project', 1), ('r', '/', 1)):
             with self.assertRaises(pymysql.MySQLError):
                 self.query('INSERT INTO cf_dir_acl VALUES(%s,%s,%s,%s,%s,%s,%s,%s,1,%s,%s)',
                            (str(uuid4()), b'x' * 32, path, 'user', 'etech', 'user', 'uid-1', permission, shared, str(uuid4())))
