@@ -17,14 +17,19 @@ class RepoTagCountDefaultTests(TestCase):
             "/api/v2.1/repos/%s/repo-tags/" % RID, params or {}
         )
         force_authenticate(
-            request, SimpleNamespace(username="current", is_authenticated=True, is_active=True)
+            # Native throttling keys authenticated requests by the CE user id.
+            # Supply the same identity shape as a real native user so these
+            # tests reach the tag-count behavior instead of failing in throttle.
+            request, SimpleNamespace(id="current", username="current", is_authenticated=True, is_active=True)
         )
         definition = Mock()
         definition.pk = 3
         definition.to_dict.return_value = {
             "repo_tag_id": 3, "repo_id": RID, "tag_name": "design", "tag_color": "#aaa"
         }
-        with patch("seahub.api2.endpoints.repo_tags.seafile_api.get_repo", return_value=object()), \
+        # Cache and throttling have separate contracts; no Redis required here.
+        with patch.object(RepoTagsView, "throttle_classes", ()), \
+             patch("seahub.api2.endpoints.repo_tags.seafile_api.get_repo", return_value=object()), \
              patch("seahub.api2.endpoints.repo_tags._native_tag_root_permission", return_value=True), \
              patch("seahub.api2.endpoints.repo_tags.RepoTags.objects.get_all_by_repo_id",
                    return_value=[definition]), \

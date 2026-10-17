@@ -86,6 +86,7 @@ jobs:
           python3 -m pytest -q \
             cloudfile_ext/v2/tests/test_directory_page.py cloudfile_ext/v2/tests/test_acl_runtime.py \
             cloudfile_ext/v2/tests/test_tag_reads.py cloudfile_ext/v2/tests/test_tag_http.py \
+            cloudfile_ext/v2/tests/test_native_repo_tag_defaults.py \
             cloudfile_ext/v2/tests/test_etech_directory.py \
             cloudfile_ext/v2/tests/test_search_acl_filter.py cloudfile_ext/v2/tests/test_search_http.py \
             cloudfile_ext/v2/tests/test_search_client.py

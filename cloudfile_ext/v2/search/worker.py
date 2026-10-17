@@ -1,6 +1,6 @@
 """Maintain the existing derived index from native commit diffs and CE Tags.
 
-Checkpoints are disposable local JSON, never SQL. Initial catch-up of an existing
+Checkpoints are disposable local JSON; native CE tags remain the only source of truth. Initial catch-up of an existing
 index requires an explicit timestamp preceding the runtime cutover. Missing
 libraries are scanned with fixed-commit directory pages; existing indexes are
 neither cleared nor globally rebuilt.
@@ -43,23 +43,20 @@ def confirm(client, task):
     raise SearchUnavailable('index task timed out')
 
 
-def tag_snapshot(repo_id):
-    from seahub.file_tags.models import FileTags
-    from seahub.tags.models import FileTag
-    values = {}
-    for model, relation, label in ((FileTags, 'file_uuid', 'repo_tag__name'),
-                                   (FileTag, 'uuid', 'tag__name')):
-        fields = (relation + '__parent_path', relation + '__filename', relation + '__is_dir', label)
-        rows = model.objects.filter(**{relation + '__repo_id': repo_id}).values_list(*fields)[:100001]
-        for count, (parent, name, is_dir, tag) in enumerate(rows):
-            if count >= 100000:
-                raise SearchUnavailable('tag scan budget exceeded')
-            path = normalize_path(posixpath.join(parent, name))
-            value = values.setdefault(path, ['dir' if is_dir else 'file', []])
-            value[1].append(tag)
-    for value in values.values():
-        value[1] = sorted(set(value[1]))
-    return values
+TAG_SWEEP_ITEMS = 200
+
+
+def tag_labels(repo_id, references):
+    """Read current CE labels for exactly the requested visible file/dir refs."""
+    if not references:
+        return {}
+    from cloudfile_ext.v2.tag_reads import read
+    try:
+        records = read(repo_id, references)
+        return {path: sorted({tag['tag_name'] for tag in records[(path, kind)]})
+                for path, kind in references}
+    except Exception as error:
+        raise SearchUnavailable('native tag read unavailable') from error
 
 
 class Indexer:
@@ -84,7 +81,7 @@ class Indexer:
         if documents:
             confirm(self.client, self.client.call('PUT', self.client.index_path + '/documents', documents))
 
-    def scan(self, repo, root, tags):
+    def scan(self, repo, root):
         pending, documents = [root], []
         while pending:
             parent, offset = pending.pop(), 0
@@ -92,13 +89,20 @@ class Indexer:
                 entries = self.native.list_dir_by_commit_and_path(repo.id, repo.head_cmmt_id, parent, offset, 200)
                 if entries is None:
                     raise SearchUnavailable('native directory snapshot unavailable')
+                refs = []
                 for entry in entries:
                     path = normalize_path(posixpath.join(parent, entry.obj_name))
                     if stat.S_ISDIR(entry.mode):
                         pending.append(path)
-                    elif not stat.S_ISREG(entry.mode):
+                        kind = 'dir'
+                    elif stat.S_ISREG(entry.mode):
+                        kind = 'file'
+                    else:
                         raise SearchUnavailable('unsupported native object')
-                    documents.append(self.upsert(repo, path, entry, tags))
+                    refs.append((path, kind))
+                tags = tag_labels(repo.id, refs)
+                for entry, (path, _) in zip(entries, refs):
+                    documents.append(self.upsert(repo, path, entry, {path: [None, tags[path]]}))
                     if len(documents) == 200:
                         self.publish(documents)
                         documents = []
@@ -107,14 +111,52 @@ class Indexer:
                     break
         self.publish(documents)
 
-    def refresh(self, repo, path, tags, subtree=True):
+    def refresh(self, repo, path, subtree=True):
         entry = self.native.get_dirent_by_path(repo.id, path)
         if entry is None:
             self.remove(repo.id, path)
             return
-        self.publish([self.upsert(repo, path, entry, tags)])
-        if subtree and stat.S_ISDIR(entry.mode):
-            self.scan(repo, path, tags)
+        if not (stat.S_ISDIR(entry.mode) or stat.S_ISREG(entry.mode)):
+            raise SearchUnavailable('unsupported native object')
+        kind = 'dir' if stat.S_ISDIR(entry.mode) else 'file'
+        tags = tag_labels(repo.id, [(path, kind)])
+        self.publish([self.upsert(repo, path, entry, {path: [None, tags[path]]})])
+        if subtree and kind == 'dir':
+            self.scan(repo, path)
+
+    def sweep(self, repo, after):
+        """Keyset-scan at most 200 sparse native UUID rows per repo per tick.
+
+        No full-library tag snapshot and no upper bound on library file count.
+        Retaining native FileUUIDMap rows allows later passes to clear deleted
+        tag labels. Search remains eventually consistent.
+        """
+        from seahub.tags.models import FileUUIDMap
+        if not isinstance(after, str) or len(after) > 36:
+            raise SearchUnavailable('invalid native tag cursor')
+        query = FileUUIDMap.objects.filter(repo_id=repo.id)
+        if after:
+            query = query.filter(uuid__gt=after)
+        page = list(query.order_by('uuid').values_list(
+            'uuid', 'parent_path', 'filename', 'is_dir')[:TAG_SWEEP_ITEMS])
+        if not page:
+            return ''
+        refs = [(normalize_path(posixpath.join(parent, filename)),
+                 'dir' if is_dir else 'file')
+                for _, parent, filename, is_dir in page]
+        labels = tag_labels(repo.id, refs)
+        documents = []
+        for path, kind in refs:
+            entry = self.native.get_dirent_by_path(repo.id, path)
+            if entry is None:
+                self.remove(repo.id, path)
+                continue
+            actual = 'dir' if stat.S_ISDIR(entry.mode) else 'file'
+            if actual != kind or not (stat.S_ISDIR(entry.mode) or stat.S_ISREG(entry.mode)):
+                raise SearchUnavailable('native tag target changed kind')
+            documents.append(self.upsert(repo, path, entry, {path: [None, labels[path]]}))
+        self.publish(documents)
+        return str(page[-1][0])
 
     def baseline(self, repo, timestamp):
         probe = self.client.call('POST', self.client.index_path + '/documents/fetch',
@@ -135,32 +177,33 @@ class Indexer:
         raise SearchUnavailable('bootstrap commit budget exceeded')
 
     def reconcile(self, repo, saved, bootstrap_before):
-        tags = tag_snapshot(repo.id)
-        old_head = saved['head'] if saved else self.baseline(repo, bootstrap_before)
+        saved = saved or {}
+        old_head = saved.get('head') or self.baseline(repo, bootstrap_before)
         if old_head is None:
-            self.scan(repo, '/', tags)
-        elif old_head != repo.head_cmmt_id:
-            diffs = self.native.diff_commits(repo.id, old_head, repo.head_cmmt_id, 1)
-            if diffs is None or len(diffs) > 10000:
-                raise SearchUnavailable('native commit diff unavailable or over budget')
-            for diff in diffs:
-                path = normalize_path('/' + diff.name)
-                if diff.status in ('del', 'deldir', 'mov'):
-                    self.remove(repo.id, path)
-                if diff.status == 'mov':
-                    self.refresh(repo, normalize_path('/' + diff.new_name), tags)
-                elif diff.status in ('add', 'mod', 'newdir'):
-                    self.refresh(repo, path, tags)
-                elif diff.status not in ('del', 'deldir'):
-                    raise SearchUnavailable('unsupported native diff')
-        previous = saved.get('tags', {}) if saved else {}
-        for path in previous.keys() | tags.keys():
-            if previous.get(path) != tags.get(path):
-                self.refresh(repo, path, tags, subtree=False)
+            self.scan(repo, '/')
+            cursor = ''
+        else:
+            if old_head != repo.head_cmmt_id:
+                diffs = self.native.diff_commits(repo.id, old_head, repo.head_cmmt_id, 1)
+                if diffs is None or len(diffs) > 10000:
+                    raise SearchUnavailable('native commit diff unavailable or over budget')
+                for diff in diffs:
+                    path = normalize_path('/' + diff.name)
+                    if diff.status in ('del', 'deldir', 'mov'):
+                        self.remove(repo.id, path)
+                    if diff.status == 'mov':
+                        self.refresh(repo, normalize_path('/' + diff.new_name))
+                    elif diff.status in ('add', 'mod', 'newdir'):
+                        self.refresh(repo, path)
+                    elif diff.status not in ('del', 'deldir'):
+                        raise SearchUnavailable('unsupported native diff')
+            # Tag mutations do not necessarily produce native commits.
+            # The cursor only advances after Meilisearch acknowledges the page.
+            cursor = self.sweep(repo, saved.get('tag_cursor', ''))
         current = self.native.get_repo(repo.id)
-        if current is None or current.head_cmmt_id != repo.head_cmmt_id or tag_snapshot(repo.id) != tags:
-            raise SearchUnavailable('native snapshot changed; retry without advancing checkpoint')
-        return dict(head=repo.head_cmmt_id, tags=tags)
+        if current is None or current.head_cmmt_id != repo.head_cmmt_id:
+            raise SearchUnavailable('native head changed; tag cursor stays unchanged')
+        return dict(head=repo.head_cmmt_id, tag_cursor=cursor)
 
 
 def tick(client, native, checkpoint, bootstrap_before=0):
