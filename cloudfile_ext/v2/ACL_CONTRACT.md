@@ -102,7 +102,9 @@ by an explicit `start` or `limit`; requests without them keep the CE14 response.
   folder. Hidden children are omitted with all their metadata.
 - `dirent_list` items carry `type`, `id`, `name`, `mtime`, `permission`
   (`r`/`rw`, effective), `parent_dir`, and `size` for files. Modifier, lock,
-  starred, tag and thumbnail fields of the unpaged CE response are not included.
+  starred and thumbnail fields of the unpaged CE response are not included.
+  `with_display_metadata=true` returns a V2 `tag_batch` for this authorized
+  window only; failure is `FAILED`/null and does not block listing.
 - `dir_id` is the listed directory object. `next_start` counts native entries,
   never visible ones: a window whose children are all hidden returns an empty
   `dirent_list` with `has_more=true`. `has_more`/`scan_exhausted` come from the
