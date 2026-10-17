@@ -197,3 +197,13 @@ def require_ready(username, settings=None):
         return False
     runtime.require_ready(username, bound_uid(username))
     return True
+
+
+def ensure_current_subject(uid, username):
+    """Signature required by the existing V2 ACL authority seam (uid, username).
+
+    Only the exact native Profile UID may be checked; no user-supplied group
+    claims or unbounded static Member projection is an authorization proof.
+    """
+    if not uid or bound_uid(username) != uid or require_ready(username) is not True:
+        raise IdentityUnavailable('current native subject is not ready')
