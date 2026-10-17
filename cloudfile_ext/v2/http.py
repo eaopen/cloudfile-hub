@@ -22,7 +22,19 @@ class IdentityResolve(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, 'Stable UID required.')
         username = Profile.objects.get_username_by_login_id(uid)
         if username is None:
-            return api_error(status.HTTP_404_NOT_FOUND, 'User must sign in through SSO first.')
+            if request.data.get('identity_source') != 'etech-directory':
+                return api_error(status.HTTP_404_NOT_FOUND, 'User must sign in through SSO first.')
+            login = request.data.get('login_email')
+            if not isinstance(login, str):
+                return api_error(status.HTTP_400_BAD_REQUEST, 'Trusted native login required.')
+            try:
+                from django.conf import settings
+                from .provision_user import ensure_user
+                outcome = ensure_user(settings=settings, uid=uid, native_login=login)
+                return Response(outcome)
+            except Exception:
+                # No fallback to assigning a grant to an unverified UID.
+                return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Trusted user provisioning unavailable.')
         try:
             user = User.objects.get(email=username)
         except User.DoesNotExist:
