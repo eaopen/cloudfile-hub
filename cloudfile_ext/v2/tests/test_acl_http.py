@@ -27,7 +27,7 @@ class HTTPTests(TestCase):
             with patch('cloudfile_ext.v2.acl_http.store') as rules:
                 result = self.request(DirectoryRules, method=method)
                 self.assertEqual(result.status_code, 503)
-                self.assertEqual(result.data['code'], 'ACL_PUBLICATION_BLOCKED')
+                self.assertEqual(result.data['code'], 'ACL_NATIVE_ENFORCEMENT_REQUIRED')
                 rules.assert_not_called()
 
     def test_directory_rules_allow_native_repo_admin_without_system_staff(self):
@@ -81,7 +81,7 @@ class HTTPTests(TestCase):
             self.assertEqual(self.request(DirectoryRules, request, method='post').status_code, 400)
             self.assertEqual(rules.return_value.mutate.call_count, 1)
 
-    def test_publication_requires_both_hub_flag_and_native_seafile_conf(self):
+    def test_publication_requires_native_seafile_acl_without_extra_hub_toggle(self):
         import os
         from pathlib import Path
         from tempfile import TemporaryDirectory
