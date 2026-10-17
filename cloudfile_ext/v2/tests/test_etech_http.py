@@ -104,6 +104,18 @@ class EtechOAuthBindingTests(TestCase):
             self.assertNotIn('oauth_nonce', request.session)
         return response, authenticate, bind
 
+    def test_cloudfile_sso_cannot_keep_session_when_uid_refresh_fails(self):
+        from cloudfile_ext.v2.errors import IdentityUnavailable
+        with patch.object(views.settings, 'CF_DIRECTORY_URL',
+                          'https://directory.example.test/directory', create=True), \
+             patch('cloudfile_ext.v2.etech_directory.ensure_subject',
+                   side_effect=IdentityUnavailable('offline')), \
+             patch.object(views.auth, 'logout') as logout:
+            response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid')
+        self.assertEqual(response, 'binding-error')
+        authenticate.assert_called_once()
+        logout.assert_called_once()
+
     def test_first_oauth_login_reuses_existing_business_uid_account(self):
         response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid')
         self.assertEqual(response.status_code, 302)
