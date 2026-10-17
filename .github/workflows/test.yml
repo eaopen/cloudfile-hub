@@ -86,7 +86,7 @@ jobs:
           python3 -m pytest -q \
             cloudfile_ext/v2/tests/test_directory_page.py cloudfile_ext/v2/tests/test_acl_runtime.py \
             cloudfile_ext/v2/tests/test_tag_reads.py cloudfile_ext/v2/tests/test_tag_http.py \
-            cloudfile_ext/v2/tests/test_native_repo_tag_defaults.py \
+            cloudfile_ext/v2/tests/test_native_repo_tag_defaults.py cloudfile_ext/v2/tests/test_native_tag_adapter.py \
             cloudfile_ext/v2/tests/test_etech_directory.py \
             cloudfile_ext/v2/tests/test_search_acl_filter.py cloudfile_ext/v2/tests/test_search_http.py \
             cloudfile_ext/v2/tests/test_search_client.py
@@ -102,7 +102,8 @@ jobs:
 
         # tmate ssh debug when failed
       - name: Setup tmate session for debugging
-        if: failure()
+        # Debug-only opt-in; never leave a failing CI run indefinitely pending.
+        if: failure() && contains(github.event.pull_request.labels.*.name, 'debug-tmate')
         uses: mxschmitt/action-tmate@v3
         with:
           limit-access-to-actor: true

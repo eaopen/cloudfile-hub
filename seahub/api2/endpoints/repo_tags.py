@@ -17,8 +17,20 @@ from seahub.views import check_folder_permission
 from seahub.constants import PERMISSION_READ_WRITE
 
 from seaserv import seafile_api
+from cloudfile_ext.v2.acl_runtime import Authority
+from cloudfile_ext.v2.acl_http import require_repo_manage
+from cloudfile_ext.v2.tag_native import authorize_tag_label
 
 logger = logging.getLogger(__name__)
+
+
+def _native_tag_root_permission(request, repo_id, write=False):
+    try:
+        decision = Authority(request.user.username).effective(repo_id, '/')
+        return decision.can_write if write else decision.can_read
+    except Exception:
+        logger.exception('Native CE repo-tag permission unavailable')
+        return False
 
 
 class RepoTagsView(APIView):
@@ -43,7 +55,7 @@ class RepoTagsView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if not check_folder_permission(request, repo_id, '/'):
+        if not _native_tag_root_permission(request, repo_id):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -104,9 +116,14 @@ class RepoTagsView(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         # permission check
-        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
+        if not _native_tag_root_permission(request, repo_id, write=True):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+
+        try:
+            authorize_tag_label(request.user, repo_id, tag_name)
+        except Exception:
+            return api_error(status.HTTP_403_FORBIDDEN, 'Reserved tag requires library manager.')
 
         try:
             repo_tag = RepoTags.objects.create_repo_tag(repo_id, tag_name, tag_color)
@@ -134,7 +151,7 @@ class RepoTagsView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
         
         # permission check
-        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
+        if not _native_tag_root_permission(request, repo_id, write=True):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -144,8 +161,11 @@ class RepoTagsView(APIView):
                 name = tag.get('name' ,'')
                 color = tag.get('color', '')
                 if name and color:
+                    authorize_tag_label(request.user, repo_id, name)
                     obj = RepoTags(repo_id=repo_id, name=name, color=color)
                     tag_objs.append(obj)
+        except PermissionError:
+            return api_error(status.HTTP_403_FORBIDDEN, 'Reserved tag requires library manager.')
         except Exception as e:
             logger.error(e)
             error_msg = 'tags invalid.'
@@ -187,14 +207,16 @@ class RepoTagView(APIView):
 
         # resource check
         repo_tag = RepoTags.objects.get_repo_tag_by_id(repo_tag_id)
-        if not repo_tag:
-            error_msg = 'repo_tag not found.'
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
+        if not repo_tag or repo_tag.repo_id != repo_id:
+            return api_error(status.HTTP_404_NOT_FOUND, 'repo_tag not found.')
 
-        # permission check
-        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+        # Shared library-wide dictionary changes require repo administration.
+        try:
+            require_repo_manage(request.user, repo_id)
+        except Exception:
+            return api_error(status.HTTP_403_FORBIDDEN, 'Library tag manager required.')
+        if not _native_tag_root_permission(request, repo_id, write=True):
+            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         try:
             repo_tag.name = tag_name
@@ -212,14 +234,16 @@ class RepoTagView(APIView):
         """
         # resource check
         repo_tag = RepoTags.objects.get_repo_tag_by_id(repo_tag_id)
-        if not repo_tag:
-            error_msg = 'repo_tag not found.'
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
+        if not repo_tag or repo_tag.repo_id != repo_id:
+            return api_error(status.HTTP_404_NOT_FOUND, 'repo_tag not found.')
 
-        # permission check
-        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+        # Shared library-wide dictionary changes require repo administration.
+        try:
+            require_repo_manage(request.user, repo_id)
+        except Exception:
+            return api_error(status.HTTP_403_FORBIDDEN, 'Library tag manager required.')
+        if not _native_tag_root_permission(request, repo_id, write=True):
+            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         try:
             RepoTags.objects.delete_repo_tag(repo_tag_id)

@@ -27,11 +27,10 @@ class RepoTagCountDefaultTests(TestCase):
         definition.to_dict.return_value = {
             "repo_tag_id": 3, "repo_id": RID, "tag_name": "design", "tag_color": "#aaa"
         }
-        # Rate-limit middleware has its own tests; tag-count checks must run
-        # without an external Redis service, including network-isolated images.
+        # Cache and throttling have separate contracts; no Redis required here.
         with patch.object(RepoTagsView, "throttle_classes", ()), \
              patch("seahub.api2.endpoints.repo_tags.seafile_api.get_repo", return_value=object()), \
-             patch("seahub.api2.endpoints.repo_tags.check_folder_permission", return_value="r"), \
+             patch("seahub.api2.endpoints.repo_tags._native_tag_root_permission", return_value=True), \
              patch("seahub.api2.endpoints.repo_tags.RepoTags.objects.get_all_by_repo_id",
                    return_value=[definition]), \
              patch("seahub.api2.endpoints.repo_tags.FileTags.objects.select_related") as file_tags:

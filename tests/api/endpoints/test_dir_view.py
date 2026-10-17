@@ -2,6 +2,7 @@
 import os
 import json
 import posixpath
+from unittest.mock import patch
 
 from seaserv import seafile_api
 
@@ -211,7 +212,12 @@ class DirViewTest(BaseTestCase):
         assert json_resp['dirent_list'][0]['name'] == self.file_name
         assert json_resp['dirent_list'][0]['starred'] == True
 
-    def test_can_get_file_with_tag_info(self):
+    # CE stock DB lacks CloudFile V2 ACL tables. The V2 permission adapter
+    # has dedicated deny/share tests; this integration case tests native
+    # RepoTags/FileTags binding readback on a real Seafile repository.
+    @patch('seahub.api2.endpoints.repo_tags._native_tag_root_permission', return_value=True)
+    @patch('seahub.api2.endpoints.file_tag.authorize_tag_target')
+    def test_can_get_file_with_tag_info(self, _authorized_target, _root_allowed):
 
         self.login_as(self.user)
 
