@@ -1,6 +1,6 @@
 """Maintain the existing derived index from native commit diffs and CE Tags.
 
-Checkpoints are disposable local JSON, never SQL. Initial catch-up of an existing
+Checkpoints are disposable local JSON; native CE tags remain the only source of truth. Initial catch-up of an existing
 index requires an explicit timestamp preceding the runtime cutover. Missing
 libraries are scanned with fixed-commit directory pages; existing indexes are
 neither cleared nor globally rebuilt.
