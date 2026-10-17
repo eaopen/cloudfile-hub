@@ -105,6 +105,9 @@ def require_repo_manage(user, repo_id):
 
 class DirectoryRules(AuthenticatedACL):
     """CE repository owner/admin or system manager; no global IsAdminUser."""
+    # Native CE library managers may repair rules without an external UID.
+    # require_repo_manage() is the independent authority for this endpoint.
+    permission_classes = (IsAuthenticated,)
 
     def get(self, request):
         try:
