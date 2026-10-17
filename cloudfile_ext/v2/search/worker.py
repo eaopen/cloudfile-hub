@@ -177,32 +177,33 @@ class Indexer:
         raise SearchUnavailable('bootstrap commit budget exceeded')
 
     def reconcile(self, repo, saved, bootstrap_before):
-        tags = tag_snapshot(repo.id)
-        old_head = saved['head'] if saved else self.baseline(repo, bootstrap_before)
+        saved = saved or {}
+        old_head = saved.get('head') or self.baseline(repo, bootstrap_before)
         if old_head is None:
-            self.scan(repo, '/', tags)
-        elif old_head != repo.head_cmmt_id:
-            diffs = self.native.diff_commits(repo.id, old_head, repo.head_cmmt_id, 1)
-            if diffs is None or len(diffs) > 10000:
-                raise SearchUnavailable('native commit diff unavailable or over budget')
-            for diff in diffs:
-                path = normalize_path('/' + diff.name)
-                if diff.status in ('del', 'deldir', 'mov'):
-                    self.remove(repo.id, path)
-                if diff.status == 'mov':
-                    self.refresh(repo, normalize_path('/' + diff.new_name), tags)
-                elif diff.status in ('add', 'mod', 'newdir'):
-                    self.refresh(repo, path, tags)
-                elif diff.status not in ('del', 'deldir'):
-                    raise SearchUnavailable('unsupported native diff')
-        previous = saved.get('tags', {}) if saved else {}
-        for path in previous.keys() | tags.keys():
-            if previous.get(path) != tags.get(path):
-                self.refresh(repo, path, tags, subtree=False)
+            self.scan(repo, '/')
+            cursor = ''
+        else:
+            if old_head != repo.head_cmmt_id:
+                diffs = self.native.diff_commits(repo.id, old_head, repo.head_cmmt_id, 1)
+                if diffs is None or len(diffs) > 10000:
+                    raise SearchUnavailable('native commit diff unavailable or over budget')
+                for diff in diffs:
+                    path = normalize_path('/' + diff.name)
+                    if diff.status in ('del', 'deldir', 'mov'):
+                        self.remove(repo.id, path)
+                    if diff.status == 'mov':
+                        self.refresh(repo, normalize_path('/' + diff.new_name))
+                    elif diff.status in ('add', 'mod', 'newdir'):
+                        self.refresh(repo, path)
+                    elif diff.status not in ('del', 'deldir'):
+                        raise SearchUnavailable('unsupported native diff')
+            # Tag mutations do not necessarily produce native commits.
+            # The cursor only advances after Meilisearch acknowledges the page.
+            cursor = self.sweep(repo, saved.get('tag_cursor', ''))
         current = self.native.get_repo(repo.id)
-        if current is None or current.head_cmmt_id != repo.head_cmmt_id or tag_snapshot(repo.id) != tags:
-            raise SearchUnavailable('native snapshot changed; retry without advancing checkpoint')
-        return dict(head=repo.head_cmmt_id, tags=tags)
+        if current is None or current.head_cmmt_id != repo.head_cmmt_id:
+            raise SearchUnavailable('native head changed; tag cursor stays unchanged')
+        return dict(head=repo.head_cmmt_id, tag_cursor=cursor)
 
 
 def tick(client, native, checkpoint, bootstrap_before=0):
