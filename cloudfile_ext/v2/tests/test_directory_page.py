@@ -125,6 +125,26 @@ class PageTests(TestCase):
             auth.page(RID, '/docs', start=0, limit=50)
         auth.api.list_dir_by_dir_id.assert_not_called()
 
+    def test_bounded_native_window_for_50_500_5000_entries(self):
+        """One native window and one library-rule read, regardless of directory size.
+
+        The mocked CE RPC slices the raw dataset; this verifies orchestration
+        only, not production I/O or real directory sorting latency.
+        """
+        for count in (50, 500, 5000):
+            with self.subTest(raw_entries=count):
+                auth = self.authority()
+                objects = [dirent('file-%05d.txt' % n) for n in range(count)]
+                auth.api.list_dir_by_dir_id.side_effect = (
+                    lambda repo, dir_id, offset, limit: objects[offset:offset + limit])
+                page = auth.page(RID, '/docs', start=0, limit=50)
+                self.assertEqual(len(page['items']), 50)
+                self.assertEqual(page['scanned_count'], 50)
+                self.assertEqual(page['next_start'], None if count == 50 else 50)
+                auth.api.list_dir_by_dir_id.assert_called_once_with(RID, DIR, 0, 51)
+                auth.store.library.assert_called_once_with(RID)
+                auth.api.check_permission.assert_called_once_with(RID, 'native@auth.local')
+
     def test_page_bounds(self):
         auth = self.authority()
         for start, limit in ((-1, 50), (0, 0), (0, 501), (2147483647, 1), ('0', 50)):
