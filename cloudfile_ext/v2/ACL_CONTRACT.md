@@ -52,13 +52,15 @@ Provider comes only from trusted `CF_ACL_PROVIDER`; a caller cannot override it.
 The only configurable directory permissions are **r/rw/invisible**, never
 `none`. `revision` uses the existing branch-serialized ACLStore CAS.
 
-Writes remain `503 ACL_PUBLICATION_BLOCKED` unless
-`CF_ACL_PUBLICATION_ENABLED=True` is explicitly set **and** the native
-`[cloudfile] v2_acl_enabled=true` option is present in the running services'
-seafile.conf. These flags do not certify a deployment: the integrator must
-verify matching Hub/C/Go image pins, current-subject TTL, server-side final
-authorization and Etech publication/rollback acceptance *before* enabling them.
-Default is disabled, including on existing instances.
+Public ACL POST/PUT/DELETE are no longer subject to a separate Hub
+publication-release switch. Their runtime prerequisite is the native
+`[cloudfile] v2_acl_enabled=true` option in the configured
+`seafile.conf`, verified fail-closed per request. Without native enforcement,
+they return `503 ACL_NATIVE_ENFORCEMENT_REQUIRED`.
+This does not automatically enable native enforcement or certify a deployment:
+matched Hub/C/Go image pins, verified identity, final-byte checks and Etech
+publisher readback remain necessary before activating ACL on shared DEV/PROD.
+Native enforcement remains disabled by default for existing installations.
 
 ## Content API
 
