@@ -1,7 +1,7 @@
 """Existing-index protocol and commit catch-up regression checks."""
 import unittest
-from types import SimpleNamespace
-from unittest.mock import Mock, patch
+from types import ModuleType, SimpleNamespace
+from unittest.mock import MagicMock, Mock, patch
 
 from cloudfile_ext.v2.search.client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, checked_reference
 from cloudfile_ext.v2.search.worker import Indexer, confirm, doc_id
@@ -93,9 +93,9 @@ class CatchupTests(unittest.TestCase):
         indexer.baseline = Mock(return_value=None)
         indexer.scan = Mock()
         indexer.remove = Mock()
-        with patch('cloudfile_ext.v2.search.worker.tag_snapshot', return_value={}):
-            saved = indexer.reconcile(repo, None, 0)
-        indexer.scan.assert_called_once_with(repo, '/', {})
+        saved = indexer.reconcile(repo, None, 0)
+        indexer.scan.assert_called_once_with(repo, '/')
+        self.assertEqual(saved['tag_cursor'], '')
         indexer.remove.assert_not_called()
         self.assertEqual(saved['head'], 'new')
 
@@ -106,17 +106,66 @@ class CatchupTests(unittest.TestCase):
         native.diff_commits.return_value = [SimpleNamespace(status='mov', name='A', new_name='B')]
         indexer = Indexer(client, native)
         indexer.remove, indexer.refresh = Mock(), Mock()
-        with patch('cloudfile_ext.v2.search.worker.tag_snapshot', return_value={}):
-            indexer.reconcile(repo, {'head': 'old', 'tags': {}}, 0)
+        indexer.sweep = Mock(return_value='cursor2')
+        saved = indexer.reconcile(repo, {'head': 'old', 'tag_cursor': 'cursor1'}, 0)
         indexer.remove.assert_called_once_with(RID, '/A')
-        indexer.refresh.assert_called_once_with(repo, '/B', {})
+        indexer.refresh.assert_called_once_with(repo, '/B')
+        indexer.sweep.assert_called_once_with(repo, 'cursor1')
+        self.assertEqual(saved['tag_cursor'], 'cursor2')
 
     def test_changed_head_does_not_acknowledge_checkpoint(self):
         native = Mock()
         native.diff_commits.return_value = []
         native.get_repo.return_value = SimpleNamespace(head_cmmt_id='changed')
-        with patch('cloudfile_ext.v2.search.worker.tag_snapshot', return_value={}), self.assertRaises(SearchUnavailable):
-            Indexer(Mock(), native).reconcile(SimpleNamespace(id=RID, head_cmmt_id='new'), {'head': 'old'}, 0)
+        indexer = Indexer(Mock(), native)
+        indexer.sweep = Mock(return_value='advanced')
+        with self.assertRaises(SearchUnavailable):
+            indexer.reconcile(SimpleNamespace(id=RID, head_cmmt_id='new'), {'head': 'old'}, 0)
+
+    def test_tag_sweep_keyset_is_bounded_and_resumable(self):
+        repo = SimpleNamespace(id=RID, head_cmmt_id='latest')
+        native = Mock()
+        native.get_dirent_by_path.return_value = SimpleNamespace(mode=0o100644, size=1, mtime=2)
+        indexer = Indexer(Mock(), native)
+        indexer.publish = Mock()
+        row = ('f' * 32, '/folder', 'a.txt', False)
+        fake = ModuleType('seahub.tags.models')
+        fake.FileUUIDMap = MagicMock()
+        with patch.dict('sys.modules', {'seahub': ModuleType('seahub'),
+                                        'seahub.tags': ModuleType('seahub.tags'),
+                                        'seahub.tags.models': fake}), \
+                patch('cloudfile_ext.v2.search.worker.tag_labels', return_value={'/folder/a.txt': ['工艺']}) as labels:
+            query = fake.FileUUIDMap.objects.filter.return_value
+            query.filter.return_value = query
+            query.order_by.return_value.values_list.return_value.__getitem__.return_value = [row]
+            cursor = indexer.sweep(repo, 'a' * 32)
+        self.assertEqual(cursor, 'f' * 32)
+        query.filter.assert_called_once_with(uuid__gt='a' * 32)
+        self.assertEqual(query.order_by.return_value.values_list.return_value.__getitem__.call_args.args[0].stop, 200)
+        labels.assert_called_once_with(RID, [('/folder/a.txt', 'file')])
+        self.assertEqual(indexer.publish.call_args.args[0][0]['tags'], ['工艺'])
+
+    def test_empty_tag_sweep_restarts_without_native_calls(self):
+        native = Mock()
+        indexer = Indexer(Mock(), native)
+        fake = ModuleType('seahub.tags.models')
+        fake.FileUUIDMap = MagicMock()
+        with patch.dict('sys.modules', {'seahub': ModuleType('seahub'),
+                                        'seahub.tags': ModuleType('seahub.tags'),
+                                        'seahub.tags.models': fake}):
+            query = fake.FileUUIDMap.objects.filter.return_value
+            query.filter.return_value = query
+            query.order_by.return_value.values_list.return_value.__getitem__.return_value = []
+            self.assertEqual(indexer.sweep(SimpleNamespace(id=RID), 'f' * 32), '')
+        native.get_dirent_by_path.assert_not_called()
+
+    def test_native_tag_sql_errors_do_not_clear_existing_search_tags(self):
+        from cloudfile_ext.v2.search.worker import tag_labels
+        fake = ModuleType('cloudfile_ext.v2.tag_reads')
+        fake.read = Mock(side_effect=OSError('db unavailable'))
+        with patch.dict('sys.modules', {'cloudfile_ext.v2.tag_reads': fake}):
+            with self.assertRaises(SearchUnavailable):
+                tag_labels(RID, [('/A/a.txt', 'file')])
 
     def test_document_ids_preserve_existing_format(self):
         self.assertEqual(doc_id(RID, '/members.xlsx'), RID+'-6809ecaf294c5dbd40e64eb8962f86d4470f784b')
