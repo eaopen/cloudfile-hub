@@ -5,6 +5,7 @@ from uuid import UUID
 from django.conf import settings
 from django.core import signing
 from rest_framework.permissions import IsAuthenticated
+from cloudfile_ext.v2.permissions import SubjectReady
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from seahub.api2.authentication import TokenAuthentication, SessionAuthentication
@@ -30,7 +31,7 @@ def configured_client():
 
 class SearchQuery(APIView):
     authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, SubjectReady)
     throttle_classes = (UserRateThrottle,)
 
     def get(self, request):
