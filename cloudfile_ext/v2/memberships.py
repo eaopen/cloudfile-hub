@@ -39,6 +39,17 @@ def validate_subject(value, uid, *, now=None):
         raise IdentityUnavailable('invalid current Directory response') from None
 
 
+def readiness_key(database, provider, uid, username):
+    return 'cfv2:subject:' + hashlib.sha256(json.dumps([database, provider, uid, username]).encode()).hexdigest()
+
+
+def is_ready(redis, key, uid, username, ttl):
+    """True only for this exact subject's marker, written after a committed projection."""
+    cached, remaining = redis.eval(
+        "local v=redis.call('GET',KEYS[1]); return {v or '',redis.call('PTTL',KEYS[1])}", 1, key)
+    return bool(cached) and 0 < remaining <= ttl * 1000 and json.loads(cached) == {'uid': uid, 'username': username}
+
+
 class Memberships:
     def __init__(self, connection, redis, identity, *, account_schema, provider, fetch, ttl=1800):
         if not connection.get_autocommit() or not callable(fetch) or type(ttl) is not int or not 30 <= ttl <= 3600:
@@ -52,7 +63,7 @@ class Memberships:
         with self.connection.cursor() as cursor:
             cursor.execute('SELECT DATABASE()')
             database = cursor.fetchone()[0]
-        return 'cfv2:subject:' + hashlib.sha256(json.dumps([database, self.provider, uid, username]).encode()).hexdigest()
+        return readiness_key(database, self.provider, uid, username)
 
     def ensure(self, uid, username, *, force=False, subject=None):
         uid, username = text(uid), text(username, 255)
@@ -62,12 +73,8 @@ class Memberships:
             # SQL publication share the much shorter provider critical section.
             with database_lock(self.connection, 'subject:' + self.provider + ':' + uid):
                 self.identity.active(username, uid)
-                cached, remaining = self.redis.eval(
-                    "local v=redis.call('GET',KEYS[1]); return {v or '',redis.call('PTTL',KEYS[1])}", 1, key)
-                if not force and subject is None and cached and 0 < remaining <= self.ttl * 1000:
-                    value = json.loads(cached)
-                    if value == {'uid': uid, 'username': username}:
-                        return
+                if not force and subject is None and is_ready(self.redis, key, uid, username, self.ttl):
+                    return
                 self.redis.delete(key)
                 current = self.fetch(uid) if subject is None else subject
                 _, desired = validate_subject(current, uid)
