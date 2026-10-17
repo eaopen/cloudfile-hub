@@ -25,7 +25,7 @@ class RuntimeTests(TestCase):
         rules.library.return_value = (rule, foreign)
         rules.shared.return_value = [(rule, 'v')]
         api = Mock()
-        api.get_repo.return_value = SimpleNamespace(is_virtual=False)
+        api.get_repo.return_value = SimpleNamespace(is_virtual=False, version=1)
         api.get_repo_status.return_value = 0
         api.check_permission.return_value = base
         api.get_dir_id_by_path.return_value = 'directory-object'

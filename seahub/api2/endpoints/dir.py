@@ -225,6 +225,12 @@ class DirView(APIView):
         1. user with either 'r' or 'rw' permission.
         """
 
+        # CloudFile V2: explicit start/limit pages through the V2 authority;
+        # unpaged requests keep the CE14 response unchanged.
+        if 'start' in request.GET or 'limit' in request.GET:
+            from cloudfile_ext.v2.directory_page import directory_page
+            return directory_page(request, repo_id)
+
         # argument check
         recursive = request.GET.get('recursive', '0')
         if recursive not in ('1', '0'):

@@ -70,6 +70,21 @@ jobs:
 
           if ./tests/test_seahub_changes.sh; then ./tests/seahubtests.sh init && ./tests/seahubtests.sh runserver && ./tests/seahubtests.sh test; else true; fi
 
+      # The stock Seahub suite discovers tests/ only, so V2's extension tests
+      # must run explicitly rather than trusting the global green check.
+      - name: Validate V2 P0-C pagination and ACL HTTP contracts
+        env:
+          TRAVIS: "1"
+          SEAFILE_MYSQL_DB_CCNET_DB_NAME: ccnet
+          SEAFILE_MYSQL_DB_SEAFILE_DB_NAME: seafile
+          SEAFILE_MYSQL_DB_SEAHUB_DB_NAME: seahub
+          SEAFILE_DATA_DIR: /tmp/seafile-data
+          SEAFILE_CENTRAL_CONF_DIR: /tmp/conf
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          export PYTHONPATH="/tmp/seafile-test-deploy/seafile-server/python:/tmp/seafile-test-deploy/libsearpc:$GITHUB_WORKSPACE/thirdpart:${PYTHONPATH:-}"
+          python3 -m pytest -q cloudfile_ext/v2/tests/test_directory_page.py cloudfile_ext/v2/tests/test_acl_runtime.py
+
       - uses: actions/setup-node@v2
         with:
           node-version: "20.x"

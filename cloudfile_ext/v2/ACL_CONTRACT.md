@@ -89,6 +89,59 @@ check. Repo API tokens cannot impersonate current users on protected repos.
 Whether a repo is protected is answered from the same library rule snapshot
 (a virtual repo also checks its origin; an over-budget library is protected).
 
+### Paged CE directory listing
+
+`GET api/v2.1/repos/<repo_id>/dir/?p=...&start=0&limit=200[&if_dir_id=<dir object id>]`
+restores the v0.9 page protocol consumed by EAP items-page. It is selected only
+by an explicit `start` or `limit`; requests without them keep the CE14 response.
+
+- One native window (`list_dir_by_dir_id`, CE order: directories first, then
+  case-insensitive name), `limit` 1–500, default 200. The parent and every child
+  are decided by the same Authority as `directory-entries`; CE
+  `check_folder_permission` is not used, so a directory-only grant can page its
+  folder. Hidden children are omitted with all their metadata.
+- `dirent_list` items carry `type`, `id`, `name`, `mtime`, `permission`
+  (`r`/`rw`, effective), `parent_dir`, and `size` for files. Modifier, lock,
+  starred, tag and thumbnail fields of the unpaged CE response are not included.
+- `dir_id` is the listed directory object. `next_start` counts native entries,
+  never visible ones: a window whose children are all hidden returns an empty
+  `dirent_list` with `has_more=true`. `has_more`/`scan_exhausted` come from the
+  native scan, `user_perm` is the effective permission on the folder, and
+  `acl_enforced=true` is set only on this fully authorized path.
+- `if_dir_id` different from the current object, or a change during the read,
+  returns 409 (restart paging). ACL, identity or native failure returns 503 and
+  never an unfiltered or truncated page; recursive, ancestor, type and thumbnail
+  variants return 400.
+- End of scan: version ≥ 1 libraries reject an invalid dirent id when loading a
+  directory object, so one extra probed entry is exact. Version 0 libraries
+  read the whole set of valid native objects and slice that stable sequence,
+  since native listing may skip invalid v0 dirents inside a window. In this
+  legacy fallback `start`/`scanned_count` refer to valid native objects
+  (not invalid storage slots); it is safe but does not provide the v1+
+  per-page performance guarantee.
+
+### P0-C validation (not a deployment sign-off)
+
+The standard Seahub CI collects `tests/` only. The PR workflow now invokes
+`cloudfile_ext/v2/tests/test_directory_page.py` and `test_acl_runtime.py`
+explicitly in its separately named P0-C step. Synthetic 50/500/5000-entry
+test data checks that the Python endpoint requests only one bounded native
+window per page, not real disk/network latency.
+
+For actual Dev measurements from a machine that can reach EAP, run the
+read-only `scripts/verify_v2_directory_p0c.py` with `--mode eap`, an
+EAP admin-api base URL, and `CLOUDFILE_P0C_EAP_BEARER` or
+`CLOUDFILE_P0C_COOKIE` supplied via the local environment. Use
+`--case '50=/existing/50-entry-dir'` (repeat for known 500/5000-item
+directories), `--limit 50` for the tree, and `--limit 200` for the
+list. Use `--mode hub` and `CLOUDFILE_P0C_HUB_TOKEN` to verify
+`acl_enforced` on the raw Hub response. The probe never logs token,
+repo ID, directory path or item names; it makes GET requests only.
+It checks page cursor monotonicity and effective permissions, but cannot
+certify that hidden data is absent without a known denied-user fixture.
+A Dev measurement is still required before claiming EAP UI performance
+parity with v0.9.
+
 ## Native Decision Protocol
 
 `POST api/v2.1/internal/cloudfile/acl/check/`, using the existing internal HS256
