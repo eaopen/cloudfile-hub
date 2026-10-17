@@ -57,3 +57,49 @@ class GroupResolve(APIView):
         if len(groups) != 1:
             return api_error(status.HTTP_409_CONFLICT, 'External group mapping is ambiguous.')
         return Response({'group_id': groups[0][0]})
+
+
+class NativeLibraries(APIView):
+    """Read-only inventory of pre-V2 native repositories, for Etech review.
+
+    Only rows explicitly reconciled as native are returned. Newly-created
+    CloudFile V2 routed repositories are never candidates for Etech adoption.
+    """
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+
+    def get(self, request):
+        from django.db import connection
+        from seahub.utils.db_api import SeafileDB
+        from seaserv import seafile_api
+        if not request.user.admin_permissions.can_manage_library():
+            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        try:
+            page = int(request.GET.get('page', '1'))
+            limit = int(request.GET.get('per_page', '100'))
+        except (TypeError, ValueError):
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid pagination.')
+        if not (1 <= page <= 200 and 1 <= limit <= 100):
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid pagination.')
+        schema = connection.ops.quote_name(SeafileDB().db_name)
+        # Strict key prefix, state and native Repo binding. No record is
+        # created or repaired by an HTTP read; the installer reconciles first.
+        with connection.cursor() as cursor:
+            cursor.execute('SELECT c.repo_id FROM ' + schema + '.cf_library_storage c '
+                           'INNER JOIN ' + schema + '.Repo r ON r.repo_id=c.repo_id '
+                           'LEFT JOIN ' + schema + '.RepoStorageId s ON s.repo_id=c.repo_id '
+                           "WHERE c.repo_key=CONCAT('native-',c.repo_id) AND c.state='active' "
+                           'AND s.repo_id IS NULL '
+                           'ORDER BY c.repo_id LIMIT %s OFFSET %s',
+                           (limit + 1, (page - 1) * limit))
+            ids = [row[0] for row in cursor.fetchall()]
+        result = []
+        for repo_id in ids[:limit]:
+            repo = seafile_api.get_repo(repo_id)
+            if repo is None or not repo.name:
+                # Present but unreadable native repo needs separate recovery;
+                # do not create an Etech business row for a broken resource.
+                continue
+            result.append({'id': repo_id, 'name': repo.name})
+        return Response({'repos': result, 'page_info': {
+            'current_page': page, 'has_next_page': len(ids) > limit}})
