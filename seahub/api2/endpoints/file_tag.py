@@ -54,39 +54,12 @@ class RepoFileTagsView(APIView):
     throttle_classes = (UserRateThrottle,)
 
     def get(self, request, repo_id):
-        """list all tags of a file.
-        """
-        # argument check
-        file_path = request.GET.get('file_path')
-        if not file_path:
-            error_msg = 'file_path invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-        file_path = normalize_file_path(file_path)
-
-        # resource check
-        repo = seafile_api.get_repo(repo_id)
-        if not repo:
-            error_msg = 'Library %s not found.' % repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        file_id = seafile_api.get_file_id_by_path(repo_id, file_path)
-        if not file_id:
-            error_msg = 'File not found.'
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        # permission check
-        if not check_folder_permission(request, repo_id, '/'):
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
         try:
-            file_tags = FileTags.objects.get_file_tag_by_path(repo_id, file_path)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        return Response({"file_tags": file_tags}, status=status.HTTP_200_OK)
+            file_path, is_dir = _tag_target_request(request, repo_id, write=False)
+            file_tags = FileTags.objects.get_file_tag_by_path(repo_id, file_path, is_dir=is_dir)
+            return Response({'file_tags': file_tags}, status=status.HTTP_200_OK)
+        except Exception as error:
+            return _tag_error(error)
 
     def post(self, request, repo_id):
         """add a tag for a file.
