@@ -2,6 +2,7 @@
 
 No legacy tables or user-supplied SQL identifiers. SQL errors never mean no ACL.
 """
+from contextlib import contextmanager
 from dataclasses import asdict
 from hashlib import sha256
 from uuid import UUID
@@ -54,6 +55,7 @@ class ACLStore:
     def __init__(self, connection, schema, atomic, changed=None):
         # changed(repo_id) runs after a committed write, e.g. cache invalidation.
         self.connection, self.atomic, self.changed = connection, atomic, changed
+        self.schema = schema
         self.table = identifier(schema) + '.cf_dir_acl'
         self.branch = identifier(schema) + '.Branch'
 
@@ -92,6 +94,23 @@ class ACLStore:
             raise PolicyError('ACL hash collision')
         return result
 
+    @contextmanager
+    def transfer_fence(self, repo_id):
+        # Native synchronous transfers hold the same lock through publication.
+        # Take it before Branch(master) to avoid lock-order inversion with CAS.
+        key = 'cfv2:t:' + sha256((self.schema + ':' + repo_id).encode()).hexdigest()[:56]
+        with self.connection.cursor() as cursor:
+            cursor.execute('SELECT GET_LOCK(%s,5)', [key])
+            if cursor.fetchone() != (1,):
+                raise PolicyError('native transfer in progress')
+        try:
+            yield
+        finally:
+            with self.connection.cursor() as cursor:
+                cursor.execute('SELECT RELEASE_LOCK(%s)', [key])
+                if cursor.fetchone() != (1,):
+                    raise PolicyError('native transfer fence lost')
+
     def mutate(self, rule, *, expected, revision, delete=False):
         """Internal writer only; public publication remains blocked until release review.
 
@@ -105,7 +124,7 @@ class ACLStore:
         key = (rule.repo_id, sha256(rule.path.encode()).digest(), rule.subject_type,
                rule.provider, rule.namespace, rule.external_id)
         where = 'repo_id=%s AND path_hash=%s AND subject_type=%s AND provider=%s AND namespace=%s AND external_id=%s'
-        with self.atomic():
+        with self.transfer_fence(rule.repo_id), self.atomic():
             with self.connection.cursor() as cursor:
                 cursor.execute('SELECT commit_id FROM ' + self.branch + " WHERE repo_id=%s AND name='master' FOR UPDATE", [rule.repo_id])
                 if len(cursor.fetchall()) != 1:

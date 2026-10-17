@@ -1,4 +1,4 @@
-"""Existing EAP identity lookup backed only by native CE14 Profile/User facts."""
+"""EAP identity preparation backed by trusted Directory and native CE facts."""
 from rest_framework import status
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
@@ -15,14 +15,26 @@ class IdentityResolve(APIView):
     permission_classes = (IsAdminUser,)
 
     def post(self, request):
-        # Read-only UID lookup uses native staff authentication; it does not manage users.
+        # Native staff authentication authorizes lookup; Directory proves new UIDs.
         uid = request.data.get('external_user_id')
         if (not isinstance(uid, str) or not uid or uid != uid.strip() or len(uid) > 225
                 or request.data.get('login_id') != uid):
             return api_error(status.HTTP_400_BAD_REQUEST, 'Stable UID required.')
         username = Profile.objects.get_username_by_login_id(uid)
         if username is None:
-            return api_error(status.HTTP_404_NOT_FOUND, 'User must sign in through SSO first.')
+            # A staff request is not identity proof: independently read the
+            # scoped Etech Directory before creating any native account.
+            from .etech_directory import prepare_user
+            from .errors import IdentityConflict, IdentityUnavailable
+            try:
+                username = prepare_user(uid)
+            except IdentityConflict:
+                return api_error(status.HTTP_409_CONFLICT, 'Native UID binding conflict.')
+            except Exception:
+                return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Trusted user preparation unavailable; sign in through SSO or restore Directory.')
+        profile = Profile.objects.get_profile_by_user(username)
+        if profile is None or profile.login_id != uid:
+            return api_error(status.HTTP_409_CONFLICT, 'Native UID binding conflict.')
         try:
             user = User.objects.get(email=username)
         except User.DoesNotExist:
@@ -32,28 +44,23 @@ class IdentityResolve(APIView):
 
 
 class GroupResolve(APIView):
-    """Resolve an existing Etech entity to its native Group, without provisioning."""
+    """Prepare an exact trusted Etech entity as a native CE Group."""
     authentication_classes = (TokenAuthentication, SessionAuthentication)
     permission_classes = (IsAdminUser,)
 
     def post(self, request):
-        from django.db import connection
-        from seahub.utils.db_api import SeafileDB
         external = request.data.get('external_group_id')
         if (not isinstance(external, str) or not external or external != external.strip()
                 or external == 'role:' or len(external) > 225):
             return api_error(status.HTTP_400_BAD_REQUEST, 'External group ID required.')
-        role = external.startswith('role:')
-        external = external[5:] if role else external
-        kinds = ('group', 'role') if role else ('dept', 'org')
-        schema = connection.ops.quote_name(SeafileDB().db_name)
-        with connection.cursor() as cursor:
-            cursor.execute('SELECT DISTINCT group_id FROM ' + schema + '.cf_sso_group_map '
-                           'WHERE provider=%s AND subject_type IN (%s,%s) AND external_id=%s',
-                           ('etech', *kinds, external))
-            groups = cursor.fetchall()
-        if not groups:
-            return api_error(status.HTTP_404_NOT_FOUND, 'External group is not mapped.')
-        if len(groups) != 1:
-            return api_error(status.HTTP_409_CONFLICT, 'External group mapping is ambiguous.')
-        return Response({'group_id': groups[0][0]})
+        from .etech_directory import prepare_group, lookup_group
+        from .errors import IdentityConflict
+        try:
+            # Catalog verifies type/namespace/exact ID and native flat Group;
+            # an old mapping or equal display name is never identity proof.
+            existing = lookup_group(external)
+            return Response({'group_id': existing if existing is not None else prepare_group(external)})
+        except IdentityConflict:
+            return api_error(status.HTTP_409_CONFLICT, 'Native group binding conflict.')
+        except Exception:
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Trusted group preparation unavailable.')

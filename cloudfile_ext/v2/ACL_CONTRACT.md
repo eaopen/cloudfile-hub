@@ -33,8 +33,13 @@ The internal writer uses the natural row key
 `expected=None` creates; otherwise it compares the current revision. A fresh UUID
 `revision` is the retry key: the same row and revision replay successfully;
 conflicting content or a stale expected revision fails. Deletes require the
-existing revision. Each transaction locks native `Branch(master)` **before** the
-ACL row. Native final commit takes the same Branch lock before consulting Hub.
+existing revision. Each writer first acquires the library transfer fence
+`cfv2:t:` + the first 56 hex characters of SHA256(`seafile_schema:repo_id`),
+then locks native `Branch(master)` **before** the ACL row. Native synchronous
+copy/move acquires both library fences in repository-ID order and holds them
+through publication. Both scopes must have no ACL rows and be non-virtual;
+SQL/lock failure or any protected scope denies transfer. The dedicated native
+connection releases advisory locks explicitly before returning to the pool. Native final commit takes the same Branch lock before consulting Hub.
 All writers must use this protocol; direct SQL bypasses its concurrency guarantee.
 Permission decisions may remain valid until their bounded cache expiry.
 
@@ -100,7 +105,7 @@ is exactly HTTP 200 with `{"allowed":true,"contract":"cf-acl-v1"}`. Redirects, m
 access. A valid bounded cached policy decision is allowed; an old access ticket
 alone is not a policy decision. The native client bounds response size and time.
 
-`CF_ACL_PROVIDER` and the server-configured dotted callable
+The built-in Etech provider defaults to `etech`. `CF_ACL_PROVIDER` and the server-configured dotted callable
 `CF_ACL_SUBJECT_ENSURE(uid, username)` are the subject integration seam. The latter
 must call the existing Memberships TTL projector successfully; failure raises.
 Only then does Hub read `cf_sso_group_map JOIN GroupUser`. Missing adapter means
@@ -168,3 +173,27 @@ bounded by the configured TTL (default 180 seconds). Do not promise instantaneou
 revocation under cache failures. Cache misses read authoritative SQL; SQL errors
 never grant access. Tags bypass shared cache entirely and read only authorized
 page/search references.
+
+## Built-In Etech Subject Wiring
+
+The default `CF_ACL_SUBJECT_ENSURE` is
+`cloudfile_ext.v2.etech_directory.ensure_subject`. It uses the existing EAP
+`/eap/cloudDrive/directory/users/{uid}/context` and `/groups?view=entities`
+contracts, a short-lived `directory.read` machine JWT, a dedicated autocommit
+SQL connection and native shared Redis. No client-supplied member list is trusted.
+Only the current UID's native GroupUser rows are refreshed after the existing
+bounded TTL; Directory or Redis failure never renews readiness. Entity lookups
+create/reuse flat CE Groups keyed by exact type/namespace/external ID, never name.
+
+Staff identity resolution pre-creates a native CE User/Profile only after a fresh
+active Directory UID proof. It creates no OAuth subject; first OAuth/OIDC login
+reuses that UID's native account. Existing UID collation aliases and inactive
+accounts reject. Local CE users without a Profile UID use a disjoint native
+principal and do not inherit external group claims.
+
+Connection settings: `CF_DIRECTORY_URL` is the existing Directory base URL;
+`CF_DIRECTORY_KEY_ID` and `CF_DIRECTORY_SECRET` match EAP's scoped service key.
+Optional issuer/audience defaults match EAP (`cloudfile-sso` / `eap-directory`).
+`CF_DIRECTORY_GROUP_OWNER` is an existing active native service administrator
+that owns newly created flat Groups. Redis comes from native `CACHES.default`
+LOCATION. These are connection/identity inputs, not feature switches.

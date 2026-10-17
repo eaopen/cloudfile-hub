@@ -111,7 +111,7 @@ class DirectoryRules(AuthenticatedACL):
             if set(args) != {'repo_id', 'path'} or any(len(args.getlist(k)) != 1 for k in args):
                 raise ValueError()
             require_repo_manage(request.user, args['repo_id'])
-            rows = store().list_path(args['repo_id'], args['path'], settings.CF_ACL_PROVIDER)
+            rows = store().list_path(args['repo_id'], args['path'], getattr(settings, 'CF_ACL_PROVIDER', 'etech'))
             return response({'data': [dict(**asdict(rule), revision=revision) for rule, revision in rows]})
         except Exception as error:
             return failure(error)
@@ -126,7 +126,7 @@ class DirectoryRules(AuthenticatedACL):
             require_repo_manage(request.user, data['repo_id'])
             if not isinstance(data['inherit'], bool) or not isinstance(data['share_mode'], bool):
                 raise ValueError()
-            provider = settings.CF_ACL_PROVIDER
+            provider = getattr(settings, 'CF_ACL_PROVIDER', 'etech')
             rule = Rule(data['repo_id'], data['path'], provider, data['subject_type'],
                         data['namespace'], data['external_id'], data['permission'],
                         data['inherit'], data['share_mode'])

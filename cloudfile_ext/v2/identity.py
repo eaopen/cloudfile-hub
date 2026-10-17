@@ -41,6 +41,40 @@ class NativeIdentity:
             if cursor.fetchall() != ((username, 1),):
                 raise IdentityUnavailable('native account inactive')
 
+    def prepare(self, *, uid, login_name):
+        """Pre-create only a Directory-verified UID; never invent an OAuth sub."""
+        uid, login_name = text(uid), text(login_name, 200)
+        with database_lock(self.connection, 'identity:uid:' + uid):
+            with self.connection.cursor() as cursor:
+                cursor.execute('SELECT user,login_id FROM ' + self.profiles + ' WHERE login_id=%s', (uid,))
+                rows = cursor.fetchall()
+            if rows:
+                if len(rows) != 1 or rows[0][1] != uid:
+                    raise IdentityConflict('ambiguous native UID binding')
+                username = rows[0][0]
+                self.active(username, uid)
+                return username
+            if self.create_account is None:
+                raise IdentityUnavailable('native account creation unavailable')
+            username = uuid4().hex + '@auth.local'
+            self.create_account(username)
+            self.connection.begin()
+            try:
+                with self.connection.cursor() as cursor:
+                    cursor.execute('SELECT email,is_active FROM ' + self.accounts + ' WHERE email=%s FOR UPDATE', (username,))
+                    if cursor.fetchall() != ((username, 1),):
+                        raise IdentityUnavailable('native account creation failed')
+                    # Contact mail and employee number are display attributes;
+                    # only the exact immutable UID owns this native account.
+                    cursor.execute('INSERT INTO ' + self.profiles +
+                        '(user,login_id,nickname,intro,lang_code,contact_email,is_manually_set_contact_email,institution,list_in_address_book) '
+                        "VALUES(%s,%s,%s,'',NULL,NULL,0,'',0)", (username, uid, login_name[:64]))
+                self.connection.commit()
+            finally:
+                self.connection.rollback()
+            self.active(username, uid)
+            return username
+
     def bind(self, *, subject, uid, login_name):
         # Both OAuth2 and OIDC callers must validate the external identity and
         # compare this exact UID with the trusted Directory before binding.

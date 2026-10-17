@@ -73,10 +73,14 @@ def current_principal(username):
     account = ccnet_api.get_emailuser(username)
     if account is None or not account.is_active:
         raise PermissionError('inactive account')
-    profile = Profile.objects.get(user=username)
-    uid = profile.login_id
-    provider = getattr(settings, 'CF_ACL_PROVIDER', '')
-    ensure = getattr(settings, 'CF_ACL_SUBJECT_ENSURE', '')
+    profile = Profile.objects.get_profile_by_user(username)
+    uid = profile.login_id if profile else None
+    # Native local accounts have no external Directory membership to refresh.
+    # Their disjoint provider prevents accidental matching of Etech rules.
+    if not uid:
+        return Principal('native-local', username, frozenset())
+    provider = getattr(settings, 'CF_ACL_PROVIDER', 'etech')
+    ensure = getattr(settings, 'CF_ACL_SUBJECT_ENSURE', 'cloudfile_ext.v2.etech_directory.ensure_subject')
     if not uid or not provider or not ensure:
         raise ACLUnavailable('trusted current subject adapter unavailable')
     # Work package A supplies a server-configured callable (uid, username).
