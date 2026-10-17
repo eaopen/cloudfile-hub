@@ -120,8 +120,8 @@ class NativeTagWriteTests(TestCase):
                    return_value=[{'name': 'old', 'source': 'legacy'}]), \
              patch('seahub.api2.endpoints.file_tag.delete_resource_user_tag') as delete:
             response = request(FileTagView, 'DELETE',
-                               '/api/v2.1/repos/'+RID+'/tags/old/',
-                               {'path': '/docs/a.txt', 'is_dir': 'false'},
+                               '/api/v2.1/repos/'+RID+'/tags/old/?path=%2Fdocs%2Fa.txt&is_dir=false',
+                               None,
                                repo_id=RID, name='old')
         self.assertEqual(response.status_code, 409)
         delete.assert_not_called()
