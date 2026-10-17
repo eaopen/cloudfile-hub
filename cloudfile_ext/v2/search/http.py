@@ -19,8 +19,10 @@ logger = logging.getLogger(__name__)
 
 
 def configured_client():
-    if not getattr(settings, 'CF_ENABLE_SEARCH', False) or getattr(settings, 'CF_PROVIDER_SEARCH', '') != 'meilisearch':
-        raise SearchUnavailable('search is disabled')
+    # Search is an external capability, not a second ENABLE/PROVIDER toggle.
+    # Missing endpoint or failed Meilisearch requests affect Search only.
+    if not getattr(settings, 'CF_MEILISEARCH_URL', ''):
+        raise SearchUnavailable('Meilisearch not configured')
     return ExistingMeiliIndex(getattr(settings, 'CF_MEILISEARCH_URL', ''),
                               getattr(settings, 'CF_MEILISEARCH_API_KEY', ''),
                               getattr(settings, 'CF_MEILISEARCH_INDEX', 'cloudfile_files'))
