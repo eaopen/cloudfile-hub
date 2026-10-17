@@ -22,13 +22,17 @@ class HTTPTests(TestCase):
             force_authenticate(request, SimpleNamespace(username='native', is_authenticated=True, is_staff=staff, is_active=True))
         return view.as_view()(request)
 
-    def test_public_mutation_remains_blocked_until_native_acl_is_enabled(self):
-        for method in ('post', 'put', 'delete'):
-            with patch('cloudfile_ext.v2.acl_http.store') as rules:
-                result = self.request(DirectoryRules, method=method)
-                self.assertEqual(result.status_code, 503)
-                self.assertEqual(result.data['code'], 'ACL_NATIVE_ENFORCEMENT_REQUIRED')
-                rules.assert_not_called()
+    def test_public_mutations_require_current_repo_administrator(self):
+        request = dict(repo_id=RID, path='/folder', subject_type='user', namespace='user',
+                       external_id='uid1', permission='r', inherit=True, share_mode=False,
+                       expected=None, revision='00000000-0000-4000-8000-000000000010')
+        with patch('cloudfile_ext.v2.acl_http.require_repo_manage',
+                   side_effect=PermissionError('not repo admin')), \
+             patch('cloudfile_ext.v2.acl_http.store') as rules:
+            for method in ('post', 'put', 'delete'):
+                result = self.request(DirectoryRules, request, method=method)
+                self.assertEqual(result.status_code, 403)
+            rules.assert_not_called()
 
     def test_directory_rules_allow_native_repo_admin_without_system_staff(self):
         with patch('cloudfile_ext.v2.acl_http.require_repo_manage') as guard, \
@@ -67,8 +71,7 @@ class HTTPTests(TestCase):
                        external_id='uid1', permission='invisible', inherit=True,
                        share_mode=False, expected=None,
                        revision='00000000-0000-4000-8000-000000000010')
-        with patch('cloudfile_ext.v2.acl_http.publication_ready', return_value=True), \
-             patch('cloudfile_ext.v2.acl_http.require_repo_manage'), \
+        with patch('cloudfile_ext.v2.acl_http.require_repo_manage'), \
              patch('cloudfile_ext.v2.acl_http.store') as rules, \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
             settings.CF_ACL_PROVIDER = 'etech'
@@ -81,22 +84,6 @@ class HTTPTests(TestCase):
             self.assertEqual(self.request(DirectoryRules, request, method='post').status_code, 400)
             self.assertEqual(rules.return_value.mutate.call_count, 1)
 
-    def test_publication_requires_native_seafile_acl_without_extra_hub_toggle(self):
-        import os
-        from pathlib import Path
-        from tempfile import TemporaryDirectory
-        from cloudfile_ext.v2.acl_http import publication_ready
-        with TemporaryDirectory() as folder, \
-             patch.dict(os.environ, {'SEAFILE_CENTRAL_CONF_DIR': folder}), \
-             patch('cloudfile_ext.v2.acl_http.settings') as settings:
-            conf = Path(folder) / 'seafile.conf'
-            conf.write_text('[cloudfile]\nv2_acl_enabled=false\n')
-            settings.CF_ACL_PUBLICATION_ENABLED = False
-            self.assertFalse(publication_ready())
-            conf.write_text('[cloudfile]\nv2_acl_enabled=true\n')
-            self.assertTrue(publication_ready())  # redundant Hub toggle no longer blocks.
-            conf.unlink()
-            self.assertFalse(publication_ready())
 
     def test_effective_is_bound_to_authenticated_user(self):
         with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
