@@ -21,7 +21,9 @@ from seahub.constants import PERMISSION_READ_WRITE
 from seahub.views import check_folder_permission
 
 from seaserv import seafile_api
-from cloudfile_ext.v2.tag_native import (authorize_tag_target, authorize_tag_label, require_repo_tag)
+from cloudfile_ext.v2.tag_native import (authorize_tag_target, authorize_tag_label, require_repo_tag,
+                                         user_tag_names, read_resource_tags, write_resource_tags,
+                                         delete_resource_user_tag)
 
 logger = logging.getLogger(__name__)
 
