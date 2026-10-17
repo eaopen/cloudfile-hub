@@ -82,7 +82,7 @@ jobs:
           SEAFILE_CENTRAL_CONF_DIR: /tmp/conf
         run: |
           cd "$GITHUB_WORKSPACE"
-          export PYTHONPATH="$GITHUB_WORKSPACE/thirdpart:${PYTHONPATH:-}"
+          export PYTHONPATH="/tmp/seafile-test-deploy/seafile-server/python:/tmp/seafile-test-deploy/libsearpc:$GITHUB_WORKSPACE/thirdpart:${PYTHONPATH:-}"
           python3 -m pytest -q cloudfile_ext/v2/tests/test_directory_page.py cloudfile_ext/v2/tests/test_acl_runtime.py
 
       - uses: actions/setup-node@v2

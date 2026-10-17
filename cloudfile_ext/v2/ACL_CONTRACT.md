@@ -120,6 +120,28 @@ by an explicit `start` or `limit`; requests without them keep the CE14 response.
   (not invalid storage slots); it is safe but does not provide the v1+
   per-page performance guarantee.
 
+### P0-C validation (not a deployment sign-off)
+
+The standard Seahub CI collects `tests/` only. The PR workflow now invokes
+`cloudfile_ext/v2/tests/test_directory_page.py` and `test_acl_runtime.py`
+explicitly in its separately named P0-C step. Synthetic 50/500/5000-entry
+test data checks that the Python endpoint requests only one bounded native
+window per page, not real disk/network latency.
+
+For actual Dev measurements from a machine that can reach EAP, run the
+read-only `scripts/verify_v2_directory_p0c.py` with `--mode eap`, an
+EAP admin-api base URL, and `CLOUDFILE_P0C_EAP_BEARER` or
+`CLOUDFILE_P0C_COOKIE` supplied via the local environment. Use
+`--case '50=/existing/50-entry-dir'` (repeat for known 500/5000-item
+directories), `--limit 50` for the tree, and `--limit 200` for the
+list. Use `--mode hub` and `CLOUDFILE_P0C_HUB_TOKEN` to verify
+`acl_enforced` on the raw Hub response. The probe never logs token,
+repo ID, directory path or item names; it makes GET requests only.
+It checks page cursor monotonicity and effective permissions, but cannot
+certify that hidden data is absent without a known denied-user fixture.
+A Dev measurement is still required before claiming EAP UI performance
+parity with v0.9.
+
 ## Native Decision Protocol
 
 `POST api/v2.1/internal/cloudfile/acl/check/`, using the existing internal HS256
