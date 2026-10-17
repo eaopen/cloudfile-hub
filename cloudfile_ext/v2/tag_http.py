@@ -8,6 +8,8 @@ import logging
 import stat
 
 from rest_framework.response import Response
+from rest_framework.exceptions import ValidationError
+from django.core.exceptions import RequestDataTooBig
 
 from .acl_http import AuthenticatedACL
 from .acl_policy import canonical_path
@@ -101,6 +103,20 @@ def batch_tags(username, repo_id, references):
 
 class TagBatch(AuthenticatedACL):
     """GET capability; POST bounded current-user read across directory parents."""
+
+    def initial(self, request, *args, **kwargs):
+        # SessionAuthentication's CSRF check accesses DRF request.POST, which
+        # can consume the JSON stream. Cache the bounded body before that check
+        # so validation does not raise RawPostDataException for browser sessions.
+        # Authentication and CSRF enforcement still run through the native path.
+        if request.method == 'POST':
+            try:
+                size = int(request.META.get('CONTENT_LENGTH') or 0)
+                if size > MAX_BYTES or len(request.body) > MAX_BYTES:
+                    raise ValueError('batch is too large')
+            except (ValueError, RequestDataTooBig):
+                raise ValidationError({'code': 'INVALID_TAG_BATCH'}) from None
+        return super().initial(request, *args, **kwargs)
 
     def get(self, request):
         if request.query_params:

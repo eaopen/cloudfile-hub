@@ -4,6 +4,7 @@ from unittest import TestCase
 from unittest.mock import patch, Mock
 
 from rest_framework.test import APIRequestFactory, force_authenticate
+from django.conf import settings
 
 from cloudfile_ext.v2.tag_http import TagBatch, batch_tags, page_tags, VERSION, MODEL
 
@@ -15,6 +16,32 @@ def ref(path, is_dir=False):
 
 
 class TagBatchTests(TestCase):
+    def session_request(self, *, csrf=True, extra=''):
+        # Exercise the real SessionAuthentication/CSRF path; force_authenticate
+        # bypasses the parser interaction that caused the live browser HTTP500.
+        token = 'a' * 32
+        raw = APIRequestFactory(enforce_csrf_checks=True).post(
+            '/api/v2.1/cloudfile/tags/batch/',
+            dict(version=VERSION, repo_id=RID, items=[ref('/docs/file' + extra)]),
+            format='json', **({'HTTP_X_CSRFTOKEN': token} if csrf else {}))
+        raw.user = SimpleNamespace(username='current', is_authenticated=True, is_active=True)
+        raw.COOKIES[settings.CSRF_COOKIE_NAME] = token
+        return TagBatch.as_view()(raw)
+
+    def test_browser_session_json_body_survives_native_csrf_check(self):
+        with patch('cloudfile_ext.v2.tag_http.batch_tags', return_value={'items': []}) as tags:
+            response = self.session_request()
+        self.assertEqual(response.status_code, 200)
+        tags.assert_called_once_with('current', RID, [('/docs/file', 'file')])
+
+    def test_body_cache_does_not_bypass_csrf_or_size_limit(self):
+        with patch('cloudfile_ext.v2.tag_http.batch_tags') as tags:
+            self.assertEqual(self.session_request(csrf=False).status_code, 403)
+            oversized = self.session_request(extra='x' * 65536)
+            self.assertEqual(oversized.status_code, 400)
+            self.assertEqual(oversized.data['code'], 'INVALID_TAG_BATCH')
+        tags.assert_not_called()
+
     def request(self, method='post', data=None, authenticated=True):
         factory = APIRequestFactory()
         raw = (factory.post('/api/v2.1/cloudfile/tags/batch/', data or {}, format='json')
