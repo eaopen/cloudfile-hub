@@ -81,7 +81,7 @@ class Indexer:
         if documents:
             confirm(self.client, self.client.call('PUT', self.client.index_path + '/documents', documents))
 
-    def scan(self, repo, root, tags):
+    def scan(self, repo, root):
         pending, documents = [root], []
         while pending:
             parent, offset = pending.pop(), 0
@@ -89,13 +89,20 @@ class Indexer:
                 entries = self.native.list_dir_by_commit_and_path(repo.id, repo.head_cmmt_id, parent, offset, 200)
                 if entries is None:
                     raise SearchUnavailable('native directory snapshot unavailable')
+                refs = []
                 for entry in entries:
                     path = normalize_path(posixpath.join(parent, entry.obj_name))
                     if stat.S_ISDIR(entry.mode):
                         pending.append(path)
-                    elif not stat.S_ISREG(entry.mode):
+                        kind = 'dir'
+                    elif stat.S_ISREG(entry.mode):
+                        kind = 'file'
+                    else:
                         raise SearchUnavailable('unsupported native object')
-                    documents.append(self.upsert(repo, path, entry, tags))
+                    refs.append((path, kind))
+                tags = tag_labels(repo.id, refs)
+                for entry, (path, _) in zip(entries, refs):
+                    documents.append(self.upsert(repo, path, entry, {path: [None, tags[path]]}))
                     if len(documents) == 200:
                         self.publish(documents)
                         documents = []
@@ -104,14 +111,18 @@ class Indexer:
                     break
         self.publish(documents)
 
-    def refresh(self, repo, path, tags, subtree=True):
+    def refresh(self, repo, path, subtree=True):
         entry = self.native.get_dirent_by_path(repo.id, path)
         if entry is None:
             self.remove(repo.id, path)
             return
-        self.publish([self.upsert(repo, path, entry, tags)])
-        if subtree and stat.S_ISDIR(entry.mode):
-            self.scan(repo, path, tags)
+        if not (stat.S_ISDIR(entry.mode) or stat.S_ISREG(entry.mode)):
+            raise SearchUnavailable('unsupported native object')
+        kind = 'dir' if stat.S_ISDIR(entry.mode) else 'file'
+        tags = tag_labels(repo.id, [(path, kind)])
+        self.publish([self.upsert(repo, path, entry, {path: [None, tags[path]]})])
+        if subtree and kind == 'dir':
+            self.scan(repo, path)
 
     def baseline(self, repo, timestamp):
         probe = self.client.call('POST', self.client.index_path + '/documents/fetch',
