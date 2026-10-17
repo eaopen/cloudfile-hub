@@ -12,8 +12,9 @@ from seahub.api2.throttling import UserRateThrottle
 from seahub.utils.timeutils import timestamp_to_isoformat_timestr
 
 from .client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, normalize_path
+from . import acl_filter
 from .paging import page
-from .runtime import AccessDenied, NativeAuthority
+from .runtime import AccessDenied, SearchAuthority
 
 logger = logging.getLogger(__name__)
 
@@ -45,7 +46,7 @@ class SearchQuery(APIView):
             root, limit = normalize_path(args.get('path', '/')), int(args.get('limit', '50'))
             if not 1 <= limit <= 100:
                 raise ValueError()
-            authority = NativeAuthority(request.user.username, rid, root)
+            authority = SearchAuthority(request.user.username, rid, root)
             binding = dict(user=request.user.username, repo=rid, q=query, root=root,
                            limit=limit, version=authority.version)
             offset = 0
@@ -58,8 +59,12 @@ class SearchQuery(APIView):
                     raise ValueError()
                 offset = saved['offset']
             client = configured_client()
-            result = page(limit=limit, offset=offset,
-                          fetch_candidates=lambda start, count: client.page(rid, root, query, start, count),
+
+            def candidates(start, count):
+                if authority.filter is acl_filter.NOTHING:
+                    return []
+                return client.page(rid, root, query, start, count, acl_filter=authority.filter)
+            result = page(limit=limit, offset=offset, fetch_candidates=candidates,
                           resolve_authorized=authority.resolve)
             data = []
             for item in result['items']:

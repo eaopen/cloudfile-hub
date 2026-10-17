@@ -1,19 +1,21 @@
-"""Current CE identity and path authority for the existing derived index.
+"""Current V2 authority for the existing derived index.
 
-V2 has not yet installed a directory-policy evaluator. Subtrees with cf_dir_acl
-rules fail closed here instead of treating a CE library grant as a directory grant.
+Candidates are narrowed by a Meilisearch filter built from the same Authority
+decisions as directory browsing (acl_filter). Every returned hit is decided
+again by that Authority and checked against the current native tree, so the
+index and its filter are never an authorization source.
 """
+from dataclasses import astuple
 import hashlib
 import json
-import posixpath
 import stat
 
-from django.db import connection
-from seaserv import ccnet_api, seafile_api
-from seahub.utils.db_api import SeafileDB
-from seahub.utils.ccnet_db import get_ccnet_db_name
+from seaserv import seafile_api
 
-from .client import SearchUnavailable, normalize_path
+from cloudfile_ext.v2.acl_runtime import Authority
+
+from . import acl_filter
+from .client import SearchUnavailable
 
 
 class AccessDenied(Exception):
@@ -28,72 +30,72 @@ def native_tags(repo_id, references):
             for path, kind in tags}
 
 
-class NativeAuthority:
-    def __init__(self, username, repo_id, root):
+class SearchAuthority:
+    def __init__(self, username, repo_id, root, *, authority=None):
         self.username, self.repo_id, self.root = username, repo_id, root
-        self.snapshot = self.read_snapshot()
-        self.version = hashlib.sha256(json.dumps(self.snapshot, sort_keys=True).encode()).hexdigest()
-
-    def read_snapshot(self):
-        account = ccnet_api.get_emailuser(self.username)
-        if account is None or not account.is_active:
-            raise AccessDenied()
-        repo = seafile_api.get_repo(self.repo_id)
-        permission = seafile_api.check_permission_by_path(self.repo_id, self.root, self.username)
-        if repo is None or permission not in ('r', 'rw'):
+        repo = seafile_api.get_repo(repo_id)
+        if repo is None:
             raise AccessDenied()
         # Virtual and encrypted repositories need explicit index/path mapping.
         if repo.is_virtual or repo.encrypted:
             raise SearchUnavailable('repository search mapping unavailable')
-        schema = connection.ops.quote_name(SeafileDB().db_name)
-        accounts = connection.ops.quote_name(get_ccnet_db_name())
-        with connection.cursor() as cursor:
-            # Only native membership facts bind the cursor; native path RPC
-            # remains the authority. Avoid expanding the whole Group hierarchy.
-            cursor.execute('SELECT gu.group_id,g.parent_group_id,r.permission FROM ' + accounts + '.GroupUser gu '
-                           'JOIN ' + accounts + '.`Group` g ON g.group_id=gu.group_id '
-                           'JOIN ' + schema + '.RepoGroup r ON r.group_id=gu.group_id '
-                           'WHERE gu.user_name=%s AND r.repo_id=%s ORDER BY gu.group_id,r.permission LIMIT 4097',
-                           (self.username, self.repo_id))
-            groups = cursor.fetchall()
-            if len(groups) > 4096:
-                raise SearchUnavailable('native membership budget exceeded')
-            cursor.execute('SELECT path,revision FROM ' + schema + '.cf_dir_acl WHERE repo_id=%s ORDER BY path,revision LIMIT 4097', (self.repo_id,))
-            acl_rules = cursor.fetchall()
-            if len(acl_rules) > 4096:
-                raise SearchUnavailable('directory policy budget exceeded')
-            for path, revision in acl_rules:
-                normalize_path(path)
-                if self.root == path or path == '/' or self.root.startswith(path + '/'):
-                    raise SearchUnavailable('directory policy evaluator unavailable')
-            cursor.execute('SELECT path,permission,user FROM ' + schema + '.FolderUserPerm WHERE repo_id=%s ORDER BY path,user,permission LIMIT 4097', (self.repo_id,))
-            user_rules = cursor.fetchall()
-            cursor.execute('SELECT path,permission,group_id FROM ' + schema + '.FolderGroupPerm WHERE repo_id=%s ORDER BY path,group_id,permission LIMIT 4097', (self.repo_id,))
-            group_rules = cursor.fetchall()
-        if len(user_rules) + len(group_rules) > 4096:
-            raise SearchUnavailable('native policy budget exceeded')
-        return dict(head=repo.head_cmmt_id, permission=permission,
-                    status=seafile_api.get_repo_status(self.repo_id),
-                    groups=groups,
-                    user_rules=user_rules, group_rules=group_rules, acl_rules=acl_rules)
+        try:
+            self.authority = Authority(username) if authority is None else authority
+        except PermissionError:
+            raise AccessDenied() from None  # inactive native account
+        self.snapshot = self.read_snapshot(self.authority, repo)
+        self.version = hashlib.sha256(json.dumps(self.snapshot, sort_keys=True).encode()).hexdigest()
+        self.filter = self.candidate_filter()
 
-    def resolve(self, references):
-        tags = native_tags(self.repo_id, references)
-        result = []
+    def read_snapshot(self, authority, repo):
+        """Every input of this library's decisions; binds cursors and the filter."""
+        try:
+            if not authority.effective(self.repo_id, self.root).can_read:
+                raise AccessDenied()
+        except PermissionError:
+            raise AccessDenied() from None
+        view = authority.library_view(self.repo_id)
+        principal = authority.principal
+        return dict(head=repo.head_cmmt_id, native=view['native'], status=view['status'],
+                    principal=[principal.provider, principal.uid, principal.active, principal.ready,
+                               sorted(list(group) for group in principal.groups)],
+                    rules=None if view['rules'] is None else sorted(list(astuple(rule)) for rule in view['rules']))
+
+    def candidate_filter(self):
+        rules = self.snapshot['rules']
+        if rules is None:
+            return None  # Over-budget library: per-hit authorization only.
+        try:
+            return acl_filter.build({rule[1] for rule in rules},
+                                    lambda path: self.authority.effective(self.repo_id, path).can_read)
+        except acl_filter.FilterUnavailable:
+            return None
+
+    def resolve(self, references, authority=None):
+        authority = self.authority if authority is None else authority
+        # An index candidate is never a tag-read authority. Authorize and
+        # verify the current native object BEFORE selecting its tag bindings.
+        entries, visible = [], []
         for ref in references:
             path, kind = ref['path'], ref['kind']
-            if any(root == '/' or path == root or path.startswith(root + '/')
-                   for root, revision in self.snapshot['acl_rules']):
-                result.append(None)
-                continue
-            permission = seafile_api.check_permission_by_path(self.repo_id, path, self.username)
-            if permission not in ('r', 'rw'):
-                result.append(None)
+            if not authority.effective(self.repo_id, path, kind).can_read:
+                entries.append(None)
                 continue
             entry = seafile_api.get_dirent_by_path(self.repo_id, path)
             if entry is None or (stat.S_ISDIR(entry.mode) if kind == 'dir' else stat.S_ISREG(entry.mode)) is False:
+                entries.append(None)
+                continue
+            entries.append(entry)
+            visible.append(ref)
+        # Failure to read tags for valid hits remains an error, not an empty tag
+        # set. Unauthorized or stale hits cause no tag query at all.
+        tags = native_tags(self.repo_id, visible) if visible else {}
+        result = []
+        for ref, entry in zip(references, entries):
+            if entry is None:
                 result.append(None)
                 continue
+            path, kind = ref['path'], ref['kind']
             current = tags[path]
             matched = [t for t in ref.get('matched_tags', []) if t in current]
             if not ref.get('text_match', True) and not matched:
@@ -105,8 +107,18 @@ class NativeAuthority:
         return result
 
     def assert_current(self, references):
-        if self.read_snapshot() != self.snapshot:
+        repo = seafile_api.get_repo(self.repo_id)
+        if repo is None:
+            raise AccessDenied()
+        # Revalidate native account and current UID/group projection; reusing
+        # the previous principal here would miss mid-request identity changes.
+        try:
+            fresh = Authority(self.username)
+        except PermissionError:
+            raise AccessDenied() from None
+        if self.read_snapshot(fresh, repo) != self.snapshot:
             raise SearchUnavailable('library or authorization changed')
-        current = self.resolve(references)
-        if current != references:
+        # With every decision input unchanged the decisions are too, except in
+        # an over-budget library, whose per-directory candidates are not bound.
+        if self.snapshot['rules'] is None and self.resolve(references, fresh) != references:
             raise SearchUnavailable('object authorization or metadata changed')

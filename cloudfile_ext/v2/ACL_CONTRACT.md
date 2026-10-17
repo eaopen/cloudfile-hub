@@ -144,6 +144,40 @@ certify that hidden data is absent without a known denied-user fixture.
 A Dev measurement is still required before claiming EAP UI performance
 parity with v0.9.
 
+### Search authorization
+
+`api/v2.1/cloudfile/search/` uses the same Authority as browsing; the
+Meilisearch index is never an authorization source.
+
+- The search root must be readable; a directory-only grant may search inside
+  its shared root. Libraries with rules are searchable (no 503 on rule-covered
+  roots) and hits under rule subtrees are decided, not discarded.
+- Candidates are narrowed by a filter built from this principal's rule paths
+  in the library snapshot and Authority decisions (`search/acl_filter.py`),
+  using only the indexed `path` and `dirs` fields; nothing is re-indexed and
+  rule changes apply on the next request. The filter may over-include (a
+  non-inherited grant's region, or a hidden rule directory's own document) but
+  never excludes a readable object; this is verified against Authority on
+  randomized rule trees. Over 256 rule paths, a 32 KiB filter, or an
+  over-budget library fall back to per-hit decisions only.
+- Every returned hit is decided again by Authority and must still exist with
+  its kind **before current CE tags are queried**; denied, missing or wrong-kind
+  candidates never enter a tag SQL batch. Cursors bind the library head,
+  native grant, status, freshly verified principal and rule rows. Before a
+  response is delivered the current user/UID/groups are checked again: a
+  snapshot change invalidates the prepared page (503), a lost root grant or
+  inactive account returns 403. Tags are display data, not grants.
+- **Dev deployment gate:** check the actual Meilisearch `cloudfile_files`
+  index settings for filterable `repo_id`, `path`, `dirs` and searchable
+  `name`, `tags`. The current search worker writes `dirs` as exact ancestor
+  paths, whereas `search/documents.py` also defines a different schema using
+  `ancestor_paths`: these fields are not interchangeable. Never assume the
+  live index supports filtering merely because one of these is present in
+  source code. Do not auto-alter index settings or start an index rebuild.
+  A separate local Meilisearch 1.31 fixture accepted the emitted predicates
+  and the real `ExistingMeiliIndex.page()` requests. That does **not** replace
+  a read-only check or user-scoped search on the existing Dev index.
+
 ## Native Decision Protocol
 
 `POST api/v2.1/internal/cloudfile/acl/check/`, using the existing internal HS256
