@@ -65,14 +65,14 @@ class RustLocalEditOpen(APIView):
     throttle_classes = (UserRateThrottle,)
 
     def post(self, request):
-        if not getattr(settings, "CF_V2_AGENT_EDIT_ENABLED", False):
-            return Response({"code": "EDIT_DISABLED"}, status=503)
         try:
             if set(request.data) != {"repo_id", "path", "mode"}:
                 raise ValueError()
             repo_id = request.data["repo_id"]
             path = request.data["path"]
             mode = request.data["mode"]
+            if mode == "exclusive-edit" and not getattr(settings, "CF_V2_AGENT_EDIT_ENABLED", False):
+                return Response({"code": "CHECKOUT_UNSUPPORTED"}, status=409)
             user = request.user.username
             uid = Profile.objects.get(user=user).login_id
             # V2 authority (including current SSO group mapping and deny) is
@@ -120,7 +120,8 @@ class RustCheckoutInfo(APIView):
 
     def get(self, request):
         if not getattr(settings, "CF_V2_AGENT_EDIT_ENABLED", False):
-            return Response({"code": "EDIT_DISABLED"}, status=503)
+            # Read-only capability information must not disable ordinary edits.
+            return Response({"checkout_supported": False, "checked_out": False})
         try:
             args = request.query_params
             if set(args) != {"repo_id", "path"} or any(len(args.getlist(k)) != 1 for k in args):
@@ -150,14 +151,15 @@ class RustCheckoutInfo(APIView):
             if len(rows) > 1:
                 return Response({"code": "EDIT_UNAVAILABLE"}, status=503)
             if not rows or rows[0][0] is None:
-                return Response({"checked_out": False})
+                return Response({"checkout_supported": True, "checked_out": False})
             guard, owner_uid, owner_user, terminal, name, ip, started, active, expires = rows[0]
             from django.utils import timezone
             if expires is None or expires <= timezone.now().replace(tzinfo=None):
-                return Response({"checked_out": False})
+                return Response({"checkout_supported": True, "checked_out": False})
             current_uid = Profile.objects.get(user=viewer).login_id
             privileged = owner_uid == current_uid or bool(request.user.is_staff)
             details = {
+                "checkout_supported": True,
                 "checked_out": True,
                 "owner_uid": owner_uid,
                 "owner": owner_user,
