@@ -27,7 +27,7 @@ class HTTPTests(TestCase):
             with patch('cloudfile_ext.v2.acl_http.store') as rules:
                 result = self.request(DirectoryRules, method=method)
                 self.assertEqual(result.status_code, 503)
-                self.assertEqual(result.data['code'], 'ACL_PUBLICATION_BLOCKED')
+                self.assertEqual(result.data['code'], 'ACL_NATIVE_ENFORCEMENT_REQUIRED')
                 rules.assert_not_called()
 
     def test_directory_rules_allow_native_repo_admin_without_system_staff(self):
@@ -81,7 +81,7 @@ class HTTPTests(TestCase):
             self.assertEqual(self.request(DirectoryRules, request, method='post').status_code, 400)
             self.assertEqual(rules.return_value.mutate.call_count, 1)
 
-    def test_publication_requires_both_hub_flag_and_native_seafile_conf(self):
+    def test_publication_requires_native_seafile_acl_without_extra_hub_toggle(self):
         import os
         from pathlib import Path
         from tempfile import TemporaryDirectory
@@ -91,11 +91,11 @@ class HTTPTests(TestCase):
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
             conf = Path(folder) / 'seafile.conf'
             conf.write_text('[cloudfile]\nv2_acl_enabled=false\n')
-            settings.CF_ACL_PUBLICATION_ENABLED = True
+            settings.CF_ACL_PUBLICATION_ENABLED = False
             self.assertFalse(publication_ready())
             conf.write_text('[cloudfile]\nv2_acl_enabled=true\n')
-            self.assertTrue(publication_ready())
-            settings.CF_ACL_PUBLICATION_ENABLED = False
+            self.assertTrue(publication_ready())  # redundant Hub toggle no longer blocks.
+            conf.unlink()
             self.assertFalse(publication_ready())
 
     def test_effective_is_bound_to_authenticated_user(self):
