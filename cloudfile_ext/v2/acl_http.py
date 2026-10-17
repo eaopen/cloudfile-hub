@@ -88,6 +88,8 @@ def require_repo_manage(user, repo_id):
     """
     from seaserv import seafile_api
     from seahub.share.utils import is_repo_admin
+    if not getattr(user, 'is_active', False):
+        raise PermissionError('inactive native account')
     uuid(repo_id)
     repo = seafile_api.get_repo(repo_id)
     if repo is None or repo.is_virtual:
