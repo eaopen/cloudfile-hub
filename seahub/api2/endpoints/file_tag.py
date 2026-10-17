@@ -85,31 +85,21 @@ class RepoFileTagView(APIView):
     throttle_classes = (UserRateThrottle,)
 
     def delete(self, request, repo_id, file_tag_id):
-        """delete a tag from a file
-        """
-        # resource check
-        repo = seafile_api.get_repo(repo_id)
-        if not repo:
-            error_msg = 'Library %s not found.' % repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        file_tag = FileTags.objects.get_file_tag_by_id(file_tag_id)
-        if not file_tag:
-            error_msg = 'file_tag %s not found.' % file_tag_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        # permission check
-        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
         try:
+            binding = FileTags.objects.get_file_tag_by_id(file_tag_id)
+            if binding is None:
+                raise FileNotFoundError('missing binding')
+            repo_tag = require_repo_tag(repo_id, binding.repo_tag)
+            target = binding.file_uuid
+            if target.repo_id != repo_id:
+                raise FileNotFoundError('cross-repository tag binding')
+            path = posixpath.join(target.parent_path, target.filename)
+            authorize_tag_target(request.user, repo_id, path, is_dir=target.is_dir, write=True)
+            authorize_tag_label(request.user, repo_id, repo_tag.name)
             FileTags.objects.delete_file_tag(file_tag_id)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        return Response({"success": "true"}, status=status.HTTP_200_OK)
+            return Response({'success': 'true'}, status=status.HTTP_200_OK)
+        except Exception as error:
+            return _tag_error(error)
 
 
 # Deprecated
