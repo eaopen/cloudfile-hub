@@ -85,3 +85,33 @@ class CatalogSync(APIView):
         response = Response(result)
         response['Cache-Control'] = 'no-store'
         return response
+
+
+
+class StorageReconcile(APIView):
+    """Explicit admin-only mutation: idempotently register original Repo rows.
+
+    Discovery itself stays in the native AdminLibraries GET endpoint.
+    """
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+
+    def post(self, request):
+        from .native_discovery import reconcile_from_hub, inspect_from_hub
+        if not request.user.admin_permissions.can_manage_library():
+            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        ids = request.data.get('repo_ids', [])
+        if not isinstance(ids, list) or len(ids) > 5000 or any(not isinstance(x, str) for x in ids):
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid repo_ids list.')
+        if len(ids) != len(set(ids)):
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Duplicate repo_ids.')
+        try:
+            counts = reconcile_from_hub()
+            states = inspect_from_hub(ids) if ids else {}
+        except ValueError:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid Repo UUID.')
+        except Exception:
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Native library registration unavailable.')
+        response = Response({'registered': counts['registered'], 'statuses': states})
+        response['Cache-Control'] = 'no-store'
+        return response

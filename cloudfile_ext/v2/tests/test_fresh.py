@@ -14,6 +14,7 @@ from uuid import uuid4
 from cloudfile_ext.v2.errors import IdentityConflict, IdentityUnavailable
 from cloudfile_ext.v2.identity import NativeIdentity
 from cloudfile_ext.v2.memberships import GroupCatalog, Memberships
+from cloudfile_ext.v2.native_discovery import NativeLibraryDiscovery
 from cloudfile_ext.v2.schema import FreshSchema, SchemaError, TABLES, statements
 
 
@@ -269,3 +270,41 @@ class FreshDatabaseTest(unittest.TestCase):
         with self.assertRaises(IdentityUnavailable):
             projector.ensure('uid-1', self.username)
         self.assertEqual(self.query('SELECT is_staff FROM ' + self.names['account'] + '.GroupUser'), ((1,),))
+
+
+    def test_historical_native_repo_registration_is_idempotent_and_preserves_facts(self):
+        repo = str(uuid4())
+        self.query("INSERT INTO Repo(repo_id) VALUES(%s)", (repo,))
+        self.query("INSERT INTO RepoOwner(repo_id,owner_id) VALUES(%s,%s)", (repo, self.username))
+        self.query("INSERT INTO Branch(repo_id,name,commit_id) VALUES(%s,%s,%s)", (repo, "master", "f" * 40))
+        before = {table: self.query("SELECT * FROM " + table)
+                  for table in ("Repo", "RepoOwner", "Branch", "RepoStorageId")}
+        discovery = NativeLibraryDiscovery(self.connection)
+        self.assertEqual(discovery.inspect(repo)["status"], "NATIVE_UNREGISTERED")
+        self.assertEqual(discovery.reconcile(repo), {"NATIVE_REGISTERED": 1})
+        self.assertEqual(discovery.reconcile(repo), {"NATIVE_REGISTERED": 1})
+        self.schema.install()  # fresh schema recheck must not erase an adopted row
+        self.assertEqual(discovery.inspect(repo)["status"], "NATIVE_REGISTERED")
+        self.assertEqual(self.query("SELECT repo_key,state FROM cf_library_storage WHERE repo_id=%s", (repo,)),
+                         (("native-" + repo, "active"),))
+        self.assertEqual(before, {table: self.query("SELECT * FROM " + table) for table in before})
+
+    def test_historical_registration_refuses_missing_native_and_existing_metadata(self):
+        discovery = NativeLibraryDiscovery(self.connection)
+        missing = str(uuid4())
+        self.assertEqual(discovery.reconcile(missing), {"NATIVE_RESOURCE_MISSING": 1})
+        self.assertEqual(self.query("SELECT * FROM cf_library_storage"), ())
+        external = str(uuid4())
+        self.query("INSERT INTO Repo(repo_id) VALUES(%s)", (external,))
+        self.query("INSERT INTO RepoStorageId(repo_id,storage_id) VALUES(%s,%s)",
+                   (external, "external-legacy"))
+        self.assertEqual(discovery.reconcile(external),
+                         {"EXTERNAL_STORAGE_REQUIRES_REVIEW": 1})
+        conflict = str(uuid4())
+        self.query("INSERT INTO Repo(repo_id) VALUES(%s)", (conflict,))
+        self.query("INSERT INTO cf_library_storage(repo_key,repo_id,state) VALUES(%s,%s,%s)",
+                   ("kept-business-key", conflict, "active"))
+        self.assertEqual(discovery.reconcile(conflict),
+                         {"STORAGE_BINDING_CONFLICT": 1})
+        self.assertEqual(self.query("SELECT repo_key FROM cf_library_storage WHERE repo_id=%s", (conflict,)),
+                         (("kept-business-key",),))
