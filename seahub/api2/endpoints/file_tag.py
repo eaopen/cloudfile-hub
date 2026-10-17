@@ -1,4 +1,5 @@
 import os
+import posixpath
 import re
 import logging
 
@@ -20,8 +21,30 @@ from seahub.constants import PERMISSION_READ_WRITE
 from seahub.views import check_folder_permission
 
 from seaserv import seafile_api
+from cloudfile_ext.v2.tag_native import (authorize_tag_target, authorize_tag_label, require_repo_tag)
 
 logger = logging.getLogger(__name__)
+
+
+def _tag_error(error):
+    if isinstance(error, ValueError):
+        return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid tag request.')
+    if isinstance(error, PermissionError):
+        return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+    if isinstance(error, FileNotFoundError):
+        return api_error(status.HTTP_404_NOT_FOUND, 'Tag resource not found.')
+    logger.exception('Native CE tag request unavailable', exc_info=error)
+    return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Tag service unavailable.')
+
+
+def _tag_target_request(request, repo_id, *, write):
+    params = request.data if request.method == 'POST' else request.GET
+    path = params.get('file_path')
+    if not isinstance(path, str) or not path:
+        raise ValueError('missing file_path')
+    is_dir = to_python_boolean(params.get('is_dir', 'false'))
+    authorize_tag_target(request.user, repo_id, path, is_dir=is_dir, write=write)
+    return path, is_dir
 
 
 class RepoFileTagsView(APIView):
