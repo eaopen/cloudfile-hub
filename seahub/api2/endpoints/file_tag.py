@@ -189,12 +189,12 @@ class FileTagsView(APIView):
 
     @check_parameter
     def get(self, request, repo_id, parent_path, filename, is_dir):
-        tag_list = FileTag.objects.get_all_file_tag_by_path(
-                repo_id, parent_path,
-                filename, is_dir
-                )
-        tag_list = [tag.to_dict() for tag in tag_list]
-        return Response({"tags": tag_list}, status=status.HTTP_200_OK)
+        path = posixpath.join(parent_path, filename)
+        try:
+            return Response({'tags': read_resource_tags(repo_id, path, is_dir)},
+                            status=status.HTTP_200_OK)
+        except Exception as error:
+            return _tag_error(error)
 
     @check_parameter
     def put(self, request, repo_id, parent_path, filename, is_dir):
