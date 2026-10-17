@@ -81,6 +81,23 @@ class HTTPTests(TestCase):
             self.assertEqual(self.request(DirectoryRules, request, method='post').status_code, 400)
             self.assertEqual(rules.return_value.mutate.call_count, 1)
 
+    def test_publication_requires_both_hub_flag_and_native_seafile_conf(self):
+        import os
+        from pathlib import Path
+        from tempfile import TemporaryDirectory
+        from cloudfile_ext.v2.acl_http import publication_ready
+        with TemporaryDirectory() as folder, \
+             patch.dict(os.environ, {'SEAFILE_CENTRAL_CONF_DIR': folder}), \
+             patch('cloudfile_ext.v2.acl_http.settings') as settings:
+            conf = Path(folder) / 'seafile.conf'
+            conf.write_text('[cloudfile]\\nv2_acl_enabled=false\\n')
+            settings.CF_ACL_PUBLICATION_ENABLED = True
+            self.assertFalse(publication_ready())
+            conf.write_text('[cloudfile]\\nv2_acl_enabled=true\\n')
+            self.assertTrue(publication_ready())
+            settings.CF_ACL_PUBLICATION_ENABLED = False
+            self.assertFalse(publication_ready())
+
     def test_effective_is_bound_to_authenticated_user(self):
         with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
             authority.return_value.effective.return_value = Decision('rw', '/shared', True)
