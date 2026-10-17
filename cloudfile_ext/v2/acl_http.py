@@ -6,6 +6,7 @@ import time
 import jwt
 from django.conf import settings
 from rest_framework.permissions import IsAuthenticated, AllowAny
+from .permissions import SubjectReady
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from seahub.api2.authentication import TokenAuthentication, SessionAuthentication
@@ -53,7 +54,7 @@ def with_tags(repo_id, path, result):
 
 class AuthenticatedACL(APIView):
     authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAuthenticated,)
+    permission_classes = (IsAuthenticated, SubjectReady)
 
 
 class EffectivePermission(AuthenticatedACL):
