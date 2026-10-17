@@ -19,17 +19,21 @@ def text(value, maximum=225):
     return value
 
 
-class NativeIdentity:
-    def __init__(self, connection, *, account_schema, hub_schema, issuer, create_account=None):
+class NativeAccountBinding:
+    """Exact native account/UID binding facts, without external proof state.
+
+    Login binding and the subject projector share this check: an account is
+    usable only while its native Profile still carries the exact stable UID and
+    its native account is active. Splitting it keeps the projector independent
+    of which login protocol created the binding.
+    """
+
+    def __init__(self, connection, *, account_schema, hub_schema):
         if not connection.get_autocommit():
             raise ValueError('dedicated autocommit connection required')
         self.connection = connection
         self.accounts = identifier(account_schema) + '.EmailUser'
         self.profiles = identifier(hub_schema) + '.profile_profile'
-        self.social = identifier(hub_schema) + '.social_auth_usersocialauth'
-        self.issuer = text(issuer, 2048)
-        self.provider = 'cfv2_' + hashlib.sha256(issuer.encode()).hexdigest()[:26]
-        self.create_account = create_account
 
     def active(self, username, uid, *, locked=False):
         suffix = ' FOR UPDATE' if locked else ''
@@ -40,6 +44,15 @@ class NativeIdentity:
             cursor.execute('SELECT email,is_active FROM ' + self.accounts + ' WHERE email=%s' + suffix, (username,))
             if cursor.fetchall() != ((username, 1),):
                 raise IdentityUnavailable('native account inactive')
+
+
+class NativeIdentity(NativeAccountBinding):
+    def __init__(self, connection, *, account_schema, hub_schema, issuer, create_account=None):
+        super().__init__(connection, account_schema=account_schema, hub_schema=hub_schema)
+        self.social = identifier(hub_schema) + '.social_auth_usersocialauth'
+        self.issuer = text(issuer, 2048)
+        self.provider = 'cfv2_' + hashlib.sha256(issuer.encode()).hexdigest()[:26]
+        self.create_account = create_account
 
     def bind(self, *, subject, uid, login_name):
         # Both OAuth2 and OIDC callers must validate the external identity and
