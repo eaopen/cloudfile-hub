@@ -198,31 +198,13 @@ class FileTagsView(APIView):
 
     @check_parameter
     def put(self, request, repo_id, parent_path, filename, is_dir):
-        names = request.data.get('names', None)
-        if names is None:
-            error_msg = "Tag can not be empty"
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        res_tag_list = []
-        if not names.strip():
-            name_list = []
-        else:
-            name_list = [name.strip() for name in names.split(",")]
-            for name in name_list:
-                if not check_tagname(name):
-                    error_msg = _('Tag can only contain letters, numbers, dot, hyphen or underscore.')
-                    return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        FileTag.objects.delete_all_filetag_by_path(repo_id, parent_path,
-                                                  filename, is_dir)
-        for name in name_list:
-            tag_obj, created = FileTag.objects.get_or_create_file_tag(
-                    repo_id, parent_path, filename, is_dir, name,
-                    request.user.username
-            )
-            res_tag_list.append(tag_obj.to_dict())
-
-        return Response({"tags": res_tag_list}, status=status.HTTP_200_OK)
+        try:
+            values = user_tag_names(request.data.get('names'))
+            path = posixpath.join(parent_path, filename)
+            tags = write_resource_tags(repo_id, path, is_dir, values, replace=True)
+            return Response({'tags': tags}, status=status.HTTP_200_OK)
+        except Exception as error:
+            return _tag_error(error)
 
     @check_parameter
     def post(self, request, repo_id, parent_path, filename, is_dir):
