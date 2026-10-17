@@ -5,7 +5,7 @@ import time
 
 import jwt
 from django.conf import settings
-from rest_framework.permissions import IsAuthenticated, IsAdminUser, AllowAny
+from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from seahub.api2.authentication import TokenAuthentication, SessionAuthentication
@@ -13,7 +13,7 @@ from seahub.api2.utils import JWT_PRIVATE_KEY
 
 from .acl_policy import PolicyError, Rule
 from .acl_runtime import Authority, store
-from .acl_store import uuid
+from .acl_store import uuid, RevisionConflict
 from . import tag_display
 
 logger = logging.getLogger(__name__)
@@ -30,6 +30,8 @@ def failure(error):
         return response({'code': 'INVALID_ACL_REQUEST'}, 400)
     if isinstance(error, PermissionError):
         return response({'code': 'ACL_DENIED'}, 403)
+    if isinstance(error, RevisionConflict):
+        return response({'code': 'ACL_REVISION_CONFLICT'}, 409)
     return response({'code': 'ACL_UNAVAILABLE'}, 503)
 
 
@@ -77,29 +79,98 @@ class SharedDirectories(AuthenticatedACL):
             return failure(error)
 
 
+def require_repo_manage(user, repo_id):
+    """Use CE owner/native repo-admin facts, not global Django IsAdminUser.
+
+    A plain user with repo rw may edit files but cannot silently delegate ACL
+    authority to other people. Native repo admins also have rw file access.
+    System administrators may repair rules without implicit byte access.
+    """
+    from seaserv import seafile_api
+    from seahub.share.utils import is_repo_admin
+    if not getattr(user, 'is_active', False):
+        raise PermissionError('inactive native account')
+    uuid(repo_id)
+    repo = seafile_api.get_repo(repo_id)
+    if repo is None or repo.is_virtual:
+        raise PermissionError('repository unavailable for ACL management')
+    if getattr(user, 'is_staff', False):
+        admin = getattr(user, 'admin_permissions', None)
+        if admin is not None and admin.can_manage_library():
+            return
+    if not is_repo_admin(user.username, repo_id):
+        raise PermissionError('native repository administrator required')
+
+
+def publication_ready():
+    """Never enable mutations on a build with native file enforcement off.
+
+    Operations must explicitly opt in after C/Go + subject runtime acceptance.
+    Both native services share the reviewed seafile.conf at runtime.
+    """
+    import configparser
+    import os
+    from pathlib import Path
+    if getattr(settings, 'CF_ACL_PUBLICATION_ENABLED', False) is not True:
+        return False
+    conf_dir = os.environ.get('SEAFILE_CENTRAL_CONF_DIR')
+    if not conf_dir:
+        return False
+    parser = configparser.ConfigParser()
+    try:
+        config_path = Path(conf_dir) / 'seafile.conf'
+        if not config_path.is_file():
+            return False
+        parser.read(config_path)
+        return parser.getboolean('cloudfile', 'v2_acl_enabled', fallback=False)
+    except (OSError, ValueError, configparser.Error):
+        return False
+
+
 class DirectoryRules(AuthenticatedACL):
-    # Minimal native administrator maintenance read. rw never means manage.
-    permission_classes = (IsAdminUser,)
+    """CE repository owner/admin or system manager; no global IsAdminUser."""
 
     def get(self, request):
         try:
             args = request.query_params
             if set(args) != {'repo_id', 'path'} or any(len(args.getlist(k)) != 1 for k in args):
                 raise ValueError()
+            require_repo_manage(request.user, args['repo_id'])
             rows = store().list_path(args['repo_id'], args['path'], settings.CF_ACL_PROVIDER)
             return response({'data': [dict(**asdict(rule), revision=revision) for rule, revision in rows]})
         except Exception as error:
             return failure(error)
 
+    def _write(self, request, *, delete=False):
+        if not publication_ready():
+            return response({'code': 'ACL_PUBLICATION_BLOCKED'}, 503)
+        try:
+            data = request.data
+            required = {'repo_id', 'path', 'subject_type', 'namespace', 'external_id',
+                        'permission', 'inherit', 'share_mode', 'expected', 'revision'}
+            if not isinstance(data, dict) or set(data) != required:
+                raise ValueError()
+            require_repo_manage(request.user, data['repo_id'])
+            if not isinstance(data['inherit'], bool) or not isinstance(data['share_mode'], bool):
+                raise ValueError()
+            provider = settings.CF_ACL_PROVIDER
+            rule = Rule(data['repo_id'], data['path'], provider, data['subject_type'],
+                        data['namespace'], data['external_id'], data['permission'],
+                        data['inherit'], data['share_mode'])
+            committed = store().mutate(rule, expected=data['expected'],
+                                       revision=data['revision'], delete=delete)
+            return response({'revision': committed, 'repo_id': rule.repo_id, 'path': rule.path})
+        except Exception as error:
+            return failure(error)
+
     def post(self, request):
-        # No settings flag can accidentally certify full C/Go enforcement.
-        # The internal CAS writer is ready for the sole integrator, but enabling
-        # public writes requires scoped machine credentials + runtime acceptance.
-        return response({'code': 'ACL_PUBLICATION_BLOCKED'}, 503)
+        return self._write(request)
 
-    put = post
-    delete = post
+    def put(self, request):
+        return self._write(request)
 
+    def delete(self, request):
+        return self._write(request, delete=True)
 
 class NativeACLCheck(APIView):
     """Existing native internal JWT, trusted username, bounded exact paths.
