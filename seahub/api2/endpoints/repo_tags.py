@@ -207,14 +207,16 @@ class RepoTagView(APIView):
 
         # resource check
         repo_tag = RepoTags.objects.get_repo_tag_by_id(repo_tag_id)
-        if not repo_tag:
-            error_msg = 'repo_tag not found.'
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
+        if not repo_tag or repo_tag.repo_id != repo_id:
+            return api_error(status.HTTP_404_NOT_FOUND, 'repo_tag not found.')
 
-        # permission check
+        # Shared library-wide dictionary changes require repo administration.
+        try:
+            require_repo_manage(request.user, repo_id)
+        except Exception:
+            return api_error(status.HTTP_403_FORBIDDEN, 'Library tag manager required.')
         if not _native_tag_root_permission(request, repo_id, write=True):
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         try:
             repo_tag.name = tag_name
@@ -232,14 +234,16 @@ class RepoTagView(APIView):
         """
         # resource check
         repo_tag = RepoTags.objects.get_repo_tag_by_id(repo_tag_id)
-        if not repo_tag:
-            error_msg = 'repo_tag not found.'
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
+        if not repo_tag or repo_tag.repo_id != repo_id:
+            return api_error(status.HTTP_404_NOT_FOUND, 'repo_tag not found.')
 
-        # permission check
+        # Shared library-wide dictionary changes require repo administration.
+        try:
+            require_repo_manage(request.user, repo_id)
+        except Exception:
+            return api_error(status.HTTP_403_FORBIDDEN, 'Library tag manager required.')
         if not _native_tag_root_permission(request, repo_id, write=True):
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
 
         try:
             RepoTags.objects.delete_repo_tag(repo_tag_id)
