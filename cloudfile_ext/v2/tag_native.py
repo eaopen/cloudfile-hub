@@ -48,7 +48,7 @@ def user_tag_names(names):
         raise ValueError('invalid user tag names')
     values = [part.strip() for part in names.split(',')] if names.strip() else []
     if len(values) > 128 or any(
-            not value or len(value) > 255 or not re.fullmatch(r'[.\\w-]+', value, re.U)
+            not value or len(value) > 255 or not re.fullmatch(r'[.\w-]+', value, re.U)
             for value in values):
         raise ValueError('invalid native user tag names')
     for value in values:
