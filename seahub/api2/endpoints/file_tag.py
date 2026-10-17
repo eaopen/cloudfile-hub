@@ -62,53 +62,20 @@ class RepoFileTagsView(APIView):
             return _tag_error(error)
 
     def post(self, request, repo_id):
-        """add a tag for a file.
-        """
-        # argument check
-        file_path = request.data.get('file_path')
-        if not file_path:
-            error_msg = 'file_path invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-        file_path = normalize_file_path(file_path)
-        repo_tag_id = request.data.get('repo_tag_id')
-
-        if not repo_tag_id:
-            error_msg = 'repo_tag_id invalid.'
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        # resource check
-        repo = seafile_api.get_repo(repo_id)
-        if not repo:
-            error_msg = 'Library %s not found.' % repo_id
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        file_id = seafile_api.get_file_id_by_path(repo_id, file_path)
-        if not file_id:
-            error_msg = 'File not found.'
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        repo_tag = RepoTags.objects.get_repo_tag_by_id(repo_tag_id)
-        if not repo_tag:
-            error_msg = 'repo_tag not found.'
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
-        file_tag = FileTags.objects.get_file_tag(repo_id, repo_tag_id, file_path)
-        if file_tag:
-            error_msg = 'file tag %s already exist.' % repo_tag_id
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-
-        # permission check
-        if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
-            error_msg = 'Permission denied.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
         try:
-            file_tag = FileTags.objects.add_file_tag(repo_id, repo_tag_id, file_path)
-        except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
-
-        return Response({"file_tag": file_tag.to_dict()}, status=status.HTTP_201_CREATED)
+            file_path, is_dir = _tag_target_request(request, repo_id, write=True)
+            repo_tag_id = request.data.get('repo_tag_id')
+            if not repo_tag_id:
+                raise ValueError('missing repo_tag_id')
+            repo_tag = require_repo_tag(repo_id, RepoTags.objects.get_repo_tag_by_id(repo_tag_id))
+            authorize_tag_label(request.user, repo_id, repo_tag.name)
+            existing = FileTags.objects.get_file_tag(repo_id, repo_tag_id, file_path, is_dir=is_dir)
+            if existing:
+                return api_error(status.HTTP_400_BAD_REQUEST, 'File tag already exists.')
+            file_tag = FileTags.objects.add_file_tag(repo_id, repo_tag_id, file_path, is_dir=is_dir)
+            return Response({'file_tag': file_tag.to_dict()}, status=status.HTTP_201_CREATED)
+        except Exception as error:
+            return _tag_error(error)
 
 
 class RepoFileTagView(APIView):
