@@ -11,7 +11,7 @@ from seahub.api2.authentication import TokenAuthentication, SessionAuthenticatio
 from seahub.api2.throttling import UserRateThrottle
 from seahub.utils.timeutils import timestamp_to_isoformat_timestr
 
-from .client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, normalize_path
+from .client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, normalize_path, search_filters, native_extension
 from .paging import page
 from .runtime import AccessDenied, NativeAuthority
 
@@ -36,7 +36,7 @@ class SearchQuery(APIView):
     def get(self, request):
         try:
             args = request.query_params
-            if set(args) - {'repo_id', 'q', 'path', 'limit', 'cursor'} or any(len(args.getlist(k)) != 1 for k in args):
+            if set(args) - {'repo_id', 'q', 'path', 'limit', 'cursor', 'kind', 'extension', 'tag'} or any(len(args.getlist(k)) != 1 for k in args):
                 raise ValueError()
             rid, query = args.get('repo_id'), args.get('q')
             if str(UUID(rid)) != rid or not isinstance(query, str) or not query.strip() or len(query) > 512:
@@ -45,9 +45,15 @@ class SearchQuery(APIView):
             root, limit = normalize_path(args.get('path', '/')), int(args.get('limit', '50'))
             if not 1 <= limit <= 100:
                 raise ValueError()
+            kind, extension, tag = search_filters(kind=args.get('kind'),
+                                                  extension=args.get('extension'),
+                                                  tag=args.get('tag'))
             authority = NativeAuthority(request.user.username, rid, root)
             binding = dict(user=request.user.username, repo=rid, q=query, root=root,
                            limit=limit, version=authority.version)
+            filters = dict(kind=kind, extension=extension, tag=tag)
+            if any(value is not None for value in filters.values()):
+                binding['filters'] = filters
             offset = 0
             cursor = args.get('cursor')
             if cursor:
@@ -58,9 +64,34 @@ class SearchQuery(APIView):
                     raise ValueError()
                 offset = saved['offset']
             client = configured_client()
+            def fetch_candidates(start, count):
+                if 'filters' not in binding:
+                    return client.page(rid, root, query, start, count)
+                return client.page(rid, root, query, start, count, **filters)
+
+            def resolve_authorized(references):
+                # Keep the existing fail-closed cf_dir_acl subtree policy in
+                # NativeAuthority. These filters only NARROW its results.
+                current = authority.resolve(references)
+                if 'filters' not in binding:
+                    return current
+                filtered = []
+                for item in current:
+                    if item is None:
+                        filtered.append(None)
+                    elif (kind is not None and item['kind'] != kind) or (
+                            extension is not None and
+                            (item['kind'] != 'file' or
+                             native_extension(item['path']) != extension)
+                    ) or (tag is not None and tag not in item['tags']):
+                        filtered.append(None)
+                    else:
+                        filtered.append(item)
+                return filtered
+
             result = page(limit=limit, offset=offset,
-                          fetch_candidates=lambda start, count: client.page(rid, root, query, start, count),
-                          resolve_authorized=authority.resolve)
+                          fetch_candidates=fetch_candidates,
+                          resolve_authorized=resolve_authorized)
             data = []
             for item in result['items']:
                 ref = {k: item[k] for k in ('repo_id', 'path', 'kind')}
