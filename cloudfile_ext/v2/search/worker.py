@@ -43,23 +43,20 @@ def confirm(client, task):
     raise SearchUnavailable('index task timed out')
 
 
-def tag_snapshot(repo_id):
-    from seahub.file_tags.models import FileTags
-    from seahub.tags.models import FileTag
-    values = {}
-    for model, relation, label in ((FileTags, 'file_uuid', 'repo_tag__name'),
-                                   (FileTag, 'uuid', 'tag__name')):
-        fields = (relation + '__parent_path', relation + '__filename', relation + '__is_dir', label)
-        rows = model.objects.filter(**{relation + '__repo_id': repo_id}).values_list(*fields)[:100001]
-        for count, (parent, name, is_dir, tag) in enumerate(rows):
-            if count >= 100000:
-                raise SearchUnavailable('tag scan budget exceeded')
-            path = normalize_path(posixpath.join(parent, name))
-            value = values.setdefault(path, ['dir' if is_dir else 'file', []])
-            value[1].append(tag)
-    for value in values.values():
-        value[1] = sorted(set(value[1]))
-    return values
+TAG_SWEEP_ITEMS = 200
+
+
+def tag_labels(repo_id, references):
+    """Read current CE labels for exactly the requested visible file/dir refs."""
+    if not references:
+        return {}
+    from cloudfile_ext.v2.tag_reads import read
+    try:
+        records = read(repo_id, references)
+        return {path: sorted({tag['tag_name'] for tag in records[(path, kind)]})
+                for path, kind in references}
+    except Exception as error:
+        raise SearchUnavailable('native tag read unavailable') from error
 
 
 class Indexer:
