@@ -5,8 +5,8 @@ from unittest.mock import Mock, patch
 
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from cloudfile_ext.v2.tag_native import user_tag_names
-from seahub.api2.endpoints.file_tag import RepoFileTagsView, RepoFileTagView, FileTagsView
+from cloudfile_ext.v2.tag_native import user_tag_names, authorize_tag_target, read_resource_tags
+from seahub.api2.endpoints.file_tag import RepoFileTagsView, RepoFileTagView, FileTagsView, FileTagView
 
 
 RID = '00000000-0000-4000-8000-000000000001'
@@ -18,8 +18,9 @@ def request(view, method, path, data=None, **route):
     raw = (factory.get(path, data or {}) if method == 'GET' else
            factory.post(path, data or {}, format='json') if method == 'POST' else
            factory.delete(path, data or {}, format='json'))
-    force_authenticate(raw, SimpleNamespace(username='current', is_authenticated=True, is_active=True))
-    return view.as_view()(raw, **route)
+    force_authenticate(raw, SimpleNamespace(id='current', username='current', is_authenticated=True, is_active=True))
+    with patch.object(view, "throttle_classes", ()):
+        return view.as_view()(raw, **route)
 
 
 class NativeTagWriteTests(TestCase):
@@ -67,3 +68,60 @@ class NativeTagWriteTests(TestCase):
         self.assertEqual(response.status_code, 200)
         write.assert_called_once_with(RID, '/docs/a.txt', False, ['设计'])
         legacy.assert_not_called()
+
+
+    def test_directory_only_share_uses_exact_target_acl_not_repo_root(self):
+        acl = Mock()
+        acl.effective.side_effect = lambda repo, path, kind: SimpleNamespace(
+            can_read=path == '/shared/design', can_write=path == '/shared/design')
+        acl.api.get_dirent_by_path.return_value = SimpleNamespace(mode=0o040755)
+        with patch('cloudfile_ext.v2.tag_native.Authority', return_value=acl):
+            user = SimpleNamespace(username='shared-user')
+            self.assertEqual(authorize_tag_target(user, RID, '/shared/design', True, True),
+                             '/shared/design')
+            with self.assertRaises(PermissionError):
+                authorize_tag_target(user, RID, '/other/private', True, False)
+        acl.effective.assert_any_call(RID, '/shared/design', 'dir')
+
+    def test_reserved_system_binding_requires_repo_manager(self):
+        target = SimpleNamespace(repo_id=RID, name='SYS_PROJECT_A')
+        with patch('seahub.api2.endpoints.file_tag._tag_target_request',
+                   return_value=('/docs/a.txt', False)), \
+             patch('seahub.api2.endpoints.file_tag.RepoTags.objects.get_repo_tag_by_id',
+                   return_value=target), \
+             patch('cloudfile_ext.v2.tag_native.require_repo_manage',
+                   side_effect=PermissionError('not manager')), \
+             patch('seahub.api2.endpoints.file_tag.FileTags.objects.add_file_tag') as bind:
+            response = request(RepoFileTagsView, 'POST', '/api/v2.1/repos/'+RID+'/file-tags/',
+                               {'file_path':'/docs/a.txt', 'repo_tag_id': 123}, repo_id=RID)
+        self.assertEqual(response.status_code, 403)
+        bind.assert_not_called()
+
+
+    def test_legacy_rows_remain_read_only_alongside_native_bindings(self):
+        values = [
+            {'source': 'repo', 'repo_tag_id': 7, 'tag_name': 'review'},
+            {'source': 'legacy', 'legacy_tag_id': 8, 'tag_name': '历史自由标签'},
+        ]
+        with patch('cloudfile_ext.v2.tag_reads.read',
+                   return_value={('/docs/a.txt', 'file'): values}):
+            result = read_resource_tags(RID, '/docs/a.txt', False)
+        self.assertEqual([(tag['source'], tag['read_only']) for tag in result],
+                         [('repo', False), ('legacy', True)])
+        self.assertEqual([tag['id'] for tag in result], [7, 8])
+
+    def test_legacy_only_tag_cannot_be_deleted_through_deprecated_endpoint(self):
+        with patch('seahub.api2.endpoints.file_tag.seafile_api.get_repo',
+                   return_value=SimpleNamespace(is_virtual=False)), \
+             patch('seahub.api2.endpoints.file_tag.seafile_api.get_file_id_by_path',
+                   return_value='native-id'), \
+             patch('seahub.api2.endpoints.file_tag.authorize_tag_target'), \
+             patch('seahub.api2.endpoints.file_tag.read_resource_tags',
+                   return_value=[{'name': 'old', 'source': 'legacy'}]), \
+             patch('seahub.api2.endpoints.file_tag.delete_resource_user_tag') as delete:
+            response = request(FileTagView, 'DELETE',
+                               '/api/v2.1/repos/'+RID+'/tags/old/',
+                               {'path': '/docs/a.txt', 'is_dir': 'false'},
+                               repo_id=RID, name='old')
+        self.assertEqual(response.status_code, 409)
+        delete.assert_not_called()
