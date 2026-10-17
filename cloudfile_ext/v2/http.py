@@ -57,3 +57,25 @@ class GroupResolve(APIView):
         if len(groups) != 1:
             return api_error(status.HTTP_409_CONFLICT, 'External group mapping is ambiguous.')
         return Response({'group_id': groups[0][0]})
+
+
+class CatalogSync(APIView):
+    """Manual and Etech PowerJob trigger: reconcile entity catalog, not members."""
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+
+    def post(self, request):
+        if request.data:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'No directory snapshot in request.')
+        if not request.user.admin_permissions.can_manage_group():
+            return api_error(status.HTTP_403_FORBIDDEN, 'Native group management denied.')
+        from django.conf import settings
+        from .catalog_sync import run
+        try:
+            result = run(settings=settings, actor=request.user.username)
+        except Exception:
+            # Do not leak signed credentials, Directory response or SQL details.
+            return Response({'status': 'ERROR', 'code': 'DIRECTORY_SYNC_UNAVAILABLE'}, status=503)
+        response = Response(result)
+        response['Cache-Control'] = 'no-store'
+        return response
