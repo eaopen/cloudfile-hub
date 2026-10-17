@@ -19,7 +19,7 @@ class HTTPTests(TestCase):
         factory = APIRequestFactory()
         request = getattr(factory, method)('/acl/', params or {}, format='json')
         if authenticated:
-            force_authenticate(request, SimpleNamespace(username='native', is_authenticated=True, is_staff=staff))
+            force_authenticate(request, SimpleNamespace(username='native', is_authenticated=True, is_staff=staff, is_active=True))
         return view.as_view()(request)
 
     def test_public_mutation_remains_blocked_until_native_acl_is_enabled(self):
@@ -47,7 +47,7 @@ class HTTPTests(TestCase):
     def test_native_repo_admin_marker_is_required_for_acl_delegation(self):
         from cloudfile_ext.v2.acl_http import require_repo_manage
         from seaserv import seafile_api
-        user = SimpleNamespace(username='native', is_staff=False)
+        user = SimpleNamespace(username='native', is_staff=False, is_active=True)
         with patch.object(seafile_api, 'get_repo', return_value=SimpleNamespace(is_virtual=False)), \
              patch.object(seafile_api, 'check_permission', return_value='rw'), \
              patch('seahub.share.utils.is_repo_admin', return_value=False) as native:
@@ -55,7 +55,7 @@ class HTTPTests(TestCase):
                 require_repo_manage(user, RID)  # Native ordinary rw is not administrative.
             native.return_value = True
             require_repo_manage(user, RID)
-        staff = SimpleNamespace(username='operator', is_staff=True,
+        staff = SimpleNamespace(username='operator', is_staff=True, is_active=True,
                                 admin_permissions=SimpleNamespace(can_manage_library=lambda: True))
         with patch.object(seafile_api, 'get_repo', return_value=SimpleNamespace(is_virtual=False)), \
              patch('seahub.share.utils.is_repo_admin') as native:
