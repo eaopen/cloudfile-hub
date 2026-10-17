@@ -30,6 +30,21 @@ class EtechIdentityLookupTests(TestCase):
     def test_non_admin_cannot_resolve_other_users(self):
         self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'uid'}, staff=False).status_code, 403)
 
+    def test_trusted_uid_provisioning_requires_directory_proof(self):
+        payload = {'external_user_id':'uid-7','login_id':'uid-7',
+                   'identity_source':'etech-directory','login_email':'e007@auth.local'}
+        with patch('cloudfile_ext.v2.http.Profile.objects.get_username_by_login_id',return_value=None), \
+             patch('cloudfile_ext.v2.provision_user.ensure_user',
+                   return_value={'external_user_id':'uid-7','login_id':'uid-7',
+                                 'email':'opaque@auth.local','is_active':True}) as ensure:
+            response=self.request(payload)
+            self.assertEqual(response.status_code,200)
+            self.assertEqual(response.data['email'],'opaque@auth.local')
+            ensure.assert_called_once()
+        with patch('cloudfile_ext.v2.http.Profile.objects.get_username_by_login_id',return_value=None), \
+             patch('cloudfile_ext.v2.provision_user.ensure_user',side_effect=ValueError('source unavailable')):
+            self.assertEqual(self.request(payload).status_code,503)
+
     def test_unknown_uid_does_not_provision_user(self):
         with patch('cloudfile_ext.v2.http.Profile.objects.get_username_by_login_id', return_value=None), \
                 patch('cloudfile_ext.v2.http.User.objects.get') as user:
