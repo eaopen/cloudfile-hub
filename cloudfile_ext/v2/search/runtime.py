@@ -9,10 +9,7 @@ import posixpath
 import stat
 
 from django.db import connection
-from django.db.models import Q
 from seaserv import ccnet_api, seafile_api
-from seahub.file_tags.models import FileTags
-from seahub.tags.models import FileTag, FileUUIDMap
 from seahub.utils.db_api import SeafileDB
 from seahub.utils.ccnet_db import get_ccnet_db_name
 
@@ -24,22 +21,11 @@ class AccessDenied(Exception):
 
 
 def native_tags(repo_id, references):
-    """Read only the requested native Tag mappings; never create UUIDs on search."""
-    result = {r['path']: [] for r in references}
-    if not references:
-        return result
-    selector = Q(pk__in=[])
-    for ref in references:
-        parent, name = posixpath.split(ref['path'])
-        selector |= Q(repo_id_parent_path_md5=FileUUIDMap.md5_repo_id_parent_path(repo_id, parent),
-                      filename=name, is_dir=ref['kind'] == 'dir')
-    maps = list(FileUUIDMap.objects.filter(selector, repo_id=repo_id))
-    paths = {m.uuid: posixpath.join(m.parent_path, m.filename) for m in maps}
-    for uuid, label in FileTags.objects.filter(file_uuid_id__in=paths, repo_tag__repo_id=repo_id).values_list('file_uuid_id', 'repo_tag__name'):
-        result[paths[uuid]].append(label)
-    for uuid, label in FileTag.objects.filter(uuid_id__in=paths).values_list('uuid_id', 'tag__name'):
-        result[paths[uuid]].append(label)
-    return {path: sorted(set(labels)) for path, labels in result.items()}
+    """Current native tag names for these authorized search hits, not stale index tags."""
+    from cloudfile_ext.v2.tag_reads import read
+    tags = read(repo_id, [(ref['path'], ref['kind']) for ref in references])
+    return {path: sorted({tag['tag_name'] for tag in tags[(path, kind)]})
+            for path, kind in tags}
 
 
 class NativeAuthority:

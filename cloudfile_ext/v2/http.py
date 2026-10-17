@@ -1,4 +1,4 @@
-"""Existing EAP identity lookup backed only by native CE14 Profile/User facts."""
+"""EAP identity preparation backed by trusted Directory and native CE facts."""
 from rest_framework import status
 from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
@@ -15,14 +15,26 @@ class IdentityResolve(APIView):
     permission_classes = (IsAdminUser,)
 
     def post(self, request):
-        # Read-only UID lookup uses native staff authentication; it does not manage users.
+        # Native staff authentication authorizes lookup; Directory proves new UIDs.
         uid = request.data.get('external_user_id')
         if (not isinstance(uid, str) or not uid or uid != uid.strip() or len(uid) > 225
                 or request.data.get('login_id') != uid):
             return api_error(status.HTTP_400_BAD_REQUEST, 'Stable UID required.')
         username = Profile.objects.get_username_by_login_id(uid)
         if username is None:
-            return api_error(status.HTTP_404_NOT_FOUND, 'User must sign in through SSO first.')
+            # A staff request is not identity proof: independently read the
+            # scoped Etech Directory before creating any native account.
+            from .etech_directory import prepare_user
+            from .errors import IdentityConflict, IdentityUnavailable
+            try:
+                username = prepare_user(uid)
+            except IdentityConflict:
+                return api_error(status.HTTP_409_CONFLICT, 'Native UID binding conflict.')
+            except Exception:
+                return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Trusted user preparation unavailable; sign in through SSO or restore Directory.')
+        profile = Profile.objects.get_profile_by_user(username)
+        if profile is None or profile.login_id != uid:
+            return api_error(status.HTTP_409_CONFLICT, 'Native UID binding conflict.')
         try:
             user = User.objects.get(email=username)
         except User.DoesNotExist:
@@ -32,151 +44,74 @@ class IdentityResolve(APIView):
 
 
 class GroupResolve(APIView):
-    """Resolve an existing Etech entity to its native Group, without provisioning."""
+    """Prepare an exact trusted Etech entity as a native CE Group."""
     authentication_classes = (TokenAuthentication, SessionAuthentication)
     permission_classes = (IsAdminUser,)
 
     def post(self, request):
-        from django.db import connection
-        from seahub.utils.db_api import SeafileDB
         external = request.data.get('external_group_id')
         if (not isinstance(external, str) or not external or external != external.strip()
                 or external == 'role:' or len(external) > 225):
             return api_error(status.HTTP_400_BAD_REQUEST, 'External group ID required.')
-        role = external.startswith('role:')
-        external = external[5:] if role else external
-        kinds = ('group', 'role') if role else ('dept', 'org')
-        schema = connection.ops.quote_name(SeafileDB().db_name)
-        with connection.cursor() as cursor:
-            cursor.execute('SELECT DISTINCT group_id FROM ' + schema + '.cf_sso_group_map '
-                           'WHERE provider=%s AND subject_type IN (%s,%s) AND external_id=%s',
-                           ('etech', *kinds, external))
-            groups = cursor.fetchall()
-        if not groups:
-            return api_error(status.HTTP_404_NOT_FOUND, 'External group is not mapped.')
-        if len(groups) != 1:
-            return api_error(status.HTTP_409_CONFLICT, 'External group mapping is ambiguous.')
-        return Response({'group_id': groups[0][0]})
-
-
-class NativeLibraries(APIView):
-    """Read-only inventory of pre-V2 native repositories, for Etech review.
-
-    Only rows explicitly reconciled as native are returned. Newly-created
-    CloudFile V2 routed repositories are never candidates for Etech adoption.
-    """
-    authentication_classes = (TokenAuthentication, SessionAuthentication)
-    permission_classes = (IsAdminUser,)
-
-    def get(self, request):
-        from django.db import connection
-        from seahub.utils.db_api import SeafileDB
-        from seaserv import seafile_api
-        if not request.user.admin_permissions.can_manage_library():
-            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        from .etech_directory import prepare_group, lookup_group
+        from .errors import IdentityConflict
         try:
-            page = int(request.GET.get('page', '1'))
-            limit = int(request.GET.get('per_page', '100'))
-        except (TypeError, ValueError):
-            return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid pagination.')
-        if not (1 <= page <= 200 and 1 <= limit <= 100):
-            return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid pagination.')
-        schema = connection.ops.quote_name(SeafileDB().db_name)
-        # Strict key prefix, state and native Repo binding. No record is
-        # created or repaired by an HTTP read; the installer reconciles first.
-        with connection.cursor() as cursor:
-            cursor.execute('SELECT c.repo_id FROM ' + schema + '.cf_library_storage c '
-                           'INNER JOIN ' + schema + '.Repo r ON r.repo_id=c.repo_id '
-                           'LEFT JOIN ' + schema + '.RepoStorageId s ON s.repo_id=c.repo_id '
-                           'LEFT JOIN ' + schema + '.VirtualRepo v ON v.repo_id=c.repo_id '
-                           "WHERE c.repo_key=CONCAT('native-',c.repo_id) AND c.state='active' "
-                           'AND s.repo_id IS NULL AND v.repo_id IS NULL '
-                           'ORDER BY c.repo_id LIMIT %s OFFSET %s',
-                           (limit + 1, (page - 1) * limit))
-            ids = [row[0] for row in cursor.fetchall()]
-        result = []
-        for repo_id in ids[:limit]:
-            repo = seafile_api.get_repo(repo_id)
-            if repo is None or not repo.name:
-                # Present but unreadable native repo needs separate recovery;
-                # do not create an Etech business row for a broken resource.
-                continue
-            result.append({'id': repo_id, 'name': repo.name})
-        return Response({'repos': result, 'page_info': {
-            'current_page': page, 'has_next_page': len(ids) > limit}})
+            # Catalog verifies type/namespace/exact ID and native flat Group;
+            # an old mapping or equal display name is never identity proof.
+            existing = lookup_group(external)
+            return Response({'group_id': existing if existing is not None else prepare_group(external)})
+        except IdentityConflict:
+            return api_error(status.HTTP_409_CONFLICT, 'Native group binding conflict.')
+        except Exception:
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Trusted group preparation unavailable.')
 
-class StorageLibraries(APIView):
-    """Administrative storage inventory and individual UUID diagnosis.
 
-    Read-only: callers cannot create or reactivate original Seafile resources.
+class CatalogSync(APIView):
+    """Etech PowerJob trigger; CloudFile reads only trusted entity catalog."""
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+
+    def post(self, request):
+        if request.data:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Catalog trigger accepts no user-supplied snapshot.')
+        if not request.user.admin_permissions.can_manage_group():
+            return api_error(status.HTTP_403_FORBIDDEN, 'Native group management denied.')
+        from .etech_directory import sync_entity_catalog
+        try:
+            result = sync_entity_catalog()
+        except Exception:
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
+                             'Trusted directory catalog reconciliation unavailable.')
+        response = Response(result)
+        response['Cache-Control'] = 'no-store'
+        return response
+
+
+
+class StorageReconcile(APIView):
+    """Explicit admin-only mutation: idempotently register original Repo rows.
+
+    Discovery itself stays in the native AdminLibraries GET endpoint.
     """
     authentication_classes = (TokenAuthentication, SessionAuthentication)
     permission_classes = (IsAdminUser,)
 
-    def get(self, request):
-        import re
-        from django.db import connection
-        from seaserv import seafile_api
-        from seahub.utils.db_api import SeafileDB
-        from .native_discovery import storage_catalog_status
-
+    def post(self, request):
+        from .native_discovery import reconcile_from_hub, inspect_from_hub
         if not request.user.admin_permissions.can_manage_library():
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
-        schema = connection.ops.quote_name(SeafileDB().db_name)
-        requested = request.GET.get('repo_id')
-        if requested and not re.fullmatch(
-                r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', requested):
+        ids = request.data.get('repo_ids', [])
+        if not isinstance(ids, list) or len(ids) > 5000 or any(not isinstance(x, str) for x in ids):
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid repo_ids list.')
+        if len(ids) != len(set(ids)):
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Duplicate repo_ids.')
+        try:
+            counts = reconcile_from_hub()
+            states = inspect_from_hub(ids) if ids else {}
+        except ValueError:
             return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid Repo UUID.')
-        if requested:
-            sql = ('SELECT i.repo_id,r.repo_id,c.repo_key,c.state,s.storage_id,t.repo_id,g.repo_id,v.repo_id '
-                   'FROM (SELECT %s AS repo_id) i '
-                   'LEFT JOIN ' + schema + '.Repo r ON r.repo_id=i.repo_id '
-                   'LEFT JOIN ' + schema + '.cf_library_storage c ON c.repo_id=i.repo_id '
-                   'LEFT JOIN ' + schema + '.RepoStorageId s ON s.repo_id=i.repo_id '
-                   'LEFT JOIN ' + schema + '.RepoTrash t ON t.repo_id=i.repo_id '
-                   'LEFT JOIN ' + schema + '.GarbageRepos g ON g.repo_id=i.repo_id '
-                   'LEFT JOIN ' + schema + '.VirtualRepo v ON v.repo_id=i.repo_id')
-            params = (requested,)
-            page = 1
-            per_page = 1
-        else:
-            try:
-                page = int(request.GET.get('page', '1'))
-                per_page = int(request.GET.get('per_page', '100'))
-            except (ValueError, TypeError):
-                return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid pagination.')
-            if not (1 <= page <= 200 and 1 <= per_page <= 100):
-                return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid pagination.')
-            sql = ('SELECT c.repo_id,r.repo_id,c.repo_key,c.state,s.storage_id,t.repo_id,g.repo_id,v.repo_id '
-                   'FROM ' + schema + '.cf_library_storage c '
-                   'LEFT JOIN ' + schema + '.Repo r ON r.repo_id=c.repo_id '
-                   'LEFT JOIN ' + schema + '.RepoStorageId s ON s.repo_id=c.repo_id '
-                   'LEFT JOIN ' + schema + '.RepoTrash t ON t.repo_id=c.repo_id '
-                   'LEFT JOIN ' + schema + '.GarbageRepos g ON g.repo_id=c.repo_id '
-                   'LEFT JOIN ' + schema + '.VirtualRepo v ON v.repo_id=c.repo_id '
-                   'ORDER BY c.repo_id LIMIT %s OFFSET %s')
-            params = (per_page + 1, (page - 1) * per_page)
-        with connection.cursor() as cursor:
-            cursor.execute(sql, params)
-            records = cursor.fetchall()
-        has_next = not requested and len(records) > per_page
-        result = []
-        for repo_id, existing, key, state, route, trashed, garbage, virtual in records[:per_page]:
-            repo = seafile_api.get_repo(repo_id) if existing is not None else None
-            readable = repo is not None and bool(getattr(repo, 'name', None))
-            code = storage_catalog_status(repo_id, existing is not None,
-                                          key, state, route, readable,
-                                          in_trash=trashed is not None,
-                                          in_gc=garbage is not None,
-                                          virtual=virtual is not None)
-            result.append({
-                'repoId': repo_id,
-                'name': repo.name if readable else '',
-                'status': code,
-                'state': state or '',
-                'source': 'native' if key == 'native-' + repo_id else 'v2',
-                'registered': key is not None,
-                'repoExists': existing is not None,
-            })
-        return Response({'repos': result, 'page_info': {
-            'current_page': page, 'has_next_page': has_next}})
+        except Exception:
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Native library registration unavailable.')
+        response = Response({'registered': counts['registered'], 'statuses': states})
+        response['Cache-Control'] = 'no-store'
+        return response

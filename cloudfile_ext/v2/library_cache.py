@@ -1,7 +1,7 @@
 """Bounded per-library snapshots of sparse facts in Seahub's Django cache.
 
-Directory rules and tag bindings are tiny next to millions of library objects,
-so one read serves every user and page of a library for at most the TTL.
+ACL rules are sparse relative to library contents, so one read serves every
+user and path for at most the TTL. Tags are deliberately NOT cached here.
 A committed write switches the library generation: readers that started
 earlier can only refill the abandoned namespace. Cache failure recomputes;
 read failure propagates and is never cached.

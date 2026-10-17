@@ -12,7 +12,7 @@ not alter policy.
 - Without library eligibility, a matching positive r/rw row **and** `share_mode=1`
   supplies eligibility at that directory. `qualified_root` / `root_path` is that
   directory; ancestors and siblings are inaccessible. Inheritance controls
-  descendants; none/invisible still deny. An ordinary positive row without
+  descendants; the only explicit deny value is `invisible` (hidden and unreadable). An ordinary positive row without
   sharing does not create library eligibility.
 - This is a directory-backed virtual **view**, not a CE `VirtualRepo`, new library,
   object copy, permission copy, or whole-library grant.
@@ -33,17 +33,38 @@ The internal writer uses the natural row key
 `expected=None` creates; otherwise it compares the current revision. A fresh UUID
 `revision` is the retry key: the same row and revision replay successfully;
 conflicting content or a stale expected revision fails. Deletes require the
-existing revision. Each transaction locks native `Branch(master)` **before** the
-ACL row. Native final commit takes the same Branch lock before consulting Hub.
+existing revision. Each writer first acquires the library transfer fence
+`cfv2:t:` + the first 56 hex characters of SHA256(`seafile_schema:repo_id`),
+then locks native `Branch(master)` **before** the ACL row. Native synchronous
+copy/move acquires both library fences in repository-ID order and holds them
+through publication. Both scopes must have no ACL rows and be non-virtual;
+SQL/lock failure or any protected scope denies transfer. The dedicated native
+connection releases advisory locks explicitly before returning to the pool. Native final commit takes the same Branch lock before consulting Hub.
 All writers must use this protocol; direct SQL bypasses its concurrency guarantee.
 Permission decisions may remain valid until their bounded cache expiry.
 
-Authenticated administrator GET:
+Authenticated native repo owner/administrator GET:
 `api/v2.1/cloudfile/authorization/v1/directory-rules/?repo_id=...&path=...`.
-Public POST/PUT/DELETE return `503 ACL_PUBLICATION_BLOCKED`, even for staff.
-There is deliberately no setting that unlocks publication. Scoped publisher
-credentials and the release acceptance gate remain integration work; rw never
-implies rule-management authority. The internal CAS writer is not a browser API.
+A full system administrator with native `can_manage_library` may also manage
+ACL rules, without acquiring file bytes. No global `IsAdminUser` requirement
+blocks a delegated repository administrator. Ordinary r/rw file editors are
+**not** repo administrators and cannot delegate ACL rules merely because they
+can edit files. Etech business login and management scopes stay in Etech.
+
+POST/PUT/DELETE accept a strict rule record:
+`repo_id,path,subject_type,namespace,external_id,permission,inherit,share_mode,expected,revision`.
+Provider comes only from trusted `CF_ACL_PROVIDER`; a caller cannot override it.
+The only configurable directory permissions are **r/rw/invisible**, never
+`none`. `revision` uses the existing branch-serialized ACLStore CAS.
+
+Public ACL POST/PUT/DELETE have no separate publication or
+`v2_acl_enabled` feature gate: CloudFile V2's directory ACL is built in.
+Each write still requires current native repository administrator authority,
+valid `r/rw/invisible` input, revision CAS and authoritative SQL; failures
+deny or reject the write. Native C/Go checks are likewise built in and
+must be deployed from matching source pins, with current subject, final-byte
+and Etech Publisher readback acceptance before promoting a shared instance.
+Do not treat a Hub-only code update as a safe deployment.
 
 ## Content API
 
@@ -54,8 +75,9 @@ Under `api/v2.1/cloudfile/authorization/v1/`:
 - `directory-entries/?repo_id=...&path=...&offset=0&limit=50` — at most 100 native
   candidates per page, filtered by the same authority. An empty page may have a
   next offset when candidates were hidden. `root_path` is the navigation boundary.
-  Optional `with_tags=true` adds display-only CE tags (`RepoTags + FileTags +
-  FileUUIDMap`, files and directories) to the visible items only, plus
+  Optional `with_tags=true` adds current CE repo tags and legacy free tags
+  (display-only and marked `read_only=true`; never a new write source) to
+  the visible files and directories only, via per-page indexed reads, plus
   `tags_status`. `FAILED` sets item `tags` to null; it never means "no tags" and
   never fails the listing. Tags are not an authorization input.
 
@@ -83,7 +105,7 @@ is exactly HTTP 200 with `{"allowed":true,"contract":"cf-acl-v1"}`. Redirects, m
 access. A valid bounded cached policy decision is allowed; an old access ticket
 alone is not a policy decision. The native client bounds response size and time.
 
-`CF_ACL_PROVIDER` and the server-configured dotted callable
+The built-in Etech provider defaults to `etech`. `CF_ACL_PROVIDER` and the server-configured dotted callable
 `CF_ACL_SUBJECT_ENSURE(uid, username)` are the subject integration seam. The latter
 must call the existing Memberships TTL projector successfully; failure raises.
 Only then does Hub read `cf_sso_group_map JOIN GroupUser`. Missing adapter means
@@ -114,8 +136,9 @@ set TTL=0.
 
 ## Native Scope And Release Status
 
-Both native processes read `[cloudfile] v2_acl_enabled=true`; default is off.
-Do not enable public rule publication merely because these hooks are configured.
+Both native C and Go enforce CloudFile V2 directory ACL unconditionally.
+There is no `v2_acl_enabled` setting; neither service may bypass protected
+library checks due to missing configuration.
 
 The first supported seam is current-path read/Range and fresh byte uploads /
 overwrites, with actual final-diff checks under Branch CAS. C trusted post/put
@@ -127,7 +150,50 @@ unprotected source is insufficient. Other structural operations on protected
 repos remain closed until lifecycle/source/destination checks are implemented.
 CF-EDIT remains an independent constraint and provides no ACL grants.
 
-The integrator must retain publication blocking until the real subject adapter,
-scoped management credentials, all exposed read/write routes, lifecycle behavior,
-and deployment acceptance are complete. This minimal seam is not full ACL release
-certification. Internal test adapters are not production authentication.
+The integrator must verify current subject adapter, native management
+credentials, exposed read/write route coverage, lifecycle behavior, and actual
+C/Go final-commit enforcement before deploying matching Hub/Server pins.
+There is no separate runtime publication switch. This minimal seam is not
+full ACL release certification; internal test adapters are not production
+authentication.
+
+## Cache Deployment
+
+ACL rules use bounded per-library snapshots in Seahub's configured shared
+Django cache, normally Redis. When the default Django cache is per-process
+`LocMemCache` (or `DummyCache`), ACL cross-request cache TTL is forced to zero
+so another worker cannot retain a stale grant after a local invalidation.
+Per-request authority reuse remains enabled. Use a shared cache in production.
+
+With Redis, use `noeviction` or a `volatile-*` policy for the dedicated/shared
+cache instance: generation keys do not have TTL, while snapshots do. Avoid
+`allkeys-*` policies that may evict generation keys and temporarily expose an
+older cache namespace. Failed invalidation or direct SQL rule edits remain
+bounded by the configured TTL (default 180 seconds). Do not promise instantaneous
+revocation under cache failures. Cache misses read authoritative SQL; SQL errors
+never grant access. Tags bypass shared cache entirely and read only authorized
+page/search references.
+
+## Built-In Etech Subject Wiring
+
+The default `CF_ACL_SUBJECT_ENSURE` is
+`cloudfile_ext.v2.etech_directory.ensure_subject`. It uses the existing EAP
+`/eap/cloudDrive/directory/users/{uid}/context` and `/groups?view=entities`
+contracts, a short-lived `directory.read` machine JWT, a dedicated autocommit
+SQL connection and native shared Redis. No client-supplied member list is trusted.
+Only the current UID's native GroupUser rows are refreshed after the existing
+bounded TTL; Directory or Redis failure never renews readiness. Entity lookups
+create/reuse flat CE Groups keyed by exact type/namespace/external ID, never name.
+
+Staff identity resolution pre-creates a native CE User/Profile only after a fresh
+active Directory UID proof. It creates no OAuth subject; first OAuth/OIDC login
+reuses that UID's native account. Existing UID collation aliases and inactive
+accounts reject. Local CE users without a Profile UID use a disjoint native
+principal and do not inherit external group claims.
+
+Connection settings: `CF_DIRECTORY_URL` is the existing Directory base URL;
+`CF_DIRECTORY_KEY_ID` and `CF_DIRECTORY_SECRET` match EAP's scoped service key.
+Optional issuer/audience defaults match EAP (`cloudfile-sso` / `eap-directory`).
+`CF_DIRECTORY_GROUP_OWNER` is an existing active native service administrator
+that owns newly created flat Groups. Redis comes from native `CACHES.default`
+LOCATION. These are connection/identity inputs, not feature switches.

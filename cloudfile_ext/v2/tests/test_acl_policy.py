@@ -48,25 +48,25 @@ class HierarchicalDirectoryTests(unittest.TestCase):
         self.assertEqual(permission('/A/child', rows, principal=user).permission, 'rw')
 
     def test_deny_has_priority_even_if_other_group_grants_write(self):
-        rows = [rule('/A', 'org', '42', 'none'), rule('/A', 'org', '99', 'rw')]
+        rows = [rule('/A', 'org', '42', 'invisible'), rule('/A', 'org', '99', 'rw')]
         user = Principal('etech', 'uid-a', frozenset({('org', 'dept', '42'), ('org', 'dept', '99')}))
         self.assertFalse(permission('/A', rows, principal=user).can_read)
 
-    def test_deeper_group_grant_replaces_ancestor_deny_in_same_track(self):
-        rows = [rule('/A', 'org', '42', 'none'), rule('/A/B', 'org', '42', 'rw')]
+    def test_deeper_group_grant_cannot_bypass_invisible_ancestor(self):
+        rows = [rule('/A', 'org', '42', 'invisible'), rule('/A/B', 'org', '42', 'rw')]
         self.assertEqual(permission('/A/B', rows).permission, 'invisible')  # Cannot traverse denied parent
-        self.assertEqual(permission('/A', rows).permission, 'none')
+        self.assertEqual(permission('/A', rows).permission, 'invisible')
 
     def test_org_priority_precedes_role_track(self):
         rows = [rule('/A', 'org', '42', 'r'),rule('/A/B','role','writer','rw')]
         self.assertEqual(permission('/A/B',rows).permission,'r')
 
     def test_deny_blocks_contents_and_invisible_hides(self):
-        for denied in ('none', 'invisible'):
+        for denied in ('invisible',):
             decision = permission('/A', [rule('/A','user','uid-a',denied)])
             self.assertFalse(decision.can_read)
             self.assertFalse(decision.can_write)
-            self.assertEqual(decision.visible, denied != 'invisible')
+            self.assertFalse(decision.visible)
 
     def test_denied_parent_cannot_be_bypassed_by_deeper_grant(self):
         rows = [rule('/A', 'user', 'uid-a', 'invisible'),rule('/A/B','user','uid-a','rw')]
@@ -79,7 +79,7 @@ class HierarchicalDirectoryTests(unittest.TestCase):
 
     def test_removing_rule_falls_back_to_native(self):
         self.assertEqual(permission('/A',[]).permission,'rw')
-        self.assertEqual(permission('/A',[rule('/A','user','uid-a','none')]).permission,'none')
+        self.assertEqual(permission('/A',[rule('/A','user','uid-a','invisible')]).permission,'invisible')
 
     def test_provider_and_duplicates_fail_closed(self):
         with self.assertRaises(PolicyError):
@@ -92,7 +92,9 @@ class HierarchicalDirectoryTests(unittest.TestCase):
             with self.assertRaises(PolicyError):
                 permission(path, [])
         with self.assertRaises(PolicyError):
-            rule('/A','user','uid-a','none',share=True)
+            rule('/A','user','uid-a','invisible',share=True)
+        with self.assertRaises(PolicyError):
+            rule('/A','user','uid-a','none')  # Removed configuration choice.
 
 
 class SharedRootTests(unittest.TestCase):

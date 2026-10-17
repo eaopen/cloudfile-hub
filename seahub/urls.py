@@ -2,9 +2,10 @@
 from django.urls import include, path, re_path
 from django.views.generic import TemplateView
 from cloudfile_ext.v2.acl_http import EffectivePermission, SharedDirectories, DirectoryRules, NativeACLCheck, DirectoryEntries
-from cloudfile_ext.v2.http import IdentityResolve, GroupResolve, NativeLibraries, StorageLibraries
+from cloudfile_ext.v2.http import IdentityResolve, GroupResolve, CatalogSync, StorageReconcile
 from cloudfile_ext.v2.oidc import oidc_login
 from cloudfile_ext.v2.search.http import SearchQuery
+from cloudfile_ext.v2.rust_edit import RustLocalEditOpen, RustCheckoutInfo
 
 from seahub.api2.endpoints.file_comments import FileCommentsView, FileCommentView, FileCommentRepliesView, \
     FileCommentReplyView
@@ -243,11 +244,13 @@ urlpatterns = [
     path('api/v2.1/cloudfile/authorization/v1/directory-rules/', DirectoryRules.as_view()),
     path('api/v2.1/internal/cloudfile/acl/check/', NativeACLCheck.as_view()),
     path('oidc/login/', oidc_login),
-    path('api/v2.1/admin/cloudfile/native-libraries/', NativeLibraries.as_view()),
-    path('api/v2.1/admin/cloudfile/storage-libraries/', StorageLibraries.as_view()),
+    path('api/v2.1/admin/cloudfile/storage/reconcile/', StorageReconcile.as_view()),
     path('api/v2.1/admin/cloudfile/sso/identities/resolve/', IdentityResolve.as_view()),
+    path('api/v2.1/admin/cloudfile/directory/entities/sync/', CatalogSync.as_view()),
     path('api/v2.1/admin/cloudfile/sso/groups/resolve/', GroupResolve.as_view()),
     path('api/v2.1/cloudfile/search/', SearchQuery.as_view()),
+path('api/v2.1/cloudfile/edit/v1/open/', RustLocalEditOpen.as_view()),
+path('api/v2.1/cloudfile/edit/v1/lock-info/', RustCheckoutInfo.as_view()),
     path('accounts/', include('seahub.base.registration_urls')),
     path('mobile-login/', mobile_login, name="mobile_login"),
 

@@ -8,7 +8,7 @@ import os
 from pathlib import Path
 import re
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 from uuid import uuid4
 
 from cloudfile_ext.v2.errors import IdentityConflict, IdentityUnavailable
@@ -82,6 +82,13 @@ class FreshDatabaseTest(unittest.TestCase):
             self._drop()
             raise
 
+    def test_prepared_uid_is_reused_by_first_oauth_binding(self):
+        prepared = self.identity.prepare(uid='not-yet-signed-in', login_name='E002')
+        self.assertEqual(self.identity.prepare(uid='not-yet-signed-in', login_name='E002-renamed'), prepared)
+        self.assertEqual(self.identity.bind(subject='new-sub', uid='not-yet-signed-in', login_name='E002'), prepared)
+        with self.assertRaises(IdentityConflict):
+            self.identity.prepare(uid='NOT-YET-SIGNED-IN', login_name='E002')
+
     def _drop(self):
         with self.admin.cursor() as cursor:
             for name in self.names.values():
@@ -115,6 +122,20 @@ class FreshDatabaseTest(unittest.TestCase):
                 return cursor.lastrowid
         return GroupCatalog(self.connection, account_schema=self.names['account'], provider=provider,
                             create_group=create).ensure(kind, 'business', external_id, 'Display Name')
+
+    def test_existing_group_lookup_uses_exact_namespace_and_native_flat_group(self):
+        from types import SimpleNamespace
+        from cloudfile_ext.v2.etech_directory import lookup_group
+        group = self.group()
+        self.query("UPDATE cf_sso_group_map SET namespace='role' WHERE group_id=%s", (group,))
+        with patch('django.db.connection', self.connection), \
+                patch.dict('sys.modules', {
+                    'seahub.utils.db_api':SimpleNamespace(SeafileDB=lambda:SimpleNamespace(db_name=self.names['files'])),
+                    'seahub.utils.ccnet_db':SimpleNamespace(get_ccnet_db_name=lambda:self.names['account'])}):
+            self.assertEqual(lookup_group('role:r1'), group)
+            self.assertIsNone(lookup_group('r1'))
+            self.query('UPDATE ' + self.names['account'] + '.`Group` SET parent_group_id=1 WHERE group_id=%s', (group,))
+            with self.assertRaises(IdentityConflict):lookup_group('role:r1')
 
     def test_schema_is_independent_retryable_and_exactly_three_tables(self):
         self.schema.install()
@@ -152,7 +173,7 @@ class FreshDatabaseTest(unittest.TestCase):
 
     def test_internal_sharing_never_attaches_to_deny_or_library_root(self):
         import pymysql
-        for permission, path, shared in (('none', '/project', 1), ('invisible', '/project', 1), ('r', '/', 1)):
+        for permission, path, shared in (('none', '/project', 0), ('invisible', '/project', 1), ('r', '/', 1)):
             with self.assertRaises(pymysql.MySQLError):
                 self.query('INSERT INTO cf_dir_acl VALUES(%s,%s,%s,%s,%s,%s,%s,%s,1,%s,%s)',
                            (str(uuid4()), b'x' * 32, path, 'user', 'etech', 'user', 'uid-1', permission, shared, str(uuid4())))

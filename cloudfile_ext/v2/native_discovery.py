@@ -182,3 +182,111 @@ def storage_catalog_status(repo_id, repo_present, key, state, storage_id, readab
     if not (native or routed):
         return "BINDING_ERROR"
     return "READY" if readable else "RESOURCE_UNREADABLE"
+
+def reconcile_from_hub(repo_id=None, *, batch_size=500):
+    """Idempotent native Repo -> cf_library_storage reconciliation from Seahub.
+
+    This uses the current Seafile schema through Django's existing connection,
+    not a second set of DB credentials. Etech and the native create endpoint
+    share the same guarded insertion, and existing V2 auto-local mappings win.
+    """
+    from django.db import connection, IntegrityError
+    from seahub.utils.db_api import SeafileDB
+    from .schema import identifier
+
+    schema = identifier(SeafileDB().db_name)
+    repo = schema + '.Repo'
+    routes = schema + '.RepoStorageId'
+    virtual = schema + '.VirtualRepo'
+    registry = schema + '.cf_library_storage'
+    if repo_id is not None and native_key(repo_id) is None:
+        raise ValueError('Invalid canonical Repo UUID')
+    added = 0
+    already = 0
+    after = ''
+    while True:
+        with connection.cursor() as cursor:
+            if repo_id:
+                cursor.execute(
+                    'SELECT r.repo_id FROM ' + repo + ' r '
+                    'LEFT JOIN ' + virtual + ' v ON v.repo_id=r.repo_id '
+                    'WHERE r.repo_id=%s AND v.repo_id IS NULL', [repo_id])
+            else:
+                cursor.execute(
+                    'SELECT r.repo_id FROM ' + repo + ' r '
+                    'LEFT JOIN ' + virtual + ' v ON v.repo_id=r.repo_id '
+                    'WHERE r.repo_id>%s AND v.repo_id IS NULL '
+                    'ORDER BY r.repo_id LIMIT %s', [after, batch_size])
+            ids = [row[0] for row in cursor.fetchall()]
+        if not ids:
+            break
+        for native_id in ids:
+            if native_key(native_id) is None:
+                continue
+            # The query decides the route at write time. New routed repos,
+            # tombstones, and existing business bindings are NEVER changed.
+            with connection.cursor() as cursor:
+                try:
+                    cursor.execute(
+                        'INSERT INTO ' + registry + ' (repo_key,repo_id,state) '
+                        "SELECT %s,r.repo_id,'active' FROM " + repo + ' r '
+                        'LEFT JOIN ' + routes + ' s ON s.repo_id=r.repo_id '
+                        'LEFT JOIN ' + virtual + ' v ON v.repo_id=r.repo_id '
+                        'LEFT JOIN ' + registry + ' c ON c.repo_id=r.repo_id '
+                        'WHERE r.repo_id=%s AND s.repo_id IS NULL '
+                        'AND v.repo_id IS NULL AND c.repo_id IS NULL',
+                        ['native-' + native_id, native_id])
+                    added += cursor.rowcount
+                except IntegrityError as exc:
+                    if getattr(exc, 'args', (None,))[0] != 1062:
+                        raise
+                    # Another instance inserted the same UUID concurrently.
+                    cursor.execute('SELECT 1 FROM ' + registry + ' WHERE repo_id=%s', [native_id])
+                    if cursor.fetchone() is None:
+                        raise
+                    already += 1
+        after = ids[-1]
+        if repo_id or len(ids) < batch_size:
+            break
+    return {'registered': added, 'already': already}
+
+
+def inspect_from_hub(repo_ids):
+    """One exact native lookup per bounded batch, including missing Repo IDs."""
+    from django.db import connection
+    from seahub.utils.db_api import SeafileDB
+    from .schema import identifier
+    schema = identifier(SeafileDB().db_name)
+    def table(name):
+        return schema + '.' + identifier(name)
+
+    result = {}
+    for offset in range(0, len(repo_ids), 200):
+        batch = repo_ids[offset:offset + 200]
+        if any(native_key(x) is None for x in batch):
+            raise ValueError('Invalid Repo UUID')
+        if not batch:
+            continue
+        keys = ' UNION ALL '.join('SELECT %s AS repo_id' for _ in batch)
+        sql = ('SELECT i.repo_id,r.repo_id,c.repo_key,c.state,s.storage_id,'
+               't.repo_id,g.repo_id,v.repo_id FROM (' + keys + ') i '
+               'LEFT JOIN ' + table('Repo') + ' r ON r.repo_id=i.repo_id '
+               'LEFT JOIN ' + table('cf_library_storage') + ' c ON c.repo_id=i.repo_id '
+               'LEFT JOIN ' + table('RepoStorageId') + ' s ON s.repo_id=i.repo_id '
+               'LEFT JOIN ' + table('RepoTrash') + ' t ON t.repo_id=i.repo_id '
+               'LEFT JOIN ' + table('GarbageRepos') + ' g ON g.repo_id=i.repo_id '
+               'LEFT JOIN ' + table('VirtualRepo') + ' v ON v.repo_id=i.repo_id')
+        with connection.cursor() as cursor:
+            cursor.execute(sql, batch)
+            rows = cursor.fetchall()
+        for repo_id, present, key, state, route, trash, garbage, virtual in rows:
+            status = storage_catalog_status(
+                repo_id, present is not None, key, state, route,
+                present is not None, in_trash=trash is not None,
+                in_gc=garbage is not None, virtual=virtual is not None)
+            result[repo_id] = {
+                'status': status,
+                'source': 'native' if key == 'native-' + repo_id
+                else ('v2' if route and route.startswith('auto-local:') else 'unknown')
+            }
+    return result

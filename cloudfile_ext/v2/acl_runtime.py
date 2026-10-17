@@ -1,4 +1,5 @@
 """One trusted authority for Hub and native file service decisions."""
+import logging
 import posixpath
 import stat
 from dataclasses import asdict, astuple
@@ -13,6 +14,9 @@ from .acl_store import ACLStore, uuid
 from .schema import identifier
 
 NAMESPACE = 'cf-acl-rules-v1'
+logger = logging.getLogger(__name__)
+_warned_local_cache = set()
+
 
 
 class ACLUnavailable(Exception):
@@ -27,9 +31,18 @@ def store():
 
 def cache_ttl():
     try:
-        return library_cache.ttl('CF_ACL_CACHE_TTL', 180)
+        ttl = library_cache.ttl('CF_ACL_CACHE_TTL', 180)
     except ValueError:
         raise ACLUnavailable('invalid ACL cache TTL') from None
+    # A local invalidation cannot reach other workers. Never retain ACL grants
+    # across requests in process-local or non-persistent Django cache backends.
+    backend = settings.CACHES.get('default', {}).get('BACKEND', '') if settings.configured else ''
+    if backend.rsplit('.', 1)[-1] in ('LocMemCache', 'DummyCache'):
+        if ttl and backend not in _warned_local_cache:
+            logger.warning('CloudFile ACL cache is %s: cross-request caching disabled', backend)
+            _warned_local_cache.add(backend)
+        return 0
+    return ttl
 
 
 def invalidate_library(repo_id):
@@ -60,10 +73,14 @@ def current_principal(username):
     account = ccnet_api.get_emailuser(username)
     if account is None or not account.is_active:
         raise PermissionError('inactive account')
-    profile = Profile.objects.get(user=username)
-    uid = profile.login_id
-    provider = getattr(settings, 'CF_ACL_PROVIDER', '')
-    ensure = getattr(settings, 'CF_ACL_SUBJECT_ENSURE', '')
+    profile = Profile.objects.get_profile_by_user(username)
+    uid = profile.login_id if profile else None
+    # Native local accounts have no external Directory membership to refresh.
+    # Their disjoint provider prevents accidental matching of Etech rules.
+    if not uid:
+        return Principal('native-local', username, frozenset())
+    provider = getattr(settings, 'CF_ACL_PROVIDER', 'etech')
+    ensure = getattr(settings, 'CF_ACL_SUBJECT_ENSURE', 'cloudfile_ext.v2.etech_directory.ensure_subject')
     if not uid or not provider or not ensure:
         raise ACLUnavailable('trusted current subject adapter unavailable')
     # Work package A supplies a server-configured callable (uid, username).
