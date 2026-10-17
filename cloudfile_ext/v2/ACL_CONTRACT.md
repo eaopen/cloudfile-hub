@@ -142,6 +142,27 @@ certify that hidden data is absent without a known denied-user fixture.
 A Dev measurement is still required before claiming EAP UI performance
 parity with v0.9.
 
+### Search authorization
+
+`api/v2.1/cloudfile/search/` uses the same Authority as browsing; the
+Meilisearch index is never an authorization source.
+
+- The search root must be readable; a directory-only grant may search inside
+  its shared root. Libraries with rules are searchable (no 503 on rule-covered
+  roots) and hits under rule subtrees are decided, not discarded.
+- Candidates are narrowed by a filter built from this principal's rule paths
+  in the library snapshot and Authority decisions (`search/acl_filter.py`),
+  using only the indexed `path` and `dirs` fields; nothing is re-indexed and
+  rule changes apply on the next request. The filter may over-include (a
+  non-inherited grant's region, or a hidden rule directory's own document) but
+  never excludes a readable object; this is verified against Authority on
+  randomized rule trees. Over 256 rule paths, a 32 KiB filter, or an
+  over-budget library fall back to per-hit decisions only.
+- Every returned hit is decided again by Authority and must still exist with
+  its kind. Cursors bind the library head, native grant, status, principal and
+  rule rows; a change invalidates the prepared page (503) and a lost root
+  grant returns 403.
+
 ## Native Decision Protocol
 
 `POST api/v2.1/internal/cloudfile/acl/check/`, using the existing internal HS256

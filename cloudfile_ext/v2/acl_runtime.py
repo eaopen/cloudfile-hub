@@ -164,6 +164,18 @@ class Authority:
             return Decision('r', decision.qualified_root, decision.from_rule)
         return decision
 
+    def library_view(self, repo_id):
+        """Inputs every decision in this library depends on, besides the principal.
+
+        rules lists this principal's rows; None when the library is over the
+        snapshot budget and decisions read per-directory candidates instead.
+        """
+        self.effective(repo_id, '/')
+        self._rules(repo_id, '/')
+        rules = self._library[repo_id]
+        return dict(native=self._native[repo_id], status=self._repos[repo_id],
+                    rules=None if rules is None else tuple(rules))
+
     def page(self, repo_id, path, *, start, limit, if_dir_id=None):
         """One raw native window of a directory object, filtered by this authority.
 

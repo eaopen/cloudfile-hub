@@ -74,6 +74,7 @@ class ExistingMeiliIndex:
         self.api_key = api_key
         self.timeout = timeout
         self.opener = build_opener(ProxyHandler({}), _NoRedirect())
+        self._cap = None
 
     def call(self, method, path, payload=None):
         headers = {'Content-Type': 'application/json', 'Accept': 'application/json',
@@ -94,7 +95,16 @@ class ExistingMeiliIndex:
         except (HTTPError, URLError, OSError, UnicodeError, ValueError, TypeError) as exc:
             raise SearchUnavailable('Meilisearch unavailable') from exc
 
-    def page(self, repo_id, root, query, offset, limit):
+    def max_total_hits(self):
+        # Read once per request; each page may scan two candidate batches.
+        if self._cap is None:
+            cap = self.call('GET', self.index_path + '/settings/pagination')['maxTotalHits']
+            if type(cap) is not int or cap < 1:
+                raise SearchUnavailable('invalid index pagination settings')
+            self._cap = cap
+        return self._cap
+
+    def page(self, repo_id, root, query, offset, limit, acl_filter=None):
         if (not isinstance(repo_id, str) or not isinstance(query, str) or not query or
                 type(offset) is not int or offset < 0 or type(limit) is not int or
                 not 1 <= limit <= 101):
@@ -103,6 +113,12 @@ class ExistingMeiliIndex:
         filters = ['repo_id = ' + json.dumps(repo_id)]
         if root != '/':
             filters.append('dirs IN ' + json.dumps([root], ensure_ascii=False))
+        if acl_filter is not None:
+            # A parenthesized expression from search.acl_filter; hits are
+            # still authorized one by one.
+            if not isinstance(acl_filter, str) or not acl_filter.startswith('(') or not acl_filter.endswith(')'):
+                raise SearchUnavailable('invalid ACL filter')
+            filters.append(acl_filter)
         payload = dict(q=query, offset=offset, limit=limit, filter=' AND '.join(filters),
                        matchingStrategy='all', attributesToSearchOn=['name', 'tags'],
                        attributesToRetrieve=['repo_id', 'path', 'name', 'object_type', 'tags'],
@@ -114,9 +130,7 @@ class ExistingMeiliIndex:
                 raise SearchUnavailable('invalid candidate page')
             # The existing index has a finite candidate window. Never silently
             # describe its cap as the end of all authorized matches.
-            cap = self.call('GET', self.index_path + '/settings/pagination')['maxTotalHits']
-            if type(cap) is not int or cap < 1:
-                raise SearchUnavailable('invalid index pagination settings')
+            cap = self.max_total_hits()
             if data.get('estimatedTotalHits', 0) >= cap and offset + len(hits) >= cap:
                 raise SearchWindowExceeded('narrow the search scope or query')
             items = []
