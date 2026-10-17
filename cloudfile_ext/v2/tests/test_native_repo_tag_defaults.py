@@ -25,7 +25,7 @@ class RepoTagCountDefaultTests(TestCase):
             "repo_tag_id": 3, "repo_id": RID, "tag_name": "design", "tag_color": "#aaa"
         }
         with patch("seahub.api2.endpoints.repo_tags.seafile_api.get_repo", return_value=object()), \
-             patch("seahub.api2.endpoints.repo_tags.check_folder_permission", return_value="r"), \
+             patch("seahub.api2.endpoints.repo_tags._native_tag_root_permission", return_value=True), \
              patch("seahub.api2.endpoints.repo_tags.RepoTags.objects.get_all_by_repo_id",
                    return_value=[definition]), \
              patch("seahub.api2.endpoints.repo_tags.FileTags.objects.select_related") as file_tags:
