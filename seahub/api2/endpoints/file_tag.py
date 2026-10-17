@@ -226,11 +226,16 @@ class FileTagView(APIView):
 
     @check_parameter
     def delete(self, request, repo_id, parent_path, filename, name, is_dir):
-        if not name or not check_tagname(name):
-            error_msg = _('Tag can only contain letters, numbers, dot, hyphen or underscore.')
-            return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
-        if FileTag.objects.delete_file_tag_by_path(repo_id,
-                parent_path, filename, is_dir, name):
-            return Response({"success": True}, status=status.HTTP_200_OK)
-        else:
-            return Response({"success": True}, status=status.HTTP_202_ACCEPTED)
+        try:
+            values = user_tag_names(name)
+            if len(values) != 1:
+                raise ValueError('invalid user tag')
+            path = posixpath.join(parent_path, filename)
+            tags = read_resource_tags(repo_id, path, is_dir)
+            if any(item['name'] == name and item['source'] == 'legacy' for item in tags) and not any(
+                    item['name'] == name and item['source'] == 'repo' for item in tags):
+                return api_error(status.HTTP_409_CONFLICT, 'Legacy tag is read-only; migrate it first.')
+            deleted = delete_resource_user_tag(repo_id, path, is_dir, name)
+            return Response({'success': True}, status=status.HTTP_200_OK if deleted else status.HTTP_202_ACCEPTED)
+        except Exception as error:
+            return _tag_error(error)
