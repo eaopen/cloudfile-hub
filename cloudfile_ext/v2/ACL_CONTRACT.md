@@ -242,7 +242,7 @@ create/reuse flat CE Groups keyed by exact type/namespace/external ID, never nam
 
 While the readiness marker is valid, `ensure_subject` returns from a read-only
 check (pooled Redis plus the request's Django connection: exact Profile UID
-binding and an active native account) without opening the dedicated connection
+binding and an exact-name active native account) without opening the dedicated connection
 or taking the subject lock. A missing, foreign or expired marker, a changed
 binding, an inactive account or any check error takes the locked path, which
 behaves as before. Readiness lifetime and revocation timing are unchanged.

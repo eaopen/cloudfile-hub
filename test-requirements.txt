@@ -7,3 +7,5 @@ splinter
 pytest==9.0.3
 pytest-django
 selenium
+# Required by the explicit V2 Etech Directory subject-readiness tests.
+PyMySQL==1.1.2

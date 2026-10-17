@@ -197,7 +197,10 @@ def subject_ready(uid, username):
         if list(Profile.objects.filter(user=username, login_id=uid).values_list('user', 'login_id')) != [(username, uid)]:
             return False
         account = ccnet_api.get_emailuser(username)
-        return account is not None and account.is_active
+        # Match NativeIdentity.active() strictly: a case-insensitive CE lookup
+        # must not turn a different stored native account into this UID's owner.
+        return (account is not None and getattr(account, 'email', None) == username
+                and getattr(account, 'is_active', None) == 1)
     except Exception:
         return False
 

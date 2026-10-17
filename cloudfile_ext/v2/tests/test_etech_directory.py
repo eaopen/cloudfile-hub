@@ -128,7 +128,7 @@ class SubjectReadyTests(TestCase):
         self.redis = Mock()
         self.redis.eval.return_value = [json.dumps({'uid': self.UID, 'username': self.USER}).encode(), 600000]
         self.binding = [(self.USER, self.UID)]
-        self.account = SimpleNamespace(is_active=True)
+        self.account = SimpleNamespace(email=self.USER, is_active=True)
         profiles = Mock()
         profiles.filter.return_value.values_list.side_effect = lambda *fields: list(self.binding)
         for target in (patch('cloudfile_ext.v2.etech_directory._shared_redis', return_value=self.redis),
@@ -184,10 +184,28 @@ class SubjectReadyTests(TestCase):
     def test_changed_binding_or_inactive_account_takes_the_locked_path(self):
         self.binding = []
         self.assert_locked_path()
-        self.binding, self.account = [(self.USER, self.UID)], SimpleNamespace(is_active=False)
+        self.binding, self.account = [(self.USER, self.UID)], SimpleNamespace(email=self.USER, is_active=False)
         self.runtime.reset_mock()
         self.assert_locked_path()
         self.account = None
+        self.runtime.reset_mock()
+        self.assert_locked_path()
+
+    def test_profile_collation_alias_cannot_become_a_readiness_proof(self):
+        # Equality after ORM retrieval must use the exact stored bytes, not
+        # the database's potentially case-insensitive field collation.
+        self.binding = [(self.USER.upper(), self.UID)]
+        self.assert_locked_path()
+        self.binding = [(self.USER, self.UID.upper())]
+        self.runtime.reset_mock()
+        self.assert_locked_path()
+
+    def test_native_account_case_alias_and_nonstandard_status_do_not_bypass_locked_check(self):
+        # CE get_emailuser() may match case-insensitively, but the original
+        # NativeIdentity.active() compares the actual stored email byte-for-byte.
+        self.account = SimpleNamespace(email=self.USER.upper(), is_active=1)
+        self.assert_locked_path()
+        self.account = SimpleNamespace(email=self.USER, is_active=2)
         self.runtime.reset_mock()
         self.assert_locked_path()
 
