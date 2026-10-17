@@ -93,9 +93,9 @@ class CatchupTests(unittest.TestCase):
         indexer.baseline = Mock(return_value=None)
         indexer.scan = Mock()
         indexer.remove = Mock()
-        with patch('cloudfile_ext.v2.search.worker.tag_snapshot', return_value={}):
-            saved = indexer.reconcile(repo, None, 0)
-        indexer.scan.assert_called_once_with(repo, '/', {})
+        saved = indexer.reconcile(repo, None, 0)
+        indexer.scan.assert_called_once_with(repo, '/')
+        self.assertEqual(saved['tag_cursor'], '')
         indexer.remove.assert_not_called()
         self.assertEqual(saved['head'], 'new')
 
@@ -106,17 +106,21 @@ class CatchupTests(unittest.TestCase):
         native.diff_commits.return_value = [SimpleNamespace(status='mov', name='A', new_name='B')]
         indexer = Indexer(client, native)
         indexer.remove, indexer.refresh = Mock(), Mock()
-        with patch('cloudfile_ext.v2.search.worker.tag_snapshot', return_value={}):
-            indexer.reconcile(repo, {'head': 'old', 'tags': {}}, 0)
+        indexer.sweep = Mock(return_value='cursor2')
+        saved = indexer.reconcile(repo, {'head': 'old', 'tag_cursor': 'cursor1'}, 0)
         indexer.remove.assert_called_once_with(RID, '/A')
-        indexer.refresh.assert_called_once_with(repo, '/B', {})
+        indexer.refresh.assert_called_once_with(repo, '/B')
+        indexer.sweep.assert_called_once_with(repo, 'cursor1')
+        self.assertEqual(saved['tag_cursor'], 'cursor2')
 
     def test_changed_head_does_not_acknowledge_checkpoint(self):
         native = Mock()
         native.diff_commits.return_value = []
         native.get_repo.return_value = SimpleNamespace(head_cmmt_id='changed')
-        with patch('cloudfile_ext.v2.search.worker.tag_snapshot', return_value={}), self.assertRaises(SearchUnavailable):
-            Indexer(Mock(), native).reconcile(SimpleNamespace(id=RID, head_cmmt_id='new'), {'head': 'old'}, 0)
+        indexer = Indexer(Mock(), native)
+        indexer.sweep = Mock(return_value='advanced')
+        with self.assertRaises(SearchUnavailable):
+            indexer.reconcile(SimpleNamespace(id=RID, head_cmmt_id='new'), {'head': 'old'}, 0)
 
     def test_document_ids_preserve_existing_format(self):
         self.assertEqual(doc_id(RID, '/members.xlsx'), RID+'-6809ecaf294c5dbd40e64eb8962f86d4470f784b')
