@@ -124,6 +124,40 @@ class Indexer:
         if subtree and kind == 'dir':
             self.scan(repo, path)
 
+    def sweep(self, repo, after):
+        """Keyset-scan at most 200 sparse native UUID rows per repo per tick.
+
+        No full-library tag snapshot and no upper bound on library file count.
+        Retaining native FileUUIDMap rows allows later passes to clear deleted
+        tag labels. Search remains eventually consistent.
+        """
+        from seahub.tags.models import FileUUIDMap
+        if not isinstance(after, str) or len(after) > 36:
+            raise SearchUnavailable('invalid native tag cursor')
+        query = FileUUIDMap.objects.filter(repo_id=repo.id)
+        if after:
+            query = query.filter(uuid__gt=after)
+        page = list(query.order_by('uuid').values_list(
+            'uuid', 'parent_path', 'filename', 'is_dir')[:TAG_SWEEP_ITEMS])
+        if not page:
+            return ''
+        refs = [(normalize_path(posixpath.join(parent, filename)),
+                 'dir' if is_dir else 'file')
+                for _, parent, filename, is_dir in page]
+        labels = tag_labels(repo.id, refs)
+        documents = []
+        for path, kind in refs:
+            entry = self.native.get_dirent_by_path(repo.id, path)
+            if entry is None:
+                self.remove(repo.id, path)
+                continue
+            actual = 'dir' if stat.S_ISDIR(entry.mode) else 'file'
+            if actual != kind or not (stat.S_ISDIR(entry.mode) or stat.S_ISREG(entry.mode)):
+                raise SearchUnavailable('native tag target changed kind')
+            documents.append(self.upsert(repo, path, entry, {path: [None, labels[path]]}))
+        self.publish(documents)
+        return str(page[-1][0])
+
     def baseline(self, repo, timestamp):
         probe = self.client.call('POST', self.client.index_path + '/documents/fetch',
                                  {'filter': 'repo_id = ' + json.dumps(repo.id), 'limit': 1, 'fields': ['id']})
