@@ -122,5 +122,40 @@ class CatchupTests(unittest.TestCase):
         with self.assertRaises(SearchUnavailable):
             indexer.reconcile(SimpleNamespace(id=RID, head_cmmt_id='new'), {'head': 'old'}, 0)
 
+    def test_tag_sweep_keyset_is_bounded_and_resumable(self):
+        repo = SimpleNamespace(id=RID, head_cmmt_id='latest')
+        native = Mock()
+        native.get_dirent_by_path.return_value = SimpleNamespace(mode=0o100644, size=1, mtime=2)
+        indexer = Indexer(Mock(), native)
+        indexer.publish = Mock()
+        row = ('f' * 32, '/folder', 'a.txt', False)
+        with patch('seahub.tags.models.FileUUIDMap') as model, \
+                patch('cloudfile_ext.v2.search.worker.tag_labels', return_value={'/folder/a.txt': ['工艺']}) as labels:
+            query = model.objects.filter.return_value
+            query.filter.return_value = query
+            query.order_by.return_value.values_list.return_value.__getitem__.return_value = [row]
+            cursor = indexer.sweep(repo, 'a' * 32)
+        self.assertEqual(cursor, 'f' * 32)
+        query.filter.assert_called_once_with(uuid__gt='a' * 32)
+        self.assertEqual(query.order_by.return_value.values_list.return_value.__getitem__.call_args.args[0].stop, 200)
+        labels.assert_called_once_with(RID, [('/folder/a.txt', 'file')])
+        self.assertEqual(indexer.publish.call_args.args[0][0]['tags'], ['工艺'])
+
+    def test_empty_tag_sweep_restarts_without_native_calls(self):
+        native = Mock()
+        indexer = Indexer(Mock(), native)
+        with patch('seahub.tags.models.FileUUIDMap') as model:
+            query = model.objects.filter.return_value
+            query.filter.return_value = query
+            query.order_by.return_value.values_list.return_value.__getitem__.return_value = []
+            self.assertEqual(indexer.sweep(SimpleNamespace(id=RID), 'f' * 32), '')
+        native.get_dirent_by_path.assert_not_called()
+
+    def test_native_tag_sql_errors_do_not_clear_existing_search_tags(self):
+        from cloudfile_ext.v2.search.worker import tag_labels
+        with patch('cloudfile_ext.v2.tag_reads.read', side_effect=OSError('db unavailable')):
+            with self.assertRaises(SearchUnavailable):
+                tag_labels(RID, [('/A/a.txt', 'file')])
+
     def test_document_ids_preserve_existing_format(self):
         self.assertEqual(doc_id(RID, '/members.xlsx'), RID+'-6809ecaf294c5dbd40e64eb8962f86d4470f784b')
