@@ -21,7 +21,7 @@ class RuntimeTests(TestCase):
         rules = Mock()
         rules.candidates.side_effect = lambda repo, path, principal: [(rule, 'v')] if path.startswith(rule.path) else []
         # Whole-library rows include other subjects/providers; Authority filters them.
-        foreign = Rule(RID, '/projects', 'other-idp', 'user', 'user', 'uid', 'none')
+        foreign = Rule(RID, '/projects', 'other-idp', 'user', 'user', 'uid', 'invisible')
         rules.library.return_value = (rule, foreign)
         rules.shared.return_value = [(rule, 'v')]
         api = Mock()
@@ -64,7 +64,7 @@ class RuntimeTests(TestCase):
         auth.api.get_repo_status.return_value = 1
         self.assertTrue(auth.effective(RID, '/projects/shared').can_read)
         self.assertFalse(auth.effective(RID, '/projects/shared').can_write)
-        auth = self.authority(base='rw', share=False, permission='none')
+        auth = self.authority(base='rw', share=False, permission='invisible')
         self.assertFalse(auth.effective(RID, '/projects/shared').can_read)
 
     def test_stale_or_inactive_principal_denied(self):
@@ -121,7 +121,7 @@ class LibraryCacheTests(TestCase):
         self.ttl_override = patch('cloudfile_ext.v2.acl_runtime.cache_ttl', return_value=180)
         self.ttl_override.start()
         self.addCleanup(self.ttl_override.stop)
-        self.denied = Rule(RID, '/projects/shared', 'etech', 'user', 'user', 'uid', 'none')
+        self.denied = Rule(RID, '/projects/shared', 'etech', 'user', 'user', 'uid', 'invisible')
 
     def tearDown(self):
         self.override.disable()
@@ -236,7 +236,7 @@ class LibraryCacheTests(TestCase):
     def test_virtual_repository_checks_its_origin(self):
         origin = '00000000-0000-4000-8000-000000000002'
         repo = SimpleNamespace(is_virtual=True, origin_repo_id=origin)
-        rule = Rule(origin, '/x', 'etech', 'user', 'user', 'uid', 'none')
+        rule = Rule(origin, '/x', 'etech', 'user', 'user', 'uid', 'invisible')
         self.assertTrue(self.protected({origin: (rule,)}, repo)[0])
         from cloudfile_ext.v2.acl_runtime import protected
         with self.assertRaises(Exception):
