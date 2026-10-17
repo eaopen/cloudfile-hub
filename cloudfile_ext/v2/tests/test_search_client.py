@@ -31,6 +31,20 @@ class ExistingIndexTests(unittest.TestCase):
         self.assertFalse(result[0]['text_match'])
         self.assertNotIn('estimatedTotalHits', result[0])
 
+    def test_acl_filter_is_conjoined_and_index_cap_is_read_once(self):
+        hit = dict(repo_id=RID, path='/A/a.txt', object_type='file')
+        client = ExistingMeiliIndex('http://meili:7700')
+        client.call = Mock(side_effect=[dict(hits=[hit]), {'maxTotalHits': 1000}, dict(hits=[hit])])
+        client.page(RID, '/A', 'a', 0, 2, acl_filter='(NOT dirs IN ["/A/S"])')
+        client.page(RID, '/A', 'a', 2, 2, acl_filter='(NOT dirs IN ["/A/S"])')
+        payload = client.call.call_args_list[0].args[2]
+        self.assertEqual(payload['filter'],
+                         'repo_id = "%s" AND dirs IN ["/A"] AND (NOT dirs IN ["/A/S"])' % RID)
+        self.assertEqual(client.call.call_count, 3)
+        for bad in ('NOT dirs IN ["/A/S"]', 1):
+            with self.assertRaises(SearchUnavailable):
+                self.client([hit]).page(RID, '/A', 'a', 0, 2, acl_filter=bad)
+
     def test_small_exact_tail_is_not_confused_with_index_cap(self):
         hits = [dict(repo_id=RID, path='/A.txt', object_type='file')]*50
         self.assertEqual(len(self.client(hits, estimatedTotalHits=100).page(RID, '/', 'A', 50, 51)), 50)
