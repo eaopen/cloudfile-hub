@@ -69,12 +69,16 @@ class NativeLibraryDiscovery:
             raise ValueError("repo_id must be a canonical UUID")
         with self.connection.cursor() as cursor:
             cursor.execute(
-                "SELECT t.repo_id,r.repo_id,s.storage_id,c.repo_key,c.state "
+                "SELECT t.repo_id,r.repo_id,s.storage_id,c.repo_key,c.state,v.repo_id "
                 "FROM (SELECT %s AS repo_id) t "
                 "LEFT JOIN Repo r ON r.repo_id=t.repo_id "
                 "LEFT JOIN RepoStorageId s ON s.repo_id=t.repo_id "
-                "LEFT JOIN cf_library_storage c ON c.repo_id=t.repo_id", (repo_id,))
-            return self._item(cursor.fetchone())
+                "LEFT JOIN cf_library_storage c ON c.repo_id=t.repo_id "
+                "LEFT JOIN VirtualRepo v ON v.repo_id=t.repo_id", (repo_id,))
+            row = cursor.fetchone()
+            if row[5] is not None:
+                return {"repo_id": repo_id, "status": "VIRTUAL_REPO"}
+            return self._item(row[:5])
 
     def scan(self, batch_size=500):
         if not (1 <= batch_size <= 2000):
@@ -86,7 +90,8 @@ class NativeLibraryDiscovery:
                     "SELECT r.repo_id,r.repo_id,s.storage_id,c.repo_key,c.state "
                     "FROM Repo r LEFT JOIN RepoStorageId s ON s.repo_id=r.repo_id "
                     "LEFT JOIN cf_library_storage c ON c.repo_id=r.repo_id "
-                    "WHERE r.repo_id > %s ORDER BY r.repo_id LIMIT %s",
+                    "LEFT JOIN VirtualRepo v ON v.repo_id=r.repo_id "
+                    "WHERE r.repo_id > %s AND v.repo_id IS NULL ORDER BY r.repo_id LIMIT %s",
                     (last, batch_size))
                 rows = cursor.fetchall()
             if not rows:
@@ -107,7 +112,8 @@ class NativeLibraryDiscovery:
                     "INSERT INTO cf_library_storage(repo_key,repo_id,state) "
                     "SELECT %s,r.repo_id,'active' FROM Repo r "
                     "LEFT JOIN RepoStorageId s ON s.repo_id=r.repo_id "
-                    "WHERE r.repo_id=%s AND s.repo_id IS NULL",
+                    "LEFT JOIN VirtualRepo v ON v.repo_id=r.repo_id "
+                    "WHERE r.repo_id=%s AND s.repo_id IS NULL AND v.repo_id IS NULL",
                     (native_key(repo_id), repo_id))
         except Exception as error:
             # Concurrent reconciliations can hit the unique key; another
@@ -125,9 +131,54 @@ class NativeLibraryDiscovery:
             counts[item["status"]] += 1
         return dict(sorted(counts.items()))
 
+    def unresolved_registry_count(self):
+        """Orphan diagnostics only: never retire or delete a record automatically.
+
+        RepoTrash and GarbageRepos are normal native lifecycle locations.
+        """
+        with self.connection.cursor() as cursor:
+            cursor.execute(
+                "SELECT COUNT(*) FROM cf_library_storage c "
+                "LEFT JOIN Repo r ON r.repo_id=c.repo_id "
+                "LEFT JOIN RepoTrash t ON t.repo_id=c.repo_id "
+                "LEFT JOIN GarbageRepos g ON g.repo_id=c.repo_id "
+                "WHERE r.repo_id IS NULL AND t.repo_id IS NULL "
+                "AND g.repo_id IS NULL AND c.state <> 'retired'")
+            return cursor.fetchone()[0]
+
     def summary(self, repo_id=None):
         counts = Counter()
         iterator = (self.inspect(repo_id),) if repo_id else self.scan()
         for item in iterator:
             counts[item["status"]] += 1
         return dict(sorted(counts.items()))
+
+def storage_catalog_status(repo_id, repo_present, key, state, storage_id, readable, *, in_trash=False, in_gc=False, virtual=False):
+    """Distinguish a missing registration from a missing native Repo.
+
+    A registry entry alone is not proof that the native object tree is healthy.
+    Actual object-byte validation remains a separate FSCK/read test.
+    """
+    if not repo_present:
+        if in_trash:
+            return "IN_TRASH"
+        if in_gc:
+            return "GC_PENDING"
+        if key is not None and state == "retired":
+            return "RETIRED"
+        return "REPO_MISSING"
+    if virtual:
+        return "VIRTUAL_REPO"
+    if key is None:
+        return "REGISTRATION_MISSING"
+    if state == "retired":
+        return "RETIRED"
+    if state == "reserved":
+        return "RESERVED"
+    if state != "active":
+        return "BINDING_ERROR"
+    native = key == native_key(repo_id) and storage_id is None
+    routed = storage_id == "auto-local:" + key and key != native_key(repo_id)
+    if not (native or routed):
+        return "BINDING_ERROR"
+    return "READY" if readable else "RESOURCE_UNREADABLE"

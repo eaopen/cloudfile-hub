@@ -88,8 +88,9 @@ class NativeLibraries(APIView):
             cursor.execute('SELECT c.repo_id FROM ' + schema + '.cf_library_storage c '
                            'INNER JOIN ' + schema + '.Repo r ON r.repo_id=c.repo_id '
                            'LEFT JOIN ' + schema + '.RepoStorageId s ON s.repo_id=c.repo_id '
+                           'LEFT JOIN ' + schema + '.VirtualRepo v ON v.repo_id=c.repo_id '
                            "WHERE c.repo_key=CONCAT('native-',c.repo_id) AND c.state='active' "
-                           'AND s.repo_id IS NULL '
+                           'AND s.repo_id IS NULL AND v.repo_id IS NULL '
                            'ORDER BY c.repo_id LIMIT %s OFFSET %s',
                            (limit + 1, (page - 1) * limit))
             ids = [row[0] for row in cursor.fetchall()]
@@ -103,3 +104,79 @@ class NativeLibraries(APIView):
             result.append({'id': repo_id, 'name': repo.name})
         return Response({'repos': result, 'page_info': {
             'current_page': page, 'has_next_page': len(ids) > limit}})
+
+class StorageLibraries(APIView):
+    """Administrative storage inventory and individual UUID diagnosis.
+
+    Read-only: callers cannot create or reactivate original Seafile resources.
+    """
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+
+    def get(self, request):
+        import re
+        from django.db import connection
+        from seaserv import seafile_api
+        from seahub.utils.db_api import SeafileDB
+        from .native_discovery import storage_catalog_status
+
+        if not request.user.admin_permissions.can_manage_library():
+            return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+        schema = connection.ops.quote_name(SeafileDB().db_name)
+        requested = request.GET.get('repo_id')
+        if requested and not re.fullmatch(
+                r'[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', requested):
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid Repo UUID.')
+        if requested:
+            sql = ('SELECT i.repo_id,r.repo_id,c.repo_key,c.state,s.storage_id,t.repo_id,g.repo_id,v.repo_id '
+                   'FROM (SELECT %s AS repo_id) i '
+                   'LEFT JOIN ' + schema + '.Repo r ON r.repo_id=i.repo_id '
+                   'LEFT JOIN ' + schema + '.cf_library_storage c ON c.repo_id=i.repo_id '
+                   'LEFT JOIN ' + schema + '.RepoStorageId s ON s.repo_id=i.repo_id '
+                   'LEFT JOIN ' + schema + '.RepoTrash t ON t.repo_id=i.repo_id '
+                   'LEFT JOIN ' + schema + '.GarbageRepos g ON g.repo_id=i.repo_id '
+                   'LEFT JOIN ' + schema + '.VirtualRepo v ON v.repo_id=i.repo_id')
+            params = (requested,)
+            page = 1
+            per_page = 1
+        else:
+            try:
+                page = int(request.GET.get('page', '1'))
+                per_page = int(request.GET.get('per_page', '100'))
+            except (ValueError, TypeError):
+                return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid pagination.')
+            if not (1 <= page <= 200 and 1 <= per_page <= 100):
+                return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid pagination.')
+            sql = ('SELECT c.repo_id,r.repo_id,c.repo_key,c.state,s.storage_id,t.repo_id,g.repo_id,v.repo_id '
+                   'FROM ' + schema + '.cf_library_storage c '
+                   'LEFT JOIN ' + schema + '.Repo r ON r.repo_id=c.repo_id '
+                   'LEFT JOIN ' + schema + '.RepoStorageId s ON s.repo_id=c.repo_id '
+                   'LEFT JOIN ' + schema + '.RepoTrash t ON t.repo_id=c.repo_id '
+                   'LEFT JOIN ' + schema + '.GarbageRepos g ON g.repo_id=c.repo_id '
+                   'LEFT JOIN ' + schema + '.VirtualRepo v ON v.repo_id=c.repo_id '
+                   'ORDER BY c.repo_id LIMIT %s OFFSET %s')
+            params = (per_page + 1, (page - 1) * per_page)
+        with connection.cursor() as cursor:
+            cursor.execute(sql, params)
+            records = cursor.fetchall()
+        has_next = not requested and len(records) > per_page
+        result = []
+        for repo_id, existing, key, state, route, trashed, garbage, virtual in records[:per_page]:
+            repo = seafile_api.get_repo(repo_id) if existing is not None else None
+            readable = repo is not None and bool(getattr(repo, 'name', None))
+            code = storage_catalog_status(repo_id, existing is not None,
+                                          key, state, route, readable,
+                                          in_trash=trashed is not None,
+                                          in_gc=garbage is not None,
+                                          virtual=virtual is not None)
+            result.append({
+                'repoId': repo_id,
+                'name': repo.name if readable else '',
+                'status': code,
+                'state': state or '',
+                'source': 'native' if key == 'native-' + repo_id else 'v2',
+                'registered': key is not None,
+                'repoExists': existing is not None,
+            })
+        return Response({'repos': result, 'page_info': {
+            'current_page': page, 'has_next_page': has_next}})

@@ -31,7 +31,8 @@ def main():
                 schema.verify()
             discovery = NativeLibraryDiscovery(connection)
             if args.command in ('install', 'reconcile'):
-                print(json.dumps(discovery.reconcile(args.repo_id), sort_keys=True))
+                print(json.dumps({"statuses": discovery.reconcile(args.repo_id),
+                                  "unresolved_registry": discovery.unresolved_registry_count()}, sort_keys=True))
             elif args.command == 'inspect':
                 if not args.repo_id:
                     parser.error('inspect requires --repo-id')

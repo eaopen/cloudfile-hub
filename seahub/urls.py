@@ -2,7 +2,7 @@
 from django.urls import include, path, re_path
 from django.views.generic import TemplateView
 from cloudfile_ext.v2.acl_http import EffectivePermission, SharedDirectories, DirectoryRules, NativeACLCheck, DirectoryEntries
-from cloudfile_ext.v2.http import IdentityResolve, GroupResolve, NativeLibraries
+from cloudfile_ext.v2.http import IdentityResolve, GroupResolve, NativeLibraries, StorageLibraries
 from cloudfile_ext.v2.oidc import oidc_login
 from cloudfile_ext.v2.search.http import SearchQuery
 
@@ -244,6 +244,7 @@ urlpatterns = [
     path('api/v2.1/internal/cloudfile/acl/check/', NativeACLCheck.as_view()),
     path('oidc/login/', oidc_login),
     path('api/v2.1/admin/cloudfile/native-libraries/', NativeLibraries.as_view()),
+    path('api/v2.1/admin/cloudfile/storage-libraries/', StorageLibraries.as_view()),
     path('api/v2.1/admin/cloudfile/sso/identities/resolve/', IdentityResolve.as_view()),
     path('api/v2.1/admin/cloudfile/sso/groups/resolve/', GroupResolve.as_view()),
     path('api/v2.1/cloudfile/search/', SearchQuery.as_view()),
