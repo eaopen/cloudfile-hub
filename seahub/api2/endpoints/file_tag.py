@@ -152,9 +152,7 @@ def check_parameter(func):
                 error_msg = 'Folder %s not found.' % file_path
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
-            if check_folder_permission(request, repo_id, new_file_path) != 'rw':
-                error_msg = _('Permission denied.')
-                return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+
         else:
             if filename.strip() == '':
                 error_msg = 'p %s invalid' % file_path
@@ -165,9 +163,13 @@ def check_parameter(func):
                 error_msg = 'File %s not found.' % file_path
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
-            if check_folder_permission(request, repo_id, parent_path) != 'rw':
-                error_msg = _('Permission denied.')
-                return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+
+
+        try:
+            authorize_tag_target(request.user, repo_id, new_file_path,
+                                 is_dir=is_dir, write=request.method != 'GET')
+        except Exception as error:
+            return _tag_error(error)
 
         kwargs['parent_path'] = parent_path
         kwargs['filename'] = filename
