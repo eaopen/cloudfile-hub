@@ -1,6 +1,6 @@
 """Existing-index protocol and commit catch-up regression checks."""
 import unittest
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock, patch
 
 from cloudfile_ext.v2.search.client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, checked_reference
@@ -129,9 +129,13 @@ class CatchupTests(unittest.TestCase):
         indexer = Indexer(Mock(), native)
         indexer.publish = Mock()
         row = ('f' * 32, '/folder', 'a.txt', False)
-        with patch('seahub.tags.models.FileUUIDMap') as model, \
+        fake = ModuleType('seahub.tags.models')
+        fake.FileUUIDMap = Mock()
+        with patch.dict('sys.modules', {'seahub': ModuleType('seahub'),
+                                        'seahub.tags': ModuleType('seahub.tags'),
+                                        'seahub.tags.models': fake}), \
                 patch('cloudfile_ext.v2.search.worker.tag_labels', return_value={'/folder/a.txt': ['工艺']}) as labels:
-            query = model.objects.filter.return_value
+            query = fake.FileUUIDMap.objects.filter.return_value
             query.filter.return_value = query
             query.order_by.return_value.values_list.return_value.__getitem__.return_value = [row]
             cursor = indexer.sweep(repo, 'a' * 32)
@@ -144,7 +148,11 @@ class CatchupTests(unittest.TestCase):
     def test_empty_tag_sweep_restarts_without_native_calls(self):
         native = Mock()
         indexer = Indexer(Mock(), native)
-        with patch('seahub.tags.models.FileUUIDMap') as model:
+        fake = ModuleType('seahub.tags.models')
+        fake.FileUUIDMap = Mock()
+        with patch.dict('sys.modules', {'seahub': ModuleType('seahub'),
+                                        'seahub.tags': ModuleType('seahub.tags'),
+                                        'seahub.tags.models': fake}):
             query = model.objects.filter.return_value
             query.filter.return_value = query
             query.order_by.return_value.values_list.return_value.__getitem__.return_value = []
@@ -153,7 +161,9 @@ class CatchupTests(unittest.TestCase):
 
     def test_native_tag_sql_errors_do_not_clear_existing_search_tags(self):
         from cloudfile_ext.v2.search.worker import tag_labels
-        with patch('cloudfile_ext.v2.tag_reads.read', side_effect=OSError('db unavailable')):
+        fake = ModuleType('cloudfile_ext.v2.tag_reads')
+        fake.read = Mock(side_effect=OSError('db unavailable'))
+        with patch.dict('sys.modules', {'cloudfile_ext.v2.tag_reads': fake}):
             with self.assertRaises(SearchUnavailable):
                 tag_labels(RID, [('/A/a.txt', 'file')])
 
