@@ -88,3 +88,30 @@ class DirectoryRuntimeTests(TestCase):
             self.assertEqual(claims['exp']-claims['iat'],60)
             response.status_code=302
             with self.assertRaises(IdentityUnavailable):Directory().get('/groups?view=entities')
+
+
+    def test_periodic_entity_sync_updates_only_native_catalog(self):
+        from cloudfile_ext.v2.etech_directory import sync_entity_catalog
+        def fake_native(group_id):
+            return SimpleNamespace(group_name='Department')
+        with patch('cloudfile_ext.v2.etech_directory.runtime', self.runtime), \
+             patch('seaserv.ccnet_api.get_group', side_effect=fake_native), \
+             patch('seaserv.ccnet_api.set_group_name') as rename:
+            result = sync_entity_catalog()
+        self.assertEqual(result['status'], 'OK')
+        self.assertEqual(result['membership_writes'], 0)
+        self.catalog.ensure.assert_called_once_with('org','directory','o1','Department')
+        self.memberships.ensure.assert_not_called()
+        rename.assert_not_called()
+
+    def test_empty_catalog_cannot_report_full_success(self):
+        from cloudfile_ext.v2.etech_directory import sync_entity_catalog
+        @contextmanager
+        def empty_runtime():
+            with self.runtime() as parts:
+                self.directory.entities.return_value = {}
+                yield parts
+        with patch('cloudfile_ext.v2.etech_directory.runtime', empty_runtime), \
+             self.assertRaises(IdentityUnavailable):
+            sync_entity_catalog()
+        self.catalog.ensure.assert_not_called()
