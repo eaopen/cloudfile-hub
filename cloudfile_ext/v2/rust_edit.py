@@ -29,6 +29,24 @@ from .acl_runtime import Authority
 
 MAX_TICKET_SECONDS = 3600
 
+# Internal schema capability, not a user-facing feature flag. A controlled
+# Guard migration must restart Hub and both native processes.
+from functools import lru_cache
+
+
+@lru_cache(maxsize=1)
+def checkout_available():
+    from seahub.utils.db_api import SeafileDB
+    schema = SeafileDB().db_name
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT COUNT(*) FROM information_schema.TABLES "
+            "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='cf_edit_guard'", (schema,))
+        rows = cursor.fetchone()
+    if not rows or rows[0] not in (0, 1):
+        raise RuntimeError("Checkout schema availability cannot be proven")
+    return rows[0] == 1
+
 
 def issue_ticket(*, username, uid, repo_id, path, mode, file_id, now, secret):
     """Stateless, path-scoped Agent permit. Never accept a caller-supplied actor."""
@@ -71,7 +89,7 @@ class RustLocalEditOpen(APIView):
             repo_id = request.data["repo_id"]
             path = request.data["path"]
             mode = request.data["mode"]
-            if mode == "exclusive-edit" and not getattr(settings, "CF_V2_AGENT_EDIT_ENABLED", False):
+            if mode == "exclusive-edit" and not checkout_available():
                 return Response({"code": "CHECKOUT_UNSUPPORTED"}, status=409)
             user = request.user.username
             uid = Profile.objects.get(user=user).login_id
@@ -119,7 +137,7 @@ class RustCheckoutInfo(APIView):
     throttle_classes = (UserRateThrottle,)
 
     def get(self, request):
-        if not getattr(settings, "CF_V2_AGENT_EDIT_ENABLED", False):
+        if not checkout_available():
             # Read-only capability information must not disable ordinary edits.
             return Response({"checkout_supported": False, "checked_out": False})
         try:
