@@ -1,5 +1,6 @@
 """Trusted Etech Directory -> CE User/Group/GroupUser runtime; no shadow tables."""
 from contextlib import contextmanager
+from functools import lru_cache
 from datetime import datetime, timezone
 import json
 import time
@@ -14,7 +15,7 @@ from django.conf import settings
 
 from .errors import IdentityConflict, IdentityUnavailable
 from .identity import NativeIdentity, text
-from .memberships import GroupCatalog, Memberships, validate_subject
+from .memberships import GroupCatalog, Memberships, is_ready, readiness_key, validate_subject
 
 
 class Directory:
@@ -107,10 +108,7 @@ def runtime():
                 raise IdentityUnavailable('native group service owner required')
             return ccnet_api.create_group(name, owner)
         catalog = GroupCatalog(conn, account_schema=account_schema, provider='etech', create_group=create_group)
-        location = settings.CACHES.get('default', {}).get('LOCATION', '')
-        if not isinstance(location, str) or not location.startswith(('redis://', 'rediss://', 'unix://')):
-            raise IdentityUnavailable('shared native Redis connection required')
-        cache = redis.Redis.from_url(location, socket_connect_timeout=5, socket_timeout=5)
+        cache = redis.Redis.from_url(redis_location(), socket_connect_timeout=5, socket_timeout=5)
         memberships = Memberships(conn, cache, identity, account_schema=account_schema, provider='etech',
             fetch=directory.subject, ttl=getattr(settings, 'CF_DIRECTORY_SUBJECT_TTL', 1800))
         yield directory, identity, catalog, memberships
@@ -161,7 +159,55 @@ def prepare_group(external):
         return catalog.ensure(*key, entities[key])
 
 
+def redis_location():
+    location = settings.CACHES.get('default', {}).get('LOCATION', '')
+    if not isinstance(location, str) or not location.startswith(('redis://', 'rediss://', 'unix://')):
+        raise IdentityUnavailable('shared native Redis connection required')
+    return location
+
+
+@lru_cache(maxsize=4)
+def _shared_redis(location):
+    # Process-wide pool; redis-py resets it after fork.
+    return redis.Redis.from_url(location, socket_connect_timeout=5, socket_timeout=5)
+
+
+def subject_ready(uid, username):
+    """Read-only check of the marker Memberships.ensure() writes after commit.
+
+    Uses pooled Redis and the request's Django connection instead of opening a
+    dedicated MySQL/Redis pair and a database lock on every request. Repeats
+    the binding/activity checks the locked path does on a hit. Any doubt
+    returns False so the locked path decides, failing closed on its own.
+    """
+    from seaserv import ccnet_api
+    from seahub.profile.models import Profile
+    from seahub.utils.db_api import SeafileDB
+    try:
+        uid, username = text(uid), text(username, 255)
+        database = SeafileDB().db_name
+        ttl = getattr(settings, 'CF_DIRECTORY_SUBJECT_TTL', 1800)
+        if not database or type(ttl) is not int or not 30 <= ttl <= 3600:
+            return False
+        key = readiness_key(database, 'etech', uid, username)
+        if not is_ready(_shared_redis(redis_location()), key, uid, username, ttl):
+            return False
+        # NativeIdentity.active(): exact UID binding (user and login_id are
+        # both unique) and an active native account.
+        if list(Profile.objects.filter(user=username, login_id=uid).values_list('user', 'login_id')) != [(username, uid)]:
+            return False
+        account = ccnet_api.get_emailuser(username)
+        # Match NativeIdentity.active() strictly: a case-insensitive CE lookup
+        # must not turn a different stored native account into this UID's owner.
+        return (account is not None and getattr(account, 'email', None) == username
+                and getattr(account, 'is_active', None) == 1)
+    except Exception:
+        return False
+
+
 def ensure_subject(uid, username):
+    if subject_ready(uid, username):
+        return
     with runtime() as (directory, identity, catalog, memberships):
         # Entity synchronization never expands users. Catalog is consulted only
         # after the subject TTL expires, including newly assigned departments.
