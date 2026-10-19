@@ -3101,6 +3101,21 @@ class FileView(APIView):
         if not path:
             return api_error(status.HTTP_400_BAD_REQUEST, 'Path is missing.')
 
+        # V2 downloads need an authorized canonical path, not an object-only
+        # token that native Fileserver must reject for libraries with ACL rules.
+        # Keep other file operations on their existing native paths.
+        # Virtual libraries retain native handling: Authority does not yet
+        # authorize their source-path mapping, so never invent a broader grant.
+        if request.GET.get('op', 'download') == 'download' and not repo.is_virtual:
+            reuse = request.GET.get('reuse', '0')
+            if reuse not in ('0', '1'):
+                return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid reuse argument.')
+            from cloudfile_ext.v2.downloads import file_download_response
+            response = file_download_response(request, repo_id, path, reuse == '0')
+            if response.status_code == 200:
+                send_file_access_msg(request, repo, path, 'api')
+            return response
+
         parent_dir = os.path.dirname(path)
         if check_folder_permission(request, repo_id, parent_dir) is None:
             return api_error(status.HTTP_403_FORBIDDEN,
