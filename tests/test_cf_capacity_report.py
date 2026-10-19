@@ -18,19 +18,23 @@ class BaseCommand:
 class CommandError(Exception):
     pass
 
-stub("django")
-stub("django.conf", settings=types.SimpleNamespace())
-stub("django.core")
-stub("django.core.management")
-stub("django.core.management.base", BaseCommand=BaseCommand, CommandError=CommandError)
-stub("django.db", connection=types.SimpleNamespace())
-stub("seahub")
-stub("seahub.utils")
-stub("seahub.utils.db_api", SeafileDB=lambda: types.SimpleNamespace(db_name="seafile_db"))
-path = Path(__file__).resolve().parents[1] / "cloudfile_ext/management/commands/cf_capacity_report.py"
-spec = importlib.util.spec_from_file_location("cf_capacity_report_under_test", path)
-module = importlib.util.module_from_spec(spec)
-spec.loader.exec_module(module)
+# Module-level doubles must not leak into the full Seahub pytest process.
+# The loaded command retains its local references after imports are restored.
+with patch.dict(sys.modules):
+    stub("django")
+    stub("django.conf", settings=types.SimpleNamespace())
+    stub("django.core")
+    stub("django.core.management")
+    stub("django.core.management.base", BaseCommand=BaseCommand, CommandError=CommandError)
+    stub("django.db", connection=types.SimpleNamespace())
+    stub("seahub")
+    stub("seahub.utils")
+    stub("seahub.utils.db_api", SeafileDB=lambda: types.SimpleNamespace(db_name="seafile_db"))
+    path = Path(__file__).resolve().parents[1] / "cloudfile_ext/management/commands/cf_capacity_report.py"
+    spec = importlib.util.spec_from_file_location("cf_capacity_report_under_test", path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
 
 
 class FakeCursor:
