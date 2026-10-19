@@ -26,7 +26,10 @@ class ViewScopeTests(unittest.TestCase):
         policy = SimpleNamespace(can_read=read, can_write=write)
         repo = SimpleNamespace(is_virtual=False, encrypted=False, version=1)
         file_entry = SimpleNamespace(mode=stat.S_IFREG | 0o644, id=FILE_ID)
-        with patch("cloudfile_ext.v2.rust_edit.Profile.objects.get",
+        # Scope denial is tested with Checkout installed; schema discovery has
+        # its own tests and must not turn this authorization case into HTTP 503.
+        with patch("cloudfile_ext.v2.rust_edit.checkout_available", return_value=True), \
+             patch("cloudfile_ext.v2.rust_edit.Profile.objects.get",
                    return_value=SimpleNamespace(login_id="stable-uid")), \
              patch("cloudfile_ext.v2.rust_edit.Authority") as auth, \
              patch("cloudfile_ext.v2.rust_edit.seafile_api.get_repo", return_value=repo), \

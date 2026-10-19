@@ -36,11 +36,19 @@ class Stars:
     def __iter__(self): return iter(())
 
 
-def endpoint(api):
+def endpoint(api, *, legacy=True):
     source = ast.parse((ROOT / 'seahub/api2/endpoints/dir.py').read_text())
     helper = next(n for n in source.body if isinstance(n, ast.FunctionDef) and n.name == 'get_dir_file_info_list')
     view = next(n for n in source.body if isinstance(n, ast.ClassDef) and n.name == 'DirView')
     get = next(n for n in view.body if isinstance(n, ast.FunctionDef) and n.name == 'get')
+    # These shared native scan-envelope cases target the retained legacy
+    # implementation. V2 dispatch is tested separately, so importing its full
+    # runtime here would silently switch the authority under test.
+    if legacy:
+        get.body = [node for node in get.body if not (isinstance(node, ast.If)
+            and any(isinstance(child, ast.ImportFrom)
+                    and child.module == 'cloudfile_ext.v2.directory_page'
+                    for child in ast.walk(node)))]
     get.decorator_list = []
     view.body, view.bases, view.decorator_list = [get], [], []
     stars = Stars()
@@ -92,6 +100,22 @@ def native_item(**changes):
                    version=1, mtime=0, size=0, modifier=None, permission='rw',
                    is_locked=False, lock_owner=None, lock_time=0, is_shared=False),
             **changes}
+
+
+class PageDispatchTest(unittest.TestCase):
+    def test_public_paged_requests_delegate_to_v2_without_native_scan(self):
+        # Keep the actual public dispatch in coverage while the matrix below
+        # independently verifies the retained native scan/RPC adapter.
+        import sys
+        for query in ({'start': '0'}, {'limit': '50'}):
+            api = API()
+            current = SimpleNamespace(GET=query, user=SimpleNamespace(username='user'))
+            delegate = Mock(return_value=Response({'v2': True}))
+            with patch.dict(sys.modules, {'cloudfile_ext.v2.directory_page':
+                            SimpleNamespace(directory_page=delegate)}):
+                result = endpoint(api, legacy=False).get(current, 'repo')
+            delegate.assert_called_once_with(current, 'repo')
+            self.assertEqual(result.data, {'v2': True})
 
 
 class HubEnvelopeTest(unittest.TestCase):

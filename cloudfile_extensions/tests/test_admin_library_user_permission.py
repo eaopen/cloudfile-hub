@@ -238,7 +238,10 @@ class AdminLibraryUserPermissionTests(unittest.TestCase):
             spec.loader.exec_module(module)
             registry = Mock()
             module.register(registry)
-        patterns = registry.register_urls.call_args.args[0]
+        # Provisioning may register another URL batch when OAuth is enabled;
+        # inspect all registrations so the assertion is configuration-independent.
+        patterns = [pattern for call in registry.register_urls.call_args_list
+                    for pattern in call.args[0]]
         routes = {pattern.name: pattern for pattern in patterns}
         route = routes['cloudfile-admin-library-administrator-with-access']
         self.assertIsNotNone(route.pattern.match(
