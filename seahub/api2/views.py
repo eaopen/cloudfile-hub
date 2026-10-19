@@ -2541,18 +2541,10 @@ def get_shared_link(request, repo_id, path):
     return file_shared_link
 
 def get_repo_file(request, repo_id, file_id, file_name, op,
-                  use_onetime=dj_settings.FILESERVER_TOKEN_ONCE_ONLY, path=None):
+                  use_onetime=dj_settings.FILESERVER_TOKEN_ONCE_ONLY):
     if op == 'download':
-        if path is not None:
-            # Hub has authorized this logged-in user and resolved this file.
-            # Server independently resolves path -> object and stores a native
-            # one-file/one-hour ticket; reads only consult ticket/expiry.
-            token = seafile_api.get_scoped_file_download_token(
-                repo_id, path, request.user.username, use_onetime)
-        else:
-            # Revision/other legacy entry points are deliberately untouched.
-            token = seafile_api.get_fileserver_access_token(
-                repo_id, file_id, op, request.user.username, use_onetime)
+        token = seafile_api.get_fileserver_access_token(repo_id,
+                file_id, op, request.user.username, use_onetime)
 
         if not token:
             error_msg = 'Internal Server Error'
@@ -3162,6 +3154,19 @@ class FileView(APIView):
         if not path:
             return api_error(status.HTTP_400_BAD_REQUEST, 'Path is missing.')
 
+        # Only normal single-file reads use the V2 scoped grant. The V2
+        # Authority currently cannot resolve virtual-library source paths;
+        # history and non-download operations keep native Seafile behavior.
+        if request.GET.get('op', 'download') == 'download' and not repo.is_virtual:
+            reuse = request.GET.get('reuse', '0')
+            if reuse not in ('0', '1'):
+                return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid reuse argument.')
+            from cloudfile_ext.v2.downloads import file_download_response
+            response = file_download_response(request, repo_id, path, reuse == '0')
+            if response.status_code == 200:
+                send_file_access_msg(request, repo, path, 'api')
+            return response
+
         parent_dir = os.path.dirname(path)
         if check_folder_permission(request, repo_id, parent_dir) is None:
             return api_error(status.HTTP_403_FORBIDDEN,
@@ -3191,7 +3196,7 @@ class FileView(APIView):
 
         use_onetime = False if reuse == '1' else True
         return get_repo_file(request, repo_id, file_id,
-                file_name, op, use_onetime, path=path)
+                file_name, op, use_onetime)
 
     def post(self, request, repo_id, format=None):
         # rename, move, copy or create file
