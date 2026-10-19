@@ -72,7 +72,6 @@ import {
   username
 } from '@/utils/constants';
 import EventBus, { eventBus } from '@/utils/event-bus';
-
 import { Utils } from '@/utils/utils';
 
 dayjs.extend(relativeTime);
