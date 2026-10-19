@@ -1,7 +1,7 @@
 import React, { useContext, useEffect, useCallback, useState, useRef, forwardRef, useImperativeHandle } from 'react';
 import { seafileAPI } from '@/api/seafile-api';
 import ZipDownloadDialog from '@/components/dialog/zip-download-dialog';
-import { EVENT_BUS_TYPE } from '@/components/event-bus';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
 import ModalPortal from '@/components/modal-portal';
 import toaster from '@/components/toast';
 import { useGoFileserver, fileServerRoot, cloudFileWebEnabled } from '@/utils/constants';

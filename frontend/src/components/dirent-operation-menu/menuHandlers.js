@@ -1,6 +1,7 @@
 import { setPendingAttachments } from '@/components/dir-chat/hooks/ai-chat-tools';
 import { AttachmentObject } from '@/components/dir-chat/models';
-import EventBus, { eventBus as globalEventBus, EVENT_BUS_TYPE } from '@/components/event-bus';
+import EventBus, { eventBus as globalEventBus } from '@/utils/event-bus';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
 import { Dirent } from '@/models';
 import { siteRoot } from '@/utils/constants';
 import TextTranslation from '@/utils/text-translation';

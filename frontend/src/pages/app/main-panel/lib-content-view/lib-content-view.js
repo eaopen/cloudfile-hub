@@ -19,7 +19,8 @@ import CopyMoveDirentProgressDialog from '@/components/dialog/copy-move-dirent-p
 import DeleteFolderDialog from '@/components/dialog/delete-folder-dialog';
 import LibDecryptDialog from '@/components/dialog/lib-decrypt-dialog';
 import Detail from '@/components/dirent-detail';
-import EventBus, { EVENT_BUS_TYPE, eventBus } from '@/components/event-bus';
+import EventBus, { eventBus } from '@/utils/event-bus';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
 import FileUploader from '@/components/file-uploader/file-uploader';
 import ModalPortal from '@/components/modal-portal';
 import toaster from '@/components/toast';

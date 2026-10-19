@@ -1,6 +1,6 @@
 import React, { useContext, useEffect, useCallback, useState, useRef, forwardRef, useImperativeHandle } from 'react';
 import LibSubFolderPermissionDialog from '@/components/dialog/lib-sub-folder-permission-dialog';
-import { EVENT_BUS_TYPE } from '@/components/event-bus';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
 import ModalPortal from '@/components/modal-portal';
 import { folderPermEnabled, isPro, siteRoot } from '@/utils/constants';
 
