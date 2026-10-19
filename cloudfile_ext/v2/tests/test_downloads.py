@@ -15,7 +15,7 @@ class DownloadTests(TestCase):
                 error=None, origin='http://files.example/cfhttp'):
         req = SimpleNamespace(user=SimpleNamespace(username='ordinary@auth.local'))
         with patch('cloudfile_ext.v2.downloads.Authority') as authority, \
-                patch('cloudfile_ext.v2.downloads.seafile_api.get_scoped_file_download_token') as mint, \
+                patch('cloudfile_ext.v2.downloads.seafile_api.get_scoped_download_token') as mint, \
                 patch('cloudfile_ext.v2.downloads.gen_file_get_url',
                       side_effect=lambda token, name: origin + '/files/' + token + '/' + name):
             authority.return_value.effective.return_value.can_read = allowed
