@@ -10,13 +10,13 @@ from seahub.utils import normalize_file_path
 
 class FileTagsManager(models.Manager):
 
-    def get_file_tag_by_path(self, repo_id, file_path):
+    def get_file_tag_by_path(self, repo_id, file_path, is_dir=False):
         file_path = normalize_file_path(file_path)
         filename = os.path.basename(file_path)
         parent_path = os.path.dirname(file_path)
 
         file_uuid = FileUUIDMap.objects.get_fileuuidmap_by_path(
-            repo_id, parent_path, filename, is_dir=False)
+            repo_id, parent_path, filename, is_dir=is_dir)
 
         file_tag_list = super(FileTagsManager, self).filter(
             file_uuid=file_uuid).select_related('repo_tag')
@@ -53,13 +53,13 @@ class FileTagsManager(models.Manager):
         except self.model.DoesNotExist:
             return None
 
-    def get_file_tag(self, repo_id, repo_tag_id, file_path):
+    def get_file_tag(self, repo_id, repo_tag_id, file_path, is_dir=False):
         file_path = normalize_file_path(file_path)
         filename = os.path.basename(file_path)
         parent_path = os.path.dirname(file_path)
 
         file_uuid = FileUUIDMap.objects.get_fileuuidmap_by_path(
-            repo_id, parent_path, filename, is_dir=False)
+            repo_id, parent_path, filename, is_dir=is_dir)
         try:
             return super(FileTagsManager, self).get(repo_tag_id=repo_tag_id,
                                                     file_uuid=file_uuid)
@@ -73,12 +73,12 @@ class FileTagsManager(models.Manager):
         except self.model.DoesNotExist:
             return None
 
-    def add_file_tag(self, repo_id, repo_tag_id, file_path):
+    def add_file_tag(self, repo_id, repo_tag_id, file_path, is_dir=False):
         file_path = normalize_file_path(file_path)
         filename = os.path.basename(file_path)
         parent_path = os.path.dirname(file_path)
         file_uuid = FileUUIDMap.objects.get_or_create_fileuuidmap(
-            repo_id, parent_path, filename, is_dir=False)
+            repo_id, parent_path, filename, is_dir=is_dir)
         repo_tag = RepoTags.objects.get_repo_tag_by_id(repo_tag_id)
         file_tag = self.model(repo_tag=repo_tag, file_uuid=file_uuid)
         file_tag.save()

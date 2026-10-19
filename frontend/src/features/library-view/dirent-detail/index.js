@@ -1,0 +1,113 @@
+import React, { useEffect, useMemo } from 'react';
+import PropTypes from 'prop-types';
+import LibDetail from '@/components/dirent-detail/lib-details';
+import { PRIVATE_FILE_TYPE } from '@/constants';
+import { METADATA_MODE, TAGS_MODE } from '@/constants/view-mode';
+import ViewDetails from '@/features/metadata/components/view-details';
+import MetadataContext from '@/features/metadata/context';
+import { useTags } from '@/features/tag/hooks';
+import ObjectUtils from '@/utils/object';
+import DirentDetail from './dirent-details';
+import MultiSelectionDetails from './multi-selection-details';
+
+const Detail = React.memo(({
+  repoID,
+  path,
+  currentMode,
+  dirent,
+  selectedDirents,
+  currentRepoInfo,
+  repoTags,
+  fileTags,
+  onClose,
+  onFileTagChanged
+}) => {
+  const { tagsData, addTag, modifyLocalFileTags } = useTags();
+
+  const isView = useMemo(() => currentMode === METADATA_MODE || (path && path.startsWith('/' + PRIVATE_FILE_TYPE.FILE_EXTENDED_PROPERTIES)), [currentMode, path]);
+  const isTag = useMemo(() => currentMode === TAGS_MODE || (path && path.startsWith('/' + PRIVATE_FILE_TYPE.TAGS_PROPERTIES)), [currentMode, path]);
+
+  useEffect(() => {
+    if (isView) return;
+
+    // init context
+    const context = new MetadataContext();
+    window.sfMetadataContext = context;
+    window.sfMetadataContext.init({ repoID, repoInfo: currentRepoInfo });
+    return () => {
+      if (window.sfMetadataContext) {
+        window.sfMetadataContext.destroy();
+        delete window['sfMetadataContext'];
+      }
+    };
+  }, [repoID, currentRepoInfo, isView]);
+
+  // Handle multi-selection case
+  if (selectedDirents && selectedDirents.length > 1) {
+    return (
+      <MultiSelectionDetails
+        repoID={repoID}
+        path={path}
+        selectedDirents={selectedDirents}
+        currentRepoInfo={currentRepoInfo}
+        modifyLocalFileTags={modifyLocalFileTags}
+        onClose={onClose}
+      />
+    );
+  }
+
+  if (isView && !dirent) {
+    const pathParts = path.split('/');
+    const [, , viewId] = pathParts;
+    if (!viewId) return null;
+    return (<ViewDetails viewId={viewId} onClose={onClose} />);
+  }
+
+  if (path === '/' && !dirent) {
+    return (<LibDetail currentRepoInfo={currentRepoInfo} onClose={onClose} />);
+  }
+
+  if (!dirent || !path) return null;
+
+  return (
+    <DirentDetail
+      repoID={repoID}
+      path={isView || isTag ? dirent.path : path}
+      dirent={selectedDirents[0] || dirent}
+      currentRepoInfo={currentRepoInfo}
+      repoTags={repoTags}
+      fileTags={fileTags}
+      tagsData={tagsData}
+      addTag={addTag}
+      modifyLocalFileTags={modifyLocalFileTags}
+      onFileTagChanged={onFileTagChanged}
+      onClose={onClose}
+    />
+  );
+}, (props, nextProps) => {
+  const isChanged =
+    props.repoID !== nextProps.repoID ||
+    props.path !== nextProps.path ||
+    !ObjectUtils.isSameObject(props.dirent, nextProps.dirent) ||
+    !ObjectUtils.isSameObject(props.selectedDirents, nextProps.selectedDirents) ||
+    !ObjectUtils.isSameObject(props.currentRepoInfo, nextProps.currentRepoInfo) ||
+    JSON.stringify(props.repoTags || []) !== JSON.stringify(nextProps.repoTags || []) ||
+    JSON.stringify(props.fileTags || []) !== JSON.stringify(nextProps.fileTags || []) ||
+    props.onFileTagChanged !== nextProps.onFileTagChanged;
+  return !isChanged;
+});
+
+Detail.propTypes = {
+  repoID: PropTypes.string,
+  path: PropTypes.string,
+  currentMode: PropTypes.string,
+  dirent: PropTypes.object,
+  selectedDirents: PropTypes.array,
+  currentRepoInfo: PropTypes.object,
+  repoTags: PropTypes.array,
+  fileTags: PropTypes.array,
+  onClose: PropTypes.func,
+  onFileTagChanged: PropTypes.func,
+};
+
+export default Detail;

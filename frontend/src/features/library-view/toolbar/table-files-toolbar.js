@@ -1,0 +1,279 @@
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import PropTypes from 'prop-types';
+import { setPendingAttachments } from '@/components/dir-chat/hooks/ai-chat-tools';
+import { AttachmentObject } from '@/components/dir-chat/models';
+import CustomDropdown from '@/components/dropdown';
+import Icon from '@/components/icon';
+import OpIcon from '@/components/op-icon';
+import { getColumnByKey } from '@/components/sf-table/utils/column';
+import RowUtils from '@/components/sf-table/utils/row';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
+import { PRIVATE_COLUMN_KEY } from '@/features/metadata/constants';
+import { getFileNameFromRecord, getParentDirFromRecord } from '@/features/metadata/utils/cell';
+import { openInNewTab, openParentFolder } from '@/features/metadata/utils/file';
+import { buildTableToolbarMenuOptions } from '@/features/metadata/utils/menu-builder';
+import { checkIsDir } from '@/features/metadata/utils/row';
+import { useMetadataStatus } from '@/hooks';
+import { gettext } from '@/utils/constants';
+import EventBus, { eventBus as globalEventBus } from '@/utils/event-bus';
+import TextTranslation from '@/utils/text-translation';
+import { Utils } from '@/utils/utils';
+
+const TableFilesToolbar = ({ repoID }) => {
+  const [selectedRecordIds, setSelectedRecordIds] = useState([]);
+  const [metadata, setMetadata] = useState({});
+  const metadataRef = useRef([]);
+  const menuRef = useRef(null);
+
+  const { enableFaceRecognition, enableTags } = useMetadataStatus();
+
+  const eventBus = window.sfMetadataContext && window.sfMetadataContext.eventBus;
+  const sfEventBus = EventBus.getInstance();
+
+  const records = useMemo(() => selectedRecordIds.map(id => RowUtils.getRecordById(id, metadataRef.current)).filter(Boolean) || [], [selectedRecordIds]);
+
+  const areRecordsInSameFolder = useMemo(() => {
+    if (records.length <= 1) return true;
+    const firstPath = records[0] ? getParentDirFromRecord(records[0]) : null;
+    return firstPath && records.every(record => getParentDirFromRecord(record) === firstPath);
+  }, [records]);
+
+  const readOnly = !window.sfMetadataContext.canModify();
+  const isMultiple = selectedRecordIds.length > 1;
+
+  const toolbarMenuOptions = useMemo(() => {
+    if (!records.length || !metadata.columns) return [];
+    const metadataStatus = {
+      enableFaceRecognition,
+      enableGenerateDescription: getColumnByKey(metadataRef.current.columns, PRIVATE_COLUMN_KEY.FILE_DESCRIPTION) !== null,
+      enableTags
+    };
+    return buildTableToolbarMenuOptions(
+      records,
+      readOnly,
+      metadataStatus,
+      isMultiple,
+      areRecordsInSameFolder,
+      true
+    );
+  }, [records, metadata.columns, enableFaceRecognition, enableTags, readOnly, isMultiple, areRecordsInSameFolder]);
+
+  const unSelect = useCallback(() => {
+    setSelectedRecordIds([]);
+    eventBus && eventBus.dispatch(EVENT_BUS_TYPE.UPDATE_SELECTED_RECORD_IDS, []);
+    sfEventBus.dispatch(EVENT_BUS_TYPE.SELECT_NONE);
+  }, [eventBus, sfEventBus]);
+
+  const deleteRecords = useCallback(() => {
+    eventBus && eventBus.dispatch(EVENT_BUS_TYPE.DELETE_RECORDS, selectedRecordIds, {
+      success_callback: () => {
+        sfEventBus.dispatch(EVENT_BUS_TYPE.SELECT_NONE);
+      }
+    });
+  }, [eventBus, sfEventBus, selectedRecordIds]);
+
+  const toggleMoveDialog = useCallback(() => {
+    eventBus && eventBus.dispatch(EVENT_BUS_TYPE.TOGGLE_MOVE_DIALOG, records);
+  }, [eventBus, records]);
+
+  const toggleCopyDialog = useCallback(() => {
+    eventBus && eventBus.dispatch(EVENT_BUS_TYPE.TOGGLE_COPY_DIALOG, records);
+  }, [eventBus, records]);
+
+  const downloadRecords = useCallback(() => {
+    eventBus && eventBus.dispatch(EVENT_BUS_TYPE.DOWNLOAD_RECORDS, selectedRecordIds);
+  }, [eventBus, selectedRecordIds]);
+
+  const onMenuItemClick = useCallback((operation) => {
+    switch (operation) {
+      case TextTranslation.MOVE.key:
+      case TextTranslation.MOVE_FILE.key:
+      case TextTranslation.MOVE_FOLDER.key: {
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.TOGGLE_MOVE_DIALOG, records);
+        break;
+      }
+      case TextTranslation.COPY.key: {
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.TOGGLE_COPY_DIALOG, records);
+        break;
+      }
+      case TextTranslation.DOWNLOAD.key: {
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.DOWNLOAD_RECORDS, selectedRecordIds);
+        break;
+      }
+      case TextTranslation.CHAT_WITH_AI.key: {
+        const attachments = records
+          .filter((record) => !checkIsDir(record))
+          .map((record) => {
+            const fileName = getFileNameFromRecord(record);
+            const parentDir = getParentDirFromRecord(record);
+            return new AttachmentObject({
+              repo_id: repoID,
+              path: Utils.joinPath(parentDir, fileName),
+              name: fileName,
+            });
+          });
+
+        setPendingAttachments(attachments, !isMultiple);
+        globalEventBus.dispatch(EVENT_BUS_TYPE.SWITCH_TO_CHAT_VIEW);
+        if (attachments.length > 0) {
+          EventBus.getInstance().dispatch(EVENT_BUS_TYPE.CHAT_ATTACH_FILES, {
+            attachments,
+            reset: !isMultiple,
+          });
+        }
+        break;
+      }
+      case TextTranslation.EXTRACT_FILE_DETAIL.key:
+      case TextTranslation.EXTRACT_FILE_DETAILS.key: {
+        const imageOrVideoRecords = records.filter(record => {
+          const isFolder = checkIsDir(record);
+          if (isFolder || readOnly) return false;
+          const fileName = getFileNameFromRecord(record);
+          return Utils.imageCheck(fileName) || Utils.videoCheck(fileName);
+        });
+
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.UPDATE_RECORD_DETAILS, imageOrVideoRecords);
+        break;
+      }
+      case TextTranslation.DETECT_FACES.key: {
+        const imageRecords = records.filter(record => {
+          const isFolder = checkIsDir(record);
+          if (isFolder || readOnly) return false;
+          const fileName = getFileNameFromRecord(record);
+          return Utils.imageCheck(fileName);
+        });
+
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.UPDATE_FACE_RECOGNITION, imageRecords);
+        break;
+      }
+      case TextTranslation.GENERATE_DESCRIPTION.key: {
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.GENERATE_DESCRIPTION, records[0]);
+        break;
+      }
+      case TextTranslation.GENERATE_TAGS.key: {
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.GENERATE_FILE_TAGS, records[0]);
+        break;
+      }
+      case TextTranslation.EXTRACT_TEXT.key: {
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.EXTRACT_TEXT, records[0], menuRef.current.dropdownRef.current);
+        break;
+      }
+      case TextTranslation.OPEN_FILE_IN_NEW_TAB.key:
+      case TextTranslation.OPEN_FOLDER_IN_NEW_TAB.key: {
+        openInNewTab(repoID, records[0]);
+        break;
+      }
+      case TextTranslation.OPEN_PARENT_FOLDER.key: {
+        openParentFolder(records[0]);
+        break;
+      }
+      default:
+        break;
+    }
+  }, [eventBus, records, selectedRecordIds, readOnly, repoID, isMultiple]);
+
+  const getMenuList = useCallback(() => {
+    return toolbarMenuOptions.map(item => {
+      if (item === 'Divider') return item;
+      if (item.subOpList) {
+        return {
+          ...item,
+          onClick: () => onMenuItemClick(item.key),
+          subOpList: item.subOpList.map((subItem) => {
+            if (subItem === 'Divider') return subItem;
+            return {
+              ...subItem,
+              onClick: () => onMenuItemClick(subItem.key)
+            };
+          })
+        };
+      }
+      return {
+        ...item,
+        onClick: () => onMenuItemClick(item.key)
+      };
+    });
+  }, [toolbarMenuOptions, onMenuItemClick]);
+
+  useEffect(() => {
+    const unsubscribeSelectedFileIds = eventBus && eventBus.subscribe(EVENT_BUS_TYPE.SELECT_RECORDS, (ids, metadataObj) => {
+      metadataRef.current = metadataObj || [];
+      setMetadata(metadataObj || {});
+      setSelectedRecordIds(ids);
+    });
+
+    return () => {
+      unsubscribeSelectedFileIds && unsubscribeSelectedFileIds();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const length = selectedRecordIds.length;
+
+  return (
+    <div className="selected-dirents-toolbar">
+      <span className="cur-view-path-btn px-2" onClick={unSelect}>
+        <span className="d-flex mr-2" aria-label={gettext('Unselect')} title={gettext('Unselect')}>
+          <Icon symbol="close" />
+        </span>
+        <span>{length}{' '}{gettext('selected')}</span>
+      </span>
+
+      {!readOnly && (!isMultiple || areRecordsInSameFolder) && (
+        <>
+          <OpIcon
+            id="move-btn"
+            className="cur-view-path-btn"
+            symbol="move"
+            tooltip={gettext('Move')}
+            aria-label={gettext('Move')}
+            op={toggleMoveDialog}
+          />
+          <OpIcon
+            id="copy-btn"
+            className="cur-view-path-btn"
+            symbol="copy"
+            tooltip={gettext('Copy')}
+            aria-label={gettext('Copy')}
+            op={toggleCopyDialog}
+          />
+        </>
+      )}
+
+      <OpIcon
+        id="download-btn"
+        className="cur-view-path-btn"
+        symbol="download"
+        tooltip={gettext('Download')}
+        aria-label={gettext('Download')}
+        op={downloadRecords}
+      />
+
+      {!readOnly && (
+        <OpIcon
+          id="delete-btn"
+          className="cur-view-path-btn"
+          symbol="delete"
+          tooltip={gettext('Delete')}
+          aria-label={gettext('Delete')}
+          op={deleteRecords}
+        />
+      )}
+
+      {length > 0 && (
+        <CustomDropdown
+          target="table-files-toolbar-menu"
+          forwardedRef={menuRef}
+          items={getMenuList()}
+          triggerClassName="cur-view-path-btn"
+        />
+      )}
+    </div>
+  );
+};
+
+TableFilesToolbar.propTypes = {
+  repoID: PropTypes.string.isRequired,
+};
+
+export default TableFilesToolbar;

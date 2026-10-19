@@ -1,10 +1,10 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import tagsAPI from '@/features/tag/api';
+import tagsAPI from '@/api/tag-api';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
 import { isPro, gettext, showLogoutIcon, siteRoot } from '@/utils/constants';
 import Account from '../account';
 import ColorMode from '../color-mode';
-import { EVENT_BUS_TYPE } from '../event-bus';
 import Logout from '../logout';
 import Notification from '../notification';
 import Search from '../search/search';

@@ -6,12 +6,12 @@ import urlJoin from 'url-join';
 import { toggleStar } from '@/components/dirent-operation-menu/dirent-operations';
 import { menuHandlers } from '@/components/dirent-operation-menu/menuHandlers';
 import CustomDropdown from '@/components/dropdown';
-import { EVENT_BUS_TYPE } from '@/components/event-bus';
 import Icon from '@/components/icon';
 import MobileItemMenu from '@/components/mobile-item-menu';
 import OpIcon from '@/components/op-icon';
 import Rename from '@/components/rename';
 import { DIR_COLUMN_KEYS } from '@/constants/dir-column-config';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
 import CreatorFormatter from '@/features/metadata/components/cell-formatter/creator';
 import FileTagsFormatter from '@/features/metadata/components/cell-formatter/file-tags';
 import { PRIVATE_COLUMN_KEY } from '@/features/metadata/constants';
@@ -309,7 +309,11 @@ class DirentListItem extends React.Component {
         onItemRename: this.onItemRenameToggle,
         onItemDelete: this.props.onItemDelete,
         onItemConvert: this.props.onItemConvert,
-        showDirentDetail: this.props.showDirentDetail,
+        showDirentDetail: () => {
+          event.stopPropagation();
+          this.props.onDirentClick(this.props.dirent);
+          this.props.showDirentDetail();
+        },
         loadDirentList: this.props.loadDirentList
       });
     }

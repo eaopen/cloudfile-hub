@@ -43,7 +43,7 @@
   padding: 8px;
   list-style: none;
   background: var(--bs-th-bg);
-  border-bottom: 1px solid var(--bs-popover-border-color);
+  border-bottom: 1px solid var(--bs-border-secondary-color);
 }
 
 .activity-selected-modifier,
@@ -59,12 +59,6 @@
   max-width: 100%;
   font-size: 13px;
   line-height: 20px;
-}
-
-.activity-user-selector-popover .avatar {
-  flex-shrink: 0;
-  width: 16px;
-  height: 16px;
 }
 
 .unselect-activity-user {
@@ -84,7 +78,7 @@
   color: #666;
 }
 
-.log-user-selector-popover .unselect-activity-user:hover .seafile-multicolor-icon {
+.activity-user-selector-popover .unselect-activity-user:hover .seafile-multicolor-icon {
   color: #5a5a5a;
 }
 
@@ -92,7 +86,7 @@
   padding: 8px 8px 0;
 }
 
-.log-user-selector-popover .activity-user-selector-search {
+.activity-user-selector-popover .activity-user-selector-search {
   position: relative;
 }
 
@@ -104,11 +98,11 @@
   line-height: 20px;
 }
 
-.log-user-selector-popover .activity-user-selector-input {
+.activity-user-selector-popover .activity-user-selector-input {
   padding-right: 28px;
 }
 
-.log-user-selector-popover .activity-user-selector-clear {
+.activity-user-selector-popover .activity-user-selector-clear {
   position: absolute;
   top: 12px;
   right: 12px;
@@ -117,22 +111,22 @@
   justify-content: center;
   width: 20px;
   height: 20px;
-  border-radius: 3px;
+  border-radius: 4px;
   cursor: pointer;
 }
 
-.log-user-selector-popover .activity-user-selector-clear .seafile-multicolor-icon {
+.activity-user-selector-popover .activity-user-selector-clear .seafile-multicolor-icon {
   width: 12px;
   height: 12px;
   color: var(--bs-icon-color);
 }
 
-.log-user-selector-popover .activity-user-selector-clear:hover {
+.activity-user-selector-popover .activity-user-selector-clear:hover {
   background: var(--bs-icon-btn-hover-bg-color);
 }
 
-.log-user-selector-popover .unselect-activity-user:focus-visible,
-.log-user-selector-popover .activity-user-selector-clear:focus-visible {
+.activity-user-selector-popover .unselect-activity-user:focus-visible,
+.activity-user-selector-popover .activity-user-selector-clear:focus-visible {
   outline: 2px solid var(--bs-form-select-focus-border-color);
   outline-offset: -2px;
 }

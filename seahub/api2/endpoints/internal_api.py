@@ -193,6 +193,22 @@ class InternalCheckFileOperationAccess(APIView):
             # take token as account token
             username = self._get_user_by_accont_token(token)
         
+        # CF-ACL uses the same effective authority for native library members
+        # and independent shared roots. Repo API tokens lack current subjects.
+        from cloudfile_ext.v2.acl_runtime import protected, Authority
+        try:
+            if protected(repo_id, repo):
+                if not username:
+                    return api_error(status.HTTP_403_FORBIDDEN, 'Current subject required.')
+                decision = Authority(username).effective(repo_id, file_path, 'file')
+                allowed = decision.can_write if op == OP_UPLOAD else decision.can_read
+                if not allowed:
+                    return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
+                send_file_access_msg(request, repo, file_path, 'web', custom_ip=ip_addr, custom_agent=user_agent)
+                return Response({'user': username})
+        except Exception:
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Current authorization unavailable.')
+
         if username:
             # 修改逻辑（B-1 Web 字节通道修复，2026-09-09）：权限判定由库根 '/' 改为请求对象的
             # 真实路径 file_path。fileserver 字节通道（/repos/{repo}/files/{path}）访问的是具体

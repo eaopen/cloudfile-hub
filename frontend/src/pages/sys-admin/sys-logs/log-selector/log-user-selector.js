@@ -1,9 +1,8 @@
 import React, { Component } from 'react';
-import { Input, Popover } from 'reactstrap';
 import { uniqueId } from 'lodash-es';
 import PropTypes from 'prop-types';
 import Icon from '@/components/icon';
-import OpIcon from '@/components/op-icon';
+import UserSelectPopover from '@/components/popover/user-select-popover';
 import toaster from '@/components/toast';
 import { gettext } from '@/utils/constants';
 import { Utils } from '@/utils/utils';
@@ -31,11 +30,27 @@ class LogUserSelector extends Component {
       isLoading: false
     };
     this.finalValue = '';
+    this.searchRequestId = 0;
     this.selectorId = uniqueId('log-user-selector-');
   }
 
-  onQueryChange = (e) => {
-    const value = e.target.value;
+  componentDidUpdate(prevProps) {
+    if (prevProps.isOpen && !this.props.isOpen) {
+      this.finalValue = '';
+      this.searchRequestId++;
+      this.setState({
+        query: '',
+        searchResults: [],
+        isLoading: false
+      });
+    }
+  }
+
+  componentWillUnmount() {
+    this.searchRequestId++;
+  }
+
+  onQueryChange = (value) => {
     this.setState({ query: value });
     this.handleSearchUser(value);
   };
@@ -48,6 +63,7 @@ class LogUserSelector extends Component {
 
   handleSearchUser = (value) => {
     this.finalValue = value;
+    const searchRequestId = ++this.searchRequestId;
     if (!value.trim()) {
       this.setState({
         searchResults: [],
@@ -61,18 +77,19 @@ class LogUserSelector extends Component {
     });
 
     setTimeout(() => {
-      if (this.finalValue === value) {
+      if (this.finalValue === value && this.searchRequestId === searchRequestId) {
         if (this.props.searchUsersFunc) {
           this.props.searchUsersFunc(value).then((res) => {
-            if (this.finalValue !== value) return;
+            if (this.finalValue !== value || this.searchRequestId !== searchRequestId) return;
             const users = res.data.user_list || res.data.users || [];
             this.setState({
               searchResults: users,
               isLoading: false
             }, () => {
+              if (this.finalValue !== value || this.searchRequestId !== searchRequestId) return;
               if (this.props.searchGroupsFunc) {
                 this.props.searchGroupsFunc(value).then((res) => {
-                  if (this.finalValue !== value) return;
+                  if (this.finalValue !== value || this.searchRequestId !== searchRequestId) return;
                   const groups = res.data.group_list || res.data.groups || [];
                   this.setState({
                     searchResults: [...users, ...groups]
@@ -81,7 +98,7 @@ class LogUserSelector extends Component {
               }
             });
           }).catch((error) => {
-            if (this.finalValue !== value) return;
+            if (this.finalValue !== value || this.searchRequestId !== searchRequestId) return;
             this.setState({
               isLoading: false
             });
@@ -91,7 +108,7 @@ class LogUserSelector extends Component {
         }
         if (this.props.searchGroupsFunc && !this.props.searchUsersFunc) {
           this.props.searchGroupsFunc(value).then((res) => {
-            if (this.finalValue !== value) return;
+            if (this.finalValue !== value || this.searchRequestId !== searchRequestId) return;
             const groups = res.data.group_list || res.data.groups || [];
             this.setState({
               searchResults: groups,
@@ -108,6 +125,18 @@ class LogUserSelector extends Component {
     this.props.onSelect(item, false);
   };
 
+  toOption = (item) => ({
+    key: item.email ? `user:${item.email}` : `group:${item.id}`,
+    name: item.name,
+    avatarUrl: item.avatar_url,
+    secondaryText: null,
+    data: item,
+  });
+
+  onSelectOption = (option, event) => {
+    this.toggleSelectItem(event, option.data);
+  };
+
   render() {
     const { query, isLoading, searchResults } = this.state;
     const { selectedItems, isOpen, onToggle } = this.props;
@@ -115,7 +144,7 @@ class LogUserSelector extends Component {
 
     return (
       <>
-        <span id="log-user-selector-trigger">
+        <span id={`${this.selectorId}-trigger`}>
           <span
             className="cur-activity-modifiers"
             onClick={onToggle}
@@ -132,82 +161,24 @@ class LogUserSelector extends Component {
             <Icon symbol="down" className="ml-1 toggle-icon" />
           </span>
         </span>
-        <Popover
+        <UserSelectPopover
           isOpen={isOpen}
-          toggle={onToggle}
-          target="log-user-selector-trigger"
-          placement="bottom-start"
-          hideArrow={true}
-          fade={false}
+          onToggle={onToggle}
+          target={`${this.selectorId}-trigger`}
           trigger="legacy"
-          popperClassName="activity-user-selector-popover log-user-selector-popover"
-          innerClassName="activity-user-selector-content"
-        >
-          <ul className="activity-selected-modifiers">
-            {selectedItems.map((item, index) => {
-              return (
-                <li key={index} className="activity-selected-modifier">
-                  <img src={item.avatar_url} className="avatar" alt="" />
-                  <span className="activity-user-name" title={item.name}>{item.name}</span>
-                  <OpIcon
-                    id={`${this.selectorId}-remove-${index}`}
-                    symbol="close"
-                    className="unselect-activity-user"
-                    tooltip={gettext('Remove')}
-                    op={(e) => { this.toggleSelectItem(e, item); }}
-                  />
-                </li>
-              );
-            })}
-          </ul>
-          <div className="activity-user-selector-search">
-            <Input
-              type="text"
-              className="activity-user-selector-input"
-              innerRef={ref => this.searchInput = ref}
-              placeholder={gettext('Find users')}
-              value={query}
-              onChange={this.onQueryChange}
-            />
-            {query && (
-              <OpIcon
-                id={`${this.selectorId}-clear`}
-                symbol="close"
-                className="activity-user-selector-clear"
-                tooltip={gettext('Clear')}
-                op={this.clearQuery}
-              />
-            )}
-          </div>
-          {isLoading ? (
-            <div className="activity-user-loading">{gettext('Loading...')}</div>
-          ) : displayItems.length === 0 ? (
-            <div className="activity-user-selector-empty" role="status">
-              {query.trim() ? gettext('User not found') : gettext('Enter characters to start searching')}
-            </div>
-          ) : (
-            <ul className="activity-user-list">
-              {displayItems.map((item, index) => {
-                const isSelected = selectedItems.some(selected =>
-                  (item.email && selected.email === item.email) ||
-                  (item.id && selected.id === item.id)
-                );
-                return (
-                  <li key={index}
-                    className="activity-user-item d-flex justify-content-between align-items-center"
-                    onClick={(e) => { this.toggleSelectItem(e, item); }}
-                  >
-                    <span className="avatar-name-wrapper">
-                      <img src={item.avatar_url} className="avatar" alt="" />
-                      <span className="activity-user-name" title={item.name}>{item.name}</span>
-                    </span>
-                    {isSelected && <Icon symbol="check" className="activity-user-selector-check" />}
-                  </li>
-                );
-              })}
-            </ul>
-          )}
-        </Popover>
+          offset={[0, 8]}
+          options={displayItems.map(this.toOption)}
+          selectedOptions={selectedItems.map(this.toOption)}
+          query={query}
+          onQueryChange={this.onQueryChange}
+          onClear={this.clearQuery}
+          inputRef={ref => this.searchInput = ref}
+          searchPlaceholder={gettext('Find users')}
+          isLoading={isLoading}
+          emptyText={query.trim() ? gettext('User not found') : gettext('Enter characters to start searching')}
+          onSelect={this.onSelectOption}
+          onRemove={this.onSelectOption}
+        />
       </>
     );
   }

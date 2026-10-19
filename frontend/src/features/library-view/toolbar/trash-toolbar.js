@@ -1,0 +1,57 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import Icon from '@/components/icon';
+import OpElement from '@/components/op-element';
+import OpIcon from '@/components/op-icon';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
+import { gettext } from '@/utils/constants';
+import EventBus from '@/utils/event-bus';
+
+const TrashToolbar = () => {
+  const [selectedTrashIds, setSelectedTrashIds] = useState([]);
+
+  const unSelect = useCallback(() => {
+    const eventBus = EventBus.getInstance();
+    eventBus && eventBus.dispatch(EVENT_BUS_TYPE.SELECT_NONE);
+  }, []);
+
+  const restoreItems = useCallback(() => {
+    const eventBus = EventBus.getInstance();
+    eventBus && eventBus.dispatch(EVENT_BUS_TYPE.RESTORE_TRASH);
+  }, []);
+
+  useEffect(() => {
+    const eventBus = EventBus.getInstance();
+    const unsubscribeSelectTrash = eventBus.subscribe(EVENT_BUS_TYPE.SELECT_TRASH, (ids) => {
+      setSelectedTrashIds(ids);
+    });
+
+    return () => {
+      unsubscribeSelectTrash && unsubscribeSelectTrash();
+    };
+  }, []);
+
+  const length = selectedTrashIds.length;
+  return (
+    <div className="selected-dirents-toolbar">
+      <OpElement
+        className="cur-view-path-btn px-2"
+        title={gettext('Unselect')}
+        op={unSelect}
+      >
+        <span className="d-flex mr-2" aria-label={gettext('Unselect')} title={gettext('Unselect')}>
+          <Icon symbol="close" />
+        </span>
+        <span>{length}{' '}{gettext('selected')}</span>
+      </OpElement>
+      <OpIcon
+        id="restore-btn"
+        className="cur-view-path-btn"
+        symbol="revoke"
+        tooltip={gettext('Restore')}
+        op={restoreItems}
+      />
+    </div>
+  );
+};
+
+export default TrashToolbar;

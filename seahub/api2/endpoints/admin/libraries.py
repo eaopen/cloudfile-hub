@@ -22,7 +22,8 @@ from seahub.admin_log.models import REPO_CREATE, REPO_DELETE, REPO_TRANSFER
 from seahub.share.models import FileShare, UploadLinkShare
 from seahub.base.templatetags.seahub_tags import email2nickname, email2contact_email
 from seahub.group.utils import is_group_member, group_id_to_name
-from seahub.utils.repo import get_related_users_by_repo, normalize_repo_status_code, normalize_repo_status_str
+from seahub.utils.repo import get_related_users_by_repo, normalize_repo_status_code, \
+        normalize_repo_status_str, check_repo_name_conflict
 from seahub.utils import is_valid_dirent_name, is_valid_email, transfer_repo
 from seahub.utils.timeutils import timestamp_to_isoformat_timestr
 
@@ -191,6 +192,16 @@ class AdminLibraries(APIView):
             'current_page': current_page
         }
 
+        if request.GET.get('with_cloudfile_storage') == '1' and return_results:
+            from cloudfile_ext.v2.native_discovery import inspect_from_hub
+            try:
+                details = inspect_from_hub([row['id'] for row in return_results])
+            except Exception:
+                return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'CloudFile storage inspection unavailable.')
+            for row in return_results:
+                found = details[row['id']]
+                row['cloudfile_storage_status'] = found['status']
+                row['cloudfile_storage_source'] = found['source']
         return Response({"page_info": page_info, "repos": return_results})
 
     def post(self, request):
@@ -217,6 +228,10 @@ class AdminLibraries(APIView):
                 return api_error(status.HTTP_404_NOT_FOUND, error_msg)
         else:
             repo_owner = username
+
+        if check_repo_name_conflict(request, repo_name, username=repo_owner):
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             _('Library name already exists.'))
 
         try:
             repo_id = seafile_api.create_repo(repo_name, '', repo_owner)
@@ -250,6 +265,14 @@ class AdminLibraries(APIView):
 
         repo = seafile_api.get_repo(repo_id)
         repo_info = get_repo_info(repo)
+        # Native AdminLibraries POST must leave a newly created original Repo
+        # discoverable in V2 storage metadata even outside Etech.
+        try:
+            from cloudfile_ext.v2.native_discovery import reconcile_from_hub
+            reconcile_from_hub(repo_id)
+        except Exception:
+            logger.warning('CloudFile storage registration deferred for repo %s', repo_id)
+            repo_info['cloudfile_storage_registration_pending'] = True
         return Response(repo_info)
 
 class AdminLibrary(APIView):
@@ -274,7 +297,14 @@ class AdminLibrary(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         repo_info = get_repo_info(repo)
-
+        if request.GET.get('with_cloudfile_storage') == '1':
+            from cloudfile_ext.v2.native_discovery import inspect_from_hub
+            try:
+                found = inspect_from_hub([repo_id])[repo_id]
+            except Exception:
+                return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'CloudFile storage inspection unavailable.')
+            repo_info['cloudfile_storage_status'] = found['status']
+            repo_info['cloudfile_storage_source'] = found['source']
         return Response(repo_info)
 
     def delete(self, request, repo_id, format=None):
@@ -488,7 +518,14 @@ class AdminLibrary(APIView):
 
         repo = seafile_api.get_repo(repo_id)
         repo_info = get_repo_info(repo)
-
+        if request.GET.get('with_cloudfile_storage') == '1':
+            from cloudfile_ext.v2.native_discovery import inspect_from_hub
+            try:
+                found = inspect_from_hub([repo_id])[repo_id]
+            except Exception:
+                return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'CloudFile storage inspection unavailable.')
+            repo_info['cloudfile_storage_status'] = found['status']
+            repo_info['cloudfile_storage_source'] = found['source']
         return Response(repo_info)
 
 

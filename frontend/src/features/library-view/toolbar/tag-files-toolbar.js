@@ -1,0 +1,207 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import { getDirentItemMenuList, getTagFilesOperations } from '@/components/dirent-operation-menu/contextMenuUtils';
+import CustomDropdown from '@/components/dropdown';
+import Icon from '@/components/icon';
+import OpElement from '@/components/op-element';
+import OpIcon from '@/components/op-icon';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
+import { getFileById, getFileObj, filterTagFileOperations } from '@/features/tag/utils/file';
+import { gettext } from '@/utils/constants';
+import TextTranslation from '@/utils/text-translation';
+
+const SINGLE_EXCLUDES = ['Download', 'Delete', 'Share', 'Move', 'Copy'];
+const MULTI_EXCLUDES = ['Download', 'Delete'];
+
+const TagFilesToolbar = ({ currentRepoInfo }) => {
+  const [selectedFileIds, setSelectedFileIds] = useState([]);
+  const [tagFiles, setTagFiles] = useState([]);
+
+  const eventBus = window.sfTagsDataContext && window.sfTagsDataContext.eventBus;
+  const selectedFilesLen = selectedFileIds.length;
+
+  const unSelect = useCallback(() => {
+    setSelectedFileIds([]);
+    eventBus && eventBus.dispatch(EVENT_BUS_TYPE.UNSELECT_TAG_FILES);
+  }, [eventBus]);
+
+  const shareTagFile = useCallback(() => {
+    eventBus && eventBus.dispatch(EVENT_BUS_TYPE.SHARE_TAG_FILE);
+  }, [eventBus]);
+
+  const copyTagFile = useCallback(() => {
+    eventBus && eventBus.dispatch(EVENT_BUS_TYPE.COPY_TAG_FILE);
+  }, [eventBus]);
+
+  const downloadTagFiles = useCallback(() => {
+    eventBus && eventBus.dispatch(EVENT_BUS_TYPE.DOWNLOAD_TAG_FILES);
+  }, [eventBus]);
+
+  const onMenuItemClick = useCallback((operation) => {
+    switch (operation) {
+      case TextTranslation.CHAT_WITH_AI.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.CHAT_WITH_AI_ABOUT_TAG_FILES);
+        break;
+      case TextTranslation.HISTORY.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.FILE_HISTORY);
+        break;
+      case TextTranslation.ACCESS_LOG.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.FILE_ACCESS_LOG);
+        break;
+      case TextTranslation.PROPERTIES.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.PROPERTIES);
+        break;
+      case TextTranslation.OPEN_WITH_DEFAULT.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.OPEN_WITH_DEFAULT);
+        break;
+      case TextTranslation.OPEN_WITH_ONLYOFFICE.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.OPEN_WITH_ONLYOFFICE);
+        break;
+      case TextTranslation.OPEN_VIA_CLIENT.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.OPEN_VIA_CLIENT);
+        break;
+      case TextTranslation.CONVERT_TO_SDOC.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.CONVERT_FILE, 'sdoc');
+        break;
+      case TextTranslation.CONVERT_TO_MARKDOWN.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.CONVERT_FILE, 'markdown');
+        break;
+      case TextTranslation.CONVERT_TO_DOCX.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.CONVERT_FILE, 'docx');
+        break;
+      case TextTranslation.EXPORT_DOCX.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.EXPORT_DOCX);
+        break;
+      case TextTranslation.EXPORT_SDOC.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.EXPORT_SDOC);
+        break;
+      case TextTranslation.EXPORT_MARKDOWN.key:
+        eventBus && eventBus.dispatch(EVENT_BUS_TYPE.EXPORT_MARKDOWN);
+        break;
+      default:
+        break;
+    }
+  }, [eventBus]);
+
+  const toFileObj = useCallback((fileId, isAdmin) => {
+    const file = getFileById(tagFiles, fileId);
+    return getFileObj(file, isAdmin);
+  }, [tagFiles]);
+
+  const buildMenuOps = useCallback((allOperations, excludesOperations) => {
+    const iconOps = excludesOperations.filter(item => {
+      return allOperations.some(op => op.key === item);
+    });
+    const validOperations = allOperations
+      .filter((item) => excludesOperations.indexOf(item.key) === -1)
+      .map((item) => {
+        if (item === 'Divider') return item;
+        if (item.subOpList) {
+          return {
+            ...item,
+            onClick: () => onMenuItemClick(item.key),
+            subOpList: item.subOpList.map((subItem) => {
+              if (subItem === 'Divider') return subItem;
+              return {
+                ...subItem,
+                onClick: () => onMenuItemClick(subItem.key)
+              };
+            })
+          };
+        }
+        return {
+          ...item,
+          onClick: () => onMenuItemClick(item.key)
+        };
+      });
+
+    const startIndex = validOperations.findIndex(item => item !== 'Divider');
+    return { iconOps, menuOps: validOperations.slice(startIndex) };
+  }, [onMenuItemClick]);
+
+  const getFileOperations = useCallback(() => {
+    if (selectedFilesLen !== 1) return {};
+    const { is_admin } = currentRepoInfo;
+    const fileObj = toFileObj(selectedFileIds[0], is_admin);
+    const allOperations = filterTagFileOperations(getDirentItemMenuList(currentRepoInfo, fileObj, true));
+    return buildMenuOps(allOperations, SINGLE_EXCLUDES);
+  }, [currentRepoInfo, toFileObj, buildMenuOps, selectedFileIds, selectedFilesLen]);
+
+  const getSelectedFilesOperations = useCallback(() => {
+    if (selectedFilesLen <= 1) return {};
+    const { is_admin } = currentRepoInfo;
+    const selectedFiles = selectedFileIds.map(id => toFileObj(id, is_admin));
+    const allOperations = getTagFilesOperations(currentRepoInfo, selectedFiles);
+    return buildMenuOps(allOperations, MULTI_EXCLUDES);
+  }, [currentRepoInfo, toFileObj, buildMenuOps, selectedFileIds, selectedFilesLen]);
+
+  useEffect(() => {
+    const unsubscribeSelectedFileIds = eventBus && eventBus.subscribe(EVENT_BUS_TYPE.SELECT_TAG_FILES, (ids, tagFiles) => {
+      setTagFiles(tagFiles);
+      setSelectedFileIds(ids);
+    });
+
+    const unsubscribeUpdateTagFiles = eventBus && eventBus.subscribe(EVENT_BUS_TYPE.UPDATE_TAG_FILES, (tagFiles) => {
+      setTagFiles(tagFiles);
+    });
+
+    return () => {
+      unsubscribeSelectedFileIds && unsubscribeSelectedFileIds();
+      unsubscribeUpdateTagFiles && unsubscribeUpdateTagFiles();
+    };
+  }, [eventBus]);
+
+  const renderIconButtons = (iconOps) => {
+    return iconOps.map((item) => {
+      switch (item) {
+        case 'Download':
+          return <OpIcon key="dl-btn" id="dl-btn" symbol="download" className="cur-view-path-btn" tooltip={gettext('Download')} op={downloadTagFiles} />;
+        case 'Share':
+          return <OpIcon key="share-btn" id="share-btn" symbol="share" className="cur-view-path-btn" tooltip={gettext('Share')} op={shareTagFile} />;
+        case 'Copy':
+          return <OpIcon key="copy-btn" id="copy-btn" symbol="copy" className="cur-view-path-btn" tooltip={gettext('Copy')} op={copyTagFile} />;
+        default:
+          return null;
+      }
+    });
+  };
+
+  const { iconOps, menuOps } = getFileOperations();
+  const { iconOps: iconOpsForMulti, menuOps: menuOpsForMulti } = getSelectedFilesOperations();
+
+  return (
+    <div className="selected-dirents-toolbar">
+      <OpElement
+        className="cur-view-path-btn px-2"
+        title={gettext('Unselect')}
+        op={unSelect}
+      >
+        <span className="d-flex mr-2" aria-label={gettext('Unselect')} title={gettext('Unselect')}>
+          <Icon symbol="close" />
+        </span>
+        <span>{selectedFilesLen}{' '}{gettext('selected')}</span>
+      </OpElement>
+      {selectedFilesLen > 1 && (
+        <>
+          {renderIconButtons(iconOpsForMulti)}
+          <CustomDropdown
+            target="tag-files-toolbar-menu"
+            items={menuOpsForMulti}
+            triggerClassName="cur-view-path-btn"
+          />
+        </>
+      )}
+      {selectedFilesLen === 1 && (
+        <>
+          {renderIconButtons(iconOps)}
+          <CustomDropdown
+            target="tag-files-toolbar-menu"
+            items={menuOps}
+            triggerClassName="cur-view-path-btn"
+          />
+        </>
+      )}
+    </div>
+  );
+};
+
+export default TagFilesToolbar;

@@ -2,14 +2,15 @@ import React, { useState, useCallback, useEffect } from 'react';
 import { Button } from 'reactstrap';
 import classnames from 'classnames';
 import PropTypes from 'prop-types';
-import { eventBus, EVENT_BUS_TYPE } from '@/components/event-bus';
+import tagsAPI from '@/api/tag-api';
 import Loading from '@/components/loading';
 import OpIcon from '@/components/op-icon';
 import Switch from '@/components/switch';
 import toaster from '@/components/toast';
-import tagsAPI from '@/features/tag/api';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
 import { ALL_TAGS_ID } from '@/features/tag/constants';
 import { gettext } from '@/utils/constants';
+import { eventBus } from '@/utils/event-bus';
 import { Utils } from '@/utils/utils';
 import TurnOffConfirmDialog from '../turn-off-confirm-dialog';
 
@@ -95,7 +96,6 @@ const MetadataTagsStatusDialog = ({
           <Switch
             checked={value}
             disabled={submitting || isMigrating || !enableMetadata}
-            size="large"
             textPosition="right"
             onChange={onValueChange}
             placeholder={gettext('Tags')}

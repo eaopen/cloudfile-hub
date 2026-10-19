@@ -878,10 +878,12 @@ def view_lib_file(request, repo_id, path):
                     ((not is_locked) or (is_locked and locked_by_online_office)):
                 action_name = 'edit'
 
+            can_write_relative = parse_repo_perm(permission).can_upload
             wopi_dict = get_wopi_dict(username, repo_id, path,
                                       action_name=action_name,
                                       language_code=request.LANGUAGE_CODE,
-                                      can_download=parse_repo_perm(permission).can_download)
+                                      can_download=parse_repo_perm(permission).can_download,
+                                      can_write_relative=can_write_relative)
 
             if wopi_dict:
                 send_file_access_msg(request, repo, path, 'web')
@@ -1067,14 +1069,6 @@ def view_lib_file(request, repo_id, path):
         send_file_access_msg(request, repo, path, 'web')
         return render(request, template, return_dict)
 
-    elif getattr(settings, 'ENABLE_CAD', False) and path.endswith('.dwg'):
-
-        from seahub.cad.utils import get_cad_dict
-        cad_dict = get_cad_dict(request, username, repo_id, path)
-
-        return_dict.update(cad_dict)
-
-        return render(request, 'view_file_cad.html', return_dict)
     else:
         return_dict['err'] = "File preview unsupported"
         if not can_download_file:
