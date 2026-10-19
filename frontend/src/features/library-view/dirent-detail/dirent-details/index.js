@@ -9,12 +9,12 @@ import { MetadataDetailsProvider } from '@/features/metadata/hooks/metadata-deta
 import { cloudFileAnnotationsEnabled, siteRoot, thumbnailSizeForGrid, enableSeafileAI, fileServerRoot, MimetypesKind } from '@/utils/constants';
 import ObjectUtils from '@/utils/object';
 import { Utils } from '@/utils/utils';
-import { eventBus } from '../../event-bus';
-import toaster from '../../toast';
-import VideoPlayer from '../../video-player';
-import { Detail, Header, Body } from '../detail';
-import DirDetails from './dir-details';
-import FileDetails from './file-details';
+import { eventBus } from '@/utils/event-bus';
+import toaster from '@/components/toast';
+import VideoPlayer from '@/components/video-player';
+import { Detail, Header, Body } from '@/components/dirent-detail/detail';
+import DirDetails from '@/components/dirent-detail/dirent-details/dir-details';
+import FileDetails from '@/components/dirent-detail/dirent-details/file-details';
 
 import './index.css';
 
