@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+from django.db import IntegrityError, transaction
 from django.http import HttpResponseRedirect
 from django.utils.translation import gettext as _
 
@@ -19,6 +20,26 @@ from seahub.auth.models import SocialAuthUser
 import seahub.settings as settings
 
 logger = logging.getLogger(__name__)
+
+
+def _save_profile_fields(profile, fields, username, what):
+    """Persist only the named columns; a unique-key conflict is a skipped
+    metadata update, never a failed login.
+
+    Profile keeps `user`, `login_id` and `contact_email` each unique, while the
+    same person may legitimately own several historical identities (legacy
+    employee-name account, EAP pre-created account, OAuth-created account). A
+    whole-row save() therefore used to raise 1062 in the OAuth callback and turn
+    a working login into HTTP 500 (CloudFile DEV, 2026-10-19).
+    """
+    try:
+        with transaction.atomic():
+            profile.save(update_fields=fields)
+        return True
+    except IntegrityError:
+        logger.warning('OAuth profile %s conflict skipped (user=%s)', what, username)
+        return False
+
 
 LDAP_PROVIDER = getattr(settings, 'LDAP_PROVIDER', 'ldap')
 SSO_LDAP_USE_SAME_UID = getattr(settings, 'SSO_LDAP_USE_SAME_UID', False)
@@ -248,34 +269,35 @@ def oauth_callback(request):
 
     # update user's profile
     name = oauth_user_info.get('name', '')
-    contact_email = oauth_user_info.get('contact_email', '')
+    contact_email = (oauth_user_info.get('contact_email', '')
+                     or oauth_user_info.get('email', ''))
     login_id = oauth_user_info.get('login_id', '')
 
-    profile = Profile.objects.get_profile_by_user(email)
-    if not profile:
-        profile = Profile(user=email)
+    # CloudFile: 三列各自唯一，整行 save() 一旦撞唯一键就把 OAuth 回调变成 500
+    # （DEV 2026-10-19 实测：1062 profile_profile_contact_email_uniq）。这里只写
+    # 本次真正变化的列，冲突降级为“跳过这条元数据”，登录本身不受影响。
+    logger.info('OAuth profile sync: user=%s login_id=%s has_contact=%s',
+                email, login_id, bool(contact_email))
+    try:
+        profile, _ = Profile.objects.get_or_create(user=email)
+    except IntegrityError:
+        profile = Profile.objects.filter(user=email).first()
+    if profile is None:
+        logger.warning('profile row unavailable for %s; profile sync skipped', email)
+    else:
+        if name and (profile.nickname or '') != name.strip()[:64]:
+            profile.nickname = name.strip()[:64]
+            _save_profile_fields(profile, ['nickname'], email, 'nickname')
 
-    if name:
-        profile.nickname = name.strip()
-        profile.save()
+        # 共享邮箱/已被他人占用的邮箱只是可选元数据：跳过即可，绝不据此合并主体。
+        if contact_email and (profile.contact_email or '').lower() != contact_email.strip().lower():
+            profile.contact_email = contact_email.strip()
+            _save_profile_fields(profile, ['contact_email'], email, 'contact_email')
 
-    # CloudFile: a shared mailbox is optional metadata, never an identity key.
-    # Keep the native unique-email schema and skip conflicts without merging
-    # the independently authenticated provider/sub accounts.
-    from cloudfile_ext.sso.oauth_profile import update_optional_contact_email
-    if contact_email:
-        update_optional_contact_email(profile, contact_email)
-
-    # Legacy integrations may map email as their login field. Preserve optional
-    # contact metadata without replacing the employee login_id or provider/sub
-    # binding; skip shared mailboxes and retain manually set contact addresses.
-    login_email = oauth_user_info.get('email', '')
-    if login_email and not profile.contact_email:
-        update_optional_contact_email(profile, login_email)
-
-    if login_id:
-        profile.login_id = login_id.strip()
-        profile.save()
+        # login_id 存业务 UID（EAP userId）；已被其它行占用时保留现值并告警。
+        if login_id and profile.login_id != login_id.strip():
+            profile.login_id = login_id.strip()
+            _save_profile_fields(profile, ['login_id'], email, 'login_id')
 
     if CUSTOM_GET_USER_ROLE:
         remote_role_value = oauth_user_info.get('role', '')
