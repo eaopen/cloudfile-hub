@@ -9,23 +9,17 @@ import dayjs from 'dayjs';
 import relativeTime from 'dayjs/plugin/relativeTime';
 import Cookies from 'js-cookie';
 import PropTypes from 'prop-types';
+import metadataAPI from '@/api/metadata-api';
 import { seafileAPI } from '@/api/seafile-api';
 import { launchPairedAgent, ensurePairedLocalAgent } from '@/cloudfile/agent-local-edit';
 import { cloudFileAPI } from '@/cloudfile/cloudfile-api';
 import { loadFeatures } from '@/cloudfile/features';
-import CurDirPath from '@/features/library-view/cur-dir-path';
-import DirTool from '@/features/library-view/cur-dir-path/dir-tool';
 import CopyMoveDirentProgressDialog from '@/components/dialog/copy-move-dirent-progress-dialog';
 import DeleteFolderDialog from '@/components/dialog/delete-folder-dialog';
 import LibDecryptDialog from '@/components/dialog/lib-decrypt-dialog';
-import Detail from '@/features/library-view/dirent-detail';
-import EventBus, { eventBus } from '@/utils/event-bus';
-import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
 import FileUploader from '@/components/file-uploader/file-uploader';
 import ModalPortal from '@/components/modal-portal';
 import toaster from '@/components/toast';
-import SelectedDirentsToolbar from '@/features/library-view/toolbar/selected-dirents-toolbar';
-import ViewToolbar from '@/features/library-view/toolbar/view-toolbar';
 import treeHelper from '@/components/tree-view/tree-helper';
 import TreeNode from '@/components/tree-view/tree-node';
 import { PRIVATE_FILE_TYPE, DIRENT_DETAIL_SHOW_KEY, TREE_PANEL_STATE_KEY, RECENTLY_USED_LIST_KEY } from '@/constants';
@@ -38,6 +32,7 @@ import {
   DIR_TABLE_DEFAULT_METADATA_COLUMNS,
   getDirTableRowHeightKey
 } from '@/constants/dir-column-config';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
 import {
   LIST_MODE,
   TABLE_MODE,
@@ -49,9 +44,14 @@ import {
   TRASH_MODE,
   CHAT_MODE
 } from '@/constants/view-mode';
+import '@/css/lib-content-view.css';
+import CurDirPath from '@/features/library-view/cur-dir-path';
+import DirTool from '@/features/library-view/cur-dir-path/dir-tool';
 import DirColumnView from '@/features/library-view/dir-column-view';
 import { getDirTableColumnOrder, setDirTableColumnOrder } from '@/features/library-view/dir-table-view/columns';
-import metadataAPI from '@/api/metadata-api';
+import Detail from '@/features/library-view/dirent-detail';
+import SelectedDirentsToolbar from '@/features/library-view/toolbar/selected-dirents-toolbar';
+import ViewToolbar from '@/features/library-view/toolbar/view-toolbar';
 import { EVENT_BUS_TYPE as METADATA_EVENT_BUS_TYPE, ROW_HEIGHT } from '@/features/metadata/constants';
 import { PRIVATE_COLUMN_KEY } from '@/features/metadata/constants/column/private';
 import { MetadataProvider } from '@/features/metadata/hooks/metadata';
@@ -71,9 +71,9 @@ import {
   thumbnailSizeForOriginal,
   username
 } from '@/utils/constants';
-import { Utils } from '@/utils/utils';
+import EventBus, { eventBus } from '@/utils/event-bus';
 
-import '@/css/lib-content-view.css';
+import { Utils } from '@/utils/utils';
 
 dayjs.extend(relativeTime);
 

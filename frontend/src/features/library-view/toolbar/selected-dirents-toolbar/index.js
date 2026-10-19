@@ -1,19 +1,19 @@
 import React from 'react';
 import PropTypes from 'prop-types';
 import { isEnabled } from '@/cloudfile/features';
-import { EVENT_BUS_TYPE as TABLE_EVENT_BUS_TYPE } from '@/features/metadata/constants';
-import { Dirent } from '@/models';
-import { gettext } from '@/utils/constants';
-import { Utils } from '@/utils/utils';
-import OpElement from '@/components/op-element';
-import OpIcon from '@/components/op-icon';
 import { getDirentItemMenuList, getBatchMenuList } from '@/components/dirent-operation-menu/contextMenuUtils';
 import { menuHandlers } from '@/components/dirent-operation-menu/menuHandlers';
 import CustomDropdown from '@/components/dropdown';
-import EventBus from '@/utils/event-bus';
-import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
 import Icon from '@/components/icon';
+import OpElement from '@/components/op-element';
+import OpIcon from '@/components/op-icon';
 import Tooltip from '@/components/tooltip';
+import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
+import { EVENT_BUS_TYPE as TABLE_EVENT_BUS_TYPE } from '@/features/metadata/constants';
+import { Dirent } from '@/models';
+import { gettext } from '@/utils/constants';
+import EventBus from '@/utils/event-bus';
+import { Utils } from '@/utils/utils';
 
 import './index.css';
 

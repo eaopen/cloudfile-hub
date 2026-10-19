@@ -1,8 +1,8 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { eventBus } from '@/utils/event-bus';
 import { EVENT_BUS_TYPE } from '@/constants/event-bus-type';
 import { gettext, username, isPro, siteRoot, cloudFileWatchEnabled } from '@/utils/constants';
+import { eventBus } from '@/utils/event-bus';
 import { Utils } from '@/utils/utils';
 import TreeSection from '../tree-section';
 import Item from './item';
