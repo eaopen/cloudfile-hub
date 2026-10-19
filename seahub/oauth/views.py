@@ -308,22 +308,54 @@ def oauth_callback(request):
     contact_email = oauth_user_info.get('contact_email', '')
     login_id = oauth_user_info.get('login_id', '')
 
+    # Preserve the reviewed DEV Profile conflict handling in the clean build:
+    # optional contact metadata must not turn a valid SSO callback into HTTP 500.
+    # Account/UID binding checks and subject refresh still run independently.
+    from django.db import IntegrityError, transaction
+
     profile = Profile.objects.get_profile_by_user(email)
     if not profile:
         profile = Profile(user=email)
-
-    if name:
-        profile.nickname = name.strip()
-        profile.save()
-
-    if contact_email:
-        profile.contact_email = contact_email.strip()
-        profile.save()
-
-    if login_id:
-        profile.login_id = login_id.strip()
-        profile.save()
-
+        try:
+            with transaction.atomic():
+                profile.save()
+        except IntegrityError:
+            profile = Profile.objects.get_profile_by_user(email)
+    if profile is None:
+        logger.error('profile unavailable for %s; profile update skipped', email)
+    else:
+        logger.info('OAuth profile sync: user=%s login_id=%s has_contact=%s',
+                    email, login_id, bool(contact_email))
+        if name:
+            profile.nickname = name.strip()[:64]
+            try:
+                with transaction.atomic():
+                    profile.save(update_fields=['nickname'])
+            except IntegrityError:
+                logger.warning('profile nickname write skipped (user=%s)', email)
+        if contact_email:
+            value = contact_email.strip()
+            if value and (profile.contact_email or '').lower() != value.lower():
+                taken = Profile.objects.filter(contact_email__iexact=value).exclude(pk=profile.pk).exists()
+                if taken:
+                    logger.warning('shared OAuth contact email skipped (user=%s)', email)
+                else:
+                    profile.contact_email = value
+                    try:
+                        with transaction.atomic():
+                            profile.save(update_fields=['contact_email'])
+                    except IntegrityError:
+                        logger.warning('concurrent contact email conflict skipped (user=%s)', email)
+        if login_id:
+            value = login_id.strip()
+            if value and profile.login_id != value:
+                try:
+                    with transaction.atomic():
+                        profile.login_id = value
+                        profile.save(update_fields=['login_id'])
+                except IntegrityError:
+                    logger.warning('login_id already bound elsewhere; kept existing (user=%s uid=%s)',
+                                   email, value)
     # Etech remains the master login. For its CloudFile SSO session, verify
     # current UID memberships before permitting this native session to proceed.
     # CE-only deployments with no Directory URL retain original native flow.
