@@ -47,8 +47,10 @@ class GroupRepoTest(ApiTestBase):
     def test_add_with_duplicate_name(self):
         with self.get_tmp_group() as group:
             name = 'grepo-test-' + randstring(6)
-            self.create_group_repo(group.group_id, name=name, expected=200)
-            self.create_group_repo(group.group_id, name=name, expected=400)
+            # CE14 identifies libraries by UUID, not unique display names.
+            first = self.create_group_repo(group.group_id, name=name, expected=200)
+            second = self.create_group_repo(group.group_id, name=name, expected=200)
+            self.assertNotEqual(first.json()['id'], second.json()['id'])
 
     def test_can_list(self):
         with self.get_tmp_group() as group:

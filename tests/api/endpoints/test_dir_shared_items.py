@@ -433,12 +433,17 @@ class DirSharedItemsTest(BaseTestCase):
     def test_share_with_invalid_ownership(self):
 
         self.share_repo_to_user_and_group()
+        # System library admins may manage shares. Use an ordinary rw reader
+        # so content access is still proven insufficient for administration.
+        reader = self.create_user(is_staff=False)
+        self.addCleanup(self.remove_user, reader.username)
+        seafile_api.share_repo(self.repo.id, self.user.username, reader.username, 'rw')
 
-        # admin can visit user sub-folder with 'rw' permission
+        # Ordinary readers can read/write content but cannot administer shares.
         assert seafile_api.check_permission_by_path(self.repo.id,
-                '/', self.admin.username) == 'rw'
+                '/', reader.username) == 'rw'
 
-        self.login_as(self.admin)
+        self.login_as(reader)
 
         resp = self.client.put(
             '/api2/repos/%s/dir/shared_items/?p=/' % self.repo.id,
@@ -632,12 +637,17 @@ class DirSharedItemsTest(BaseTestCase):
     def test_modify_with_invalid_ownership(self):
 
         self.share_repo_to_user_and_group()
+        # System library admins may manage shares. Use an ordinary rw reader
+        # so content access is still proven insufficient for administration.
+        reader = self.create_user(is_staff=False)
+        self.addCleanup(self.remove_user, reader.username)
+        seafile_api.share_repo(self.repo.id, self.user.username, reader.username, 'rw')
 
-        # admin can visit user sub-folder with 'rw' permission
+        # Ordinary readers can read/write content but cannot administer shares.
         assert seafile_api.check_permission_by_path(self.repo.id,
-                '/', self.admin.username) == 'rw'
+                '/', reader.username) == 'rw'
 
-        self.login_as(self.admin)
+        self.login_as(reader)
 
         resp = self.client.post('/api2/repos/%s/dir/shared_items/?p=/&share_type=user&username=%s' % (
             self.repo.id,
@@ -820,12 +830,17 @@ class DirSharedItemsTest(BaseTestCase):
     def test_unshare_with_invalid_ownership(self):
 
         self.share_repo_to_user_and_group()
+        # System library admins may manage shares. Use an ordinary rw reader
+        # so content access is still proven insufficient for administration.
+        reader = self.create_user(is_staff=False)
+        self.addCleanup(self.remove_user, reader.username)
+        seafile_api.share_repo(self.repo.id, self.user.username, reader.username, 'rw')
 
-        # admin can visit user sub-folder with 'rw' permission
+        # Ordinary readers can read/write content but cannot administer shares.
         assert seafile_api.check_permission_by_path(self.repo.id,
-                '/', self.admin.username) == 'rw'
+                '/', reader.username) == 'rw'
 
-        self.login_as(self.admin)
+        self.login_as(reader)
 
         resp = self.client.delete('/api2/repos/%s/dir/shared_items/?p=/&share_type=user&username=%s' % (
             self.repo.id,

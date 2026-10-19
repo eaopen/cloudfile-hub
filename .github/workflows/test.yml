@@ -42,7 +42,17 @@ jobs:
           git clone --depth=1 --branch=master https://github.com/haiwen/seafile-test-deploy /tmp/seafile-test-deploy
           cd /tmp/seafile-test-deploy && git fetch origin master:master && git checkout master
           export JWT_PRIVATE_KEY=qwertyuiop SITE_ROOT=/ SEAFILE_MYSQL_DB_CCNET_DB_NAME=ccnet SEAFILE_MYSQL_DB_SEAFILE_DB_NAME=seafile SEAFILE_MYSQL_DB_SEAHUB_DB_NAME=seahub
+          # Hub now requires the CloudFile scoped-download RPC. Build the
+          # matching fork instead of silently testing against upstream Server.
+          git config submodule.seafile-server.url https://github.com/eaopen/cloudfile-server.git
+          git config -f .gitmodules submodule.seafile-server.branch dev
+          # Select fork dev exactly, rather than merging it with an old
+          # upstream gitlink in this disposable build harness.
+          sed -i 's/git submodule update --remote --merge/git submodule update --remote --checkout/' build.sh
           ./bootstrap.sh
+          # Native-local test users still need the same sparse V2 ACL schema;
+          # an absent table remains a real authorization outage, not permission.
+          sudo mysql -uroot -proot seafile < seafile-server/scripts/sql/mysql/cloudfile-v2.sql
 
       - name: pip install
         run: |

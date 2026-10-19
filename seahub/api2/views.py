@@ -3157,12 +3157,16 @@ class FileView(APIView):
         # Only normal single-file reads use the V2 scoped grant. The V2
         # Authority currently cannot resolve virtual-library source paths;
         # history and non-download operations keep native Seafile behavior.
-        if request.GET.get('op', 'download') == 'download' and not repo.is_virtual:
+        if (request.GET.get('op', 'download') == 'download' and not repo.is_virtual
+                and not request.GET.get('commit_id')):
             reuse = request.GET.get('reuse', '0')
             if reuse not in ('0', '1'):
                 return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid reuse argument.')
             from cloudfile_ext.v2.downloads import file_download_response
-            response = file_download_response(request, repo_id, path, reuse == '0')
+            # The legacy API accepts paths relative to the repository root;
+            # bind the canonical absolute path before V2 authorization/signing.
+            scoped_path = path if path.startswith('/') else '/' + path
+            response = file_download_response(request, repo_id, scoped_path, reuse == '0')
             if response.status_code == 200:
                 send_file_access_msg(request, repo, path, 'api')
             return response
@@ -4547,6 +4551,11 @@ class SharedRepo(APIView):
         if not repo:
             error_msg = 'Library %s not found.' % repo_id
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
+
+        # Virtual libraries cannot become a new sharing authority. Reject
+        # before native mutation so invalid delegation is HTTP 400, not RPC 500.
+        if repo.is_virtual:
+            return api_error(status.HTTP_400_BAD_REQUEST, 'Virtual library cannot be shared.')
 
         # permission check
         username = request.user.username

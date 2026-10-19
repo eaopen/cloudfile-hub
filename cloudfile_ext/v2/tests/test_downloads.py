@@ -52,3 +52,49 @@ class DownloadTests(TestCase):
     def test_noncanonical_paths_are_rejected_before_authorization(self):
         for path in ('/', 'relative', '/a/../secret', '/a//b', '/a\\b', '/a\n.txt'):
             self.assertEqual(self.request(path).status_code, 400)
+
+
+class NativeDispatchCompatibilityTests(TestCase):
+    """Execute the selected native FileView method, without copying its logic."""
+
+    def dispatch(self, query):
+        import ast
+        import os
+        from pathlib import Path
+        import seahub
+        from unittest.mock import Mock
+        from rest_framework import status
+        source = Path(next(iter(seahub.__path__))) / 'api2/views.py'
+        tree = ast.parse(source.read_text())
+        view = next(node for node in tree.body if isinstance(node, ast.ClassDef)
+                    and node.name == 'FileView')
+        method = next(node for node in view.body if isinstance(node, ast.FunctionDef)
+                      and node.name == 'get')
+        api = Mock()
+        api.get_file_id_by_path.return_value = 'f' * 40
+        native = Mock(return_value='native-history-response')
+        request = SimpleNamespace(GET=query, user=SimpleNamespace(username='ordinary'))
+        env = dict(os=os, status=status, seafile_api=api, SearpcError=RuntimeError,
+            get_repo=lambda repo: SimpleNamespace(is_virtual=False),
+            check_folder_permission=lambda *args: 'rw', send_file_access_msg=Mock(),
+            get_repo_file=native)
+        exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), env)
+        from cloudfile_ext.v2 import downloads
+        with patch.object(downloads, 'file_download_response', return_value=SimpleNamespace(status_code=200)) as scoped:
+            result = env['get'](object(), request, RID)
+        return result, request, scoped, native
+
+    def test_root_relative_native_path_is_canonical_before_issuance(self):
+        # Older native clients omit the leading slash; authorization must still
+        # receive exactly one canonical path, without weakening path validation.
+        _, request, scoped, native = self.dispatch({'p': 'docs/a +文档.pdf', 'reuse': '1'})
+        scoped.assert_called_once_with(request, RID, '/docs/a +文档.pdf', False)
+        native.assert_not_called()
+
+    def test_history_request_never_mints_a_current_file_grant(self):
+        # A commit-bound request retains the original history path rather than
+        # acquiring a reusable grant for the current object at the same path.
+        result, _, scoped, native = self.dispatch({'p': '/docs/old.pdf', 'commit_id': 'a' * 40})
+        self.assertEqual(result, 'native-history-response')
+        scoped.assert_not_called()
+        native.assert_called_once()
