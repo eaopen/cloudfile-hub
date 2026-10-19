@@ -1,5 +1,6 @@
-"""Browser-authorized Rust edit handoff. No Device/Session/Intent database table.
+"""Browser-authorized Rust local view/edit handoff. No Device/Session/Intent table.
 
+The local-view mode grants read only. Publish / checkout is forbidden by Go Fileserver.
 This is a deliberately narrow scoped JWT minted ONLY from an authenticated
 Seahub session. The Agent never receives the browser cookie or full API token.
 Seafile/CF-ACL and the native repository version are checked before issuance;
@@ -55,7 +56,7 @@ def issue_ticket(*, username, uid, repo_id, path, mode, file_id, now, secret):
     if not isinstance(uid, str) or not uid or len(uid) > 225:
         raise ValueError("stable user UID required")
     UUID(repo_id)
-    if mode not in ("optimistic-edit", "exclusive-edit"):
+    if mode not in ("local-view", "optimistic-edit", "exclusive-edit"):
         raise ValueError("unsupported edit mode")
     if not isinstance(path, str) or not path.startswith("/") or path == "/" or (
             path.endswith("/") or "//" in path or "\\" in path or
@@ -89,6 +90,8 @@ class RustLocalEditOpen(APIView):
             repo_id = request.data["repo_id"]
             path = request.data["path"]
             mode = request.data["mode"]
+            if mode not in ("local-view", "optimistic-edit", "exclusive-edit"):
+                return Response({"code": "BAD_EDIT_REQUEST"}, status=400)
             if mode == "exclusive-edit" and not checkout_available():
                 return Response({"code": "CHECKOUT_UNSUPPORTED"}, status=409)
             user = request.user.username
@@ -96,8 +99,12 @@ class RustLocalEditOpen(APIView):
             # V2 authority (including current SSO group mapping and deny) is
             # intentionally the sole browser-side policy resolver.
             decision = Authority(user).effective(repo_id, path, "file")
-            if not decision.can_write:
-                return Response({"code": "EDIT_DENIED"}, status=403)
+            # View-only must be usable by read-authorized users; never promote a
+            # read grant into an optimistic or exclusive write capability.
+            permitted = decision.can_read if mode == "local-view" else decision.can_write
+            if not permitted:
+                return Response({"code": "VIEW_DENIED" if mode == "local-view"
+                                 else "EDIT_DENIED"}, status=403)
             repo = seafile_api.get_repo(repo_id)
             if (repo is None or repo.is_virtual or repo.encrypted or
                     repo.version != 1):
