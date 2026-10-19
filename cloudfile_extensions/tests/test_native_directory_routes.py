@@ -7,7 +7,7 @@ import ast
 from pathlib import Path
 import re
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, ANY
 
 import pytest
 
@@ -141,7 +141,7 @@ def test_native_page_inlines_tags_only_for_scoped_visible_entries(monkeypatch, u
                response=lambda req, read: read(current))
     exec(compile(ast.Module(body=[fn], type_ignores=[]), 'native-directory-page', 'exec'), env)
     page = env['directory_page'](request(p='/folder', start='0', limit='50', with_display_metadata='true'), REPO)
-    tags.assert_called_once_with(REPO, [('/folder/open', 'dir')])
+    tags.assert_called_once_with(REPO, [('/folder/open', 'dir')], deadline=ANY)
     assert [entry['name'] for entry in page['dirent_list']] == ['open']
     assert page['user_perm'] == 'r'
     assert page['dirent_list'][0]['permission'] == 'rw'

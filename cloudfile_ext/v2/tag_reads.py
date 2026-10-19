@@ -6,9 +6,12 @@ existing FileUUIDMap rows and never creates UUIDs. Tags never authorize
 anything; callers pass references that are already visible to the user.
 """
 import posixpath
+from contextlib import nullcontext
 
+from django.db import connections
 from django.db.models import Q
 
+from .tag_query_budget import query_budget, remaining_ms
 MAX_REFERENCES = 1000
 MAX_ROWS = 10000
 
@@ -26,14 +29,24 @@ def _selector(repo_id, references, relation):
     return selector & Q(**{relation + '__repo_id': repo_id})
 
 
-def _bounded(queryset, fields):
-    rows = list(queryset.values_list(*fields).order_by('pk')[:MAX_ROWS + 1])
+def _bounded(queryset, fields, *, deadline=None):
+    # Each SELECT receives only the remainder of the page's shared budget.
+    scope = nullcontext()
+    if deadline is not None:
+        # Pin the router's chosen alias so execution uses the wrapped connection.
+        alias = queryset.db
+        queryset = queryset.using(alias)
+        scope = query_budget(connections[alias], deadline)
+    with scope:
+        rows = list(queryset.values_list(*fields).order_by('pk')[:MAX_ROWS + 1])
+    if deadline is not None:
+        remaining_ms(deadline)
     if len(rows) > MAX_ROWS:
         raise ValueError('tag read budget exceeded')
     return rows
 
 
-def read(repo_id, references):
+def read(repo_id, references, *, deadline=None):
     """references: [(path, 'file'|'dir')]; returns {(path, kind): [tag, ...]}.
 
     Library tags carry ids and color; legacy free tags are read-only display.
@@ -52,13 +65,13 @@ def read(repo_id, references):
 
     rows = _bounded(FileTags.objects.filter(_selector(repo_id, result, 'file_uuid'), repo_tag__repo_id=repo_id),
                     ('pk', 'repo_tag_id', 'repo_tag__name', 'repo_tag__color',
-                     'file_uuid__parent_path', 'file_uuid__filename', 'file_uuid__is_dir'))
+                     'file_uuid__parent_path', 'file_uuid__filename', 'file_uuid__is_dir'), deadline=deadline)
     for pk, tag_id, name, color, parent, filename, is_dir in rows:
         items = target(parent, filename, is_dir)
         if items is not None:
             items.append(dict(source='repo', file_tag_id=pk, repo_tag_id=tag_id, tag_name=name, tag_color=color))
     rows = _bounded(FileTag.objects.filter(_selector(repo_id, result, 'uuid')),
-                    ('pk', 'tag__name', 'uuid__parent_path', 'uuid__filename', 'uuid__is_dir'))
+                    ('pk', 'tag__name', 'uuid__parent_path', 'uuid__filename', 'uuid__is_dir'), deadline=deadline)
     for pk, name, parent, filename, is_dir in rows:
         items = target(parent, filename, is_dir)
         if items is not None:
