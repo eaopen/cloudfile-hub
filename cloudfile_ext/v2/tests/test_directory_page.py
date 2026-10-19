@@ -192,7 +192,11 @@ class DirViewPageTests(TestCase):
 
     def test_page_matches_the_eap_fast_path_contract(self):
         self.authority.return_value.page.return_value = self.page()
-        result = self.request(dict(p='/docs', start='0', limit='2', with_display_metadata='true'))
+        tags = [dict(tag_status='OK', tags=[]), dict(tag_status='OK', tags=[
+            dict(source='repo', file_tag_id=1, repo_tag_id=7, tag_name='review', tag_color='#abc')])]
+        with patch('cloudfile_ext.v2.tag_http.page_tags', return_value=tags) as read:
+            result = self.request(dict(p='/docs', start='0', limit='2', with_display_metadata='true'))
+        read.assert_called_once_with(RID, self.page()['items'])
         self.assertEqual(result.status_code, 200)
         self.authority.return_value.page.assert_called_once_with(RID, '/docs', start=0, limit=2, if_dir_id=None)
         data = result.data
@@ -203,6 +207,29 @@ class DirViewPageTests(TestCase):
         self.assertEqual(data['dirent_list'][1]['size'], 7)
         self.assertNotIn('size', data['dirent_list'][0])
         self.assertEqual(result['Cache-Control'], 'no-store')
+        self.assertNotIn('tag_batch', data)
+        self.assertEqual(data['dirent_list'][0]['tags'], [])
+        self.assertEqual(data['dirent_list'][1]['tags'], tags[1]['tags'])
+        self.assertEqual([item['tag_status'] for item in data['dirent_list']], ['OK', 'OK'])
+
+    def test_tag_failure_keeps_authorized_page_and_unknown_tags(self):
+        self.authority.return_value.page.return_value = self.page()
+        with patch('cloudfile_ext.v2.tag_http.read_tags', side_effect=OSError()), \
+                self.assertLogs('cloudfile_ext.v2.tag_http', level='ERROR'):
+            result = self.request(dict(p='/docs', start='0', limit='2', with_display_metadata='true'))
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual([(item['tag_status'], item['tags']) for item in result.data['dirent_list']],
+                         [('FAILED', None), ('FAILED', None)])
+        self.assertNotIn('tag_batch', result.data)
+
+    def test_empty_authorized_page_never_reads_tags(self):
+        self.authority.return_value.page.return_value = self.page(items=[], next_start=2)
+        with patch('cloudfile_ext.v2.tag_http.read_tags') as read:
+            read.return_value = {}
+            result = self.request(dict(p='/docs', start='0', limit='2', with_display_metadata='true'))
+        read.assert_called_once_with(RID, [])
+        self.assertEqual(result.data['dirent_list'], [])
+        self.assertTrue(result.data['has_more'])
 
     def test_last_and_empty_visible_pages(self):
         self.authority.return_value.page.return_value = self.page(items=[], next_start=None, scanned_count=1)

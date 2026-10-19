@@ -125,10 +125,10 @@ class TagBatchTests(TestCase):
         entries = [(entry, '/docs/file', 'file', 'r')]
         with patch('cloudfile_ext.v2.tag_http.read_tags', return_value={('/docs/file', 'file'): []}) as tags:
             result = page_tags(RID, entries)
-        self.assertEqual(result['items'], [dict(path='/docs/file', is_dir=False, status='OK', tags=[])])
+        self.assertEqual(result, [dict(tag_status='OK', tags=[])])
         tags.assert_called_once_with(RID, [('/docs/file', 'file')])
         with patch('cloudfile_ext.v2.tag_http.read_tags', side_effect=OSError()), \
                 self.assertLogs('cloudfile_ext.v2.tag_http', level='ERROR'):
             result = page_tags(RID, entries)
-        self.assertEqual(result['items'][0]['status'], 'FAILED')
-        self.assertIsNone(result['items'][0]['tags'])
+        self.assertEqual(result[0]['tag_status'], 'FAILED')
+        self.assertIsNone(result[0]['tags'])
