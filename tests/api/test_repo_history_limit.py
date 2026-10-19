@@ -78,6 +78,9 @@ class RepoTest(BaseTestCase):
         assert json_resp['keep_days'] == -1
 
     def test_shared_repo_admin_can_get_and_set_history_limit(self):
+        # A management marker requires live native access; a stale marker
+        # alone must never authorize metadata/content operations.
+        seafile_api.share_repo(self.user_repo_id, self.user.username, self.tmp_user.username, 'r')
         ExtraSharePermission.objects.create_share_permission(
             self.user_repo_id, self.tmp_user.username, 'admin')
         self.login_as(self.tmp_user)

@@ -169,10 +169,14 @@ class GroupLibraryTest(BaseTestCase):
         self.assertEqual(403, resp.status_code)
 
     def test_delete_with_login_user_is_group_member(self):
+        # A system admin has independent management rights; use a regular
+        # member to verify that membership alone cannot unshare a library.
+        reader = self.create_user(is_staff=False)
+        self.addCleanup(self.remove_user, reader.username)
 
-        ccnet_api.group_add_member(self.group_id, self.user_name, self.admin_name)
+        ccnet_api.group_add_member(self.group_id, self.user_name, reader.username)
 
-        self.login_as(self.admin)
+        self.login_as(reader)
         resp = self.client.delete(self.group_library_url)
         self.assertEqual(403, resp.status_code)
 
@@ -211,8 +215,12 @@ class GroupLibraryTest(BaseTestCase):
         assert len(group_repos) == 0
 
     def test_delete_if_login_user_is_group_repo_admin(self):
+        # A system admin has independent management rights; use a regular
+        # member to verify that membership alone cannot unshare a library.
+        reader = self.create_user(is_staff=False)
+        self.addCleanup(self.remove_user, reader.username)
 
-        self.login_as(self.admin)
+        self.login_as(reader)
 
         # commont user can not delete
         resp = self.client.delete(self.group_library_url)
@@ -222,7 +230,7 @@ class GroupLibraryTest(BaseTestCase):
         assert len(group_repos) == 1
 
         # share library to group with `admin` permission
-        ccnet_api.group_add_member(self.group_id, self.user_name, self.admin_name)
+        ccnet_api.group_add_member(self.group_id, self.user_name, reader.username)
         ExtraGroupsSharePermission.objects.create_share_permission(
                 self.repo_id, self.group_id, PERMISSION_ADMIN)
 
@@ -231,7 +239,7 @@ class GroupLibraryTest(BaseTestCase):
         self.assertEqual(403, resp.status_code)
 
         # repo admin user(also is group admin) can delete
-        ccnet_api.group_set_admin(self.group_id, self.admin_name)
+        ccnet_api.group_set_admin(self.group_id, reader.username)
         resp = self.client.delete(self.group_library_url)
         self.assertEqual(200, resp.status_code)
 

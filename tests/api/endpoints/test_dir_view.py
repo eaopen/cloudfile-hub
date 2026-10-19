@@ -93,13 +93,14 @@ class DirViewTest(BaseTestCase):
         self.assertIsNone(second_data['next_start'])
         self.assertEqual(first_data['dir_id'], second_data['dir_id'])
 
-    @override_settings(CLOUDFILE_DIRECTORY_PAGE_SIZE=1, CLOUDFILE_DIRECTORY_PAGE_MAX_ITEMS=1)
-    def test_page_size_uses_configured_default_and_ceiling(self):
+    def test_page_size_uses_v2_default_and_ceiling(self):
+        # Public V2 pages have a fixed 200/500 protocol, not legacy settings.
         self.login_as(self.user)
         response = self.client.get(self.url + '?start=0')
         self.assertEqual(200, response.status_code)
-        self.assertEqual(1, len(json.loads(response.content)['dirent_list']))
-        self.assertEqual(400, self.client.get(self.url + '?limit=2').status_code)
+        self.assertEqual(2, len(json.loads(response.content)['dirent_list']))
+        self.assertEqual(200, self.client.get(self.url + '?limit=500').status_code)
+        self.assertEqual(400, self.client.get(self.url + '?limit=501').status_code)
 
     def test_page_rejects_recursive_and_invalid_limits(self):
         self.login_as(self.user)
@@ -107,7 +108,9 @@ class DirViewTest(BaseTestCase):
         self.assertEqual(400, self.client.get(self.url + '?limit=0').status_code)
         self.assertEqual(400, self.client.get(self.url + '?limit=501').status_code)
         self.assertEqual(400, self.client.get(self.url + '?recursive=1&limit=1').status_code)
-        self.assertEqual(409, self.client.get(self.url + '?limit=1&if_dir_id=stale').status_code)
+        # Malformed revisions are input errors; a valid stale object is a conflict.
+        self.assertEqual(400, self.client.get(self.url + '?limit=1&if_dir_id=stale').status_code)
+        self.assertEqual(409, self.client.get(self.url + '?limit=1&if_dir_id=' + '0' * 40).status_code)
 
     def test_can_get_with_dir_type_parameter(self):
 
@@ -249,9 +252,9 @@ class DirViewTest(BaseTestCase):
     # CE stock DB lacks CloudFile V2 ACL tables. The V2 permission adapter
     # has dedicated deny/share tests; this integration case tests native
     # RepoTags/FileTags binding readback on a real Seafile repository.
-    @patch('seahub.api2.endpoints.repo_tags._native_tag_root_permission', return_value=True)
-    @patch('seahub.api2.endpoints.file_tag.authorize_tag_target')
-    def test_can_get_file_with_tag_info(self, _authorized_target, _root_allowed):
+    # Use the real full-fork native tag checks; the different clean V2 seams
+    # are independently tested against their immutable source-set.
+    def test_can_get_file_with_tag_info(self):
 
         self.login_as(self.user)
 

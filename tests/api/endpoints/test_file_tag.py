@@ -1,8 +1,8 @@
 #coding:utf-8
+# Full-fork legacy FileTag/creator persistence remains a native integration
+# contract. Clean V2 RepoTags/source semantics run in the pinned V2 HTTP suite.
 import os
 import json
-
-from unittest.mock import patch
 
 from django.urls import reverse
 from django.test.client import encode_multipart
@@ -11,12 +11,6 @@ from seahub.test_utils import BaseTestCase
 from seaserv import seafile_api
 class FileTagTest(BaseTestCase):
     def setUp(self):
-        # Stock CE Seahub tests do not install CloudFile's separate ACL DDL.
-        # Exercise native RepoTags persistence here; authorization is tested
-        # independently by cloudfile_ext/v2/tests/test_native_tag_adapter.py.
-        policy = patch('seahub.api2.endpoints.file_tag.authorize_tag_target')
-        policy.start()
-        self.addCleanup(policy.stop)
         self.login_as(self.user)
 
         self.test_filepath ='/test_file.txt'
@@ -46,10 +40,10 @@ class FileTagTest(BaseTestCase):
         assert response.status_code == 200
         self.filetag_id = response.data['tags'][0]['id']
         self.filetag_name = response.data['tags'][0]['name']
-        self.filetag_source = response.data['tags'][0]['source']
+        self.filetag_username = response.data['tags'][0]['creator']
         assert self.filetag_id
         assert self.filetag_name
-        assert self.filetag_source == 'repo'
+        assert self.filetag_username
 
         #test for create folder
         folder_response = self.client.post(self.endpoint, {
@@ -59,10 +53,10 @@ class FileTagTest(BaseTestCase):
         assert folder_response.status_code == 200
         self.foldertag_id = folder_response.data["tags"][0]['id']
         self.foldertag_name = folder_response.data["tags"][0]['name']
-        self.foldertag_source = folder_response.data["tags"][0]["source"]
+        self.foldertag_username = folder_response.data["tags"][0]['creator']
         assert self.foldertag_id
         assert self.foldertag_name
-        assert self.foldertag_source == 'repo'
+        assert self.foldertag_username
 
         #test for get file tag
         response = self.client.get(self.endpoint, {
@@ -72,7 +66,7 @@ class FileTagTest(BaseTestCase):
         assert response.status_code == 200
         assert response.data['tags'][0]['id'] == self.filetag_id
         assert response.data['tags'][0]['name'] == self.filetag_name
-        assert response.data['tags'][0]['source'] == self.filetag_source
+        assert response.data['tags'][0]['creator'] == self.filetag_username
 
         #test for get folder tag
         response = self.client.get(self.endpoint, {
@@ -82,7 +76,7 @@ class FileTagTest(BaseTestCase):
         assert response.status_code == 200
         assert response.data['tags'][0]['id'] == self.foldertag_id
         assert response.data['tags'][0]['name'] == self.foldertag_name
-        assert response.data['tags'][0]['source'] == self.foldertag_source
+        assert response.data['tags'][0]['creator'] == self.foldertag_username
 
         #test for del file tag
         response = self.client.delete(self._endpoint + "?path=%s&is_dir=%s"
@@ -112,8 +106,7 @@ class FileTagTest(BaseTestCase):
         assert response.status_code == 200
         assert response.data["tags"][0]["id"]
         assert response.data["tags"][0]["name"] == "test_tagname"
-        assert response.data["tags"][0]["source"] == "repo"
-        assert response.data["tags"][0]["read_only"] is False
+        assert response.data["tags"][0]["creator"] == self.user.username
         # add more
         response = self.client.post(self.endpoint, {
                 'path': self.test_filepath,
@@ -127,8 +120,7 @@ class FileTagTest(BaseTestCase):
         assert "test_tagname" in tags_names
         assert "test_tagname1" in tags_names
         assert "test_tagnm天" in tags_names
-        assert response.data["tags"][0]["source"] == "repo"
-        assert response.data["tags"][0]["read_only"] is False
+        assert response.data["tags"][0]["creator"] == self.user.username
         response = self.client.get(self.endpoint, {
                 'path': self.test_filepath,
                 'is_dir': False,
