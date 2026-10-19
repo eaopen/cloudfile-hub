@@ -89,6 +89,7 @@ def directory_page(request, repo_id):
     # Page tags are display-only: reuse the already authorized native entries.
     if request.GET.get('with_display_metadata') == 'true':
         from .tag_http import page_tags
-        response.data['tag_batch'] = page_tags(repo_id, page['items'])
+        for item, metadata in zip(response.data['dirent_list'], page_tags(repo_id, page['items'])):
+            item.update(metadata)
     response['Cache-Control'] = 'no-store'
     return response

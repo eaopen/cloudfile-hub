@@ -106,3 +106,45 @@ def test_native_directory_rejects_get_with_body(monkeypatch):
     with pytest.raises(ContractError):
         obj.get(req)
     assert trace == {}
+
+
+@pytest.mark.parametrize('unavailable', [False, True])
+def test_native_page_inlines_tags_only_for_scoped_visible_entries(monkeypatch, unavailable):
+    import stat
+    import seaserv
+    from cloudfile_ext.v2 import tag_http
+
+    cursor = Mock()
+    cursor.fetchall.return_value = [('a' * 40,)]
+    current = SimpleNamespace(state=SimpleNamespace(provider='etech'), current_subject='alice',
+        native_permission='r', hard_readonly=False, effective_access={'write': False},
+        preparation=SimpleNamespace(contexts=SimpleNamespace(allowlist=())),
+        rules=Mock(), shares=Mock(), core=Mock(), subjects=lambda: ())
+    current.consume = lambda ref, consume: consume(cursor, ref)
+    current.rules.candidates_many.return_value = [[], []]
+    current.shares.candidates_many.return_value = [[], []]
+    current.core.evaluate_scoped.side_effect = [dict(visible=False, read=False, write=False),
+                                               dict(visible=True, read=True, write=True)]
+    api = Mock()
+    api.get_dir_id_by_commit_and_path.return_value = 'b' * 40
+    api.list_dir_by_commit_and_path.return_value = [
+        SimpleNamespace(obj_name='hidden', obj_id='c' * 40, mode=stat.S_IFREG),
+        SimpleNamespace(obj_name='open', obj_id='d' * 40, mode=stat.S_IFDIR)]
+    monkeypatch.setattr(seaserv, 'seafile_api', api)
+    binding = dict(source='repo', file_tag_id=1, repo_tag_id=2, tag_name='review', tag_color='#abc')
+    tags = Mock(side_effect=OSError() if unavailable else None,
+                return_value={('/folder/open', 'dir'): [binding]})
+    monkeypatch.setattr(tag_http, 'read_tags', tags)
+    fn = next(node for node in ast.parse(SOURCE.read_text()).body
+              if isinstance(node, ast.FunctionDef) and node.name == 'directory_page')
+    env = dict(re=re, stat=stat, resource_ref=resource_ref, invalid=invalid, ContractError=ContractError,
+               response=lambda req, read: read(current))
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), 'native-directory-page', 'exec'), env)
+    page = env['directory_page'](request(p='/folder', start='0', limit='50', with_display_metadata='true'), REPO)
+    tags.assert_called_once_with(REPO, [('/folder/open', 'dir')])
+    assert [entry['name'] for entry in page['dirent_list']] == ['open']
+    assert page['user_perm'] == 'r'
+    assert page['dirent_list'][0]['permission'] == 'rw'
+    assert page['dirent_list'][0]['tag_status'] == ('FAILED' if unavailable else 'OK')
+    assert page['dirent_list'][0]['tags'] == (None if unavailable else [binding])
+    assert 'tag_batch' not in page

@@ -140,6 +140,18 @@ class OrmTests(unittest.TestCase):
         self.assertEqual(len(response.data['tag_batch']['items'][0]['tags']), 2)
         self.assertEqual(response['Cache-Control'], 'no-store')
 
+    def test_native_inline_metadata_is_not_loaded_twice(self):
+        data = dict(user_perm='r', has_more=False, dirent_list=[
+            dict(parent_dir='/', name='a', type='file', permission='r', tag_status='OK', tags=[])])
+        request = SimpleNamespace(user=SimpleNamespace(username='alice'))
+        with patch('cloudfile_ext.legacy_tags.directory.tags_for_page') as tags:
+            response = directory_response(lambda *a, **k: Response(data), None, request, repo_id=REPO)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data['dirent_list'][0]['tags'], [])
+        self.assertEqual(response.data['dirent_list'][0]['tag_status'], 'OK')
+        self.assertNotIn('tag_batch', response.data)
+        tags.assert_not_called()
+
     def test_display_failure_is_unknown_and_permission_failure_is_closed(self):
         data = dict(user_perm='r', has_more=False, dirent_list=[
             dict(parent_dir='/', name='a', type='file', permission='r')])

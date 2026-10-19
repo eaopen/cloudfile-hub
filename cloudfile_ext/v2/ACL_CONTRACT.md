@@ -103,8 +103,14 @@ by an explicit `start` or `limit`; requests without them keep the CE14 response.
 - `dirent_list` items carry `type`, `id`, `name`, `mtime`, `permission`
   (`r`/`rw`, effective), `parent_dir`, and `size` for files. Modifier, lock,
   starred and thumbnail fields of the unpaged CE response are not included.
-  `with_display_metadata=true` returns a V2 `tag_batch` for this authorized
-  window only; failure is `FAILED`/null and does not block listing.
+  `with_display_metadata=true` adds `tags` and `tag_status` directly to each
+  authorized `dirent_list` item; no separate `tag_batch` is returned. Tags retain
+  native source, binding ID, name, color and read-only fields. `OK`/[] means no
+  tags; `FAILED`/null means unavailable and does not block listing. The same
+  bounded batched SQL reader is reused; there are no per-entry HTTP/RPC checks.
+  Consumers reuse `user_perm` and each item's `permission` for this content
+  read rather than preflight library/directory permission requests; local
+  business admission and separate library-management authorization still apply.
 - `dir_id` is the listed directory object. `next_start` counts native entries,
   never visible ones: a window whose children are all hidden returns an empty
   `dirent_list` with `has_more=true`. `has_more`/`scan_exhausted` come from the

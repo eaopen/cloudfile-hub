@@ -16,11 +16,16 @@
 
 ## 与分页及 EAP 集成
 
-- `items-page` 显式 `with_display_metadata=true` 时，仅对已授权的当前页附带
-  同结构 `tag_batch`，不重复检查文件存在性；标签失败只把每项置为 `FAILED`。
-- EAP 转换 V2 `source/tag_name` 为既有浏览器 `tags: string[]`，去重保序。
-  系统词表/展示名仍由 EAP 管理；不再要求旧 FileTag 的 `creator` 字段。
-- EAP 对外 `file-tags/batch`、单个标签增删改和前端 DTO 不变。
+- 目录分页显式 `with_display_metadata=true` 时，将 `tags` 与 `tag_status` 直接合入
+  当前已授权页的 `dirent_list[]`，不再返回独立 `tag_batch`。标签对象保持独立批量接口
+  的原生结构；不重复检查文件存在性，也不按条目发 HTTP/RPC 请求。成功空标签为
+  `tag_status=OK, tags=[]`；读取失败为 `FAILED, tags=null`，不阻断目录浏览。
+- EAP 直接转换每项 V2 `source/tag_name` 为浏览器 `items[].tags: string[]`，去重保序，
+  以 `items[].tagStatus` 保留状态，不再输出顶层 `tagBatch`。系统词表/展示名仍由 EAP 管理。
+- CloudFile 已统一计算父目录 `user_perm` 和逐项 `permission`；EAP 新链路只保留本地
+  业务库状态/作用域门禁，不再预查远程库/目录权限或补读标签。管理操作独立授权。
+- 独立 `file-tags/batch` 及单个标签增删改协议不变；分页协议变更需要 CloudFile、EAP
+  和前端配套更新。旧 EAP 不会消费新的条目标签；旧 CloudFile 不提供新的条目字段。
 - 不新增表、缓存、功能开关、第三套标签读引擎，也不恢复 v0.9 标签服务。
 
 CI 专项包含多来源标签、跨目录、拒绝访问、缺失对象、重复项、失败不伪空

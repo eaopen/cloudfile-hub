@@ -41,16 +41,16 @@ def _tag_row(path, kind, status, tags=None):
 
 
 def page_tags(repo_id, authorized_entries):
-    """Inline tags for a pre-authorized native directory page, never full repo."""
+    """Metadata in authorized page order; paths/types already belong to dirents."""
     references = [(path, kind) for _, path, kind, _ in authorized_entries]
     try:
         tags = read_tags(repo_id, references)
-        rows = [_tag_row(path, kind, 'OK', tags[(path, kind)]) for path, kind in references]
+        rows = [dict(tag_status='OK', tags=tags[(path, kind)]) for path, kind in references]
     except Exception:
         # Tag failure is display-only and never converts into an empty tag set.
         logger.exception('CloudFile directory page tag read unavailable')
-        rows = [_tag_row(path, kind, 'FAILED') for path, kind in references]
-    return _envelope(repo_id, rows)
+        rows = [dict(tag_status='FAILED', tags=None) for _ in references]
+    return rows
 
 
 def _valid_items(request):

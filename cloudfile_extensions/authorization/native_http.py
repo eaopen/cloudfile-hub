@@ -146,6 +146,14 @@ def directory_page(request, repo_id):
                         parent_dir=target['path'], permission='rw' if decision['write'] else 'r',
                         size=getattr(item, 'size', 0), mtime=getattr(item, 'mtime', 0),
                         starred=False, is_locked=False))
+            # Reuse the shared bounded tag reader only after scoped decisions;
+            # hidden entries never participate and no extra HTTP/RPC is needed.
+            if request.GET.get('with_display_metadata') == 'true':
+                from cloudfile_ext.v2.tag_http import page_tags
+                authorized = [(None, target['path'].rstrip('/') + '/' + entry['name'],
+                               entry['type'], entry['permission']) for entry in entries]
+                for entry, metadata in zip(entries, page_tags(repo_id, authorized)):
+                    entry.update(metadata)
             more = len(raw) > limit
             return dict(dirent_list=entries, dir_id=dir_id, head_id=head, acl_enforced=True,
                 user_perm='rw' if current.effective_access['write'] else 'r',

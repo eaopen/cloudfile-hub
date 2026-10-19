@@ -26,6 +26,10 @@ def enrich_page(data, username, repo_id):
         entries.append(dict(entry, permission=permission))
     data['dirent_list'] = entries
     data['acl_enforced'] = True
+    # New pages already carry native tag metadata. Keep the extra permission
+    # filtering, but never repeat tag SQL or recreate the retired batch envelope.
+    if all('tag_status' in entry for entry in entries):
+        return
     if not is_enabled('CF_ENABLE_TAGS'):
         return
     targets = [(posixpath.join(e['parent_dir'], e['name']).rstrip('/') or '/', e['type'] == 'dir') for e in entries]
