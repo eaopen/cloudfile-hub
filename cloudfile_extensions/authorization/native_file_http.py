@@ -1,12 +1,9 @@
-"""Preserve Etech's existing CE file API while replacing its read authority."""
+"""Compatibility route for the CE file API and its current V2 download guard."""
 from seahub.api2.views import FileView
-
-from .native_read import enabled, response
-from .native_transfer import download_url
 
 
 class NativeFileView(FileView):
-    def get(self, request, repo_id, format=None):
-        if not enabled():
-            return super().get(request, repo_id, format=format)
-        return response(request, lambda current: download_url(request, current, repo_id))
+    # FileView already issues V2 path-scoped tickets for current file downloads.
+    # Do not shadow it with the retired Directory provider / group projector:
+    # Cookie and OIDC sessions must use the same native byte authority.
+    pass

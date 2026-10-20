@@ -167,35 +167,36 @@ from seahub.api2.endpoints.repos import RepoView
 
 
 class NativeRepoView(RepoView):
-    """Keep native mutation handlers; authorize metadata through current policy."""
+    """Keep CE mutations and the Cookie contract on the current V2 authority."""
     def get(self, request, repo_id):
-        from .native_read import enabled
-        if not enabled():
-            return super().get(request, repo_id)
-        def read(current):
-            from seaserv import seafile_api
-            ref = resource_ref(dict(repo_id=repo_id, path='/', kind='dir'))
-            def consume(cursor, target):
-                repo = seafile_api.get_repo(repo_id)
-                if repo is None:
-                    raise ContractError('RESOURCE_NOT_FOUND', 'Library does not exist', 404)
-                # Management is independent from content rw.
-                # is_admin keeps the meaning the running deployment already has
-                # (measured 2026-10-16: owner -> true, designated library
-                # administrator -> false, staff system administrator -> true),
-                # so shipping this line cannot change who sees admin-only UI.
-                # The library-management signal is published separately as
-                # can_manage: owner | designated administrator | system
-                # administrator. Callers that need "may manage this library"
-                # (EAP: CloudFileService#canManageLibrary) read can_manage
-                # instead of inferring it from content permission or is_admin.
-                return dict(repo_id=repo_id, repo_name=repo.name, name=repo.name,
-                    permission='rw' if current.effective_access['write'] else 'r',
-                    user_perm='rw' if current.effective_access['write'] else 'r',
-                    is_admin=bool(current.is_owner or current.is_global_library_admin),
-                    can_manage=bool(current.can_manage_library()),
-                    size=repo.size, encrypted=repo.encrypted, is_virtual=repo.is_virtual,
-                    status=repo.status, repo_type=repo.repo_type,
-                    owner_email=seafile_api.get_repo_owner(repo_id))
-            return current.consume(ref, consume)
-        return response(request, read)
+        from cloudfile_ext.v2.acl_runtime import Authority, ACLUnavailable
+        from cloudfile_ext.v2.acl_http import failure, response as v2_response
+        from seahub.share.utils import is_repo_admin
+        try:
+            # The legacy provider selector also starts the retired group sync.
+            # Cookie and OIDC sessions must use V2's same UID/org/role projection.
+            current = Authority(request.user.username)
+            access = current.effective(repo_id, '/')
+            if not access.can_read:
+                raise PermissionError('Library access denied')
+            native = current.api.check_permission_by_path(repo_id, '/', request.user.username)
+            if native not in (None, 'r', 'rw', 'invisible'):
+                raise ACLUnavailable('Invalid native permission')
+            if native not in ('r', 'rw'):
+                raise PermissionError('Native library access denied')
+            permission = 'rw' if access.can_write and native == 'rw' else 'r'
+            repo = current.api.get_repo(repo_id)
+            owner = current.api.get_repo_owner(repo_id)
+            admin_permissions = getattr(request.user, 'admin_permissions', None)
+            global_admin = bool(request.user.is_staff and admin_permissions
+                                and admin_permissions.can_manage_library())
+            # Management never grants content access. Keep the existing is_admin
+            # meaning and expose designated repository administrators separately.
+            owner_or_admin = request.user.username == owner or global_admin
+            return v2_response(dict(repo_id=repo_id, repo_name=repo.name, name=repo.name,
+                permission=permission, user_perm=permission, is_admin=owner_or_admin,
+                can_manage=owner_or_admin or bool(is_repo_admin(request.user.username, repo_id)),
+                size=repo.size, encrypted=repo.encrypted, is_virtual=repo.is_virtual,
+                status=repo.status, repo_type=repo.repo_type, owner_email=owner))
+        except Exception as error:
+            return failure(error)
