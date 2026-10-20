@@ -7,7 +7,7 @@ import jwt
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from cloudfile_ext.v2.acl_http import EffectivePermission, SharedDirectories, DirectoryRules, NativeACLCheck, DirectoryEntries
-from cloudfile_ext.v2.acl_policy import Decision
+from cloudfile_ext.v2.acl_policy import Decision, PolicyError, StoredACLError
 from cloudfile_ext.v2.acl_runtime import ACLUnavailable
 
 RID = '00000000-0000-4000-8000-000000000001'
@@ -123,6 +123,20 @@ class HTTPTests(TestCase):
         with patch('cloudfile_ext.v2.acl_http.Authority', side_effect=ACLUnavailable()):
             self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID,path='/shared')).status_code,503)
             self.assertEqual(self.request(SharedDirectories).status_code,503)
+
+    def test_stored_acl_inconsistency_is_not_blamed_on_the_caller(self):
+        # A row that contradicts its own path or hash is our fault: 503, never
+        # 400 INVALID_ACL_REQUEST, which consumers read as ACL unavailable anyway.
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
+            authority.return_value.effective.side_effect = StoredACLError('ACL path hash mismatch')
+            result = self.request(EffectivePermission, dict(repo_id=RID, path='/shared'))
+            self.assertEqual(result.status_code, 503)
+            self.assertEqual(result.data['code'], 'ACL_UNAVAILABLE')
+            authority.return_value.entries.side_effect = StoredACLError('malformed stored ACL')
+            self.assertEqual(self.request(DirectoryEntries, dict(repo_id=RID, path='/shared')).status_code, 503)
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
+            authority.return_value.effective.side_effect = PolicyError('invalid object kind')
+            self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID, path='/shared')).status_code, 400)
 
     def test_directory_entries_require_authentication_and_preserve_root(self):
         self.assertIn(self.request(DirectoryEntries, authenticated=False).status_code,(401,403))

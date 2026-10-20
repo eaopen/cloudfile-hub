@@ -28,6 +28,24 @@ not alter policy.
 stored paths/hashes/revisions, and limits candidate results to 4096. Sharing uses
 the existing `acl_shared_subject` index. No new tables or legacy migrations.
 
+`path_hash` is `BINARY(32)`, the SHA-256 of the canonical path, and that is the
+only accepted shape. A text cell (64 hex characters in a `CHAR` column, or bytes
+written into a text column) means the table is not this V2 table; decoding names
+it as a stored fault instead of encoding around it, because such data is fixed by
+migrating it (`UNHEX` after verifying `SHA2(path,256)`), not by `.encode()` in
+the reader. A row that contradicts its own path, hash, revision or column shape
+is a server-side fault: it stays fail-closed and answers `503 ACL_UNAVAILABLE`,
+never `400 INVALID_ACL_REQUEST`, which consumers read as "the permission service
+is unavailable". The natural key needs InnoDB `DYNAMIC` (or `COMPRESSED`) row
+format: the primary key is ~1612 bytes, so a `COMPACT` table rejects this DDL
+outright instead of truncating an index column.
+
+**Directory identity is the canonical path.** A directory deleted and recreated at
+the same path keeps the rules stored for that path: V2 stores no directory birth,
+object ID or `lifecycle_ref`, and deleting a directory does not delete its rules.
+This is the accepted behaviour for the current version, not an unimplemented
+lifecycle binding; a deletion that must revoke access is an explicit rule change.
+
 The internal writer uses the natural row key
 `(repo_id,path_hash,subject_type,provider,namespace,external_id)`.
 `expected=None` creates; otherwise it compares the current revision. A fresh UUID

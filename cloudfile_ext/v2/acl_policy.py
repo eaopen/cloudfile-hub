@@ -17,6 +17,15 @@ class PolicyError(ValueError):
     """Invalid ACL or missing trusted context: caller must fail closed."""
 
 
+class StoredACLError(PolicyError):
+    """A stored row contradicts its own path, hash, revision or schema shape.
+
+    Kept apart from a caller mistake on purpose: it is still fail-closed, but it
+    is our fault, not the requester's. Reporting it as a bad request blamed the
+    caller and let one legacy encoding look like an ACL outage (DEV 2026-10-20).
+    """
+
+
 def canonical_path(value):
     if (not isinstance(value, str) or not value.startswith('/') or
             len(value.encode('utf-8')) > 4096 or '\\' in value or
@@ -148,10 +157,10 @@ def resolve(repo_id, path, principal, native_permission, rules, *, hard_readonly
     unique = set()
     for rule in rules:
         if not isinstance(rule, Rule) or rule.repo_id != repo_id or rule.provider != principal.provider:
-            raise PolicyError('mixed or malformed ACL candidate set')
+            raise StoredACLError('mixed or malformed ACL candidate set')
         key = (rule.path, rule.provider, rule.subject_type, rule.namespace, rule.external_id)
         if key in unique:
-            raise PolicyError('conflicting ACL rows')
+            raise StoredACLError('conflicting ACL rows')
         unique.add(key)
         if within(path, rule.path):
             selected.append(rule)

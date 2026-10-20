@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from seahub.api2.authentication import TokenAuthentication, SessionAuthentication
 from seahub.api2.utils import JWT_PRIVATE_KEY
 
-from .acl_policy import PolicyError, Rule, Decision
+from .acl_policy import PolicyError, Rule, Decision, StoredACLError
 from .acl_runtime import ACLUnavailable, Authority, store
 from .acl_store import uuid, RevisionConflict
 from .errors import SubjectNotFound
@@ -31,6 +31,12 @@ def failure(error):
         # "No business subject for this account" is an answer, not an outage.
         # Callers (EAP admin paths) must be able to tell it apart from 503.
         return response({'code': 'SUBJECT_NOT_FOUND'}, 404)
+    if isinstance(error, StoredACLError):
+        # A stored row that contradicts its own path, hash or column shape is a
+        # server-side fault. Answering 400 (INVALID_ACL_REQUEST) blamed the
+        # caller and let one legacy path_hash encoding read as an ACL outage.
+        logger.error('CloudFile stored ACL inconsistent: %s', error)
+        return response({'code': 'ACL_UNAVAILABLE'}, 503)
     if isinstance(error, (ValueError, TypeError, KeyError, PolicyError)):
         return response({'code': 'INVALID_ACL_REQUEST'}, 400)
     if isinstance(error, PermissionError):

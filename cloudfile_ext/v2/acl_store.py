@@ -7,7 +7,7 @@ from dataclasses import asdict
 from hashlib import sha256
 from uuid import UUID
 
-from .acl_policy import Rule, PolicyError, ancestors, canonical_path
+from .acl_policy import Rule, PolicyError, StoredACLError, ancestors, canonical_path
 from .schema import identifier
 
 
@@ -32,6 +32,10 @@ def subject_filter(principal):
 COLUMNS = 'repo_id,path,provider,subject_type,namespace,external_id,permission,inherit,share_mode,revision,path_hash'
 
 
+def path_digest(path):
+    return sha256(path.encode()).digest()
+
+
 def validate(rule):
     Rule(**asdict(rule))
     uuid(rule.repo_id)
@@ -42,12 +46,20 @@ def validate(rule):
 
 def decode(row):
     if len(row) != 11 or row[7] not in (0, 1) or row[8] not in (0, 1):
-        raise PolicyError('malformed stored ACL')
-    rule = Rule(*row[:7], bool(row[7]), bool(row[8]))
-    validate(rule)
-    uuid(row[9])
-    if bytes(row[10]) != sha256(rule.path.encode()).digest():
-        raise PolicyError('ACL path hash mismatch')
+        raise StoredACLError('malformed stored ACL')
+    try:
+        rule = Rule(*row[:7], bool(row[7]), bool(row[8]))
+        validate(rule)
+        uuid(row[9])
+    except ValueError as error:  # PolicyError and a malformed UUID are both stored-data faults
+        raise StoredACLError('malformed stored ACL: %s' % error) from None
+    if not isinstance(row[10], (bytes, bytearray, memoryview)):
+        # The contract column is BINARY(32); a text cell means the table is not
+        # this one. Name it instead of letting bytes(str) raise a TypeError that
+        # a caller mistakes for a bad request.
+        raise StoredACLError('stored path_hash is not binary')
+    if bytes(row[10]) != path_digest(rule.path):
+        raise StoredACLError('ACL path hash mismatch')
     return rule, row[9]
 
 
@@ -68,7 +80,7 @@ class ACLStore:
         return [decode(row) for row in rows]
 
     def candidates(self, repo_id, path, principal):
-        hashes = [sha256(p.encode()).digest() for p in ancestors(path)]
+        hashes = [path_digest(p) for p in ancestors(path)]
         selector, args = subject_filter(principal)
         return self._read('repo_id=%s AND path_hash IN (' + ','.join(['%s'] * len(hashes)) + ') AND ' + selector,
                           [uuid(repo_id), *hashes, *args])
@@ -89,9 +101,9 @@ class ACLStore:
     def list_path(self, repo_id, path, provider):
         canonical_path(path)
         result = self._read('repo_id=%s AND path_hash=%s AND provider=%s',
-                            [uuid(repo_id), sha256(path.encode()).digest(), provider])
+                            [uuid(repo_id), path_digest(path), provider])
         if any(rule.path != path for rule, _ in result):
-            raise PolicyError('ACL hash collision')
+            raise StoredACLError('ACL hash collision')
         return result
 
     @contextmanager
@@ -121,7 +133,7 @@ class ACLStore:
         uuid(revision)
         if expected is not None:
             uuid(expected)
-        key = (rule.repo_id, sha256(rule.path.encode()).digest(), rule.subject_type,
+        key = (rule.repo_id, path_digest(rule.path), rule.subject_type,
                rule.provider, rule.namespace, rule.external_id)
         where = 'repo_id=%s AND path_hash=%s AND subject_type=%s AND provider=%s AND namespace=%s AND external_id=%s'
         with self.transfer_fence(rule.repo_id), self.atomic():
@@ -133,7 +145,7 @@ class ACLStore:
                 rows = cursor.fetchall()
                 current = decode(rows[0]) if len(rows) == 1 else None
                 if len(rows) > 1 or (current and current[0].path != rule.path):
-                    raise PolicyError('conflicting stored ACL')
+                    raise StoredACLError('conflicting stored ACL')
                 if not delete and current == (rule, revision):
                     return revision
                 if (current[1] if current else None) != expected or (current and current[1] == revision):
@@ -148,7 +160,8 @@ class ACLStore:
                 else:
                     cursor.execute('INSERT INTO ' + self.table + ' (' + COLUMNS + ') VALUES (' + ','.join(['%s'] * 11) + ')',
                                    [rule.repo_id, rule.path, rule.provider, rule.subject_type, rule.namespace,
-                                    rule.external_id, rule.permission, int(rule.inherit), int(rule.share_mode), revision, key[1]])
+                                    rule.external_id, rule.permission, int(rule.inherit), int(rule.share_mode), revision,
+                                    key[1]])
         if self.changed is not None:
             self.changed(rule.repo_id)
         return revision
