@@ -90,6 +90,73 @@ class SQLIdentityBindings:
                 raise conflict() from None
             raise ContractError("IDENTITY_UNAVAILABLE", "Identity binding is unavailable", 503) from None
 
+    def bind_verified_existing(self, *, issuer, subject, user_id, request_id):
+        """Link a verified IdP identity to the ONE pre-existing exact UID owner.
+
+        Internal OIDC callback only, after issuer/sub/UserInfo validation and an
+        active-user check against the trusted Directory. No JIT creation,
+        employee-name/email matching, Profile mutation, or ACL changes.
+        """
+        from datetime import datetime, timezone
+        from uuid import uuid4
+        from ..events.outbox import EventWriter
+        provider, metadata = IdentityBindings._identity(issuer, subject, user_id)
+        identifier(request_id)
+        scopes = [dict(type="provider", provider=self.provider, external_id=self.provider),
+                  dict(type="user", provider=self.provider, external_id=user_id),
+                  dict(type="subject", provider=provider, namespace="oidc", external_id=subject)]
+        try:
+            with scope_locks(self.connection, scopes):
+                self.connection.begin()
+                try:
+                    with self.connection.cursor() as cursor:
+                        self._engines(cursor)
+                        cursor.execute("SELECT user,login_id FROM " + self.profiles +
+                                       " WHERE login_id=%s FOR UPDATE", (user_id,))
+                        rows = cursor.fetchall()
+                        if not rows:
+                            # No local UID owner: existing JIT policy decides whether
+                            # account creation is permitted. Never invent one here.
+                            return None
+                        if len(rows) != 1 or rows[0][1] != user_id:
+                            raise conflict()
+                        username = rows[0][0]
+                        identifier(username)
+                        if username.lower() in ("cfadmin@auth.local", "cfadmin@etech.com"):
+                            raise conflict()
+                        cursor.execute("SELECT user,login_id FROM " + self.profiles +
+                                       " WHERE user=%s OR login_id=%s FOR UPDATE", (username, user_id))
+                        if cursor.fetchall() != ((username, user_id),):
+                            raise conflict()
+                        self._account(cursor, username, locked=True)
+                        cursor.execute("SELECT username,provider,uid,extra_data FROM " +
+                                       self.social + " WHERE provider=%s AND uid=%s FOR UPDATE",
+                                       (provider, subject))
+                        existing = self._social_match(
+                            cursor.fetchall(), provider, subject, metadata, username)
+                        if existing is not None:
+                            return username
+                        cursor.execute("INSERT INTO " + self.social +
+                                       "(username,provider,uid,extra_data) VALUES(%s,%s,%s,%s)",
+                                       (username, provider, subject,
+                                        json.dumps(metadata, sort_keys=True)))
+                        EventWriter().append(cursor, dict(
+                            event_id=str(uuid4()),
+                            occurred_at=datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+                            request_id=request_id, actor_user_id=user_id, actor_kind="user",
+                            source="idp", action="identity.bound", result="succeeded",
+                            target_user_id=user_id))
+                    self.connection.commit()
+                    return username
+                finally:
+                    self.connection.rollback()
+        except ContractError:
+            raise
+        except Exception as error:
+            if getattr(error, "args", ()) and error.args[0] == 1062:
+                raise conflict() from None
+            raise ContractError("IDENTITY_UNAVAILABLE", "Existing UID link is unavailable", 503) from None
+
     def prebind(self, *, issuer, subject, user_id, username, actor, reason, dry_run=False):
         if type(dry_run) is not bool:
             raise ValueError("invalid binding check mode")

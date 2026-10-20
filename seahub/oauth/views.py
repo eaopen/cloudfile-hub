@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+import secrets
 from django.db import IntegrityError, transaction
 from django.http import HttpResponseRedirect
 from django.utils.translation import gettext as _
@@ -138,17 +139,35 @@ def oauth_login(request):
         # V2 does not import the retired v0.9 EAP OAuth bridge.
         logger.error('Retired EAP SSO bridge is unavailable in CloudFile V2')
         return render_error(request, _('Error, please contact administrator.'))
+    # /oidc/login/ uses the same OAuth client but additionally requires a
+    # verified ID Token. Keep the standalone V2 OIDC entrypoint independent.
+    oidc_mode = getattr(request, '_cloudfile_oidc', False) is True
+    nonce = None
+    if oidc_mode:
+        try:
+            from cloudfile_ext.v2.oidc import configuration
+            configuration(settings)
+            nonce = secrets.token_urlsafe(32)
+        except Exception:
+            logger.warning('OIDC settings unavailable')
+            return render_error(request, _('Error, please contact administrator.'))
     session = OAuth2Session(client_id=CLIENT_ID,
                             scope=SCOPE,
                             redirect_uri=REDIRECT_URL)
 
     try:
-        authorization_url, state = session.authorization_url(AUTHORIZATION_URL)
+        authorization_url, state = session.authorization_url(
+            AUTHORIZATION_URL, **({'nonce': nonce} if oidc_mode else {}))
     except Exception as e:
         logger.error(e)
         return render_error(request, _('Error, please contact administrator.'))
 
     request.session['oauth_state'] = state
+    request.session['oauth_protocol'] = 'oidc' if oidc_mode else 'oauth2'
+    if oidc_mode:
+        request.session['oauth_nonce'] = nonce
+    else:
+        request.session.pop('oauth_nonce', None)
     request.session['oauth_redirect'] = request.GET.get(
         auth.REDIRECT_FIELD_NAME, '/')
     return HttpResponseRedirect(authorization_url)
@@ -167,9 +186,20 @@ def oauth_callback(request):
         # V2 does not import the retired v0.9 EAP OAuth bridge.
         logger.error('Retired EAP SSO bridge is unavailable in CloudFile V2')
         return render_error(request, _('Error, please contact administrator.'))
+    expected_state = request.session.pop('oauth_state', None)
+    state = request.GET.get('state', '')
+    protocol = request.session.pop('oauth_protocol', 'oauth2')
+    nonce = request.session.pop('oauth_nonce', None)
+    if (not isinstance(expected_state, str) or not expected_state
+            or not isinstance(state, str) or not state
+            or not secrets.compare_digest(expected_state, state)
+            or protocol not in ('oauth2', 'oidc')
+            or (protocol == 'oidc' and (not isinstance(nonce, str) or not nonce))):
+        logger.warning('OAuth state or protocol rejected')
+        return render_error(request, _('Error, please contact administrator.'))
     session = OAuth2Session(client_id=CLIENT_ID,
                             scope=SCOPE,
-                            state=request.session.get('oauth_state', None),
+                            state=expected_state,
                             redirect_uri=REDIRECT_URL)
 
     service_url = get_service_url().strip('/')
@@ -200,7 +230,24 @@ def oauth_callback(request):
         return render_error(request, _('Error, please contact administrator.'))
 
     oauth_user_info = {}
-    user_info_json = user_info_resp.json()
+    try:
+        if user_info_resp.status_code != 200:
+            raise ValueError('userinfo HTTP failure')
+        user_info_json = user_info_resp.json()
+        if not isinstance(user_info_json, dict):
+            raise ValueError('invalid userinfo')
+        if protocol == 'oidc':
+            from cloudfile_ext.v2.oidc import configuration, verify_id_token
+            issuer, jwks_uri = configuration(settings)
+            claims = verify_id_token(token, issuer=issuer, client_id=CLIENT_ID,
+                                     nonce=nonce, jwks_uri=jwks_uri)
+            if claims['sub'] != user_info_json.get('sub'):
+                raise ValueError('OIDC subject mismatch')
+            if 'userId' in claims and claims['userId'] != user_info_json.get('userId'):
+                raise ValueError('OIDC userId mismatch')
+    except Exception:
+        logger.warning('OAuth UserInfo/OIDC identity proof rejected')
+        return render_error(request, _('Error, please contact administrator.'))
     for oauth_attr, attr_tuple in OAUTH_ATTRIBUTE_MAP.items():
         required, user_attr = attr_tuple
         attr_value = user_info_json.get(oauth_attr, '')
@@ -217,32 +264,53 @@ def oauth_callback(request):
         logger.error('user_info_json: %s' % user_info_json)
         return render_error(request, _('Error, please contact administrator.'))
 
-    # compatible with old users via email
-    old_email = oauth_user_info.get('email', '')
-
-    oauth_user = SocialAuthUser.objects.get_by_provider_and_uid(OAUTH_PROVIDER, uid)
-    if not oauth_user and SSO_LDAP_USE_SAME_UID:
-        oauth_user = SocialAuthUser.objects.get_by_provider_and_uid(LDAP_PROVIDER, uid)
-        if oauth_user:
-            SocialAuthUser.objects.add(oauth_user.username, OAUTH_PROVIDER, uid)
-    if oauth_user:
-        email = oauth_user.username
-        is_new_user = False
-    elif old_email:
-        if not is_valid_email(str(old_email)):
-            # In previous versions, if 'email' is not in mailbox format,
-            # we combine 'email' and 'provider' to mailbox format.
-            old_email = '%s@%s' % (str(old_email), OAUTH_PROVIDER)
+    # A specifically mapped, trusted Etech userId is the canonical login_id.
+    # Generic legacy OAuth mappings (including preferred_username as login_id)
+    # retain their native CE compatibility path; do not mistake them for UID.
+    from cloudfile_extensions.identity.legacy_oauth import (
+        trusted_uid_mapping, bind_existing_uid)
+    strict_uid = (trusted_uid_mapping(OAUTH_ATTRIBUTE_MAP)
+                  and bool(oauth_user_info.get('login_id')))
+    if strict_uid:
+        if (not isinstance(user_info_json.get('sub'), str) or not user_info_json.get('sub')
+                or oauth_user_info.get('uid') != user_info_json['sub']):
+            logger.warning('Trusted OAuth UID has no matching stable provider sub')
+            return render_error(request, _('Error, please contact administrator.'))
         try:
-            old_user = User.objects.get_old_user(old_email, OAUTH_PROVIDER, uid)
-            email = old_user.username
+            email = bind_existing_uid(
+                uid=oauth_user_info['login_id'],
+                provider=OAUTH_PROVIDER, subject=oauth_user_info['uid'])
+        except Exception:
+            logger.warning('Trusted OAuth UID cannot resolve its native account')
+            return render_error(request, _('Error, please contact administrator.'))
+        is_new_user = False
+    else:
+        # compatible with old users via email
+        old_email = oauth_user_info.get('email', '')
+
+        oauth_user = SocialAuthUser.objects.get_by_provider_and_uid(OAUTH_PROVIDER, uid)
+        if not oauth_user and SSO_LDAP_USE_SAME_UID:
+            oauth_user = SocialAuthUser.objects.get_by_provider_and_uid(LDAP_PROVIDER, uid)
+            if oauth_user:
+                SocialAuthUser.objects.add(oauth_user.username, OAUTH_PROVIDER, uid)
+        if oauth_user:
+            email = oauth_user.username
             is_new_user = False
-        except User.DoesNotExist:
+        elif old_email:
+            if not is_valid_email(str(old_email)):
+                # In previous versions, if 'email' is not in mailbox format,
+                # we combine 'email' and 'provider' to mailbox format.
+                old_email = '%s@%s' % (str(old_email), OAUTH_PROVIDER)
+            try:
+                old_user = User.objects.get_old_user(old_email, OAUTH_PROVIDER, uid)
+                email = old_user.username
+                is_new_user = False
+            except User.DoesNotExist:
+                email = None
+                is_new_user = True
+        else:
             email = None
             is_new_user = True
-    else:
-        email = None
-        is_new_user = True
 
     try:
         user = auth.authenticate(remote_user=email)
@@ -254,6 +322,21 @@ def oauth_callback(request):
 
     if not user:
         return render_error(request, _('Error, new user registration is not allowed, please contact administrator.'))
+
+    if strict_uid:
+        if (user.username != email or type(user.is_active) not in (bool, int)
+                or user.is_active != 1):
+            logger.warning('Trusted OAuth UID returned a different native user')
+            return render_error(request, _('Error, please contact administrator.'))
+        # For configured Etech Directory deployments, refuse login when UID
+        # membership cannot be refreshed. Do this BEFORE issuing any session.
+        if getattr(settings, 'CF_DIRECTORY_URL', ''):
+            try:
+                from cloudfile_ext.v2.etech_directory import ensure_subject
+                ensure_subject(oauth_user_info['login_id'], email)
+            except Exception:
+                logger.warning('Trusted OAuth UID directory preparation failed')
+                return render_error(request, _('Error, please contact administrator.'))
 
     email = user.username
     if is_new_user:
@@ -281,7 +364,7 @@ def oauth_callback(request):
     logger.info('OAuth profile sync: user=%s login_id=%s has_contact=%s',
                 email, login_id, bool(contact_email))
     try:
-        profile, _ = Profile.objects.get_or_create(user=email)
+        profile, profile_created = Profile.objects.get_or_create(user=email)
     except IntegrityError:
         profile = Profile.objects.filter(user=email).first()
     if profile is None:
@@ -296,8 +379,10 @@ def oauth_callback(request):
             profile.contact_email = contact_email.strip()
             _save_profile_fields(profile, ['contact_email'], email, 'contact_email')
 
-        # login_id 存业务 UID（EAP userId）；已被其它行占用时保留现值并告警。
-        if login_id and profile.login_id != login_id.strip():
+        # A trusted UID is authorization identity, not an optional metadata
+        # sync. It was strictly bound BEFORE login and must never be rewritten.
+        # Non-UID legacy OAuth keeps its previous compatibility metadata sync.
+        if login_id and not strict_uid and profile.login_id != login_id.strip():
             profile.login_id = login_id.strip()
             _save_profile_fields(profile, ['login_id'], email, 'login_id')
 

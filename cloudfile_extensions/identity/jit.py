@@ -33,6 +33,33 @@ class SQLJITProvisioner:
         self.state = NativeSubjectState(bindings.connection, native_schema=bindings.native_schema,
                                        identity_schema=bindings.identity_schema, provider=bindings.provider)
 
+    def link_existing(self, identity):
+        """Reuse a pre-provisioned UID across trusted OIDC providers.
+
+        An existing native account may accept another issuer/sub without
+        enabling new-account JIT. Only the signed OIDC flow may invoke this:
+        the Directory must still confirm the exact UID is active.
+        """
+        if identity.get("issuer") != self.issuer:
+            raise ContractError("ACCESS_DENIED", "Identity issuer does not match", 403)
+        user_id, subject = identity["userId"], identity["sub"]
+        IdentityBindings._identity(self.issuer, subject, user_id)
+        try:
+            # Missing UID is *not* a claim to create or merge another account.
+            self.state.username(user_id)
+        except ContractError as error:
+            if error.status == 404:
+                return None
+            raise
+        if self.state.barrier_active(self.bindings.provider, user_id):
+            raise ContractError("SUBJECT_UNAVAILABLE", "Identity linking is fenced", 503)
+        source = self.directory.fetch(user_id)
+        if source["userId"] != user_id or source["status"] != "active":
+            raise ContractError("SUBJECT_DISABLED", "Directory subject is disabled", 403)
+        return self.bindings.bind_verified_existing(
+            issuer=self.issuer, subject=subject, user_id=user_id,
+            request_id=self.request_id)
+
     def ensure(self, identity, *, assert_transaction=None, request_id=None):
         from ..common.validation import identifier
         request_id = self.request_id if request_id is None else identifier(request_id)

@@ -95,6 +95,7 @@ class PreparedLoginTest(unittest.TestCase):
         jit = Mock(spec=SQLJITProvisioner)
         jit.bindings = self.bindings
         jit.ensure.return_value = "native@example.invalid"
+        jit.link_existing.return_value = None
         self.bindings.resolve.side_effect = [None, "native@example.invalid"]
         login = PreparedOIDCLogin(self.flow, self.bindings, preparation_factory=self.factory, jit=jit)
         self.assertEqual(login.complete(state="state", code="code", binding="browser").username, "native@example.invalid")
@@ -108,12 +109,42 @@ class PreparedLoginTest(unittest.TestCase):
             self.complete()
         self.assertEqual(caught.exception.status, 401)
 
+    def test_existing_uid_links_new_verified_provider_without_creating_a_user(self):
+        from cloudfile_extensions.identity.jit import SQLJITProvisioner
+        jit = Mock(spec=SQLJITProvisioner)
+        jit.bindings = self.bindings
+        jit.link_existing.return_value = "native@example.invalid"
+        jit.ensure.side_effect = AssertionError("must reuse existing account")
+        self.bindings.resolve.side_effect = [None, "native@example.invalid"]
+        login = PreparedOIDCLogin(self.flow, self.bindings,
+                                  preparation_factory=self.factory, jit=jit)
+        result = login.complete(state="state", code="code", binding="browser")
+        self.assertEqual(result.username, "native@example.invalid")
+        jit.link_existing.assert_called_once_with(self.flow.complete.return_value[0])
+        jit.ensure.assert_not_called()
+        self.preparation.prepare.assert_called_once_with("u1", trigger="login")
+
+    def test_uid_link_rejects_identity_conflict_before_session_preparation(self):
+        from cloudfile_extensions.identity.jit import SQLJITProvisioner
+        jit = Mock(spec=SQLJITProvisioner)
+        jit.bindings = self.bindings
+        jit.link_existing.side_effect = ContractError("IDENTITY_CONFLICT", "conflict", 409)
+        self.bindings.resolve.return_value = None
+        login = PreparedOIDCLogin(self.flow, self.bindings,
+                                  preparation_factory=self.factory, jit=jit)
+        with self.assertRaises(ContractError) as caught:
+            login.complete(state="state", code="code", binding="browser")
+        self.assertEqual(caught.exception.status, 409)
+        self.factory.assert_not_called()
+        jit.ensure.assert_not_called()
+
     def test_durable_provisioning_returns_pending_even_if_identity_exists(self):
         from cloudfile_extensions.identity.provisioning import ProvisioningJobs
         from cloudfile_extensions.identity.login import PendingLogin
         provisioning = Mock(spec=ProvisioningJobs)
         provisioning.jit = Mock()
         provisioning.jit.bindings = self.bindings
+        provisioning.jit.link_existing.return_value = None
         provisioning.request_for_login.return_value = "job-id"
         login = PreparedOIDCLogin(self.flow, self.bindings, preparation_factory=self.factory, provisioning=provisioning)
         for username in (None, "native@example.invalid"):
