@@ -79,18 +79,20 @@ class EtechOAuthBindingTests(TestCase):
         session.fetch_token.return_value = {}
         session.get.return_value.status_code = 200
         session.get.return_value.json.return_value = {'sub': userinfo_sub, 'userId': 'business-uid'}
-        profile = SimpleNamespace(login_id=profile_uid, save=Mock())
+        profile = SimpleNamespace(login_id=profile_uid, nickname='', contact_email='', save=Mock())
+        from cloudfile_ext.sso.uid_binding import UIDBindingError
+        bad_binding = (oauth_binding is not None and oauth_binding.username != profile_username)
+        bad_binding = bad_binding or profile_uid != 'business-uid'
         from cloudfile_ext.v2.errors import IdentityUnavailable
         with patch('cloudfile_ext.v2.oidc.configuration', return_value=('https://idp.example.test/', 'https://idp.example.test/jwks')), \
                 patch('cloudfile_ext.v2.oidc.verify_id_token', return_value={'sub': 'trusted-sub'},
                       side_effect=IdentityUnavailable('rejected') if invalid_token else None) as verify, \
                 patch.object(views, 'OAuth2Session', return_value=session), \
                 patch.object(views, 'OAUTH_ATTRIBUTE_MAP', {'sub': (True, 'uid'), 'userId': (True, 'login_id')}), \
-                patch.object(views.SocialAuthUser.objects, 'get_by_provider_and_uid', return_value=oauth_binding), \
-                patch.object(views.SocialAuthUser.objects, 'add') as bind, \
-                patch.object(views.Profile.objects, 'get_username_by_login_id', return_value=profile_username), \
-                patch.object(views.Profile.objects, 'get_profile_by_user', return_value=profile), \
-                patch.object(views.auth, 'authenticate', return_value=SimpleNamespace(username='existing@auth.local')) as authenticate, \
+                patch('cloudfile_ext.sso.uid_binding.bind_uid_account', return_value=profile_username,
+                      side_effect=UIDBindingError('UID conflict') if bad_binding else None) as bind, \
+                patch.object(views.Profile.objects, 'get', return_value=profile), \
+                patch.object(views.auth, 'authenticate', return_value=SimpleNamespace(username='existing@auth.local', is_active=True)) as authenticate, \
                 patch.object(views.auth, 'login'), \
                 patch.object(views, 'get_api_token', return_value=SimpleNamespace(key='test-token')), \
                 patch.object(views, 'get_service_url', return_value='https://files.example.test/cfile'), \
@@ -114,25 +116,26 @@ class EtechOAuthBindingTests(TestCase):
             response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid')
         self.assertEqual(response, 'binding-error')
         authenticate.assert_called_once()
-        logout.assert_called_once()
+        # The directory check precedes session creation; no logout is needed.
+        logout.assert_not_called()
 
     def test_first_oauth_login_reuses_existing_business_uid_account(self):
         response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid')
         self.assertEqual(response.status_code, 302)
         authenticate.assert_called_once_with(remote_user='existing@auth.local')
-        bind.assert_called_once_with('existing@auth.local', views.OAUTH_PROVIDER, 'trusted-sub')
+        bind.assert_called_once_with(uid='business-uid', provider=views.OAUTH_PROVIDER, subject='trusted-sub')
 
     def test_conflicting_oauth_and_business_uid_bindings_cannot_rebind(self):
         response, authenticate, bind = self.callback(SimpleNamespace(username='other@auth.local'), 'existing@auth.local', 'other-uid')
         self.assertEqual(response, 'binding-error')
         authenticate.assert_not_called()
-        bind.assert_not_called()
+        bind.assert_called_once()
 
     def test_oidc_reuses_the_same_native_uid_account_and_session(self):
         response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True)
         self.assertEqual(response.status_code, 302)
         authenticate.assert_called_once_with(remote_user='existing@auth.local')
-        bind.assert_called_once_with('existing@auth.local', views.OAUTH_PROVIDER, 'trusted-sub')
+        bind.assert_called_once_with(uid='business-uid', provider=views.OAUTH_PROVIDER, subject='trusted-sub')
 
     def test_oidc_invalid_token_or_mismatched_userinfo_cannot_authenticate(self):
         for options in ({'invalid_token': True}, {'userinfo_sub': 'other-sub'}):
@@ -146,7 +149,7 @@ class EtechOAuthBindingTests(TestCase):
         response, authenticate, bind = self.callback(None, 'existing@auth.local', 'BUSINESS-UID')
         self.assertEqual(response, 'binding-error')
         authenticate.assert_not_called()
-        bind.assert_not_called()
+        bind.assert_called_once()
 
     def test_missing_state_cannot_fetch_tokens(self):
         for saved, supplied in (({}, 'expected'), ({'oauth_state': 'expected'}, '错误-state')):

@@ -3,6 +3,7 @@
 import os
 import sys
 import logging
+import secrets
 from django.db import IntegrityError, transaction
 from django.http import HttpResponseRedirect
 from django.utils.translation import gettext as _
@@ -12,11 +13,9 @@ from seaserv import seafile_api, ccnet_api
 from seahub.api2.utils import get_api_token
 from seahub import auth
 from seahub.profile.models import Profile
-from seahub.utils import is_valid_email, render_error, get_service_url
+from seahub.utils import render_error, get_service_url
 from seahub.utils.file_size import get_quota_from_string
-from seahub.base.accounts import User
 from seahub.role_permissions.utils import get_enabled_role_permissions_by_role
-from seahub.auth.models import SocialAuthUser
 import seahub.settings as settings
 
 logger = logging.getLogger(__name__)
@@ -41,8 +40,6 @@ def _save_profile_fields(profile, fields, username, what):
         return False
 
 
-LDAP_PROVIDER = getattr(settings, 'LDAP_PROVIDER', 'ldap')
-SSO_LDAP_USE_SAME_UID = getattr(settings, 'SSO_LDAP_USE_SAME_UID', False)
 
 try:
     current_path = os.path.dirname(os.path.abspath(__file__))
@@ -129,62 +126,74 @@ def oauth_check(func):
 # https://requests-oauthlib.readthedocs.io/en/latest/examples/google.html
 @oauth_check
 def oauth_login(request):
-    """Step 1: User Authorization.
-    Redirect the user/resource owner to the OAuth provider (i.e. Github)
-    using an URL with a few key OAuth parameters.
-    """
-    # The deployed EAP bridge must validate the same UID contract before JIT.
+    """Start the existing OAuth flow, optionally with a verified OIDC nonce."""
     if getattr(settings, 'CF_SSO_EAP_PROFILE_IDENTITY', False):
         from cloudfile_ext.sso.eap_oauth import login
         return login(request)
-    session = OAuth2Session(client_id=CLIENT_ID,
-                            scope=SCOPE,
-                            redirect_uri=REDIRECT_URL)
 
+    oidc = getattr(request, '_cloudfile_oidc', False) is True
+    nonce = None
+    if oidc:
+        try:
+            from cloudfile_ext.v2.oidc import configuration
+            configuration(settings)
+            nonce = secrets.token_urlsafe(32)
+        except Exception:
+            logger.warning('SSO OIDC configuration unavailable')
+            return render_error(request, _('Error, please contact administrator.'))
+    session = OAuth2Session(client_id=CLIENT_ID, scope=SCOPE, redirect_uri=REDIRECT_URL)
     try:
-        authorization_url, state = session.authorization_url(AUTHORIZATION_URL)
-    except Exception as e:
-        logger.error(e)
+        authorization_url, state = session.authorization_url(
+            AUTHORIZATION_URL, **({'nonce': nonce} if oidc else {}))
+    except Exception:
+        logger.warning('SSO authorization request failed')
         return render_error(request, _('Error, please contact administrator.'))
 
     request.session['oauth_state'] = state
-    request.session['oauth_redirect'] = request.GET.get(
-        auth.REDIRECT_FIELD_NAME, '/')
+    request.session['oauth_protocol'] = 'oidc' if oidc else 'oauth2'
+    if oidc:
+        request.session['oauth_nonce'] = nonce
+    else:
+        request.session.pop('oauth_nonce', None)
+    request.session['oauth_redirect'] = request.GET.get(auth.REDIRECT_FIELD_NAME, '/')
     return HttpResponseRedirect(authorization_url)
 
 
-# Step 2: User authorization, this happens on the provider.
 @oauth_check
 def oauth_callback(request):
-    """ Step 3: Retrieving an access token.
-    The user has been redirected back from the provider to your registered
-    callback URL. With this redirection comes an authorization code included
-    in the redirect URL. We will use that to obtain an access token.
+    """Authenticate through verified provider/sub -> exact business UID -> CE user.
+
+    A mismatched/absent login_id is an authentication failure, NOT optional
+    profile metadata. Never fall back to email or a stale social-auth account.
     """
-    # Keep the upstream entry point; isolate EAP identity logic in its extension.
     if getattr(settings, 'CF_SSO_EAP_PROFILE_IDENTITY', False):
         from cloudfile_ext.sso.eap_oauth import callback
         return callback(request)
-    session = OAuth2Session(client_id=CLIENT_ID,
-                            scope=SCOPE,
-                            state=request.session.get('oauth_state', None),
-                            redirect_uri=REDIRECT_URL)
 
+    saved_state = request.session.pop('oauth_state', None)
+    supplied_state = request.GET.get('state', '')
+    protocol = request.session.pop('oauth_protocol', 'oauth2')
+    nonce = request.session.pop('oauth_nonce', None)
+    if (not isinstance(saved_state, str) or not saved_state
+            or not isinstance(supplied_state, str) or not supplied_state
+            or not secrets.compare_digest(saved_state, supplied_state)
+            or protocol not in ('oauth2', 'oidc')
+            or (protocol == 'oidc' and not nonce)):
+        logger.warning('SSO state or protocol rejected')
+        return render_error(request, _('Error, please contact administrator.'))
+
+    session = OAuth2Session(client_id=CLIENT_ID, scope=SCOPE,
+                            state=saved_state, redirect_uri=REDIRECT_URL)
     service_url = get_service_url().strip('/')
-
     try:
         token = session.fetch_token(
-            TOKEN_URL,
-            client_secret=CLIENT_SECRET,
+            TOKEN_URL, client_secret=CLIENT_SECRET,
             include_client_id=INCLUDE_CLIENT_ID,
             authorization_response=service_url + request.get_full_path())
-
         if 'user_id' in session._client.__dict__['token']:
-            # used for sjtu.edu.cn
-            # https://xjq12311.gitbooks.io/sjtu-engtc/content/
+            # Kept for legacy OAuth providers with a user_id parameter.
             user_id = session._client.__dict__['token']['user_id']
-            user_info_resp = session.get(USER_INFO_URL +
-                                         '?user_id=%s' % user_id)
+            user_info_resp = session.get(USER_INFO_URL + '?user_id=%s' % user_id)
         else:
             user_info_url = USER_INFO_URL
             if ACCESS_TOKEN_IN_URI:
@@ -192,73 +201,58 @@ def oauth_callback(request):
                 user_info_url = USER_INFO_URL + '?access_token=%s&code=%s' % (
                     token['access_token'], code)
             user_info_resp = session.get(user_info_url)
-
-    except Exception as e:
-        logger.error(e)
+        if user_info_resp.status_code != 200:
+            raise ValueError('userinfo unavailable')
+        user_info_json = user_info_resp.json()
+        if not isinstance(user_info_json, dict):
+            raise ValueError('invalid userinfo')
+        if protocol == 'oidc':
+            from cloudfile_ext.v2.oidc import configuration, verify_id_token
+            issuer, jwks_uri = configuration(settings)
+            claims = verify_id_token(token, issuer=issuer, jwks_uri=jwks_uri,
+                                     client_id=CLIENT_ID, nonce=nonce)
+            if claims['sub'] != user_info_json.get('sub'):
+                raise ValueError('OIDC UserInfo subject mismatch')
+    except Exception:
+        logger.warning('SSO token or identity proof failed')
         return render_error(request, _('Error, please contact administrator.'))
 
     oauth_user_info = {}
-    user_info_json = user_info_resp.json()
     for oauth_attr, attr_tuple in OAUTH_ATTRIBUTE_MAP.items():
         required, user_attr = attr_tuple
         attr_value = user_info_json.get(oauth_attr, '')
         if attr_value:
             oauth_user_info[user_attr] = attr_value
         elif required:
-            logger.error('Required user attr not found.')
-            logger.error(user_info_json)
+            logger.warning('SSO required identity attribute missing')
             return render_error(request, _('Error, please contact administrator.'))
 
-    uid = oauth_user_info.get('uid', '') or oauth_user_info.get('email', '')
-    if not uid:
-        logger.error('oauth user uid and email not found.')
-        logger.error('user_info_json: %s' % user_info_json)
+    subject = oauth_user_info.get('uid')
+    login_id = oauth_user_info.get('login_id')
+    if protocol == 'oidc' and 'userId' in claims and claims['userId'] != login_id:
+        logger.warning('SSO OIDC business UID claim mismatch')
         return render_error(request, _('Error, please contact administrator.'))
-
-    # compatible with old users via email
-    old_email = oauth_user_info.get('email', '')
-
-    oauth_user = SocialAuthUser.objects.get_by_provider_and_uid(OAUTH_PROVIDER, uid)
-    if not oauth_user and SSO_LDAP_USE_SAME_UID:
-        oauth_user = SocialAuthUser.objects.get_by_provider_and_uid(LDAP_PROVIDER, uid)
-        if oauth_user:
-            SocialAuthUser.objects.add(oauth_user.username, OAUTH_PROVIDER, uid)
-    if oauth_user:
-        email = oauth_user.username
-        is_new_user = False
-    elif old_email:
-        if not is_valid_email(str(old_email)):
-            # In previous versions, if 'email' is not in mailbox format,
-            # we combine 'email' and 'provider' to mailbox format.
-            old_email = '%s@%s' % (str(old_email), OAUTH_PROVIDER)
-        try:
-            old_user = User.objects.get_old_user(old_email, OAUTH_PROVIDER, uid)
-            email = old_user.username
-            is_new_user = False
-        except User.DoesNotExist:
-            email = None
-            is_new_user = True
-    else:
-        email = None
-        is_new_user = True
+    try:
+        from cloudfile_ext.sso.uid_binding import bind_uid_account
+        email = bind_uid_account(uid=login_id, provider=OAUTH_PROVIDER,
+                                 subject=subject)
+    except Exception:
+        # UID account missing, collation alias, stale provider/sub binding,
+        # inactive user or DB error all fail closed before session creation.
+        logger.warning('SSO canonical UID binding rejected')
+        return render_error(request, _('Error, please contact administrator.'))
 
     try:
         user = auth.authenticate(remote_user=email)
-    except User.DoesNotExist:
-        user = None
-    except Exception as e:
-        logger.error(e)
+        if user is None or user.username != email or not user.is_active:
+            raise ValueError('inactive or inconsistent authenticated account')
+        if getattr(settings, 'CF_DIRECTORY_URL', None):
+            from cloudfile_ext.v2.etech_directory import ensure_subject
+            ensure_subject(login_id, email)
+    except Exception:
+        logger.warning('SSO UID subject or permissions unavailable')
         return render_error(request, _('Error, please contact administrator.'))
 
-    if not user:
-        return render_error(request, _('Error, new user registration is not allowed, please contact administrator.'))
-
-    email = user.username
-    if is_new_user:
-        SocialAuthUser.objects.add(email, OAUTH_PROVIDER, uid)
-
-    # User is valid.  Set request.user and persist user in the session
-    # by logging the user in.
     request.user = user
     auth.login(request, user)
     oauth_id_token = token.get('id_token')
@@ -267,56 +261,34 @@ def oauth_callback(request):
     else:
         request.session.pop('oauth_id_token', None)
 
-    # update user's profile
+    # Optional display metadata never changes ownership or login_id.
     name = oauth_user_info.get('name', '')
     contact_email = (oauth_user_info.get('contact_email', '')
                      or oauth_user_info.get('email', ''))
-    login_id = oauth_user_info.get('login_id', '')
-
-    # CloudFile: 三列各自唯一，整行 save() 一旦撞唯一键就把 OAuth 回调变成 500
-    # （DEV 2026-10-19 实测：1062 profile_profile_contact_email_uniq）。这里只写
-    # 本次真正变化的列，冲突降级为“跳过这条元数据”，登录本身不受影响。
-    logger.info('OAuth profile sync: user=%s login_id=%s has_contact=%s',
-                email, login_id, bool(contact_email))
     try:
-        profile, _ = Profile.objects.get_or_create(user=email)
-    except IntegrityError:
-        profile = Profile.objects.filter(user=email).first()
-    if profile is None:
-        logger.warning('profile row unavailable for %s; profile sync skipped', email)
+        profile = Profile.objects.get(user=email)
+    except Profile.DoesNotExist:
+        logger.warning('SSO profile missing after canonical UID binding')
     else:
-        if name and (profile.nickname or '') != name.strip()[:64]:
+        if isinstance(name, str) and name and (profile.nickname or '') != name.strip()[:64]:
             profile.nickname = name.strip()[:64]
             _save_profile_fields(profile, ['nickname'], email, 'nickname')
-
-        # 共享邮箱/已被他人占用的邮箱只是可选元数据：跳过即可，绝不据此合并主体。
-        if contact_email and (profile.contact_email or '').lower() != contact_email.strip().lower():
+        if (isinstance(contact_email, str) and contact_email
+                and (profile.contact_email or '').lower() != contact_email.strip().lower()):
             profile.contact_email = contact_email.strip()
             _save_profile_fields(profile, ['contact_email'], email, 'contact_email')
-
-        # login_id 存业务 UID（EAP userId）；已被其它行占用时保留现值并告警。
-        if login_id and profile.login_id != login_id.strip():
-            profile.login_id = login_id.strip()
-            _save_profile_fields(profile, ['login_id'], email, 'login_id')
 
     if CUSTOM_GET_USER_ROLE:
         remote_role_value = oauth_user_info.get('role', '')
         if remote_role_value:
             role = custom_get_user_role(remote_role_value)
-
-            # update user role
             ccnet_api.update_role_emailuser(email, role)
-
-            # update user role quota
             role_quota = get_enabled_role_permissions_by_role(role)['role_quota']
             if role_quota:
                 quota = get_quota_from_string(role_quota)
                 seafile_api.set_role_quota(role, quota)
 
-    # generate auth token for Seafile client
     api_token = get_api_token(request)
-
-    # redirect user to home page
     response = HttpResponseRedirect(request.session.get('oauth_redirect', '/'))
     response.set_cookie('seahub_auth', email + '@' + api_token.key)
     response.set_cookie('via_oauth', 'true')
