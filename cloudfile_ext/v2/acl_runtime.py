@@ -84,7 +84,12 @@ def current_principal(username):
     uid = profile.login_id if profile else None
     # Native local accounts have no external Directory membership to refresh.
     # Their disjoint provider prevents accidental matching of Etech rules.
-    if not uid:
+    # System accounts carry a non-numeric login_id (cfadmin -> 'cfadmin'). That
+    # is not a business UID, so the directory answers 404 SUBJECT_NOT_FOUND and
+    # every administrator-initiated call would fail with 503 (DEV 2026-10-20).
+    # Keep them on the native track as well: ACL rules are provider-scoped, so
+    # this widens nothing and only stops treating a system account as a person.
+    if not uid or not str(uid).strip().isdigit():
         return Principal('native-local', username, frozenset())
     provider = getattr(settings, 'CF_ACL_PROVIDER', 'etech')
     ensure = getattr(settings, 'CF_ACL_SUBJECT_ENSURE', 'cloudfile_ext.v2.etech_directory.ensure_subject')

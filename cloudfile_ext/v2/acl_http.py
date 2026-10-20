@@ -14,6 +14,7 @@ from seahub.api2.utils import JWT_PRIVATE_KEY
 from .acl_policy import PolicyError, Rule
 from .acl_runtime import Authority, store
 from .acl_store import uuid, RevisionConflict
+from .errors import SubjectNotFound
 from . import tag_display
 
 logger = logging.getLogger(__name__)
@@ -26,6 +27,10 @@ def response(data, status=200):
 
 
 def failure(error):
+    if isinstance(error, SubjectNotFound):
+        # "No business subject for this account" is an answer, not an outage.
+        # Callers (EAP admin paths) must be able to tell it apart from 503.
+        return response({'code': 'SUBJECT_NOT_FOUND'}, 404)
     if isinstance(error, (ValueError, TypeError, KeyError, PolicyError)):
         return response({'code': 'INVALID_ACL_REQUEST'}, 400)
     if isinstance(error, PermissionError):

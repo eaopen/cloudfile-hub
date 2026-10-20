@@ -13,7 +13,7 @@ import redis
 import requests
 from django.conf import settings
 
-from .errors import IdentityConflict, IdentityUnavailable
+from .errors import IdentityConflict, IdentityUnavailable, SubjectNotFound
 from .identity import NativeIdentity, text
 from .memberships import GroupCatalog, Memberships, is_ready, readiness_key, validate_subject
 
@@ -40,6 +40,24 @@ class Directory:
             # redirects must never forward the service token to another host.
             with requests.get(self.base + path, headers={'Authorization': 'Bearer '+token},
                               timeout=5, allow_redirects=False, stream=True) as reply:
+                if reply.status_code == 404:
+                    # The directory answers 404 SUBJECT_NOT_FOUND for an account
+                    # that has no business subject (e.g. the system account whose
+                    # login_id is 'cfadmin'). Report that as a fact, not as an
+                    # outage: callers decide whether to fall back to native.
+                    raw = bytearray()
+                    try:
+                        for chunk in reply.iter_content(4096):
+                            raw.extend(chunk)
+                            if len(raw) > 4096:
+                                break
+                        if json.loads(bytes(raw) or b'{}').get('code') == 'SUBJECT_NOT_FOUND':
+                            raise SubjectNotFound('directory has no business subject for this account')
+                    except SubjectNotFound:
+                        raise
+                    except Exception:
+                        pass
+                    raise ValueError()
                 if reply.status_code != 200:
                     raise ValueError()
                 raw = bytearray()
@@ -51,6 +69,8 @@ class Directory:
                 if not isinstance(value, dict):
                     raise ValueError()
                 return value
+        except SubjectNotFound:
+            raise
         except Exception:
             raise IdentityUnavailable('trusted Directory unavailable') from None
 
