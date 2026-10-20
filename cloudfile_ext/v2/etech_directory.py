@@ -115,7 +115,8 @@ class Directory:
             # Do not silently turn a missing/damaged parent into a root group.
             ordered, visiting, visited = [], set(), set()
             def visit(key):
-                if key in visiting or key not in result:
+                # Bound depth to native GroupStructure/ACL subject limits.
+                if key in visiting or key not in result or len(visiting) >= 128:
                     raise ValueError()
                 if key in visited:
                     return
