@@ -135,8 +135,9 @@ def oauth_login(request):
     """
     # The deployed EAP bridge must validate the same UID contract before JIT.
     if getattr(settings, 'CF_SSO_EAP_PROFILE_IDENTITY', False):
-        from cloudfile_ext.sso.eap_oauth import login
-        return login(request)
+        # V2 does not import the retired v0.9 EAP OAuth bridge.
+        logger.error('Retired EAP SSO bridge is unavailable in CloudFile V2')
+        return render_error(request, _('Error, please contact administrator.'))
     session = OAuth2Session(client_id=CLIENT_ID,
                             scope=SCOPE,
                             redirect_uri=REDIRECT_URL)
@@ -163,8 +164,9 @@ def oauth_callback(request):
     """
     # Keep the upstream entry point; isolate EAP identity logic in its extension.
     if getattr(settings, 'CF_SSO_EAP_PROFILE_IDENTITY', False):
-        from cloudfile_ext.sso.eap_oauth import callback
-        return callback(request)
+        # V2 does not import the retired v0.9 EAP OAuth bridge.
+        logger.error('Retired EAP SSO bridge is unavailable in CloudFile V2')
+        return render_error(request, _('Error, please contact administrator.'))
     session = OAuth2Session(client_id=CLIENT_ID,
                             scope=SCOPE,
                             state=request.session.get('oauth_state', None),
