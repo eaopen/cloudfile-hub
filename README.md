@@ -1,61 +1,27 @@
 [CloudFile product home / 产品总入口](https://github.com/eaopen/cloudfile) · [English](https://github.com/eaopen/cloudfile/blob/main/README.md) · [简体中文](https://github.com/eaopen/cloudfile/blob/main/README.zh-CN.md)
 
-<!-- generated-by: gsd-doc-writer -->
 # CloudFile Hub
 
-> 用途：说明 CloudFile 的 Web/API 仓库定位、边界和最短验证路径。
-> 适用版本：Seafile CE 14.x；当前基线来自 `haiwen/seahub`。
-> 状态：已完成（文档与 `dev` 分支代码核对，2026-08-11）。
+> **当前开发：GitHub 默认 `dev` = CloudFile V2**（基于 Seafile CE14）。不是旧 V0.x 或已归档的 `dev2`。功能分支用 `feat/<功能>`，修复分支用 `fix/<问题>`，文档分支用 `docs/<主题>`；无需版本前缀。
 
-CloudFile Hub 是 Seahub 的长期跟随型 fork：复用 Seafile CE 14 的 Web、API、认证与文件预览能力，在 `cloudfile_ext/` 和 `frontend/src/cloudfile/` 中补充企业集成与文件协作扩展。
+CloudFile Hub is the Web/API layer built on the Seahub Community Edition source. It works with [CloudFile Server](https://github.com/eaopen/cloudfile-server) for data-plane authorization and [CloudFile Docker](https://github.com/eaopen/cloudfile-docker) for source assembly and deployment.
 
-## 产品边界
+CloudFile Hub 基于 Seahub CE14，负责 Web/API、身份与企业集成接口、文件与目录展示、可选搜索等。V2 尽量复用 Seafile 原生功能；ACL、Tag、Checkout 等内置能力遵循当前 V2 实现，**不再按旧 V0.x 文档要求添加一套可选开关**。
 
-| 边界 | 当前做法 |
-|---|---|
-| CE 复用 | 登录认证、库/目录/文件基础 API、权限基线、原生预览、SeaSearch/Elasticsearch 路径 |
-| 本项目新增 | 扩展注册中心、目录 ACL、组织映射、操作审计、Meilisearch、外部文件源、统一文件动作与本地软件会话 |
-| 外部组件 | `cloudfile-server` 负责不可绕过的底层权限/锁校验；`cloudfile-docker` 负责构建、配置、数据库建表和部署；Meilisearch、IdP、客户目录服务和挂载目录由部署侧提供 |
+## 当前开发边界
 
-本仓库不是独立可部署产品。完整运行需要三个仓库并排检出：
-
-```text
-workspace/
-├── cloudfile-server/
-├── cloudfile-hub/
-└── cloudfile-docker/
-```
-
-部署入口与跨仓规格以 `cloudfile-docker` 为准；本仓文档只描述 Hub/Web/API 的真实实现。
-
-## 当前状态
-
-- 扩展框架与 `CF_ENABLE_*` 默认关闭语义已完成；关闭全部开关时应保持原生 CE 行为。
-- Hub 扩展测试当前为 `217 passed`；这不等同于三仓集成或部署验收。
-- 目录 ACL、搜索、外部源、SSO 组织映射、审计和文件动作已有代码；逐项状态与缺口见 [能力矩阵](docs/CAPABILITIES.md)。
-- CloudFile 自有 `metadata`/标签扩展仍是占位，但 CE 已有 `repo_metadata`、`repo_tags`/`file_tags` 前端和 API；跨仓部署已验证标签定义生命周期，目录/文件绑定闭环仍未验收。转换导出与监控也不应按“已验收”宣传。
-
-## 最短验证
-
-```bash
-.venv/bin/python -m pytest cloudfile_ext/ -q
-```
-
-三仓并排且依赖就绪时运行统一门禁：
-
-```bash
-../cloudfile-docker/tools/run-checks.sh
-```
+- 日常任务一律以三仓 `dev` 的 V2 设计与源码为准，历史旧版资料仅供追溯。
+- 涉及 Server/Hub/Docker 的变更，联验与发布时记录确切的三仓 Commit SHA；分支同名不保证运行兼容。
+- 源码已提交、镜像已构建、DEV 已部署、Etech 业务已验收是不同事实，不得互相代替。
+- 只需修改文档时不编译、不测试；修改代码时按实际影响做定向验证，完整编译/镜像/E2E 在明确的集成或发布阶段按需执行。
+- 当前 V2 源码约束以 [AGENTS.md](AGENTS.md) 为准；根目录 [CLOUDFILE.md](CLOUDFILE.md) 属于 V0.x 历史设计，不是现行构建或授权指南。
 
 ## 文档入口
 
-- [文档索引](docs/README.md)
-- [架构](docs/ARCHITECTURE.md)
-- [扩展注册中心](docs/EXTENSIONS.md)
-- [能力矩阵](docs/CAPABILITIES.md)
-- [Hub API](docs/API.md)
-- [Hub 配置](docs/CONFIGURATION.md)
-- [测试与证据](docs/TESTING.md)
-- [本地专业软件](docs/local-professional-software.md)
+- [Hub 文档索引](docs/README.md)
+- [V2 分支统一规范](https://github.com/eaopen/cloudfile-docker/blob/dev/BRANCHING.md)
+- [Hub API 参考](docs/API.md)
+- [Hub 代码能力和证据（须核对记录日期）](docs/CAPABILITIES.md)
+- [Hub 测试与证据](docs/TESTING.md)
 
-开发约束见 [AGENTS.md](AGENTS.md)。
+上游 Seahub 文档与代码可以作为实现参考，但不能用上游分支或历史扩展版取代 CloudFile V2 `dev`。
