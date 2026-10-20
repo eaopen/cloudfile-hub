@@ -206,13 +206,21 @@ class NativeACLCheck(APIView):
             if not isinstance(checks, list) or not 1 <= len(checks) <= 4096:
                 raise ValueError()
             authority = Authority(data['username'])
+            permissions = []
             for check in checks:
                 if set(check) != {'path', 'kind', 'action'} or check['action'] not in ('read', 'write'):
                     raise ValueError()
                 decision = authority.effective(data['repo_id'], check['path'], check['kind'])
                 if not (decision.can_read if check['action'] == 'read' else decision.can_write):
                     raise PermissionError()
-            return response({'allowed': True, 'contract': 'cf-acl-v1'})
+                permissions.append(decision.permission)
+            # `permissions` is aligned with `checks` and carries the V2 level,
+            # not just the batch verdict. Native C asks here for a single path
+            # when it has no library grant at all, and it needs to know whether
+            # the qualified share root is r or rw: probing again with
+            # action=write would double the round trip for every write.
+            return response({'allowed': True, 'contract': 'cf-acl-v1',
+                             'permissions': permissions})
         except Exception as error:
             return failure(error)
 

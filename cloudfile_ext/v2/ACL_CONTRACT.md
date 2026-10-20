@@ -118,6 +118,24 @@ check. Repo API tokens cannot impersonate current users on protected repos.
 Whether a repo is protected is answered from the same library rule snapshot
 (a virtual repo also checks its origin; an over-budget library is protected).
 
+### Native write entries consume the same share root
+
+The exception above is not only a Hub-side shape. Native upload links, mkdir,
+rename, move, delete and seafdav all gate on C's
+`seafile_check_permission_by_path`, whose native library answer for a
+non-member is "none". C therefore asks this same authority, once, at the exact
+path, when -- and only when -- the library gate denied (an RPC *failure* is
+propagated, never retried as a share question). The answer is `r`/`rw` for that
+path; the library root and every unshared path stay denied, `admin` is never
+producible, and the Go/C final publication checks are unchanged.
+
+`/cloudfile/acl/check/` carries the level in `permissions`, aligned with
+`checks`, because a second `action=write` probe would double the round trip on
+every share-root write. A caller that ignores the field, or an older Hub that
+does not send it, keeps the *deny* reading: not "assume rw". The seam is
+registered only where the V2 managed schema exists and an internal Hub channel
+is configured; elsewhere a stock CE denial is byte-identical to before.
+
 ### Paged CE directory listing
 
 `GET api/v2.1/repos/<repo_id>/dir/?p=...&start=0&limit=200[&if_dir_id=<dir object id>]`
