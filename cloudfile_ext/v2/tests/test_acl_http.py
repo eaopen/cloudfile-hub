@@ -200,6 +200,31 @@ class HTTPTests(TestCase):
             authority.return_value.effective.return_value = Decision('invisible','/shared',True)
             self.assertEqual(self.native(good).status_code,403)
 
+    def test_native_answer_carries_the_level_not_only_the_verdict(self):
+        # Native C has no library grant at a share root, so it needs the V2
+        # level (r vs rw) out of this one call: probing again with
+        # action=write would double the round trip on every upload.
+        claims = dict(is_internal=True, exp=int(time.time()) + 60)
+        checks = [dict(path='/shared', kind='dir', action='read'),
+                  dict(path='/shared/file', kind='file', action='write')]
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
+            # One read-only directory grant and one writable file grant:
+            # the read check may return r, while a write check must be rw.
+            authority.return_value.effective.side_effect = [Decision('r', '/shared', True),
+                                                            Decision('rw', '/shared', True)]
+            result = self.native(claims, dict(username='native', repo_id=RID, checks=checks))
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.data['permissions'], ['r', 'rw'])
+            self.assertTrue(result.data['allowed'])
+            self.assertEqual(result.data['contract'], 'cf-acl-v1')
+            # Denial still answers 403 and never leaks a partial level list.
+            authority.return_value.effective.side_effect = None
+            authority.return_value.effective.return_value = Decision('r', '/shared', True)
+            denied = self.native(claims, dict(username='native', repo_id=RID, checks=[
+                dict(path='/shared/file', kind='file', action='write')]))
+            self.assertEqual(denied.status_code, 403)
+            self.assertNotIn('permissions', denied.data)
+
     def test_native_missing_subject_adapter_and_unknown_checks_fail_closed(self):
         with patch('cloudfile_ext.v2.acl_http.Authority',side_effect=ACLUnavailable()):
             self.assertEqual(self.native(dict(is_internal=True,exp=int(time.time())+60)).status_code,503)
