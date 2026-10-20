@@ -35,7 +35,7 @@ def main(argv=None):
         parser.error('--batch-size must be between 1 and 2000')
     import pymysql
     try:
-        config = StorageConfig.read(args.seafile_conf, args.seafile_data) if args.seafile_conf and args.seafile_data else None
+        config = StorageConfig.detect(args.seafile_conf, args.seafile_data)
         with pymysql.connect(host=os.environ['CF_V2_DB_HOST'],
                              port=int(os.environ.get('CF_V2_DB_PORT', '3306')),
                              user=os.environ['CF_V2_DB_USER'],
@@ -44,7 +44,6 @@ def main(argv=None):
                              charset='utf8mb4', autocommit=True) as connection:
             if storage:
                 discovery = StorageReconciler(connection, config)
-                discovery.ensure_schema()
                 report = discovery.run(apply=args.apply, batch_size=args.batch_size,
                                        normalize=args.normalize_native_class, repo_id=args.repo_id)
                 print(json.dumps(report, sort_keys=True))

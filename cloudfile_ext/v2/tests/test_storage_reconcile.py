@@ -60,6 +60,17 @@ class ConfigTests(unittest.TestCase):
             main(['reconcile', '--ddl', '/unused.sql', '--dry-run'])
         self.assertEqual(error.exception.code, 2)
 
+    def test_legacy_entry_points_detect_existing_seafile_configuration(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            data = root / 'seafile-data'
+            data.mkdir()
+            conf = root / 'conf'
+            conf.mkdir()
+            (conf / 'seafile.conf').write_text('[cloudfile_v2]\nauto_local_root=' + str(root) + '\n')
+            with patch.dict(os.environ, {'SEAFILE_DATA_DIR': str(data)}, clear=True):
+                self.assertEqual(StorageConfig.detect().root, root)
+
     def test_cli_default_dry_run_and_machine_readable_blocked(self):
         from cloudfile_ext.v2.__main__ import main
         output = io.StringIO()
@@ -190,7 +201,7 @@ class StorageSQLTests(unittest.TestCase):
         conflict = self.repo(key='wrong')
         self.assertEqual(self.service.inspect(conflict)['reason'], 'STORAGE_BINDING_CONFLICT')
         wrong_state = self.repo(route='auto-local:wrong-state', key='wrong-state', state='retired')
-        self.assertEqual(self.service.inspect(wrong_state)['reason'], 'STORAGE_BINDING_CONFLICT')
+        self.assertEqual(self.service.inspect(wrong_state)['status'], 'STATE_DRIFT')
         occupied = self.repo(route='auto-local:occupied')
         self.repo(key='occupied')
         self.assertEqual(self.service.inspect(occupied)['reason'], 'KEY_OCCUPIED')
@@ -368,7 +379,7 @@ class StorageSQLTests(unittest.TestCase):
         self.assertEqual(len(report['items']), 1)
         self.assertEqual(report['orphan_directories'], [])
 
-    def test_clean_registry_is_created_before_cli_dry_run(self):
+    def test_missing_registry_dry_run_classifies_without_creating_then_apply_installs(self):
         from cloudfile_ext.v2.__main__ import main
         rid = self.repo()
         self.sql('DROP TABLE cf_library_storage')
@@ -380,9 +391,89 @@ class StorageSQLTests(unittest.TestCase):
         with patch.dict(os.environ, env), redirect_stdout(output):
             code = main(['storage-reconcile', '--seafile-conf', str(conf), '--seafile-data', str(self.native)])
         self.assertEqual(code, 0)
-        self.assertEqual(json.loads(output.getvalue())['summary']['NATIVE'], 1)
-        self.assertEqual(self.sql('SELECT * FROM cf_library_storage'), ())
+        report = json.loads(output.getvalue())
+        self.assertEqual(report['summary']['NATIVE'], 1)
+        self.assertEqual(report['summary']['SCHEMA_MISSING'], 1)
+        self.assertEqual(report['schema']['status'], 'SCHEMA_MISSING')
+        self.assertEqual(self.sql("SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_library_storage'"), ())
         self.assertEqual(self.sql('SELECT * FROM cf_library_storage_key'), ((42,),))
+        with patch.dict(os.environ, env), redirect_stdout(io.StringIO()):
+            self.assertEqual(main(['storage-reconcile', '--seafile-conf', str(conf), '--seafile-data', str(self.native), '--apply']), 0)
+        self.assertEqual(self.sql('SELECT state FROM cf_library_storage WHERE repo_id=%s', (rid,)), (('active',),))
+
+    def test_dry_run_works_with_select_only_user_and_read_only_transaction(self):
+        import pymysql
+        rid = self.repo()
+        username = 'storage_ro_' + uuid4().hex[:16]
+        with self.admin.cursor() as cursor:
+            cursor.execute('CREATE USER %s IDENTIFIED BY %s', (username, 'select-only-test'))
+            cursor.execute('GRANT SELECT ON ' + self.schema + '.* TO %s', (username,))
+        try:
+            for missing in (False, True):
+                if missing:
+                    self.sql('DROP TABLE cf_library_storage')
+                readonly = pymysql.connect(**dict(self.db_options, user=username, password='select-only-test'))
+                try:
+                    with readonly.cursor() as cursor:
+                        cursor.execute('START TRANSACTION READ ONLY')
+                    report = StorageReconciler(readonly, self.config).run()
+                    self.assertEqual(report['summary']['NATIVE'], 1)
+                    self.assertEqual(report['schema']['status'], 'SCHEMA_MISSING' if missing else 'SCHEMA_READY')
+                finally:
+                    readonly.rollback()
+                    readonly.close()
+            self.assertEqual(self.sql("SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_library_storage'"), ())
+        finally:
+            with self.admin.cursor() as cursor:
+                cursor.execute('DROP USER %s', (username,))
+
+    def test_read_only_schema_verifier_rejects_changed_contract_without_altering_it(self):
+        variants = [STORAGE_DDL.replace("'reserved','active','retired'", "'reserved','active'"),
+                    STORAGE_DDL.replace('    UNIQUE KEY library_storage_repo (repo_id),\n', ''),
+                    STORAGE_DDL.replace('COLLATE=utf8mb4_bin', 'COLLATE=utf8mb4_general_ci'),
+                    STORAGE_DDL.replace('state VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL',
+                                        "state VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'active'")]
+        for ddl in variants:
+            with self.subTest(ddl=ddl):
+                self.sql('DROP TABLE cf_library_storage')
+                self.sql(ddl)
+                before = self.sql('SHOW CREATE TABLE cf_library_storage')
+                with self.assertRaisesRegex(RuntimeError, 'STORAGE_SCHEMA_DRIFT'):
+                    self.service.ensure_schema(apply=False)
+                self.assertEqual(before, self.sql('SHOW CREATE TABLE cf_library_storage'))
+
+    def test_reserved_active_compatibility_and_state_drift_do_not_write_or_block(self):
+        reserved = self.repo(route='auto-local:reserved-library', key='reserved-library', state='reserved')
+        retired = self.repo(source='RepoTrash', route='auto-local:retired-trash', key='retired-trash', state='retired')
+        active_gc = self.repo(source='GarbageRepos', route='auto-local:active-garbage', key='active-garbage', state='active')
+        native_retired = self.repo(source='RepoTrash')
+        self.sql('INSERT INTO cf_library_storage VALUES(%s,%s,%s)', ('native-' + native_retired, native_retired, 'retired'))
+        before = self.sql('SELECT * FROM cf_library_storage ORDER BY repo_id')
+        report = self.service.run(apply=True)
+        self.assertNotIn('BLOCKED', report['summary'])
+        self.assertEqual(report['summary']['REGISTERED'], 1)
+        self.assertEqual(report['summary']['STATE_DRIFT'], 3)
+        by_id = {item['repo_id']: item for item in report['items']}
+        self.assertEqual((by_id[reserved]['state'], by_id[reserved]['expected_state']), ('reserved', 'active'))
+        self.assertEqual((by_id[retired]['state'], by_id[retired]['expected_state']), ('retired', 'active'))
+        self.assertEqual((by_id[active_gc]['state'], by_id[active_gc]['expected_state']), ('active', 'retired'))
+        self.assertEqual((by_id[native_retired]['state'], by_id[native_retired]['expected_state']), ('retired', 'active'))
+        self.assertEqual(before, self.sql('SELECT * FROM cf_library_storage ORDER BY repo_id'))
+        self.assertFalse(any('action' in item for item in report['items']))
+
+    def test_native_default_class_resolves_ce_symlink_layout_only(self):
+        alias = self.root / 'seafile-data-alias'
+        alias.symlink_to(self.native, target_is_directory=True)
+        self.config.native_dir = alias
+        self.config.classes['legacy-default'] = {kind: {'backend': 'fs', 'dir': str(alias)}
+                                                 for kind in ('commits', 'fs', 'blocks')}
+        rid = self.repo(route='legacy-default')
+        self.assertEqual(self.service.inspect(rid)['status'], 'NATIVE_CLASS_PINNED')
+        self.assertEqual(self.service.apply_one(rid, normalize=['legacy-default'])['status'], 'REGISTERED')
+        managed_alias = self.root / 'managed-alias'
+        managed_alias.symlink_to(self.auto, target_is_directory=True)
+        self.config.root = managed_alias
+        self.assertEqual(self.config.auto_error('some-key', str(uuid4())), 'INVALID_STORAGE_ROOT')
 
     def test_wrong_database_fails_before_creating_registry(self):
         self.sql('DROP TABLE cf_library_storage')

@@ -80,16 +80,40 @@ class StorageConfig:
             raise ValueError('INVALID_STORAGE_ROOT')
         return config
 
+    @classmethod
+    def detect(cls, conf=None, native_dir=None):
+        """Use existing Seafile layout/environment for legacy entry points."""
+        native_dir = native_dir or os.environ.get('SEAFILE_DATA_DIR')
+        if not native_dir:
+            native_dir = next((path for path in ('/shared/seafile/seafile-data', '/opt/seafile/seafile-data')
+                               if Path(path).is_dir()), None)
+        if not native_dir:
+            return None
+        if conf:
+            return cls.read(conf, native_dir)
+        central = os.environ.get('SEAFILE_CENTRAL_CONF_DIR')
+        candidates = ([Path(central) / 'seafile.conf'] if central else []) + [
+            Path(native_dir).parent / 'conf' / 'seafile.conf',
+            Path(native_dir) / 'seafile.conf',
+            Path('/shared/seafile/conf/seafile.conf'), Path('/opt/seafile/conf/seafile.conf')]
+        return next((cls.read(path, native_dir) for path in candidates if path.is_file()), None)
+
     def native_class(self, route):
         item = self.classes.get(route, {})
-        if not self.native_dir or not real_directory(self.native_dir):
+        if not self.native_dir:
             return False
-        return all(item.get(kind, {}).get('backend') == 'fs' and
-                   item[kind].get('dir') and
-                   Path(item[kind]['dir']).is_absolute() and
-                   real_directory(Path(item[kind]['dir'])) and
-                   Path(item[kind]['dir']).resolve() == self.native_dir.resolve()
-                   for kind in KINDS)
+        try:
+            native = self.native_dir.resolve(strict=True)
+            if not native.is_dir():
+                return False
+            # CE's /opt/seafile/seafile-data alias is normal. Only native
+            # aliases are resolved; managed automatic roots reject symlinks.
+            return all(item.get(kind, {}).get('backend') == 'fs' and
+                       item[kind].get('dir') and Path(item[kind]['dir']).is_absolute() and
+                       Path(item[kind]['dir']).resolve(strict=True).is_dir() and
+                       Path(item[kind]['dir']).resolve(strict=True) == native for kind in KINDS)
+        except (OSError, RuntimeError):
+            return False
 
     def auto_error(self, key, repo_id):
         if not valid_key(key):
@@ -120,6 +144,7 @@ class StorageReconciler:
         self.schema = schema
         self.prefix = identifier(schema) + '.' if schema else ''
         self.atomic = atomic or self._atomic
+        self.registry_present = True
 
     def table(self, name):
         return self.prefix + identifier(name)
@@ -134,32 +159,65 @@ class StorageReconciler:
             self.connection.rollback()
             raise
 
-    def ensure_schema(self):
-        # Deliberately inspect only this reviewed table: unrelated old tables
-        # remain present and are never enumerated, queried, or altered.
+    def ensure_schema(self, *, apply=True):
+        """Read the exact contract; only an explicit apply may create it.
+
+        Both modes inspect existing metadata without disposable tables or any
+        writes. Missing registry metadata is an independent dry-run result.
+        """
         with self.connection.cursor() as cursor:
             required = {'Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId'}
             cursor.execute("SELECT table_name FROM information_schema.tables "
                            "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name IN "
-                           "('Repo','RepoTrash','GarbageRepos','VirtualRepo','RepoStorageId')",
-                           (self.schema,))
+                           "('Repo','RepoTrash','GarbageRepos','VirtualRepo','RepoStorageId')", (self.schema,))
             if {row[0] for row in cursor.fetchall()} != required:
                 raise RuntimeError('NATIVE_SEAFILE_DATABASE_NOT_CONNECTED')
-            cursor.execute(STORAGE_DDL.replace('CREATE TABLE cf_library_storage',
-                           'CREATE TABLE IF NOT EXISTS ' + self.table('cf_library_storage'), 1))
-            expected = 'cfv2_expected_storage'
-            cursor.execute('DROP TEMPORARY TABLE IF EXISTS ' + expected)
-            try:
+            cursor.execute("SELECT engine,table_collation FROM information_schema.tables "
+                           "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name='cf_library_storage'",
+                           (self.schema,))
+            table = cursor.fetchone()
+            if table is None and not apply:
+                self.registry_present = False
+                return 'SCHEMA_MISSING'
+            if table is None:
                 cursor.execute(STORAGE_DDL.replace('CREATE TABLE cf_library_storage',
-                               'CREATE TEMPORARY TABLE ' + expected, 1))
-                cursor.execute('SHOW CREATE TABLE ' + self.table('cf_library_storage'))
-                actual = cursor.fetchone()[1]
-                cursor.execute('SHOW CREATE TABLE ' + expected)
-                wanted = cursor.fetchone()[1]
-                if actual[actual.index('('):] != wanted[wanted.index('('):]:
-                    raise RuntimeError('STORAGE_SCHEMA_DRIFT')
-            finally:
-                cursor.execute('DROP TEMPORARY TABLE IF EXISTS ' + expected)
+                               'CREATE TABLE IF NOT EXISTS ' + self.table('cf_library_storage'), 1))
+                cursor.execute("SELECT engine,table_collation FROM information_schema.tables "
+                               "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name='cf_library_storage'",
+                               (self.schema,))
+                table = cursor.fetchone()
+            cursor.execute("SELECT column_name,column_type,is_nullable,column_default,character_set_name,"
+                           "collation_name,extra FROM information_schema.columns "
+                           "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name='cf_library_storage' "
+                           "ORDER BY ordinal_position", (self.schema,))
+            columns = list(cursor.fetchall())
+            expected_columns = [(name, kind, 'NO', None, 'ascii', 'ascii_bin', '') for name, kind in
+                                (('repo_key', 'varchar(80)'), ('repo_id', 'char(36)'), ('state', 'varchar(8)'))]
+            cursor.execute("SELECT index_name,non_unique,seq_in_index,column_name,sub_part,index_type "
+                           "FROM information_schema.statistics WHERE table_schema=COALESCE(%s,DATABASE()) "
+                           "AND table_name='cf_library_storage' ORDER BY index_name,seq_in_index", (self.schema,))
+            indexes = sorted(cursor.fetchall(), key=lambda row: (row[0], row[2]))
+            expected_indexes = [('PRIMARY', 0, 1, 'repo_key', None, 'BTREE'),
+                                ('library_storage_repo', 0, 1, 'repo_id', None, 'BTREE')]
+            # MariaDB hides CHECK_CONSTRAINTS from SELECT-only users even
+            # when SHOW CREATE TABLE exposes their table's complete contract.
+            cursor.execute('SHOW CREATE TABLE ' + self.table('cf_library_storage'))
+            definition = cursor.fetchone()[1]
+            checks = re.findall(r'CONSTRAINT\s+`?([A-Za-z0-9_]+)`?\s+CHECK\s+([^\n]+)',
+                                definition, flags=re.IGNORECASE)
+            def clause(value):
+                # MySQL may add _ascii literal introducers and parentheses;
+                # these spell the same reviewed expression on MariaDB.
+                value = re.sub(r"_[a-zA-Z0-9]+(?=')", '', value)
+                return re.sub(r'[\s`()]+', '', value).lower()
+            valid_check = (len(checks) == 1 and checks[0][0] == 'library_storage_state' and
+                           clause(checks[0][1]) == clause("state IN ('reserved','active','retired')"))
+            if (table != ('InnoDB', 'utf8mb4_bin') or columns != expected_columns or
+                    indexes != expected_indexes or not valid_check or 'NOT ENFORCED' in definition.upper() or
+                    'FOREIGN KEY' in definition.upper()):
+                raise RuntimeError('STORAGE_SCHEMA_DRIFT')
+        self.registry_present = True
+        return 'SCHEMA_READY'
 
     def sources(self):
         return ' UNION '.join('SELECT repo_id FROM ' + self.table(name)
@@ -184,6 +242,8 @@ class StorageReconciler:
         from .native_discovery import native_key
         tables = {name: self.table(name) for name in
                   ('Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId', 'cf_library_storage')}
+        if not self.registry_present:
+            tables['cf_library_storage'] = '(SELECT NULL AS repo_id,NULL AS repo_key,NULL AS state WHERE 1=0)'
         sql = ('SELECT r.repo_id,t.repo_id,g.repo_id,v.repo_id,s.repo_id,s.storage_id,c.repo_key,c.state '
                'FROM (SELECT %s AS repo_id) i '
                'LEFT JOIN {Repo} r ON r.repo_id=i.repo_id '
@@ -221,18 +281,22 @@ class StorageReconciler:
             return blocked('UNSUPPORTED_STORAGE_CLASS')
         item.update(category=category, repo_key=wanted, state=target_state)
         with self.connection.cursor() as cursor:
-            cursor.execute('SELECT repo_id FROM ' + self.table('cf_library_storage') +
-                           ' WHERE repo_key=%s AND repo_id<>%s', (wanted, repo_id))
-            if cursor.fetchone():
-                return blocked('KEY_OCCUPIED')
+            if self.registry_present:
+                cursor.execute('SELECT repo_id FROM ' + self.table('cf_library_storage') +
+                               ' WHERE repo_key=%s AND repo_id<>%s', (wanted, repo_id))
+                if cursor.fetchone():
+                    return blocked('KEY_OCCUPIED')
             if category == 'AUTO_LOCAL':
                 cursor.execute('SELECT repo_id FROM ' + self.table('RepoStorageId') +
                                ' WHERE storage_id=%s AND repo_id<>%s', (route, repo_id))
                 if cursor.fetchone():
                     return blocked('KEY_OCCUPIED')
         if key is not None:
-            if key != wanted or state != target_state or category == 'NATIVE_CLASS_PINNED':
+            if key != wanted or category == 'NATIVE_CLASS_PINNED':
                 return blocked('STORAGE_BINDING_CONFLICT')
+            item.update(state=state, expected_state=target_state)
+            if state != target_state and not (state == 'reserved' and target_state == 'active'):
+                return dict(item, status='STATE_DRIFT', reason='LIFECYCLE_STATE_MISMATCH')
             return dict(item, status='REGISTERED')
         return dict(item, status=category)
 
@@ -294,6 +358,7 @@ class StorageReconciler:
                 if (path.is_dir() or path.is_symlink()) and path.name not in referenced]
 
     def run(self, *, apply=False, batch_size=500, normalize=(), repo_id=None):
+        schema_status = self.ensure_schema(apply=apply)
         items = []
         iterator = (self.inspect(repo_id),) if repo_id else self.scan(batch_size)
         for item in iterator:
@@ -303,5 +368,7 @@ class StorageReconciler:
         orphans = self.orphans()
         counts = Counter(item['status'] for item in items)
         counts['ORPHAN_DIRECTORY'] += len(orphans)
-        return dict(mode='apply' if apply else 'dry-run', summary=dict(sorted(counts.items())),
+        if schema_status == 'SCHEMA_MISSING':
+            counts['SCHEMA_MISSING'] = 1
+        return dict(schema={'status': schema_status}, mode='apply' if apply else 'dry-run', summary=dict(sorted(counts.items())),
                     items=items, orphan_directories=orphans)

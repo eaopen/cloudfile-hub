@@ -169,24 +169,19 @@ def reconcile_from_hub(repo_id=None, *, batch_size=500):
     Startup/admin discovery handles native and auto-local bindings only.
     Pinned classes and invalid bindings are reported without conversion.
     """
-    import os
-    from pathlib import Path
     from django.db import connection, transaction
     from seahub.utils.db_api import SeafileDB
     from .storage_reconcile import StorageConfig, StorageReconciler
 
-    data = os.environ.get('SEAFILE_DATA_DIR', '')
-    conf = os.environ.get('SEAFILE_CENTRAL_CONF_DIR') or data
-    if not data or not conf:
+    config = StorageConfig.detect()
+    if config is None:
         raise RuntimeError('SEAFILE_STORAGE_CONFIGURATION_UNAVAILABLE')
-    config = StorageConfig.read(Path(conf) / 'seafile.conf', data)
     discovery = StorageReconciler(connection, config, schema=SeafileDB().db_name,
                                   atomic=transaction.atomic)
-    discovery.ensure_schema()
     report = discovery.run(apply=True, repo_id=repo_id, batch_size=batch_size)
     import logging
     for item in report['items'] + report['orphan_directories']:
-        if item['status'] in ('BLOCKED', 'NATIVE_CLASS_PINNED', 'ORPHAN_DIRECTORY'):
+        if item['status'] in ('BLOCKED', 'NATIVE_CLASS_PINNED', 'ORPHAN_DIRECTORY', 'STATE_DRIFT'):
             logging.getLogger(__name__).warning('Storage reconciliation: %s', item)
     report['registered'] = sum(item.get('action') == 'REGISTERED' for item in report['items'])
     report['already'] = report['summary'].get('REGISTERED', 0) - report['registered']
