@@ -28,6 +28,11 @@ def real_directory(path):
     return path.is_dir() and not path.is_symlink()
 
 
+def symlink_in_path(path):
+    """Reject managed-root aliases, including any ancestor component."""
+    return any(component.is_symlink() for component in (path, *path.parents))
+
+
 class StorageConfig:
     def __init__(self, root=None, native_dir=None, classes=()):
         self.root = Path(root) if root else None
@@ -58,7 +63,7 @@ class StorageConfig:
             if not path.is_absolute():
                 path = conf.parent / path
             classes = json.loads(path.read_text())
-        if not isinstance(classes, list):
+        if not isinstance(classes, list) or any(not isinstance(item, dict) for item in classes):
             raise ValueError('INVALID_STORAGE_CLASSES')
         root = parser.get('cloudfile_v2', 'auto_local_root', fallback='')
         if not root:
@@ -71,7 +76,7 @@ class StorageConfig:
                     raise ValueError('INVALID_AUTO_LOCAL_TEMPLATE')
                 root = roots.pop()
         config = cls(root, native_dir, classes)
-        if config.root and (not config.root.is_absolute() or not real_directory(config.root)):
+        if config.root and (not config.root.is_absolute() or symlink_in_path(config.root) or not real_directory(config.root)):
             raise ValueError('INVALID_STORAGE_ROOT')
         return config
 
@@ -89,7 +94,7 @@ class StorageConfig:
     def auto_error(self, key, repo_id):
         if not valid_key(key):
             return 'INVALID_KEY'
-        if not self.root or not real_directory(self.root):
+        if not self.root or symlink_in_path(self.root) or not real_directory(self.root):
             return 'INVALID_STORAGE_ROOT'
         base = self.root / key
         storage = base / 'storage'
@@ -112,6 +117,7 @@ class StorageReconciler:
     def __init__(self, connection, config=None, *, schema=None, atomic=None):
         self.connection = connection
         self.config = config or StorageConfig()
+        self.schema = schema
         self.prefix = identifier(schema) + '.' if schema else ''
         self.atomic = atomic or self._atomic
 
@@ -132,6 +138,13 @@ class StorageReconciler:
         # Deliberately inspect only this reviewed table: unrelated old tables
         # remain present and are never enumerated, queried, or altered.
         with self.connection.cursor() as cursor:
+            required = {'Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId'}
+            cursor.execute("SELECT table_name FROM information_schema.tables "
+                           "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name IN "
+                           "('Repo','RepoTrash','GarbageRepos','VirtualRepo','RepoStorageId')",
+                           (self.schema,))
+            if {row[0] for row in cursor.fetchall()} != required:
+                raise RuntimeError('NATIVE_SEAFILE_DATABASE_NOT_CONNECTED')
             cursor.execute(STORAGE_DDL.replace('CREATE TABLE cf_library_storage',
                            'CREATE TABLE IF NOT EXISTS ' + self.table('cf_library_storage'), 1))
             expected = 'cfv2_expected_storage'
@@ -171,7 +184,7 @@ class StorageReconciler:
         from .native_discovery import native_key
         tables = {name: self.table(name) for name in
                   ('Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId', 'cf_library_storage')}
-        sql = ('SELECT r.repo_id,t.repo_id,g.repo_id,v.repo_id,s.storage_id,c.repo_key,c.state '
+        sql = ('SELECT r.repo_id,t.repo_id,g.repo_id,v.repo_id,s.repo_id,s.storage_id,c.repo_key,c.state '
                'FROM (SELECT %s AS repo_id) i '
                'LEFT JOIN {Repo} r ON r.repo_id=i.repo_id '
                'LEFT JOIN {RepoTrash} t ON t.repo_id=i.repo_id '
@@ -181,7 +194,7 @@ class StorageReconciler:
                'LEFT JOIN {cf_library_storage} c ON c.repo_id=i.repo_id').format(**tables)
         with self.connection.cursor() as cursor:
             cursor.execute(sql + (' FOR UPDATE' if lock else ''), (repo_id,))
-            present, trash, garbage, virtual, route, key, state = cursor.fetchone()
+            present, trash, garbage, virtual, route_owner, route, key, state = cursor.fetchone()
         item = dict(repo_id=repo_id, storage_id=route, status='BLOCKED')
         def blocked(reason):
             return dict(item, reason=reason)
@@ -189,6 +202,8 @@ class StorageReconciler:
             return dict(item, status='VIRTUAL_REPO')
         if not (present or trash or garbage):
             return blocked('NATIVE_RESOURCE_MISSING')
+        if route_owner is not None and route is None:
+            return blocked('INVALID_STORAGE_ROUTE')
         marker = native_key(repo_id)
         if marker is None:
             return blocked('INVALID_NATIVE_REPO_ID')
@@ -232,11 +247,12 @@ class StorageReconciler:
                 if normalize_route:
                     with self.connection.cursor() as cursor:
                         cursor.execute('DELETE FROM ' + self.table('RepoStorageId') +
-                                       ' WHERE repo_id=%s AND storage_id=%s',
+                                       ' WHERE repo_id=%s AND BINARY storage_id = BINARY %s',
                                        (repo_id, item['storage_id']))
                         if cursor.rowcount != 1:
                             raise RuntimeError('NATIVE_ROUTE_CHANGED')
                 route = None if normalize_route else item['storage_id']
+                route_check = 's.repo_id IS NULL' if route is None else 'BINARY s.storage_id = BINARY %s'
                 sql = ('INSERT INTO ' + self.table('cf_library_storage') + '(repo_key,repo_id,state) '
                        'SELECT %s,i.repo_id,CASE WHEN r.repo_id IS NOT NULL OR t.repo_id IS NOT NULL '
                        "THEN 'active' ELSE 'retired' END FROM (SELECT %s AS repo_id) i "
@@ -246,9 +262,9 @@ class StorageReconciler:
                        'LEFT JOIN ' + self.table('VirtualRepo') + ' v ON v.repo_id=i.repo_id '
                        'LEFT JOIN ' + self.table('RepoStorageId') + ' s ON s.repo_id=i.repo_id '
                        'WHERE (r.repo_id IS NOT NULL OR t.repo_id IS NOT NULL OR g.repo_id IS NOT NULL) '
-                       'AND v.repo_id IS NULL AND s.storage_id <=> %s FOR UPDATE')
+                       'AND v.repo_id IS NULL AND ' + route_check + ' FOR UPDATE')
                 with self.connection.cursor() as cursor:
-                    cursor.execute(sql, (item['repo_key'], repo_id, route))
+                    cursor.execute(sql, (item['repo_key'], repo_id) + (() if route is None else (route,)))
                     if cursor.rowcount != 1:
                         raise RuntimeError('NATIVE_ROUTE_CHANGED')
                 after = self.inspect(repo_id)

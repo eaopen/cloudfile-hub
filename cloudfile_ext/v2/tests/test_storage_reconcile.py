@@ -24,7 +24,8 @@ class ConfigTests(unittest.TestCase):
 
     def test_reads_native_and_legacy_config_and_rejects_invalid_root(self):
         with TemporaryDirectory() as tmp:
-            root = Path(tmp)
+            root = Path(tmp).resolve()
+            tmp = str(root)
             conf = root / 'seafile.conf'
             conf.write_text('[cloudfile_v2]\nauto_local_root=' + tmp + '\n[storage]\nbackend=filesystem\n')
             self.assertEqual(StorageConfig.read(conf, root).root, root)
@@ -40,6 +41,24 @@ class ConfigTests(unittest.TestCase):
             conf.write_text('[cloudfile_v2]\nauto_local_root=' + tmp + '/link\n')
             with self.assertRaisesRegex(ValueError, 'INVALID_STORAGE_ROOT'):
                 StorageConfig.read(conf, root)
+
+    def test_managed_root_rejects_symlink_ancestor(self):
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp).resolve()
+            (root / 'real' / 'libraries').mkdir(parents=True)
+            (root / 'alias').symlink_to(root / 'real', target_is_directory=True)
+            conf = root / 'seafile.conf'
+            conf.write_text('[cloudfile_v2]\nauto_local_root=' + str(root / 'alias' / 'libraries') + '\n')
+            with self.assertRaisesRegex(ValueError, 'INVALID_STORAGE_ROOT'):
+                StorageConfig.read(conf, root)
+            config = StorageConfig(root / 'alias' / 'libraries', root)
+            self.assertEqual(config.auto_error('key', str(uuid4())), 'INVALID_STORAGE_ROOT')
+
+    def test_legacy_commands_cannot_silently_ignore_dry_run(self):
+        from cloudfile_ext.v2.__main__ import main
+        with patch('sys.stderr', io.StringIO()), self.assertRaises(SystemExit) as error:
+            main(['reconcile', '--ddl', '/unused.sql', '--dry-run'])
+        self.assertEqual(error.exception.code, 2)
 
     def test_cli_default_dry_run_and_machine_readable_blocked(self):
         from cloudfile_ext.v2.__main__ import main
@@ -75,7 +94,7 @@ class StorageSQLTests(unittest.TestCase):
         self.db_options = dict(self.options, database=self.schema)
         self.connection = pymysql.connect(**self.db_options)
         self.temp = TemporaryDirectory()
-        self.root = Path(self.temp.name)
+        self.root = Path(self.temp.name).resolve()
         self.native = self.root / 'seafile-data'
         self.native.mkdir()
         self.auto = self.root / 'libraries'
@@ -313,6 +332,92 @@ class StorageSQLTests(unittest.TestCase):
         self.assertEqual((report['registered'], report['summary']['NATIVE_CLASS_PINNED']), (2, 1))
         self.assertEqual(self.sql('SELECT storage_id FROM RepoStorageId WHERE repo_id=%s', (pinned,)), (('legacy-default',),))
         self.assertEqual({row[0] for row in self.sql('SELECT repo_id FROM cf_library_storage')}, {native, auto})
+
+    def test_null_native_route_is_blocked_instead_of_treated_as_absent(self):
+        rid = self.repo()
+        self.sql('INSERT INTO RepoStorageId VALUES(%s,NULL)', (rid,))
+        self.assertEqual(self.service.apply_one(rid)['reason'], 'INVALID_STORAGE_ROUTE')
+        self.assertEqual(self.sql('SELECT * FROM cf_library_storage'), ())
+
+    def test_internal_storage_kind_and_repo_symlinks_are_blocked(self):
+        for part in ('storage', 'commits', 'repo'):
+            key = 'linked-' + part
+            rid = self.repo(route='auto-local:' + key)
+            directory = self.auto / key / 'storage'
+            if part == 'commits':
+                directory = directory / 'commits'
+            elif part == 'repo':
+                directory = directory / 'commits' / rid
+            moved = self.root / ('outside-' + part)
+            directory.rename(moved)
+            directory.symlink_to(moved, target_is_directory=True)
+            self.assertEqual(self.service.apply_one(rid)['reason'], 'SYMLINK_DIRECTORY')
+        self.assertEqual(self.sql('SELECT * FROM cf_library_storage'), ())
+
+    def test_trash_and_garbage_overlap_stays_active(self):
+        rid = self.repo(source='RepoTrash', route='auto-local:trash-overlap')
+        self.sql('INSERT INTO GarbageRepos VALUES(%s)', (rid,))
+        self.assertEqual(self.service.apply_one(rid)['state'], 'active')
+        self.assertEqual(self.sql('SELECT state FROM cf_library_storage WHERE repo_id=%s', (rid,)), (('active',),))
+
+    def test_orphan_references_include_routes_outside_the_selected_batch(self):
+        selected = self.repo()
+        outside = self.repo(route='auto-local:outside')
+        self.sql('DELETE FROM Repo WHERE repo_id=%s', (outside,))
+        report = self.service.run(repo_id=selected, batch_size=1)
+        self.assertEqual(len(report['items']), 1)
+        self.assertEqual(report['orphan_directories'], [])
+
+    def test_clean_registry_is_created_before_cli_dry_run(self):
+        from cloudfile_ext.v2.__main__ import main
+        rid = self.repo()
+        self.sql('DROP TABLE cf_library_storage')
+        conf = self.root / 'seafile.conf'
+        conf.write_text('[cloudfile_v2]\nauto_local_root=' + str(self.auto) + '\n')
+        env = dict(CF_V2_DB_HOST='127.0.0.1', CF_V2_DB_PORT=str(self.options['port']),
+                   CF_V2_DB_USER='root', CF_V2_DB_PASSWORD='storage-test-only', CF_V2_DB_NAME=self.schema)
+        output = io.StringIO()
+        with patch.dict(os.environ, env), redirect_stdout(output):
+            code = main(['storage-reconcile', '--seafile-conf', str(conf), '--seafile-data', str(self.native)])
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(output.getvalue())['summary']['NATIVE'], 1)
+        self.assertEqual(self.sql('SELECT * FROM cf_library_storage'), ())
+        self.assertEqual(self.sql('SELECT * FROM cf_library_storage_key'), ((42,),))
+
+    def test_wrong_database_fails_before_creating_registry(self):
+        self.sql('DROP TABLE cf_library_storage')
+        self.sql('RENAME TABLE Repo TO NotNativeRepo')
+        with self.assertRaisesRegex(RuntimeError, 'NATIVE_SEAFILE_DATABASE_NOT_CONNECTED'):
+            self.service.ensure_schema()
+        self.assertEqual(self.sql("SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_library_storage'"), ())
+
+    def test_write_statement_rechecks_absent_route_not_null_storage_value(self):
+        rid = self.repo()
+        original = self.service.inspect
+        def changed(*args, **kwargs):
+            item = original(*args, **kwargs)
+            if kwargs.get('lock'):
+                self.sql('INSERT INTO RepoStorageId VALUES(%s,NULL)', (rid,))
+            return item
+        with patch.object(self.service, 'inspect', side_effect=changed):
+            item = self.service.apply_one(rid)
+        self.assertEqual(item['reason'], 'NATIVE_ROUTE_CHANGED')
+        self.assertEqual(self.sql('SELECT * FROM cf_library_storage'), ())
+        self.assertEqual(self.sql('SELECT * FROM RepoStorageId'), ())
+
+    def test_write_statement_rechecks_case_sensitive_route(self):
+        rid = self.repo(route='auto-local:exact')
+        original = self.service.inspect
+        def changed(*args, **kwargs):
+            item = original(*args, **kwargs)
+            if kwargs.get('lock'):
+                self.sql('UPDATE RepoStorageId SET storage_id=%s WHERE repo_id=%s', ('auto-local:EXACT', rid))
+            return item
+        with patch.object(self.service, 'inspect', side_effect=changed):
+            item = self.service.apply_one(rid)
+        self.assertEqual(item['reason'], 'NATIVE_ROUTE_CHANGED')
+        self.assertEqual(self.sql('SELECT * FROM cf_library_storage'), ())
+        self.assertEqual(self.sql('SELECT storage_id FROM RepoStorageId WHERE repo_id=%s', (rid,)), (('auto-local:exact',),))
 
     def test_route_change_between_scan_and_apply_is_reclassified(self):
         rid = self.repo()

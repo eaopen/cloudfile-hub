@@ -81,3 +81,27 @@ Virtual 跳过、旧表不读取以及 Hub 运行时共用规则。
 
 未覆盖：生产或 DEV 数据副本的 1,407 自动库 / 63 默认库计数核对；真实 Server 上传、下载、
 历史版本、恢复、GC、fsck；三仓镜像完整构建。未执行 DEV 或生产部署。
+
+## 安全边界复审（2026-10-20）
+
+复审修复三处边界：存储根任何祖先组件为符号链接时拒绝；存在但值为 NULL 的
+`RepoStorageId` 为 `BLOCKED: INVALID_STORAGE_ROUTE`，不当作无路由；写入复核使用真实
+路由行不存在或字节精确匹配，避免数据库默认排序规则将不同大小写视为同一路由。
+规范化删除路由也使用字节精确匹配。旧 `reconcile` 等命令拒绝 storage 专用模式参数，
+防止误传 `--dry-run` 后仍执行变更。建表前必须验证五张原生来源表完整，错误数据库
+以 `NATIVE_SEAFILE_DATABASE_NOT_CONNECTED` 拒绝且不创建登记表。
+
+新增 10 项针对性回归，并复验 4 项受影响的并发/规范化/Hub 入口用例；分三次执行：
+`Ran 11 tests ... OK`、`Ran 3 tests ... OK`、`Ran 1 test ... OK`（其中干净登记表预检重复验证一次）。
+覆盖根祖先、storage/type/repo 目录链符号链接、NULL 路由、写时大小写路由变化、
+Trash 与 Garbage 重叠 active、批次外全局路由对 ORPHAN 的保护，以及预检前不存在登记表。
+
+另外使用独立临时数据库运行 11 个合成库、1 个孤儿目录的 CLI 验收，batch_size=2：
+
+```json
+{"dry_run":{"NATIVE":3,"AUTO_LOCAL":3,"NATIVE_CLASS_PINNED":1,"BLOCKED":3,"VIRTUAL_REPO":1,"ORPHAN_DIRECTORY":1},"apply":{"REGISTERED":7,"BLOCKED":3,"VIRTUAL_REPO":1,"ORPHAN_DIRECTORY":1},"replay":{"REGISTERED":7,"BLOCKED":3,"VIRTUAL_REPO":1,"ORPHAN_DIRECTORY":1},"result":"PASS"}
+```
+
+三个预置 BLOCKED 分别为 S3、非法 key、登记冲突。显式规范化后新增 7 条登记，重放无写入，
+垃圾库 retired、Trash+Garbage 重叠库 active，旧表哨兵保持不变。数据完全合成，不作为
+1,407/63 个真实库数量核对证据；该真实数据核对按用户最新要求留至发布后验收。

@@ -27,6 +27,8 @@ def main(argv=None):
     storage = args.command == 'storage-reconcile'
     if storage and (not args.seafile_conf or not args.seafile_data):
         parser.error('storage-reconcile requires --seafile-conf and --seafile-data')
+    if not storage and (args.dry_run or args.apply or args.normalize_native_class):
+        parser.error('storage mode flags require storage-reconcile')
     if not storage and not args.ddl:
         parser.error('--ddl is required for schema commands')
     if not 1 <= args.batch_size <= 2000:
@@ -65,7 +67,7 @@ def main(argv=None):
                 print(json.dumps(discovery.summary(args.repo_id), sort_keys=True))
     except Exception as error:
         if storage:
-            reason = str(error) if isinstance(error, ValueError) else type(error).__name__
+            reason = str(error) if isinstance(error, (ValueError, RuntimeError)) else type(error).__name__
             report = dict(mode='apply' if args.apply else 'dry-run', summary={'BLOCKED': 1},
                           items=[{'status': 'BLOCKED', 'reason': reason}], orphan_directories=[])
             print(json.dumps(report, sort_keys=True))
