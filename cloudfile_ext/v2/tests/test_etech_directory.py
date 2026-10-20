@@ -24,7 +24,7 @@ class DirectoryRuntimeTests(TestCase):
     def runtime(self):
         self.directory, self.identity, self.catalog, self.memberships = (Mock() for _ in range(4))
         self.directory.subject.return_value=subject()
-        self.directory.entities.return_value={('org','directory','o1'):'Department'}
+        self.directory.entities.return_value={('org','directory','o1'): {'name': 'Department', 'parent': None}}
         self.identity.prepare.return_value='opaque@auth.local'
         self.catalog.ensure.return_value=42
         yield self.directory, self.identity, self.catalog, self.memberships
@@ -129,19 +129,21 @@ class DirectoryRuntimeTests(TestCase):
             with self.assertRaises(IdentityUnavailable):Directory().get('/groups?view=entities')
 
 
-    def test_periodic_entity_sync_updates_only_native_catalog(self):
+    def test_periodic_full_sync_is_delegated_to_v2_owned_catalog(self):
         from cloudfile_ext.v2.etech_directory import sync_entity_catalog
-        def fake_native(group_id):
-            return SimpleNamespace(group_name='Department')
+        from cloudfile_ext.v2.full_directory_sync import synchronize
         with patch('cloudfile_ext.v2.etech_directory.runtime', self.runtime), \
-             patch('seaserv.ccnet_api.get_group', side_effect=fake_native), \
-             patch('seaserv.ccnet_api.set_group_name') as rename:
+             patch('cloudfile_ext.v2.full_directory_sync.synchronize',
+                   return_value=dict(status='OK', entities=1,
+                                     membership_writes=2, parent_writes=1,
+                                     unresolved_count=0)) as reconcile, \
+             patch('seahub.utils.db_api.SeafileDB',
+                   return_value=SimpleNamespace(db_name='seafile_db')):
             result = sync_entity_catalog()
         self.assertEqual(result['status'], 'OK')
-        self.assertEqual(result['membership_writes'], 0)
-        self.catalog.ensure.assert_called_once_with('org','directory','o1','Department')
-        self.memberships.ensure.assert_not_called()
-        rename.assert_not_called()
+        self.assertEqual(result['membership_writes'], 2)
+        reconcile.assert_called_once_with(self.directory, self.catalog,
+                self.memberships.redis, 'seafile_db')
 
     def test_empty_catalog_cannot_report_full_success(self):
         from cloudfile_ext.v2.etech_directory import sync_entity_catalog
@@ -151,6 +153,8 @@ class DirectoryRuntimeTests(TestCase):
                 self.directory.entities.return_value = {}
                 yield parts
         with patch('cloudfile_ext.v2.etech_directory.runtime', empty_runtime), \
+             patch('seahub.utils.db_api.SeafileDB',
+                   return_value=SimpleNamespace(db_name='seafile_db')), \
              self.assertRaises(IdentityUnavailable):
             sync_entity_catalog()
         self.catalog.ensure.assert_not_called()
