@@ -1701,7 +1701,7 @@ def _commit_touches_folder(repo_id, commit, folder, current_folder_only=False):
     if not diffs:
         return False
 
-    from cloudfile_ext.history.scope import touches_folder_paths
+    from cloudfile_ext.v2.history_scope import touches_folder_paths
     return touches_folder_paths(
         ((getattr(d, 'name', '') or '', getattr(d, 'new_name', '') or '')
          for d in diffs),
@@ -3770,12 +3770,8 @@ class FileSharedLinkView(APIView):
 
     def put(self, request, repo_id, format=None):
 
-        # CloudFile review share-002: when external sharing is restricted,
-        # only system admins may create new share links.
-        from cloudfile_ext.features import is_enabled
-        if is_enabled('CF_ENABLE_SHARE_RESTRICT') and not request.user.is_staff:
-            error_msg = 'External sharing is disabled.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+        # V2 uses native CE share authorization, not the retired
+        # v0.9 CF_ENABLE_SHARE_RESTRICT feature flag.
 
         repo = seaserv.get_repo(repo_id)
         if not repo:
