@@ -64,6 +64,13 @@ class AdminExternalIdentityView(APIView):
         The trusted caller has already resolved the user in its own directory.
         No password is supplied and the account is never chosen by display name.
         """
+        # Etech has exactly one administrator provisioning authority, even
+        # when a legacy extension registration is still enabled.
+        if (getattr(settings, 'CF_DIRECTORY_URL', '')
+                or request.data.get('identity_source') == 'etech-directory'):
+            from cloudfile_ext.v2.http import IdentityResolve
+            return IdentityResolve().post(request)
+
         from seahub.auth.models import SocialAuthUser
         from seahub.base.accounts import User
         from seahub.profile.models import Profile, DuplicatedContactEmailError

@@ -18,9 +18,15 @@ class IdentityResolve(APIView):
         # Native staff authentication authorizes lookup; Directory proves new UIDs.
         uid = request.data.get('external_user_id')
         if (not isinstance(uid, str) or not uid or uid != uid.strip() or len(uid) > 225
+                or any(ord(c) < 32 or ord(c) == 127 for c in uid)
                 or request.data.get('login_id') != uid):
             return api_error(status.HTTP_400_BAD_REQUEST, 'Stable UID required.')
-        username = Profile.objects.get_username_by_login_id(uid)
+        # Check exact stored values after native collation matching; never
+        # choose an arbitrary owner for a duplicate UID or case alias.
+        rows = list(Profile.objects.filter(login_id=uid).values_list('user', 'login_id'))
+        if rows and (len(rows) != 1 or rows[0][1] != uid):
+            return api_error(status.HTTP_409_CONFLICT, 'Native UID binding conflict.')
+        username = rows[0][0] if rows else None
         if username is None:
             # A staff request is not identity proof: independently read the
             # scoped Etech Directory before creating any native account.
@@ -33,12 +39,15 @@ class IdentityResolve(APIView):
             except Exception:
                 return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Trusted user preparation unavailable; sign in through SSO or restore Directory.')
         profile = Profile.objects.get_profile_by_user(username)
-        if profile is None or profile.login_id != uid:
+        if (profile is None or profile.login_id != uid
+                or username.lower() in ('cfadmin@auth.local', 'cfadmin@etech.com')):
             return api_error(status.HTTP_409_CONFLICT, 'Native UID binding conflict.')
         try:
             user = User.objects.get(email=username)
         except User.DoesNotExist:
             return api_error(status.HTTP_404_NOT_FOUND, 'Native user not found.')
+        if user.username != username or not user.is_active:
+            return api_error(status.HTTP_409_CONFLICT, 'Native user inactive or changed.')
         return Response({'external_user_id': uid, 'login_id': uid,
                          'email': user.username, 'is_active': bool(user.is_active)})
 

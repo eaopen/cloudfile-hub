@@ -8,7 +8,7 @@ from unittest.mock import Mock, patch
 from django.test import override_settings
 
 from cloudfile_ext.v2.etech_directory import Directory, prepare_user, prepare_group, ensure_subject
-from cloudfile_ext.v2.errors import IdentityUnavailable
+from cloudfile_ext.v2.errors import IdentityUnavailable, IdentityConflict
 
 
 def subject(status='active'):
@@ -31,7 +31,7 @@ class DirectoryRuntimeTests(TestCase):
         with patch('cloudfile_ext.v2.etech_directory.runtime',self.runtime):
             self.assertEqual(prepare_user('uid'),'opaque@auth.local')
         self.directory.subject.assert_called_once_with('uid')
-        self.identity.prepare.assert_called_once_with(uid='uid',login_name='E001')
+        self.identity.prepare.assert_called_once_with(uid='uid',login_name='E001',account='E001')
         self.memberships.ensure.assert_not_called()
 
     def test_disabled_or_changed_uid_cannot_create_native_account(self):
@@ -43,6 +43,19 @@ class DirectoryRuntimeTests(TestCase):
                     yield parts
             with patch('cloudfile_ext.v2.etech_directory.runtime',runtime):
                 with self.assertRaises(IdentityUnavailable):prepare_user('uid')
+            self.identity.prepare.assert_not_called()
+
+    def test_missing_reserved_or_invalid_directory_account_cannot_precreate(self):
+        for account in (None, '', 'cfadmin', 'CFADMIN', 'a b', 'a@contact.test'):
+            @contextmanager
+            def runtime():
+                with self.runtime() as parts:
+                    value = subject()
+                    value['attributes'] = {'login_name': 'display-only'} if account is None else {'employee_no': account}
+                    self.directory.subject.return_value = value
+                    yield parts
+            with patch('cloudfile_ext.v2.etech_directory.runtime', runtime), self.assertRaises((IdentityUnavailable, IdentityConflict)):
+                prepare_user('uid')
             self.identity.prepare.assert_not_called()
 
     def test_group_mapping_uses_exact_type_namespace_and_external_id(self):

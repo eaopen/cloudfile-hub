@@ -192,6 +192,7 @@ def oauth_callback(request):
     nonce = request.session.pop('oauth_nonce', None)
     if (not isinstance(expected_state, str) or not expected_state
             or not isinstance(state, str) or not state
+            or not expected_state.isascii() or not state.isascii()
             or not secrets.compare_digest(expected_state, state)
             or protocol not in ('oauth2', 'oidc')
             or (protocol == 'oidc' and (not isinstance(nonce, str) or not nonce))):
@@ -267,10 +268,16 @@ def oauth_callback(request):
     # A specifically mapped, trusted Etech userId is the canonical login_id.
     # Generic legacy OAuth mappings (including preferred_username as login_id)
     # retain their native CE compatibility path; do not mistake them for UID.
-    from cloudfile_extensions.identity.legacy_oauth import (
+    from cloudfile_ext.v2.oauth_identity import (
         trusted_uid_mapping, bind_existing_uid)
-    strict_uid = (trusted_uid_mapping(OAUTH_ATTRIBUTE_MAP)
-                  and bool(oauth_user_info.get('login_id')))
+    # An optional claim in a trusted UID mapping is still mandatory for
+    # identity selection: its absence must not enter CE's generic signup path.
+    strict_uid = trusted_uid_mapping(OAUTH_ATTRIBUTE_MAP)
+    if getattr(settings, 'CF_DIRECTORY_URL', '') and not strict_uid:
+        # Etech Directory deployments cannot reuse a legacy employee-number
+        # mapping: that would overwrite the UID after a successful login.
+        logger.warning('Directory login requires userId mapped to login_id')
+        return render_error(request, _('Error, please contact administrator.'))
     if strict_uid:
         if (not isinstance(user_info_json.get('sub'), str) or not user_info_json.get('sub')
                 or oauth_user_info.get('uid') != user_info_json['sub']):

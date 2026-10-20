@@ -288,7 +288,12 @@ binding, an inactive account or any check error takes the locked path, which
 behaves as before. Readiness lifetime and revocation timing are unchanged.
 
 Staff identity resolution pre-creates a native CE User/Profile only after a fresh
-active Directory UID proof. It creates no OAuth subject; first OAuth/OIDC login
+active Directory UID proof. New Etech users require the trusted Directory account
+(`employee_no`, currently Etech `account_`) and use `account@auth.local`. Numeric
+and named accounts, including `admin`, are ordinary non-staff users; `cfadmin`,
+missing/invalid accounts and native name collisions reject creation. Existing
+UID owners retain their exact historical native names, independent of contact
+email. It creates no OAuth subject; first OAuth/OIDC login
 reuses that UID's native account. Existing UID collation aliases and inactive
 accounts reject. Local CE users without a Profile UID use a disjoint native
 principal and do not inherit external group claims.

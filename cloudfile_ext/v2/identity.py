@@ -1,7 +1,7 @@
 """Stable UID binding using CE's native account/Profile/OAuth facts only.
 
-Ported invariants: exact provider/sub/UID matching, no email/name merging,
-and opaque native accounts. No legacy provisioning worker is imported.
+Ported invariants: exact provider/sub/UID matching and no email/name merging.
+Trusted account naming affects creation only. No legacy worker is imported.
 """
 from contextlib import ExitStack
 import hashlib
@@ -10,6 +10,7 @@ from uuid import uuid4
 
 from .errors import IdentityConflict, IdentityUnavailable
 from .schema import database_lock, identifier
+from cloudfile_ext.v2.account_names import account_username
 
 
 def text(value, maximum=225):
@@ -32,6 +33,8 @@ class NativeIdentity:
         self.create_account = create_account
 
     def active(self, username, uid, *, locked=False):
+        if username.lower() in ('cfadmin@auth.local', 'cfadmin@etech.com'):
+            raise IdentityConflict('reserved native account')
         suffix = ' FOR UPDATE' if locked else ''
         with self.connection.cursor() as cursor:
             cursor.execute('SELECT user,login_id FROM ' + self.profiles + ' WHERE user=%s OR login_id=%s' + suffix, (username, uid))
@@ -41,7 +44,7 @@ class NativeIdentity:
             if cursor.fetchall() != ((username, 1),):
                 raise IdentityUnavailable('native account inactive')
 
-    def prepare(self, *, uid, login_name):
+    def prepare(self, *, uid, login_name, account=None):
         """Pre-create only a Directory-verified UID; never invent an OAuth sub."""
         uid, login_name = text(uid), text(login_name, 200)
         with database_lock(self.connection, 'identity:uid:' + uid):
@@ -56,22 +59,34 @@ class NativeIdentity:
                 return username
             if self.create_account is None:
                 raise IdentityUnavailable('native account creation unavailable')
-            username = uuid4().hex + '@auth.local'
-            self.create_account(username)
-            self.connection.begin()
             try:
+                username = account_username(account) if account is not None else uuid4().hex + '@auth.local'
+            except ValueError:
+                raise IdentityConflict('invalid Directory account') from None
+            # Serialize case variants too: CE account lookup is case insensitive.
+            # Never adopt an unbound native account after a failed RPC/SQL attempt.
+            with database_lock(self.connection, 'identity:account:' + username.lower()):
                 with self.connection.cursor() as cursor:
-                    cursor.execute('SELECT email,is_active FROM ' + self.accounts + ' WHERE email=%s FOR UPDATE', (username,))
-                    if cursor.fetchall() != ((username, 1),):
-                        raise IdentityUnavailable('native account creation failed')
-                    # Contact mail and employee number are display attributes;
-                    # only the exact immutable UID owns this native account.
-                    cursor.execute('INSERT INTO ' + self.profiles +
-                        '(user,login_id,nickname,intro,lang_code,contact_email,is_manually_set_contact_email,institution,list_in_address_book) '
-                        "VALUES(%s,%s,%s,'',NULL,NULL,0,'',0)", (username, uid, login_name[:64]))
-                self.connection.commit()
-            finally:
-                self.connection.rollback()
+                    cursor.execute('SELECT user,login_id FROM ' + self.profiles + ' WHERE user=%s', (username,))
+                    if cursor.fetchall():
+                        raise IdentityConflict('native account name already bound')
+                    cursor.execute('SELECT email FROM ' + self.accounts + ' WHERE email=%s', (username,))
+                    if cursor.fetchall():
+                        raise IdentityConflict('native account name already exists')
+                self.create_account(username)
+                self.connection.begin()
+                try:
+                    with self.connection.cursor() as cursor:
+                        cursor.execute('SELECT email,is_active FROM ' + self.accounts + ' WHERE email=%s FOR UPDATE', (username,))
+                        if cursor.fetchall() != ((username, 1),):
+                            raise IdentityUnavailable('native account creation failed')
+                        # UID is the binding; the account only names a new user.
+                        cursor.execute('INSERT INTO ' + self.profiles +
+                            '(user,login_id,nickname,intro,lang_code,contact_email,is_manually_set_contact_email,institution,list_in_address_book) '
+                            "VALUES(%s,%s,%s,'',NULL,NULL,0,'',0)", (username, uid, login_name[:64]))
+                    self.connection.commit()
+                finally:
+                    self.connection.rollback()
             self.active(username, uid)
             return username
 

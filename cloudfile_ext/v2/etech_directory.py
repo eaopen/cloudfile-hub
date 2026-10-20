@@ -15,6 +15,7 @@ from django.conf import settings
 
 from .errors import IdentityConflict, IdentityUnavailable, SubjectNotFound
 from .identity import NativeIdentity, text
+from cloudfile_ext.v2.account_names import account_username
 from .memberships import GroupCatalog, Memberships, is_ready, readiness_key, validate_subject
 
 
@@ -144,7 +145,14 @@ def prepare_user(uid):
         login, _ = validate_subject(subject, uid)
         if subject['status'] != 'active':
             raise IdentityUnavailable('Directory account disabled')
-        return identity.prepare(uid=uid, login_name=login)
+        # employee_no carries Etech account_, including nonnumeric accounts.
+        # Only the trusted Directory supplies it; request aliases are not proof.
+        account = subject['attributes'].get('employee_no')
+        try:
+            account_username(account)
+        except ValueError:
+            raise IdentityConflict('invalid Directory account') from None
+        return identity.prepare(uid=uid, login_name=login, account=account)
 
 
 def lookup_group(external):
