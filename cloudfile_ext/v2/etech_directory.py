@@ -203,7 +203,9 @@ def lookup_group(external):
         rows = cursor.fetchall()
     if not rows:
         return None
-    if len(rows) != 1 or rows[0][:3] != key or rows[0][4] != 0:
+    if (len(rows) != 1 or rows[0][:3] != key or
+            (key[0] == 'role' and rows[0][4] != 0) or
+            (key[0] == 'org' and (type(rows[0][4]) is not int or rows[0][4] < -1))):
         raise IdentityConflict('native group mapping changed')
     return rows[0][3]
 
