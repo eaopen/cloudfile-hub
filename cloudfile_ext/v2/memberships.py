@@ -108,12 +108,58 @@ class Memberships:
                 owned = set(mappings.values())
                 if len(owned) != len(rows) or not desired <= mappings.keys():
                     raise IdentityUnavailable('required native group mapping missing')
-                # Flat native groups avoid implicit CE hierarchy grants. The
-                # trusted Directory supplies effective ancestors explicitly.
-                for group in sorted(owned):
-                    cursor.execute('SELECT group_id,parent_group_id FROM ' + self.groups + ' WHERE group_id=%s FOR UPDATE', (group,))
-                    if cursor.fetchall() != ((group, 0),):
-                        raise IdentityUnavailable('native mapped group changed')
+                # Org hierarchies use CE's native Group/GroupStructure. Roles
+                # remain flat, and every parent must itself be a mapped org.
+                # Batch lookups avoid one SQL round-trip per 1,143+ groups.
+                group_types = {row[3]: row[0] for row in rows}
+                parents = {}
+                for start in range(0, len(owned), 400):
+                    batch = sorted(owned)[start:start + 400]
+                    markers = ','.join(['%s'] * len(batch))
+                    cursor.execute('SELECT group_id,parent_group_id FROM ' + self.groups +
+                                   ' WHERE group_id IN (' + markers + ') FOR UPDATE', tuple(batch))
+                    found = cursor.fetchall()
+                    if len(found) != len(batch):
+                        raise IdentityUnavailable('mapped native group missing')
+                    for group, parent in found:
+                        if group in parents or type(parent) is not int:
+                            raise IdentityUnavailable('ambiguous group hierarchy')
+                        parents[group] = parent
+                if set(parents) != owned:
+                    raise IdentityUnavailable('incomplete native hierarchy')
+                for group, parent in parents.items():
+                    kind = group_types[group]
+                    if (kind == 'role' and parent != 0 or
+                            kind == 'org' and parent not in (0, -1) and
+                            (parent not in parents or group_types[parent] != 'org')):
+                        raise IdentityUnavailable('native organization parent is not owned by Etech')
+                # Confirm the exact CE ancestor paths, rejecting cycles and
+                # structural drift before publishing this user's memberships.
+                def native_path(group, visiting):
+                    if group in visiting:
+                        raise IdentityUnavailable('native group parent cycle')
+                    parent = parents[group]
+                    if parent == 0:
+                        return None
+                    if parent == -1:
+                        return str(group)
+                    root = native_path(parent, visiting | {group})
+                    if root is None:
+                        raise IdentityUnavailable('parent has no CE hierarchy')
+                    return root + ', ' + str(group)
+                expected_paths = {gid: native_path(gid, set()) for gid in parents}
+                paths = {}
+                for start in range(0, len(owned), 400):
+                    batch = sorted(owned)[start:start + 400]
+                    markers = ','.join(['%s'] * len(batch))
+                    cursor.execute('SELECT group_id,path FROM ' + self.groups.replace('.`Group`', '.GroupStructure') +
+                                   ' WHERE group_id IN (' + markers + ') FOR UPDATE', tuple(batch))
+                    for gid, path in cursor.fetchall():
+                        if gid in paths:
+                            raise IdentityUnavailable('duplicate native hierarchy path')
+                        paths[gid] = path
+                if paths != {gid: path for gid, path in expected_paths.items() if path is not None}:
+                    raise IdentityUnavailable('native organization structure is inconsistent')
                 cursor.execute('SELECT group_id,is_staff FROM ' + self.members + ' WHERE user_name=%s ORDER BY group_id FOR UPDATE', (username,))
                 members = cursor.fetchall()
                 if any(group in owned and staff != 0 for group, staff in members):
