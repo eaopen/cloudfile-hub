@@ -39,14 +39,10 @@ from functools import lru_cache
 def checkout_available():
     from seahub.utils.db_api import SeafileDB
     schema = SeafileDB().db_name
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT COUNT(*) FROM information_schema.TABLES "
-            "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='cf_edit_guard'", (schema,))
-        rows = cursor.fetchone()
-    if not rows or rows[0] not in (0, 1):
-        raise RuntimeError("Checkout schema availability cannot be proven")
-    return rows[0] == 1
+    from .checkout_schema import path_checkout_available
+    # Qualify the optional contract by columns/indexes, not by a colliding
+    # table name. Native read/upload must not acquire a Checkout session.
+    return path_checkout_available(connection, schema)
 
 
 def issue_ticket(*, username, uid, repo_id, path, mode, file_id, now, secret):
