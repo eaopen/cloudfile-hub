@@ -96,10 +96,33 @@ class Directory:
                 key = (kind, namespace, external)
                 if key in result:
                     raise ValueError()
-                result[key] = text(item['name'], 255)
-            return result
-        except (KeyError, TypeError, ValueError, IdentityConflict):
-            raise IdentityUnavailable('invalid trusted Directory entities') from None
+                parent = item.get('parent_external_id')
+                if parent is not None:
+                    parent = text(parent)
+                if kind != 'org' and parent is not None:
+                    raise ValueError()
+                result[key] = dict(name=text(item['name'], 255),
+                                   parent=None if parent is None else ('org', 'directory', parent))
+            # A complete, acyclic parent forest is required BEFORE native writes.
+            # Do not silently turn a missing/damaged parent into a root group.
+            ordered, visiting, visited = [], set(), set()
+            def visit(key):
+                if key in visiting or key not in result:
+                    raise ValueError()
+                if key in visited:
+                    return
+                visiting.add(key)
+                parent = result[key]['parent']
+                if parent is not None:
+                    visit(parent)
+                visiting.remove(key)
+                visited.add(key)
+                ordered.append(key)
+            for key in sorted(result):
+                visit(key)
+            return {key: result[key] for key in ordered}
+        except (KeyError, TypeError, ValueError, RecursionError, IdentityConflict):
+            raise IdentityUnavailable('invalid trusted Directory entities or parent graph') from None
 
 
 @contextmanager
