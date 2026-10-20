@@ -8,6 +8,59 @@ TABLES = frozenset({'cf_library_storage', 'cf_dir_acl', 'cf_sso_group_map'})
 EDIT_TABLES = frozenset({'cf_edit_guard'})
 
 
+# Structural signatures for a *read-only* preflight. The canonical DDL
+# remains in cloudfile-server/scripts/sql/mysql/cloudfile-v2[-edit].sql; the
+# full verification below compares CREATE TABLE rather than approximating it.
+# This bounded inventory only classifies absent/current/legacy/mixed installs.
+V2_FIELDS = {
+    'cf_library_storage': {'repo_key': ('varchar', 80), 'repo_id': ('char', 36),
+                           'state': ('varchar', 8)},
+    'cf_sso_group_map': {'provider': ('varchar', 32), 'subject_type': ('varchar', 4),
+                         'namespace': ('varchar', 128), 'external_id': ('varchar', 225),
+                         'group_id': ('bigint', None)},
+    'cf_dir_acl': {'repo_id': ('char', 36), 'path_hash': ('binary', 32),
+                   'path': ('varchar', 4096), 'subject_type': ('varchar', 4),
+                   'provider': ('varchar', 32), 'namespace': ('varchar', 128),
+                   'external_id': ('varchar', 225), 'permission': ('varchar', 9),
+                   'inherit': ('tinyint', None), 'share_mode': ('tinyint', None),
+                   'revision': ('char', 36)},
+    'cf_edit_guard': {'repo_id': ('char', 36), 'path_hash': ('binary', 32),
+                      'path': ('varchar', 4096), 'guard_id': ('char', 36),
+                      'generation': ('bigint', None), 'owner_uid': ('varchar', 225),
+                      'owner_native_user': ('varchar', 255),
+                      'terminal_type': ('varchar', 16),
+                      'terminal_name': ('varchar', 128),
+                      'checkout_ip': ('varchar', 45),
+                      'proof_digest': ('char', 64),
+                      'base_file_id': ('char', 40),
+                      'lease_expires_at': ('datetime', None),
+                      'created_at': ('datetime', None),
+                      'updated_at': ('datetime', None)},
+}
+V2_INDEXES = {
+    'cf_library_storage': {'PRIMARY': ('repo_key',)},
+    'cf_sso_group_map': {'PRIMARY': ('provider', 'subject_type', 'namespace', 'external_id')},
+    'cf_dir_acl': {'PRIMARY': ('repo_id', 'path_hash', 'subject_type', 'provider',
+                               'namespace', 'external_id')},
+    'cf_edit_guard': {'PRIMARY': ('repo_id', 'path_hash'),
+                      'cf_edit_guard_active': ('repo_id', 'guard_id')},
+}
+
+
+def classify_v2_table(name, columns, indexes):
+    expected = V2_FIELDS[name]
+    if not columns:
+        return 'missing'
+    if (set(columns) == set(expected)
+            and all(columns[key] == signature for key, signature in expected.items())
+            and all(indexes.get(key) == names for key, names in V2_INDEXES[name].items())):
+        return 'current'
+    if ({'resource_uid', 'lifecycle_ref', 'lease_until', 'subject_hash'} & set(columns)
+            or (name == 'cf_sso_group_map' and 'id' in columns)):
+        return 'legacy'
+    return 'incompatible'
+
+
 class SchemaError(RuntimeError):
     pass
 
@@ -69,6 +122,36 @@ class FreshSchema:
     def _tables(self, cursor):
         cursor.execute('SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE()')
         return {row[0] for row in cursor.fetchall() if row[0].startswith('cf_')}
+
+    def inspect(self):
+        """Read-only metadata inventory: no DDL, no row data, no migration."""
+        with self.connection.cursor() as cursor:
+            existing = self._tables(cursor)
+            rows = {}
+            for name in sorted(V2_FIELDS):
+                if name not in existing:
+                    rows[name] = 'missing'
+                    continue
+                cursor.execute('SELECT COLUMN_NAME,DATA_TYPE,CHARACTER_MAXIMUM_LENGTH '
+                               'FROM information_schema.COLUMNS WHERE table_schema=DATABASE() '
+                               'AND table_name=%s', (name,))
+                columns = {field: (kind.lower(), length)
+                           for field, kind, length in cursor.fetchall()}
+                cursor.execute('SELECT INDEX_NAME,COLUMN_NAME '
+                               'FROM information_schema.STATISTICS '
+                               'WHERE table_schema=DATABASE() AND table_name=%s '
+                               'ORDER BY INDEX_NAME,SEQ_IN_INDEX', (name,))
+                indexes = {}
+                for index, field in cursor.fetchall():
+                    indexes.setdefault(index, []).append(field)
+                rows[name] = classify_v2_table(
+                    name, columns, {index: tuple(fields) for index, fields in indexes.items()})
+        extras = sorted(existing - set(V2_FIELDS))
+        current = (all(rows[name] == 'current' for name in TABLES)
+                   and rows['cf_edit_guard'] in ('missing', 'current')
+                   and not extras)
+        return {'status': 'current' if current else 'migration_review_required',
+                'tables': rows, 'unexpected_cf_tables': extras}
 
     @staticmethod
     def _definition(cursor, name):
