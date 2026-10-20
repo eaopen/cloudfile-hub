@@ -30,6 +30,10 @@ class Directory:
             raise IdentityUnavailable('trusted Directory connection required')
 
     def get(self, path):
+        # Full snapshot is explicitly bounded separately from routine per-user
+        # requests (the Etech org+role membership export may exceed 4 MiB).
+        full = path == '/groups?view=snapshot'
+        limit = 32 * 1024 * 1024 if full else 4 * 1024 * 1024
         now = int(time.time())
         token = jwt.encode(dict(iss=getattr(settings, 'CF_DIRECTORY_ISSUER', 'cloudfile-sso'),
             aud=getattr(settings, 'CF_DIRECTORY_AUDIENCE', 'eap-directory'), sub='cloudfile',
@@ -39,7 +43,7 @@ class Directory:
             # The destination and credential are server configuration only;
             # redirects must never forward the service token to another host.
             with requests.get(self.base + path, headers={'Authorization': 'Bearer '+token},
-                              timeout=5, allow_redirects=False, stream=True) as reply:
+                              timeout=(5, 25 if full else 5), allow_redirects=False, stream=True) as reply:
                 if reply.status_code == 404:
                     # The directory answers 404 SUBJECT_NOT_FOUND for an account
                     # that has no business subject (e.g. the system account whose
@@ -63,7 +67,7 @@ class Directory:
                 raw = bytearray()
                 for chunk in reply.iter_content(65536):
                     raw.extend(chunk)
-                    if len(raw) > 4 * 1024 * 1024:
+                    if len(raw) > limit:
                         raise ValueError()
                 value = json.loads(raw)
                 if not isinstance(value, dict):
@@ -78,6 +82,10 @@ class Directory:
         value = self.get('/users/' + quote(text(uid), safe='') + '/context')
         validate_subject(value, uid)
         return value
+
+    def snapshot(self):
+        """Full trusted organization/role member export; not used on login."""
+        return self.get('/groups?view=snapshot')
 
     def entities(self):
         value = self.get('/groups?view=entities')
@@ -217,7 +225,7 @@ def prepare_group(external):
         entities = directory.entities()
         if key not in entities:
             raise IdentityUnavailable('Directory entity unavailable')
-        return catalog.ensure(*key, entities[key])
+        return catalog.ensure(*key, entities[key]['name'])
 
 
 def redis_location():
@@ -280,36 +288,19 @@ def ensure_subject(uid, username):
                 if not desired <= entities.keys():
                     raise IdentityUnavailable('Directory membership entity missing')
                 for key in sorted(desired):
-                    catalog.ensure(*key, entities[key])
+                    catalog.ensure(*key, entities[key]['name'])
             return subject
         memberships.fetch = fetch
         memberships.ensure(uid, username)
 
 
 def sync_entity_catalog():
-    """PowerJob/manual entity reconciliation, without any user/member writes.
+    """Idempotent full Etech catalog + membership reconciliation.
 
-    Etech remains the only organization truth. Preserve deleted/retired CE
-    groups until a separate reviewed cleanup: they may own libraries.
+    Retains the existing PowerJob endpoint, group IDs and all RepoGroup shares.
+    No retired SSO worker or alternate schema is enabled.
     """
-    from seaserv import ccnet_api
+    from .full_directory_sync import synchronize
+    from seahub.utils.db_api import SeafileDB
     with runtime() as (directory, identity, catalog, memberships):
-        entities = directory.entities()  # Already validated /groups?view=entities.
-        if not entities:
-            raise IdentityUnavailable('empty entity catalog cannot be treated as a successful sync')
-        renamed = unchanged = 0
-        for key, name in sorted(entities.items()):
-            group_id = catalog.ensure(*key, name)
-            group = ccnet_api.get_group(group_id)
-            if group is None:
-                raise IdentityUnavailable('mapped native group missing')
-            if group.group_name != name:
-                ccnet_api.set_group_name(group_id, name)
-                actual = ccnet_api.get_group(group_id)
-                if actual is None or actual.group_name != name:
-                    raise IdentityUnavailable('native group rename not confirmed')
-                renamed += 1
-            else:
-                unchanged += 1
-        return dict(status='OK', entities=len(entities), renamed=renamed,
-                    unchanged=unchanged, membership_writes=0)
+        return synchronize(directory, catalog, memberships.redis, SeafileDB().db_name)
