@@ -43,9 +43,13 @@ if getattr(settings, "CLOUDFILE_ADMIN_POLICY_ENABLED", not getattr(settings, "CL
     if getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False):
         raise ImproperlyConfigured("Administrator and session policy route ownership must be distinct")
     from .authorization.admin_http import AdministratorPolicyView
-    from .authorization.native_http import NativeEffectiveView, NativeRepoView, NativeDirectoryAccessView
+    from .authorization.native_http import NativeEffectiveView, NativeEffectiveContractView, NativeRepoView, NativeDirectoryAccessView
     from .authorization.native_file_http import NativeFileView
     urlpatterns.extend([
+        # EAP's established path must use the selected native authority too;
+        # the independent V2 ACL adapter cannot authenticate this deployment.
+        re_path(r"^api/v2.1/cloudfile/authorization/v1/effective-permission/$",
+            NativeEffectiveContractView.as_view(), name="native-effective-contract"),
         re_path(r"^api2/repos/(?P<repo_id>[-0-9a-f]{36})/file/$",
             NativeFileView.as_view(), name="native-policy-file"),
         re_path(r"^api/v2.1/repos/(?P<repo_id>[-0-9a-f]{36})/$",

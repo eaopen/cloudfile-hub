@@ -22,8 +22,42 @@ class NativeEffectiveView(APIView):
             if set(request.GET) != {'repo_id', 'path', 'kind'} or any(
                     len(request.GET.getlist(k)) != 1 for k in request.GET):
                 raise invalid('Exact resource query required')
-            return current.inspect_policy(resource_ref(dict(request.GET.items())))
+            reference = resource_ref(dict(request.GET.items()))
+            return self.present(current, reference, current.inspect_policy(reference))
         return response(request, inspect)
+
+    def present(self, current, reference, diagnostic):
+        return diagnostic
+
+
+class NativeEffectiveContractView(NativeEffectiveView):
+    """EAP's existing read contract, backed only by the selected native C policy."""
+
+    def present(self, current, reference, diagnostic):
+        permission = diagnostic.get('effective_permission')
+        if permission not in ('r', 'rw', 'none', 'invisible'):
+            raise ContractError('POLICY_UNAVAILABLE', 'Invalid native permission', 503)
+        root = None
+        if permission in ('r', 'rw'):
+            if current.native_permission in ('r', 'rw'):
+                # Native library eligibility already supplies this boundary.
+                # A permission diagnostic must not require directory-birth
+                # metadata (imported roots can legitimately be pending).
+                root = '/'
+            elif reference['kind'] == 'dir':
+                from .directory_access import DirectoryAccessService
+                # A share-only subject needs its actual scoped root; never
+                # infer an entire-library grant from a readable child path.
+                location = DirectoryAccessService(current).resolve(dict(reference=reference))
+                permission, root = location['permission'], location['root_path']
+                if permission not in ('r', 'rw'):
+                    raise ContractError('POLICY_UNAVAILABLE', 'Invalid directory permission', 503)
+        readable = permission in ('r', 'rw')
+        # This is a transport translation, not another ACL resolver. Management
+        # grants do not become content rw; unavailable C policy stays an error.
+        return dict(permission=permission if readable else None,
+            read=readable, write=permission == 'rw', visible=readable,
+            qualified_root=root)
 
 
 
