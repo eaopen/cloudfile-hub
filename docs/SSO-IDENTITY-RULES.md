@@ -1,6 +1,6 @@
 # CloudFile SSO 统一用户身份规则
 
-> 当前开发主线为 `dev`（CloudFile V2）。本设计属于 `feat/sso-unified-identity`；先合并 `fix/sso-login-id`，再复核本分支后合并。本文不是部署已验收证明。
+> 当前 V2 开发主线为 `dev`。本方案由 PR #35 唯一交付，选择性吸收 PR #34 的旧 OAuth UID 校验与协议验证；不恢复已退役的 EAP OAuth 桥接。尚未进行真实 DEV 身份及权限验收。
 
 ## 1. 唯一业务身份、认证身份、原生账号
 
@@ -21,8 +21,8 @@ OAuth2/OIDC 的 `provider + sub` 是 **外部认证凭证的标识**，不是业
 ## 2. 支持的登录入口
 
 1. **Etech 认证 / 内部调用**：Etech 的受信目录和服务凭证负责传递 Etech UID；CloudFile 查找已存在且启用的原生账号，或按既有 Etech Directory 预创建流程建号。Etech 门户的自身会话不能直接替代 CloudFile 登录证明。
-2. **旧 OAuth2（包含旧 ssoauth/Authentik 配置）**：保留 `/oauth/login/`、`/oauth/callback/` 及已存在 `OAUTH_PROVIDER`；使用受信 UserInfo 字段映射，将稳定业务 UID 映射到 `login_id`，OAuth 主体映射到 `uid`。严禁在 UID 对不上时按邮箱登录其他账号。
-3. **Etech 专用 OAuth/OIDC 桥接**：保留已有 `CF_SSO_EAP_PROFILE_IDENTITY` 入口及 Directory UID / employee 校验；不删除旧绑定或把工号视为主键。
+2. **旧 OAuth2（含旧 ssoauth/Authentik 配置）**：保留 `/oauth/login/`、`/oauth/callback/` 和现有 Provider。只有管理员将可信 UserInfo `userId` 显式映射为 `login_id` 且该 claim 存在时，才强制从精确 UID 选已有原生账号，并验证 `sub` 与原生绑定；冲突、账号不存在或无效时拒绝登录。未映射可信 `userId` 的通用旧 OAuth 保留原生兼容流程，不将员工号或邮箱误当成 Etech UID。
+3. **Etech 集成**：最新 V2 `dev` 已隔离历史 `cloudfile_ext/sso/eap_oauth.py` 模块，若启用 `CF_SSO_EAP_PROFILE_IDENTITY=true` 则明确拒绝，不恢复旧分支。Etech 采用可信 `userId` 映射的 OAuth、原生 V2 OIDC 与目录接口，不以工号归并账号。
 4. **独立 OIDC（Authentik、ssoauth 或其他合规 IdP）**：`/api/v2.1/cloudfile/extensions/identity/v1/begin/` 和 `callback/` 验证固定 issuer、client audience、签名、nonce、state、PKCE、UserInfo `sub`、可信业务 UID 声明后，基于 UID 选同一原生账号。多个 issuer 的同名 `sub` 互不混用。
 
 `/oidc/login/` 是 Seahub OAuth 入口的 OIDC 适配；也须检查 ID Token，而不能仅以拿到 access token 当作身份验证。
@@ -48,7 +48,7 @@ OAuth2/OIDC 的 `provider + sub` 是 **外部认证凭证的标识**，不是业
 ## 4. 部署接入约束
 
 - Etech / Authentik 映射需由管理员固定并保证业务 UID 不可由最终用户自助更改。
-- 旧 OAuth 的 `OAUTH_ATTRIBUTE_MAP`：可信 `userId` → `login_id`，可信 `sub`（或稳定 OAuth subject）→ `uid`；不要将 `email` 映射到 `login_id`。
+- 旧 OAuth 的 `OAUTH_ATTRIBUTE_MAP`：可信 `userId` → `login_id`，稳定的 `sub` → `uid`。不能把邮箱或 `preferred_username` 假定为 Etech UID；没有映射的旧 OAuth 继续原生兼容。
 - 新 OIDC 使用受信 `user_id_claim`（Etech 通常为 `userId`）与固定 issuer；不得把不同 issuer 的 `sub` 直接互认。
 - 目录未接通时只允许既有明确可信的 UID 映射登录；不通过邮箱、工号或用户输入绕过目录验证。
 - 不增加用户影子表、Feature Flag、一次性多账号迁移任务或 Etech 专用表；复用 `Profile`、`SocialAuthUser` 和已有审计。
@@ -60,4 +60,4 @@ OAuth2/OIDC 的 `provider + sub` 是 **外部认证凭证的标识**，不是业
 
 **DEV 验收（尚未执行）**：同一 Etech UID 分别通过旧 OAuth、ssoauth/Authentik OIDC 和 Etech 入口完成登录；核对 `Profile.login_id`、`Profile.user`、社会绑定和原有资料库/目录授权一致。另核对跨账号冲突、登出、撤销、旧 Agent 文件访问，不能用“登录成功/资料库列表出现”代表读写权限已通过。
 
-合并顺序：先审核并验证 `fix/sso-login-id`，进入 `dev` 后再重新同步本优化分支并做组合联验。Server/Docker 无本次源码变更；发布需单独锁定三仓 SHA，且在用户明确要求的节点才构建和部署。
+交付策略：PR #35 吸收 #34 必需的可信 UID 严格关联、OAuth state 和 `/oidc/login/` nonce/ID Token 检查，作为单一 PR 合并 `dev`；#34 关闭，不单独合入。当前 Docker 默认旧 OAuth 可能仍配置 `preferred_username` 为 `login_id`，不代表已升级为 Etech UID。Server / Docker 没有随本 PR 修改，发布时需另行确认三仓版本；本次不构建镜像、不部署。
