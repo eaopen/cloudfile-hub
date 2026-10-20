@@ -144,6 +144,21 @@ def apply_snapshot(connection, catalog, entities, ids, members, *, native_users_
         connection.begin()
         try:
             with connection.cursor() as cursor:
+                # Group, GroupStructure, GroupUser and ownership mapping must
+                # participate in the same transaction before any hierarchy or
+                # membership changes. No implicit nontransactional fallback.
+                cursor.execute('SELECT DATABASE()')
+                cloud_schema = cursor.fetchone()[0]
+                for table_schema, table_name in (
+                        (schema.strip('`'), 'Group'),
+                        (schema.strip('`'), 'GroupStructure'),
+                        (schema.strip('`'), 'GroupUser'),
+                        (cloud_schema, 'cf_sso_group_map')):
+                    cursor.execute('SELECT ENGINE FROM information_schema.tables '
+                                   'WHERE table_schema=%s AND table_name=%s',
+                                   (table_schema, table_name))
+                    if cursor.fetchall() != (('InnoDB',),):
+                        raise IdentityUnavailable('native directory storage is not transactional')
                 actual = _read_native(cursor, group_table, all_ids)
                 cursor.execute('SELECT group_id,parent_group_id FROM ' + group_table +
                                ' WHERE parent_group_id IN (' + ','.join(['%s'] * len(all_ids)) + ')',
