@@ -35,9 +35,14 @@ def register(registry):
     # to its explicitly enabled administrator control plane.
     from cloudfile_ext.identity import provisioning_enabled
     if provisioning_enabled(settings):
-        from cloudfile_ext.identity_api import AdminExternalIdentityView
+        # Both registrations must reach the same Etech UID authority. Keep
+        # the generic CE extension's provider behavior outside this deployment.
+        if getattr(settings, 'CF_DIRECTORY_URL', ''):
+            from cloudfile_ext.v2.http import IdentityResolve as identity_view
+        else:
+            from cloudfile_ext.identity_api import AdminExternalIdentityView as identity_view
         registry.register_urls([
             path('api/v2.1/admin/cloudfile/sso/identities/resolve/',
-                 AdminExternalIdentityView.as_view(),
+                 identity_view.as_view(),
                  name='cloudfile-admin-external-identity'),
         ])

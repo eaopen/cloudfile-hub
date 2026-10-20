@@ -5,6 +5,7 @@ rows and audit are locally atomic; directory projection/Redis ready are later
 steps, so this result is not a login session or file authorization.
 """
 import json
+from contextlib import ExitStack, nullcontext
 import secrets
 import time
 from datetime import datetime, timezone
@@ -19,6 +20,8 @@ from ..jobs.authority import scope_locks
 from ..schema.runner import SchemaRunner
 from .bindings import IdentityBindings, conflict
 from .sql_bindings import SQLIdentityBindings
+from cloudfile_ext.v2.account_names import account_username
+from cloudfile_ext.v2.schema import database_lock
 
 
 class SQLJITProvisioner:
@@ -74,23 +77,20 @@ class SQLJITProvisioner:
             return existing
         # Coherent primary fetch outside the short SQL authority transaction.
         source = self.directory.fetch(user_id)
+        if source["userId"] != user_id:
+            raise conflict()
         if source["status"] != "active":
             raise ContractError("SUBJECT_DISABLED", "Business subject is disabled", 403)
-        # Employee numbers name new EAP accounts only; login_id remains the UID.
-        # Generic directories without this attribute retain opaque account names.
-        employee = source["attributes"].get("employee_no")
-        if employee is not None:
-            if (not isinstance(employee, str) or not employee or len(employee) > 200
-                    or not all(c.isascii() and (c.isalnum() or c in "._-") for c in employee)
-                    or employee.lower() == "cfadmin"):
-                raise conflict()
-        default_username = employee + "@auth.local" if employee else secrets.token_hex(16) + "@auth.local"
         connection = self.bindings.connection
         scopes = [dict(type="provider", provider=self.bindings.provider, external_id=self.bindings.provider),
                   dict(type="user", provider=self.bindings.provider, external_id=user_id),
                   dict(type="subject", provider=provider, namespace="oidc", external_id=subject)]
         try:
-            with scope_locks(connection, scopes):
+            # Etech preparation and login serialize the same UID, while their
+            # authorization proofs and native creation mechanisms stay separate.
+            uid_lock = (database_lock(connection, 'identity:uid:' + user_id)
+                        if self.bindings.provider == 'etech' else nullcontext())
+            with scope_locks(connection, scopes), uid_lock, ExitStack() as names:
                 if self.state.barrier_active(self.bindings.provider, user_id):
                     raise ContractError("SUBJECT_UNAVAILABLE", "Identity provisioning is fenced", 503)
                 existing = self.bindings.resolve(issuer=self.issuer, subject=subject, user_id=user_id)
@@ -114,7 +114,18 @@ class SQLJITProvisioner:
                                 raise conflict()
                             self.bindings._account(cursor, username, locked=True)
                         else:
-                            username = default_username
+                            # Naming applies only to new users. Existing UID
+                            # owners retain their historical native username.
+                            employee = source["attributes"].get("employee_no")
+                            try:
+                                username = (account_username(employee) if employee is not None
+                                            or self.bindings.provider == 'etech'
+                                            else secrets.token_hex(16) + "@auth.local")
+                            except ValueError:
+                                raise conflict() from None
+                            if self.bindings.provider == 'etech':
+                                names.enter_context(database_lock(connection,
+                                    'identity:account:' + username.lower()))
                             cursor.execute("SELECT user,login_id FROM " + self.bindings.profiles + " WHERE user=%s FOR UPDATE", (username,))
                             if cursor.fetchall():
                                 # A name collision or changed UID requires explicit prebinding.
