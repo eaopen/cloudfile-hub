@@ -15,7 +15,6 @@ from seahub.api2.throttling import UserRateThrottle
 from seahub.repo_tags.models import RepoTags
 from seahub.file_tags.models import FileTags
 from seahub.api2.utils import api_error, to_python_boolean
-from seahub.views import check_folder_permission
 from seaserv import seafile_api
 from cloudfile_ext.v2.acl_runtime import Authority
 from cloudfile_ext.v2.acl_http import require_repo_manage
@@ -83,7 +82,7 @@ class RepoTagsView(APIView):
 
         repo_tags = []
         try:
-                repo_tag_list = RepoTags.objects.get_all_by_repo_id(repo_id)
+            repo_tag_list = RepoTags.objects.get_all_by_repo_id(repo_id)
         except Exception as e:
             logger.error(e)
             error_msg = 'Internal Server Error'
