@@ -104,7 +104,12 @@ class FileHistoryView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if not check_folder_permission(request, repo_id, '/'):
+        # CloudFile: ask about the file's parent directory, not the library root. A
+        # share-only account has no library permission and is qualified on the shared
+        # directory instead, so checking '/' here refuses history for exactly the files
+        # it may read. Same convention as the file detail view (file.py).
+        parent_dir = posixpath.dirname(path) or '/'
+        if not check_folder_permission(request, repo_id, parent_dir):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -195,7 +200,12 @@ class NewFileHistoryView(APIView):
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
         # permission check
-        if not check_folder_permission(request, repo_id, '/'):
+        # CloudFile: ask about the file's parent directory, not the library root. A
+        # share-only account has no library permission and is qualified on the shared
+        # directory instead, so checking '/' here refuses history for exactly the files
+        # it may read. Same convention as the file detail view (file.py).
+        parent_dir = posixpath.dirname(path) or '/'
+        if not check_folder_permission(request, repo_id, parent_dir):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
