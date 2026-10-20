@@ -183,16 +183,14 @@ class EtechOAuthBindingTests(TestCase):
         authenticate.assert_not_called()
 
     def test_directory_config_cannot_enter_employee_claim_compatibility_path(self):
-        from django.test import override_settings
-        with override_settings(CF_DIRECTORY_URL='https://directory.test'):
+        with patch.object(views.settings, 'CF_DIRECTORY_URL', 'https://directory.test', create=True):
             response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', generic=True)
         self.assertEqual(response, 'binding-error')
         authenticate.assert_not_called()
         bind.assert_not_called()
 
     def test_generic_ce_oauth_without_directory_keeps_existing_provider_resolution(self):
-        from django.test import override_settings
-        with override_settings(CF_DIRECTORY_URL=''), \
+        with patch.object(views.settings, 'CF_DIRECTORY_URL', '', create=True), \
                 patch.object(views.SocialAuthUser.objects, 'get_by_provider_and_uid', return_value=SimpleNamespace(username='existing@auth.local')):
             response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', generic=True)
         self.assertEqual(response.status_code, 302)
@@ -200,8 +198,7 @@ class EtechOAuthBindingTests(TestCase):
         bind.assert_not_called()
 
     def test_signed_oidc_identity_uses_v2_jit_and_oauth_remains_reuse_only(self):
-        from django.test import override_settings
-        with override_settings(CF_DIRECTORY_URL='https://directory.test'), \
+        with patch.object(views.settings, 'CF_DIRECTORY_URL', 'https://directory.test', create=True), \
                 patch('cloudfile_ext.v2.etech_directory.provision_oidc_user', return_value='existing@auth.local') as provision, \
                 patch('cloudfile_ext.v2.etech_directory.ensure_subject'):
             response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True)
@@ -210,8 +207,7 @@ class EtechOAuthBindingTests(TestCase):
         bind.assert_not_called()
 
     def test_missing_signed_business_uid_cannot_provision_even_with_userinfo_uid(self):
-        from django.test import override_settings
-        with override_settings(CF_DIRECTORY_URL='https://directory.test'), \
+        with patch.object(views.settings, 'CF_DIRECTORY_URL', 'https://directory.test', create=True), \
                 patch('cloudfile_ext.v2.etech_directory.provision_oidc_user') as provision:
             response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True, id_uid=None)
         self.assertEqual(response, 'binding-error')
