@@ -270,7 +270,8 @@ def synchronize(directory, catalog, cache, database):
                 raise IdentityUnavailable('native group name update failed')
             renamed += 1
     all_uids = sorted({uid for group in members.values() for uid in group})
-    bound = native_users(catalog.connection, database, all_uids)
+    from django.conf import settings
+    bound = native_users(catalog.connection, settings.DATABASES['default']['NAME'], all_uids)
     result = apply_snapshot(catalog.connection, catalog, entities, ids, members,
                             native_users_by_uid=bound, cache=cache, database=database)
     return dict(result, entities=len(entities), renamed=renamed)
