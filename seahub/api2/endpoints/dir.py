@@ -5,13 +5,9 @@ import json
 import logging
 import posixpath
 
-from django.conf import settings
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
-from cloudfile_extensions.authorization.browsing import web_list
-from cloudfile_ext.directory_page import (
-    read_directory_page, DirectoryPageError, DirectoryRevisionChanged)
 from rest_framework.views import APIView
 from rest_framework import status
 from urllib.parse import quote
@@ -44,7 +40,7 @@ logger = logging.getLogger(__name__)
 
 
 def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
-        with_thumbnail, thumbnail_size, offset=-1, page_size=None, dir_id=None):
+        with_thumbnail, thumbnail_size):
 
     repo_id = repo_obj.id
     dir_info_list = []
@@ -56,29 +52,13 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
         repo_permission = PERMISSION_READ
 
     # get dirent(folder and file) list
-    parent_dir_id = dir_id or seafile_api.get_dir_id_by_path(repo_id, parent_dir)
-    page = None
-    if page_size is not None:
-        # Server filters after scanning. Only its raw cursor can survive a
-        # short/empty authorized window, so do not probe with page_size + 1.
-        page = read_directory_page(seafile_api, repo_id, parent_dir,
-                                   parent_dir_id, username, offset, page_size)
-        dir_file_list = page.items
-    else:
-        # Preserve the unlimited objlist API for existing non-paged callers.
-        dir_file_list = seafile_api.list_dir_with_perm(
-            repo_id, parent_dir, parent_dir_id, username, offset, -1)
+    parent_dir_id = seafile_api.get_dir_id_by_path(repo_id, parent_dir)
+    dir_file_list = seafile_api.list_dir_with_perm(repo_id,
+            parent_dir, parent_dir_id, username, -1, -1)
 
     try:
         starred_items = UserStarredFiles.objects.filter(email=username,
-                repo_id=repo_id, org_id=-1)
-        if page_size is not None:
-            # A page must not fetch every star in a large library.
-            paths = [posixpath.join(parent_dir, entry.obj_name).rstrip('/')
-                     for entry in dir_file_list]
-            starred_items = starred_items.filter(path__in=paths + [path + '/' for path in paths])
-        else:
-            starred_items = starred_items.filter(path__startswith=parent_dir)
+                repo_id=repo_id, path__startswith=parent_dir, org_id=-1)
         starred_item_path_list = [f.path.rstrip('/') for f in starred_items]
     except Exception as e:
         logger.error(e)
@@ -110,7 +90,6 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
             # get star info
             dir_info['starred'] = False
             dir_path = posixpath.join(parent_dir, dirent.obj_name)
-            # Shared/changed content ids must not star unrelated directories.
             if dir_path.rstrip('/') in starred_item_path_list:
                 dir_info['starred'] = True
 
@@ -119,28 +98,11 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
 
         file_list = [dirent for dirent in dir_file_list if not stat.S_ISDIR(dirent.mode)]
 
-        cloudfile_locks = {}
-        if not is_pro_version():
-            try:
-                from cloudfile_ext.features import is_enabled as cf_feature_enabled
-                if cf_feature_enabled('CF_ENABLE_FILE_LOCK'):
-                    from cloudfile_ext.file_actions.service import lock_status_map
-                    cloudfile_locks = lock_status_map(
-                        repo_id,
-                        [posixpath.join(parent_dir, item.obj_name) for item in file_list],
-                        username)
-            except Exception as e:
-                # Listing stays available when the optional lock provider is
-                # down; write paths still fail closed in seafile-server.
-                logger.error(e)
-
         # Use dict to reduce memcache fetch cost in large for-loop.
         nickname_dict = {}
         contact_email_dict = {}
         modifier_set = {x.modifier for x in file_list}
         lock_owner_set = {x.lock_owner for x in file_list}
-        lock_owner_set.update(
-            item['owner'] for item in cloudfile_locks.values() if item.get('owner'))
         for e in modifier_set | lock_owner_set:
             if e not in nickname_dict:
                 nickname_dict[e] = email2nickname(e)
@@ -148,8 +110,7 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
                 contact_email_dict[e] = email2contact_email(e)
 
         try:
-            files_tags_in_dir = get_files_tags_in_dir(repo_id, parent_dir,
-                    filenames=[entry.obj_name for entry in file_list] if page_size is not None else None)
+            files_tags_in_dir = get_files_tags_in_dir(repo_id, parent_dir)
         except Exception as e:
             logger.error(e)
             files_tags_in_dir = {}
@@ -189,19 +150,9 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
                     file_info["locked_by_me"] = True
                 else:
                     file_info["locked_by_me"] = False
-            elif file_path in cloudfile_locks:
-                lock_info = cloudfile_locks[file_path]
-                lock_owner_email = lock_info['owner']
-                file_info['is_locked'] = True
-                file_info['is_freezed'] = False
-                file_info['lock_owner'] = lock_owner_email
-                file_info['lock_owner_name'] = nickname_dict.get(lock_owner_email, '')
-                file_info['lock_owner_contact_email'] = contact_email_dict.get(lock_owner_email, '')
-                file_info['locked_by_me'] = lock_info['locked_by_me']
 
             # get star info
             file_info['starred'] = False
-            # The exact path relationship remains valid after content edits.
             if file_path.rstrip('/') in starred_item_path_list:
                 file_info['starred'] = True
 
@@ -241,7 +192,7 @@ def get_dir_file_info_list(username, request_type, repo_obj, parent_dir,
     dir_info_list.sort(key=lambda x: x['name'].lower())
     file_info_list.sort(key=lambda x: x['name'].lower())
 
-    return dir_info_list, file_info_list, page
+    return dir_info_list, file_info_list
 
 
 class DirView(APIView):
@@ -267,7 +218,6 @@ class DirView(APIView):
 
         return dir_info
 
-    @web_list('directory')
     def get(self, request, repo_id, format=None):
         """ Get sub dirent list info.
 
@@ -275,8 +225,8 @@ class DirView(APIView):
         1. user with either 'r' or 'rw' permission.
         """
 
-        # CloudFile V2: explicit start/limit pages through the V2 authority;
-        # unpaged requests keep the CE14 response unchanged.
+        # CloudFile V2: paginated listing uses the V2 Authority directly.
+        # Unpaged clients keep the original CE14 listing semantics.
         if 'start' in request.GET or 'limit' in request.GET:
             from cloudfile_ext.v2.directory_page import directory_page
             return directory_page(request, repo_id)
@@ -312,26 +262,6 @@ class DirView(APIView):
 
         with_parents = to_python_boolean(with_parents)
 
-        # The native directory API already supports offset/limit. Keep the
-        # legacy unlimited response when neither parameter is supplied.
-        start_arg = request.GET.get('start')
-        limit_arg = request.GET.get('limit')
-        paged = start_arg is not None or limit_arg is not None
-        start = 0
-        if paged:
-            # Tree callers use the 200 default; single-level callers may ask
-            # for up to 500 without changing the default request size.
-            page_max = max(1, min(500, int(getattr(settings, 'CLOUDFILE_DIRECTORY_PAGE_MAX_ITEMS', 500))))
-            page_default = max(1, min(page_max, int(getattr(settings, 'CLOUDFILE_DIRECTORY_PAGE_SIZE', 200))))
-            try:
-                start = int(start_arg or '0')
-                limit = int(limit_arg or str(page_default))
-            except ValueError:
-                return api_error(status.HTTP_400_BAD_REQUEST, 'start/limit invalid.')
-            if (start < 0 or start > 2147483647 - page_max - 1 or
-                    limit < 1 or limit > page_max or recursive != '0' or with_parents):
-                return api_error(status.HTTP_400_BAD_REQUEST, 'start/limit invalid.')
-
         # resource check
         repo = seafile_api.get_repo(repo_id)
         if not repo:
@@ -345,15 +275,13 @@ class DirView(APIView):
         if not dir_id:
             error_msg = 'Folder %s not found.' % parent_dir
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
+
         # permission check
         permission = check_folder_permission(request, repo_id, parent_dir)
 
         if not permission:
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-        if paged and request.GET.get('if_dir_id') and request.GET['if_dir_id'] != dir_id:
-            # Offset pages must not silently mix different directory versions.
-            return api_error(status.HTTP_409_CONFLICT, 'Folder changed; restart paging.')
 
         # get dir/file list recursively
         username = request.user.username
@@ -407,19 +335,11 @@ class DirView(APIView):
         try:
             for parent_dir in parent_dir_list:
                 # get dir file info list
-                dir_info_list, file_info_list, page_state = get_dir_file_info_list(username,
-                        request_type, repo, parent_dir, with_thumbnail, thumbnail_size,
-                        start if paged else -1, limit if paged else None,
-                        dir_id if paged else None)
+                dir_info_list, file_info_list = get_dir_file_info_list(username,
+                        request_type, repo, parent_dir, with_thumbnail, thumbnail_size)
                 all_dir_info_list.extend(dir_info_list)
                 all_file_info_list.extend(file_info_list)
                 current_dir_info_list = dir_info_list  # Save last iteration for metadata
-        except DirectoryRevisionChanged:
-            # Also catches a change between Hub's precheck and the native RPC.
-            return api_error(status.HTTP_409_CONFLICT, 'Folder changed; restart paging.')
-        except DirectoryPageError:
-            # An old server or malformed envelope must not silently truncate.
-            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Directory pagination unavailable.')
         except Exception as e:
             logger.error(e)
             error_msg = 'Internal Server Error'
@@ -428,14 +348,6 @@ class DirView(APIView):
         response_dict = {}
         response_dict["user_perm"] = permission
         response_dict["dir_id"] = dir_id
-        if paged:
-            # Mapping preserves the existing HTTP fields; later authorization
-            # and type filtering may remove items without changing this state.
-            response_dict['dir_id'] = page_state.dir_revision
-            response_dict['has_more'] = not page_state.scan_exhausted
-            response_dict['next_start'] = page_state.next_scan_position
-            response_dict['scanned_count'] = page_state.scanned_count
-            response_dict['scan_exhausted'] = page_state.scan_exhausted
 
         # Check if metadata is enabled for this repo
         repo_metadata = RepoMetadata.objects.filter(repo_id=repo_id).first()
@@ -729,10 +641,6 @@ class DirView(APIView):
                                  json.dumps([dir_name]), username)
         except SearpcError as e:
             logger.error(e)
-            from cloudfile_ext.file_actions.service import searpc_lock_status
-            locked_status = searpc_lock_status(e)
-            if locked_status is not None:
-                return api_error(locked_status, str(e))
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
