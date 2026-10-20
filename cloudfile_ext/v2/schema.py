@@ -38,12 +38,18 @@ V2_FIELDS = {
                       'updated_at': ('datetime', None)},
 }
 V2_INDEXES = {
-    'cf_library_storage': {'PRIMARY': ('repo_key',)},
-    'cf_sso_group_map': {'PRIMARY': ('provider', 'subject_type', 'namespace', 'external_id')},
+    'cf_library_storage': {'PRIMARY': ('repo_key',),
+                           'library_storage_repo': ('repo_id',)},
+    'cf_sso_group_map': {'PRIMARY': ('provider', 'subject_type', 'namespace', 'external_id'),
+                         'sso_native_group': ('group_id',)},
     'cf_dir_acl': {'PRIMARY': ('repo_id', 'path_hash', 'subject_type', 'provider',
-                               'namespace', 'external_id')},
+                               'namespace', 'external_id'),
+                   'acl_shared_subject': ('provider', 'subject_type', 'namespace',
+                                          'external_id', 'share_mode', 'repo_id')},
     'cf_edit_guard': {'PRIMARY': ('repo_id', 'path_hash'),
-                      'cf_edit_guard_active': ('repo_id', 'guard_id')},
+                      'cf_edit_guard_id': ('guard_id',),
+                      'cf_edit_guard_active': ('repo_id', 'guard_id'),
+                      'cf_edit_guard_owner': ('owner_uid', 'guard_id')},
 }
 
 
