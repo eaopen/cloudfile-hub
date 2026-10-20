@@ -11,8 +11,8 @@ from rest_framework.views import APIView
 from seahub.api2.authentication import TokenAuthentication, SessionAuthentication
 from seahub.api2.utils import JWT_PRIVATE_KEY
 
-from .acl_policy import PolicyError, Rule
-from .acl_runtime import Authority, store
+from .acl_policy import PolicyError, Rule, Decision
+from .acl_runtime import ACLUnavailable, Authority, store
 from .acl_store import uuid, RevisionConflict
 from .errors import SubjectNotFound
 from . import tag_display
@@ -67,7 +67,20 @@ class EffectivePermission(AuthenticatedACL):
             args = request.query_params
             if set(args) - {'repo_id', 'path', 'kind'} or any(len(args.getlist(k)) != 1 for k in args):
                 raise ValueError()
-            decision = Authority(request.user.username).effective(args['repo_id'], args['path'], args.get('kind', 'dir'))
+            authority = Authority(request.user.username)
+            decision = authority.effective(args['repo_id'], args['path'], args.get('kind', 'dir'))
+            if not decision.can_read:
+                raise PermissionError('content access denied')
+            # Match the native upload/read gate for this exact resource. Scope
+            # and repository status may narrow C's decision, never widen it;
+            # management authority is not a content write permission.
+            native = authority.api.check_permission_by_path(args['repo_id'], args['path'], request.user.username)
+            if native not in (None, 'r', 'rw', 'invisible'):
+                raise ACLUnavailable('invalid native content permission')
+            if native not in ('r', 'rw'):
+                raise PermissionError('native content access denied')
+            if native == 'r' and decision.can_write:
+                decision = Decision('r', decision.qualified_root, decision.from_rule)
             return response(dict(**asdict(decision), read=decision.can_read, write=decision.can_write,
                                  visible=decision.visible, protected_publication=False))
         except Exception as error:

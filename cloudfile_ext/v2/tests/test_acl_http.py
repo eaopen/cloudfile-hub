@@ -88,6 +88,7 @@ class HTTPTests(TestCase):
     def test_effective_is_bound_to_authenticated_user(self):
         with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
             authority.return_value.effective.return_value = Decision('rw', '/shared', True)
+            authority.return_value.api.check_permission_by_path.return_value = 'rw'
             result = self.request(EffectivePermission, dict(repo_id=RID, path='/shared'))
             self.assertEqual(result.status_code, 200)
             self.assertEqual(result.data['qualified_root'], '/shared')

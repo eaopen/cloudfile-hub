@@ -83,7 +83,13 @@ Under `api/v2.1/cloudfile/authorization/v1/`:
 
 All require a native session/token, use its username, reject subject overrides,
 and return `Cache-Control: no-store`. These are content checks, not management
-checks. Native file `check-access` also uses this authority for protected repos,
+checks. Effective-permission also requires native C `check_permission_by_path`
+for the authenticated username and exact path. Its result can only narrow the
+current V2 scope decision: a library `r` with a child `rw` remains writable at
+that child, while root/sibling `r` responses have `write=false`. No readable
+content permission returns HTTP 403; unavailable or invalid native policy
+returns HTTP 503. A management role never supplies content `rw`.
+Native file `check-access` also uses this authority for protected repos,
 so directory-only access does not fail a preliminary whole-library permission
 check. Repo API tokens cannot impersonate current users on protected repos.
 Whether a repo is protected is answered from the same library rule snapshot
