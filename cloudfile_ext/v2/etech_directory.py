@@ -139,20 +139,33 @@ def runtime():
         conn.close()
 
 
+def verified_account(directory, uid):
+    """Shared Directory proof, independent of login/administrator authorization."""
+    subject = directory.subject(uid)
+    login, _ = validate_subject(subject, uid)
+    if subject['status'] != 'active':
+        raise IdentityUnavailable('Directory account disabled')
+    # employee_no carries Etech account_, including nonnumeric accounts.
+    # Only the trusted Directory supplies it; request aliases are not proof.
+    account = subject['attributes'].get('employee_no')
+    try:
+        account_username(account)
+    except ValueError:
+        raise IdentityConflict('invalid Directory account') from None
+    return login, account
+
+
 def prepare_user(uid):
     with runtime() as (directory, identity, catalog, memberships):
-        subject = directory.subject(uid)
-        login, _ = validate_subject(subject, uid)
-        if subject['status'] != 'active':
-            raise IdentityUnavailable('Directory account disabled')
-        # employee_no carries Etech account_, including nonnumeric accounts.
-        # Only the trusted Directory supplies it; request aliases are not proof.
-        account = subject['attributes'].get('employee_no')
-        try:
-            account_username(account)
-        except ValueError:
-            raise IdentityConflict('invalid Directory account') from None
+        login, account = verified_account(directory, uid)
         return identity.prepare(uid=uid, login_name=login, account=account)
+
+
+def provision_oidc_user(*, uid, provider, subject):
+    """Internal callback only, after verified ID Token/UserInfo UID equality."""
+    from .jit import SQLJITProvisioner
+    with runtime() as (directory, identity, catalog, memberships):
+        return SQLJITProvisioner(directory, identity).ensure(uid=uid, provider=provider, subject=subject)
 
 
 def lookup_group(external):

@@ -290,7 +290,8 @@ behaves as before. Readiness lifetime and revocation timing are unchanged.
 Staff identity resolution pre-creates a native CE User/Profile only after a fresh
 active Directory UID proof. New Etech users require the trusted Directory account
 (`employee_no`, currently Etech `account_`) and use `account@auth.local`. Numeric
-and named accounts, including `admin`, are ordinary non-staff users; `cfadmin`,
+and named accounts, including `admin`, are ordinary non-staff users. New native
+names follow Seafile RPC lowercase normalization; UIDs remain byte-exact; `cfadmin`,
 missing/invalid accounts and native name collisions reject creation. Existing
 UID owners retain their exact historical native names, independent of contact
 email. It creates no OAuth subject; first OAuth/OIDC login
@@ -304,3 +305,13 @@ Optional issuer/audience defaults match EAP (`cloudfile-sso` / `eap-directory`).
 `CF_DIRECTORY_GROUP_OWNER` is an existing active native service administrator
 that owns newly created flat Groups. Redis comes from native `CACHES.default`
 LOCATION. These are connection/identity inputs, not feature switches.
+
+
+OIDC-only login provisioning uses `cloudfile_ext.v2.jit.SQLJITProvisioner` after
+ID Token verification and exact signed/UserInfo `userId` agreement, with fresh
+active Directory proof. It uses only native User/Profile/SocialAuthUser facts;
+no legacy job, audit, outbox or extension schema is required. Staff preparation
+never invokes this login adapter. OAuth-only callbacks retain existing-UID
+reuse; a second provider adds its own subject binding to the same UID owner.
+A native RPC success followed by SQL failure can leave a precreated/unbound
+account, as with staff preparation; no password or session is issued on failure.

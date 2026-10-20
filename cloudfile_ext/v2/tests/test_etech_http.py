@@ -92,7 +92,7 @@ class EtechOAuthBindingTests(TestCase):
             self.assertNotIn('oauth_nonce', request.session)
 
     def callback(self, oauth_binding, profile_username, profile_uid, *, oidc=False, invalid_token=False,
-                 userinfo_sub='trusted-sub', missing_uid=False, generic=False):
+                 userinfo_sub='trusted-sub', missing_uid=False, generic=False, id_uid='business-uid'):
         request = APIRequestFactory().get('/cfile/oauth/callback/?code=test&state=expected')
         request.session = {'oauth_state': 'expected'}
         if oidc:
@@ -110,7 +110,7 @@ class EtechOAuthBindingTests(TestCase):
         conflicting = conflicting or profile_uid != 'business-uid'
         from cloudfile_ext.v2.errors import IdentityUnavailable
         with patch('cloudfile_ext.v2.oidc.configuration', return_value=('https://idp.example.test/', 'https://idp.example.test/jwks')), \
-                patch('cloudfile_ext.v2.oidc.verify_id_token', return_value={'sub': 'trusted-sub'},
+                patch('cloudfile_ext.v2.oidc.verify_id_token', return_value=({'sub': 'trusted-sub'} if id_uid is None else {'sub': 'trusted-sub', 'userId': id_uid}),
                       side_effect=IdentityUnavailable('rejected') if invalid_token else None) as verify, \
                 patch.object(views, 'OAuth2Session', return_value=session), \
                 patch.object(views, 'OAUTH_ATTRIBUTE_MAP', ({'sub': (True, 'uid')} if generic else {'sub': (True, 'uid'), 'userId': (False, 'login_id')})), \
@@ -197,6 +197,26 @@ class EtechOAuthBindingTests(TestCase):
             response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', generic=True)
         self.assertEqual(response.status_code, 302)
         authenticate.assert_called_once_with(remote_user='existing@auth.local')
+        bind.assert_not_called()
+
+    def test_signed_oidc_identity_uses_v2_jit_and_oauth_remains_reuse_only(self):
+        from django.test import override_settings
+        with override_settings(CF_DIRECTORY_URL='https://directory.test'), \
+                patch('cloudfile_ext.v2.etech_directory.provision_oidc_user', return_value='existing@auth.local') as provision, \
+                patch('cloudfile_ext.v2.etech_directory.ensure_subject'):
+            response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True)
+        self.assertEqual(response.status_code, 302)
+        provision.assert_called_once_with(uid='business-uid', provider=views.OAUTH_PROVIDER, subject='trusted-sub')
+        bind.assert_not_called()
+
+    def test_missing_signed_business_uid_cannot_provision_even_with_userinfo_uid(self):
+        from django.test import override_settings
+        with override_settings(CF_DIRECTORY_URL='https://directory.test'), \
+                patch('cloudfile_ext.v2.etech_directory.provision_oidc_user') as provision:
+            response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True, id_uid=None)
+        self.assertEqual(response, 'binding-error')
+        provision.assert_not_called()
+        authenticate.assert_not_called()
         bind.assert_not_called()
 
     def test_missing_state_cannot_fetch_tokens(self):

@@ -4,7 +4,6 @@ These tests execute both provisioning implementations and native binding
 selection. They do not claim RPC, collation or transactional integration proof.
 """
 from contextlib import nullcontext
-from copy import deepcopy
 import unittest
 from unittest.mock import Mock, patch
 
@@ -17,62 +16,7 @@ from cloudfile_extensions.identity.jit import SQLJITProvisioner
 from cloudfile_extensions.identity.sql_bindings import SQLIdentityBindings
 
 
-class NativeFacts:
-    """Model CE's case-insensitive lookup while returning exact stored values."""
-    def __init__(self):
-        self.accounts, self.profiles, self.social = {}, [], []
-        self.rows, self.snapshot = (), None
-        self.created = []
-
-    def get_autocommit(self): return True
-    def cursor(self): return self
-    def __enter__(self): return self
-    def __exit__(self, *args): pass
-    def fetchall(self): return tuple(self.rows)
-    def begin(self): self.snapshot = deepcopy((self.accounts, self.profiles, self.social))
-    def commit(self): self.snapshot = None
-    def rollback(self):
-        if self.snapshot is not None:
-            self.accounts, self.profiles, self.social = self.snapshot
-            self.snapshot = None
-
-    def create(self, username):
-        if any(name.lower() == username.lower() for name in self.accounts):
-            raise AssertionError('RPC must never adopt an existing account')
-        self.created.append(username)
-        self.accounts[username] = 1
-
-    def execute(self, sql, args=()):
-        self.rows = ()
-        sql = sql.replace("`", "")
-        if sql.startswith('SELECT'):
-            if '.profile_profile' in sql:
-                if 'WHERE user=%s OR login_id=%s' in sql:
-                    rows = [r for r in self.profiles if r[0].lower() == args[0].lower() or r[1].lower() == args[1].lower()]
-                elif 'WHERE login_id=%s' in sql:
-                    rows = [r for r in self.profiles if r[1].lower() == args[0].lower()]
-                else:
-                    rows = [r for r in self.profiles if r[0].lower() == args[0].lower()]
-                self.rows = rows
-            elif '.EmailUser' in sql:
-                rows = [(name, active) for name, active in self.accounts.items() if name.lower() == args[0].lower()]
-                self.rows = rows if 'email,is_active' in sql else [(r[0],) for r in rows]
-            elif '.social_auth_usersocialauth' in sql:
-                self.rows = [r for r in self.social if r[1:3] == args]
-            else:
-                raise AssertionError(sql)
-        elif sql.startswith('INSERT INTO'):
-            if '.EmailUser' in sql:
-                self.create(args[0])
-            elif '.profile_profile' in sql:
-                self.profiles.append(tuple(args[:2]))
-            elif '.social_auth_usersocialauth' in sql:
-                self.social.append(tuple(args))
-            else:
-                raise AssertionError(sql)
-        else:
-            raise AssertionError(sql)
-
+from cloudfile_ext.v2.tests.native_identity_facts import NativeFacts
 
 class AccountProvisioningTests(unittest.TestCase):
     def setUp(self):
@@ -184,4 +128,3 @@ class LegacyProvisioningDelegationTests(unittest.TestCase):
             request = SimpleNamespace(data={'external_user_id': 'uid', 'login_id': 'uid'})
             self.assertEqual(AdminExternalIdentityView().post(request), 'delegated')
             resolve.assert_called_once_with(request)
-
