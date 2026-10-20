@@ -6,9 +6,6 @@ name: CloudFile checks
 # 仓库摆成并排布局，并把**本仓库**换成被测的那个 ref，另外两个取 dev。
 
 on:
-  push:
-    branches: [dev]
-  pull_request:
   workflow_dispatch:
 
 jobs:

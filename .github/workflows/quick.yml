@@ -1,0 +1,58 @@
+name: CloudFile quick source checks
+
+# Routine PRs get source syntax checks only; Seahub packaging, native
+# integration and cross-repository verification are manually dispatched.
+on:
+  push:
+    branches: [dev]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.markdown'
+      - 'README*'
+      - 'AGENTS.md'
+      - 'docs/**'
+      - 'doc/**'
+  pull_request:
+    branches: [dev]
+    paths-ignore:
+      - '**/*.md'
+      - '**/*.markdown'
+      - 'README*'
+      - 'AGENTS.md'
+      - 'docs/**'
+      - 'doc/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  static:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Validate only changed source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git diff --check HEAD^ HEAD
+          python3 - <<'PY'
+          from pathlib import Path
+          import subprocess
+
+          changed = subprocess.check_output(
+              ['git', 'diff', '--name-only', '-z', 'HEAD^', 'HEAD']
+          ).split(b'\0')
+          for raw in changed:
+              if not raw:
+                  continue
+              path = Path(raw.decode('utf-8'))
+              if path.is_file() and path.suffix == '.py':
+                  compile(path.read_bytes(), str(path), 'exec')
+          PY
+          while IFS= read -r path; do
+            [[ ! -f "$path" ]] || bash -n "$path"
+          done < <(git diff --name-only HEAD^ HEAD -- '*.sh')
