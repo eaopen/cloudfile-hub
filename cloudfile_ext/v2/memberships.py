@@ -39,6 +39,16 @@ def validate_subject(value, uid, *, now=None):
         raise IdentityUnavailable('invalid current Directory response') from None
 
 
+# cf_sso_group_map is shared: the Directory hierarchy contract stores
+# 'dept'/'group' (cloudfile_ext/sso/snapshot.py, decision 2026-08-27 §3) while
+# the V2 subject contract speaks 'org'/'role'. Translate at this table boundary
+# instead of rewriting rows the SSO sync owns -- DEV 2026-10-20, where the two
+# domains never intersected and every projection failed with
+# "required native group mapping missing" (503 for every authorized request).
+STORED_KIND = {'org': 'dept', 'role': 'group'}
+SUBJECT_KIND = {stored: subject for subject, stored in STORED_KIND.items()}
+
+
 def readiness_key(database, provider, uid, username):
     return 'cfv2:subject:' + hashlib.sha256(json.dumps([database, provider, uid, username]).encode()).hexdigest()
 
@@ -99,7 +109,7 @@ class Memberships:
                 rows = cursor.fetchall()
                 if len(rows) > 16384:
                     raise IdentityUnavailable('group catalog too large')
-                mappings = {row[:3]: row[3] for row in rows}
+                mappings = {(SUBJECT_KIND.get(row[0], row[0]), row[1], row[2]): row[3] for row in rows}
                 owned = set(mappings.values())
                 if len(owned) != len(rows) or not desired <= mappings.keys():
                     raise IdentityUnavailable('required native group mapping missing')
@@ -139,7 +149,9 @@ class GroupCatalog:
         if kind not in ('org', 'role'):
             raise ValueError('unsupported external group kind')
         namespace, external_id, name = text(namespace, 128), text(external_id), text(name, 255)
-        key = (self.provider, kind, namespace, external_id)
+        # Store the hierarchy contract's spelling so the SSO sync and this
+        # catalog keep sharing one row per external group.
+        key = (self.provider, STORED_KIND[kind], namespace, external_id)
         with database_lock(self.connection, 'groups:' + self.provider):
             with self.connection.cursor() as cursor:
                 cursor.execute('SELECT provider,subject_type,namespace,external_id,group_id FROM cf_sso_group_map '

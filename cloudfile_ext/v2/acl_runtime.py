@@ -105,8 +105,10 @@ def current_principal(username):
                        accounts + '.GroupUser gu ON gu.group_id=m.group_id WHERE m.provider=%s AND gu.user_name=%s LIMIT 4097',
                        [provider, username])
         groups = cursor.fetchall()
-    if len(groups) > 4096 or any(row[0] not in ('org', 'role') for row in groups):
-        raise ACLUnavailable('invalid current membership')
+        # cf_sso_group_map stores the hierarchy contract's kinds ('dept'/'group');
+        # 'org'/'role' are the V2 names for the same rows.
+        if len(groups) > 4096 or any(row[0] not in ('org', 'role', 'dept', 'group') for row in groups):
+            raise ACLUnavailable('invalid current membership')
     return Principal(provider, uid, frozenset(groups))
 
 
