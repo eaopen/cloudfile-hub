@@ -69,6 +69,14 @@ class PreparedOIDCLogin:
             raise ContractError("AUTHENTICATION_REQUIRED", "OIDC authentication expired", 401)
         username = self.bindings.resolve(issuer=identity["issuer"], subject=identity["sub"],
                                          user_id=identity["userId"])
+        if username is None:
+            # A pre-existing Etech/CloudFile UID can be linked to a second
+            # trusted OIDC provider without creating a duplicate account.
+            # This validates the Directory and native owner before writing a
+            # provider/sub binding; missing UID still follows the JIT policy.
+            linker = self.jit or (self.provisioning.jit if self.provisioning else None)
+            if linker is not None:
+                username = linker.link_existing(identity)
         if self.provisioning is not None:
             job_id = self.provisioning.request_for_login(identity, unbound=username is None)
             if job_id is not None:

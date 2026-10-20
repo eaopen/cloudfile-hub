@@ -92,6 +92,47 @@ class SQLBindingsTest(DatabaseTestCase):
             cursor.execute("SELECT COUNT(*) FROM cf_probe_binding_audit")
             self.assertEqual(cursor.fetchone()[0], 1)
 
+    def test_second_verified_oidc_provider_reuses_canonical_uid(self):
+        from cloudfile_extensions.schema.runner import SchemaRunner
+        SchemaRunner(self.connection).apply()
+        with self.admin.cursor() as cursor:
+            cursor.execute("UPDATE " + self.identity +
+                           ".profile_profile SET login_id='u1' WHERE user='actor@example.invalid'")
+        original = self.request
+        first = dict(issuer=original["issuer"], subject=original["subject"],
+                     user_id="u1", request_id="new-oidc-1")
+        second = dict(first, issuer="https://ssoauth.example.invalid/application/o/files/",
+                      subject="different-sub", request_id="new-oidc-2")
+        self.assertEqual(self.binding.bind_verified_existing(**first), "actor@example.invalid")
+        self.assertEqual(self.binding.bind_verified_existing(**first), "actor@example.invalid")
+        self.assertEqual(self.binding.bind_verified_existing(**second), "actor@example.invalid")
+        self.assertEqual(self.binding.resolve(
+            issuer=first["issuer"], subject=first["subject"], user_id="u1"), "actor@example.invalid")
+        self.assertEqual(self.binding.resolve(
+            issuer=second["issuer"], subject=second["subject"], user_id="u1"), "actor@example.invalid")
+        with self.connection.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM " + self.identity + ".social_auth_usersocialauth")
+            self.assertEqual(cursor.fetchone()[0], 2)
+            cursor.execute("SELECT login_id FROM " + self.identity +
+                           ".profile_profile WHERE user='actor@example.invalid'")
+            self.assertEqual(cursor.fetchone(), ("u1",))
+            cursor.execute("SELECT COUNT(*) FROM cf_audit_event WHERE operation='identity.bound'")
+            self.assertEqual(cursor.fetchone()[0], 2)
+        with self.assertRaises(ContractError):
+            self.binding.bind_verified_existing(**dict(first, user_id="u2"))
+        with self.admin.cursor() as cursor:
+            cursor.execute("UPDATE " + self.identity +
+                           ".profile_profile SET login_id='u2' WHERE user='other@example.invalid'")
+        with self.assertRaises(ContractError):
+            self.binding.bind_verified_existing(**dict(first, user_id="u2"))
+        with self.admin.cursor() as cursor:
+            cursor.execute("UPDATE " + self.native +
+                           ".EmailUser SET is_active=0 WHERE email='actor@example.invalid'")
+        with self.assertRaises(ContractError) as caught:
+            self.binding.bind_verified_existing(**dict(second,
+                issuer="https://third.example.invalid/", subject="third"))
+        self.assertEqual(caught.exception.status, 403)
+
     def test_native_manager_authority_and_real_transactional_audit(self):
         from cloudfile_extensions.identity.management import IdentityManagement
         from cloudfile_extensions.schema.runner import SchemaRunner
