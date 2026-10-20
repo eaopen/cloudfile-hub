@@ -30,13 +30,18 @@ from .acl_runtime import Authority
 
 MAX_TICKET_SECONDS = 3600
 
-# Internal schema capability, not a user-facing feature flag. A controlled
-# Guard migration must restart Hub and both native processes.
+# Existing Checkout configuration and schema are qualified together. Changing
+# the capability or migrating Guard requires restarting Hub/native processes.
 from functools import lru_cache
 
 
 @lru_cache(maxsize=1)
 def checkout_available():
+    from cloudfile_ext.features import is_enabled
+    # A baseline table is not feature activation. Keep ordinary transfer and
+    # optimistic editing independent of Guard discovery when Checkout is off.
+    if not is_enabled('CF_ENABLE_CHECKOUT'):
+        return False
     from seahub.utils.db_api import SeafileDB
     schema = SeafileDB().db_name
     from .checkout_schema import path_checkout_available
