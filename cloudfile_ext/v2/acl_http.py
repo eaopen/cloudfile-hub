@@ -11,7 +11,7 @@ from rest_framework.views import APIView
 from seahub.api2.authentication import TokenAuthentication, SessionAuthentication
 from seahub.api2.utils import JWT_PRIVATE_KEY
 
-from .acl_policy import PolicyError, Rule, Decision, StoredACLError
+from .acl_policy import PolicyError, Rule, StoredACLError, narrow_to_native
 from .acl_runtime import ACLUnavailable, Authority, store
 from .acl_store import uuid, RevisionConflict
 from .errors import SubjectNotFound
@@ -77,16 +77,15 @@ class EffectivePermission(AuthenticatedACL):
             decision = authority.effective(args['repo_id'], args['path'], args.get('kind', 'dir'))
             if not decision.can_read:
                 raise PermissionError('content access denied')
-            # Match the native upload/read gate for this exact resource. Scope
-            # and repository status may narrow C's decision, never widen it;
-            # management authority is not a content write permission.
+            # Native library permission can only narrow C's decision, never widen
+            # it; management authority is not a content write permission. An
+            # absent native grant at a share root is the share's normal case.
             native = authority.api.check_permission_by_path(args['repo_id'], args['path'], request.user.username)
-            if native not in (None, 'r', 'rw', 'invisible'):
+            if native not in (None, 'none', 'r', 'rw', 'invisible'):
                 raise ACLUnavailable('invalid native content permission')
-            if native not in ('r', 'rw'):
+            decision = narrow_to_native(decision, native)
+            if decision is None:
                 raise PermissionError('native content access denied')
-            if native == 'r' and decision.can_write:
-                decision = Decision('r', decision.qualified_root, decision.from_rule)
             return response(dict(**asdict(decision), read=decision.can_read, write=decision.can_write,
                                  visible=decision.visible, protected_publication=False))
         except Exception as error:

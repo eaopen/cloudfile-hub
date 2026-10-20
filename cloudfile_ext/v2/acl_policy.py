@@ -109,6 +109,24 @@ class Decision:
         return self.permission != 'invisible'
 
 
+def narrow_to_native(decision, native):
+    """What the native library gate leaves of a V2 decision; None means deny.
+
+    A native r/rw may only narrow a grant. A directory share exists for users
+    with no native library permission at all, so there the absence of a native
+    grant is the normal case and the V2 share root is the authorization. Every
+    other path still requires a native grant: an absent ('none', None) or denied
+    ('invisible') native permission keeps failing closed.
+    """
+    if native in ('r', 'rw'):
+        if native == 'r' and decision.can_write:
+            return Decision('r', decision.qualified_root, decision.from_rule)
+        return decision
+    if native in (None, 'none') and decision.from_rule and decision.qualified_root not in (None, '/'):
+        return decision
+    return None
+
+
 def _track_permission(rules, principal, path, kind):
     winner = None
     for level in ancestors(path):

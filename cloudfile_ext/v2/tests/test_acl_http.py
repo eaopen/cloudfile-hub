@@ -119,6 +119,22 @@ class HTTPTests(TestCase):
             self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID,path='/shared',username='owner')).status_code, 400)
             self.assertEqual(result['Cache-Control'], 'no-store')
 
+    def test_directory_share_does_not_require_native_library_permission(self):
+        # A user with no library membership must still act inside a shared subtree;
+        # the library root and an explicit native denial keep failing closed.
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
+            authority.return_value.effective.return_value = Decision('rw', '/shared/team', True)
+            authority.return_value.api.check_permission_by_path.return_value = None
+            result = self.request(EffectivePermission, dict(repo_id=RID, path='/shared/team'))
+            self.assertEqual(result.status_code, 200)
+            self.assertTrue(result.data['write'])
+            self.assertEqual(result.data['qualified_root'], '/shared/team')
+            authority.return_value.effective.return_value = Decision('rw', '/', True)
+            self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID, path='/')).status_code, 403)
+            authority.return_value.effective.return_value = Decision('rw', '/shared/team', True)
+            authority.return_value.api.check_permission_by_path.return_value = 'invisible'
+            self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID, path='/shared/team')).status_code, 403)
+
     def test_subject_or_sql_outage_is_not_native_fallback(self):
         with patch('cloudfile_ext.v2.acl_http.Authority', side_effect=ACLUnavailable()):
             self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID,path='/shared')).status_code,503)

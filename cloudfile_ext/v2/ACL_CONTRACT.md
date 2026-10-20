@@ -104,7 +104,12 @@ and return `Cache-Control: no-store`. These are content checks, not management
 checks. Effective-permission also requires native C `check_permission_by_path`
 for the authenticated username and exact path. Its result can only narrow the
 current V2 scope decision: a library `r` with a child `rw` remains writable at
-that child, while root/sibling `r` responses have `write=false`. No readable
+that child, while root/sibling `r` responses have `write=false`.
+**Exception, and only there:** when the decision comes from a share root
+(`from_rule` and `qualified_root` outside the library root), an absent native
+grant (`None`/`none`) does not deny; the share root itself is the authorisation,
+because a directory share exists for accounts with no library membership. An
+explicit native `invisible`, and every non-share path, still fail closed. No readable
 content permission returns HTTP 403; unavailable or invalid native policy
 returns HTTP 503. A management role never supplies content `rw`.
 Native file `check-access` also uses this authority for protected repos,

@@ -1,6 +1,7 @@
 """Isolated V2 policy proofs; these tests do not claim that fileserver is guarded."""
 import unittest
-from cloudfile_ext.v2.acl_policy import Rule, Principal, PolicyError, resolve
+from cloudfile_ext.v2.acl_policy import (Decision, PolicyError, Principal, Rule, narrow_to_native,
+                                         resolve)
 
 REPO = '00000000-0000-4000-8000-000000000001'
 U = Principal('etech', 'uid-a', frozenset({('org','dept','42'), ('role','role','writer')}))
@@ -122,6 +123,39 @@ class SharedRootTests(unittest.TestCase):
     def test_unready_subject_fails_closed(self):
         principal=Principal('etech','uid-a',U.groups,ready=False)
         self.assertFalse(permission('/Projects',[rule('/Projects','org','42','rw',share=True)],native=None,principal=principal).can_read)
+
+
+class NativeNarrowingTests(unittest.TestCase):
+    """The native library gate narrows a V2 decision; a share root is its own grant."""
+
+    def decide(self, path, rows, native='rw'):
+        return resolve(REPO, path, U, native, rows)
+
+    def test_native_read_still_caps_a_v2_write(self):
+        decision = narrow_to_native(Decision('rw', '/', True), 'r')
+        self.assertEqual(decision.permission, 'r')
+        self.assertEqual(narrow_to_native(Decision('rw', '/', True), 'rw').permission, 'rw')
+
+    def test_share_root_survives_an_absent_native_grant(self):
+        # No library membership: CE reports none/None, yet the share root is readable.
+        for native in (None, 'none'):
+            decision = self.decide('/Projects/Sub', [rule('/Projects', 'org', '42', 'rw', share=True)], native=None)
+            self.assertTrue(decision.can_read)
+            kept = narrow_to_native(decision, native)
+            self.assertIsNotNone(kept, native)
+            self.assertEqual(kept.permission, 'rw')
+            self.assertEqual(kept.qualified_root, '/Projects')
+
+    def test_absent_native_grant_still_denies_outside_a_share_root(self):
+        library = self.decide('/writable', [rule('/writable', 'user', 'uid-a', 'rw')], native='rw')
+        for native in (None, 'none'):
+            self.assertIsNone(narrow_to_native(library, native))
+        # A library-root decision is not a share root even when it comes from a rule.
+        self.assertIsNone(narrow_to_native(Decision('rw', '/', True), None))
+
+    def test_explicit_native_denial_is_never_overridden(self):
+        share = self.decide('/Projects', [rule('/Projects', 'org', '42', 'rw', share=True)], native=None)
+        self.assertIsNone(narrow_to_native(share, 'invisible'))
 
 
 if __name__ == '__main__':
