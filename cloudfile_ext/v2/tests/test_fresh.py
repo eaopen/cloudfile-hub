@@ -281,8 +281,8 @@ class FreshDatabaseTest(unittest.TestCase):
                   for table in ("Repo", "RepoOwner", "Branch", "RepoStorageId")}
         discovery = NativeLibraryDiscovery(self.connection)
         self.assertEqual(discovery.inspect(repo)["status"], "NATIVE_UNREGISTERED")
-        self.assertEqual(discovery.reconcile(repo), {"NATIVE_REGISTERED": 1})
-        self.assertEqual(discovery.reconcile(repo), {"NATIVE_REGISTERED": 1})
+        self.assertEqual(discovery.reconcile(repo), {"REGISTERED": 1, "ORPHAN_DIRECTORY": 0})
+        self.assertEqual(discovery.reconcile(repo), {"REGISTERED": 1, "ORPHAN_DIRECTORY": 0})
         self.schema.install()  # fresh schema recheck must not erase an adopted row
         self.assertEqual(discovery.inspect(repo)["status"], "NATIVE_REGISTERED")
         self.assertEqual(self.query("SELECT repo_key,state FROM cf_library_storage WHERE repo_id=%s", (repo,)),
@@ -292,19 +292,19 @@ class FreshDatabaseTest(unittest.TestCase):
     def test_historical_registration_refuses_missing_native_and_existing_metadata(self):
         discovery = NativeLibraryDiscovery(self.connection)
         missing = str(uuid4())
-        self.assertEqual(discovery.reconcile(missing), {"NATIVE_RESOURCE_MISSING": 1})
+        self.assertEqual(discovery.reconcile(missing), {"BLOCKED": 1, "ORPHAN_DIRECTORY": 0})
         self.assertEqual(self.query("SELECT * FROM cf_library_storage"), ())
         external = str(uuid4())
         self.query("INSERT INTO Repo(repo_id) VALUES(%s)", (external,))
         self.query("INSERT INTO RepoStorageId(repo_id,storage_id) VALUES(%s,%s)",
                    (external, "external-legacy"))
         self.assertEqual(discovery.reconcile(external),
-                         {"EXTERNAL_STORAGE_REQUIRES_REVIEW": 1})
+                         {"BLOCKED": 1, "ORPHAN_DIRECTORY": 0})
         conflict = str(uuid4())
         self.query("INSERT INTO Repo(repo_id) VALUES(%s)", (conflict,))
         self.query("INSERT INTO cf_library_storage(repo_key,repo_id,state) VALUES(%s,%s,%s)",
                    ("kept-business-key", conflict, "active"))
         self.assertEqual(discovery.reconcile(conflict),
-                         {"STORAGE_BINDING_CONFLICT": 1})
+                         {"BLOCKED": 1, "ORPHAN_DIRECTORY": 0})
         self.assertEqual(self.query("SELECT repo_key FROM cf_library_storage WHERE repo_id=%s", (conflict,)),
                          (("kept-business-key",),))

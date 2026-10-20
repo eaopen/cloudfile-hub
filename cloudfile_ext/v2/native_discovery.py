@@ -45,8 +45,9 @@ class NativeLibraryDiscovery:
     database: the actual Seafile Repo/Commit/FS/Block facts must first exist.
     """
 
-    def __init__(self, connection):
+    def __init__(self, connection, config=None):
         self.connection = connection
+        self.config = config
 
     @staticmethod
     def check_native_schema(connection):
@@ -101,35 +102,14 @@ class NativeLibraryDiscovery:
             last = rows[-1][0]
 
     def register_native(self, repo_id):
-        # This INSERT SELECT explicitly rechecks the native Repo and route in
-        # the same statement, and a concurrent worker cannot overwrite rows.
-        before = self.inspect(repo_id)
-        if before["status"] != "NATIVE_UNREGISTERED":
-            return before
-        try:
-            with self.connection.cursor() as cursor:
-                cursor.execute(
-                    "INSERT INTO cf_library_storage(repo_key,repo_id,state) "
-                    "SELECT %s,r.repo_id,'active' FROM Repo r "
-                    "LEFT JOIN RepoStorageId s ON s.repo_id=r.repo_id "
-                    "LEFT JOIN VirtualRepo v ON v.repo_id=r.repo_id "
-                    "WHERE r.repo_id=%s AND s.repo_id IS NULL AND v.repo_id IS NULL",
-                    (native_key(repo_id), repo_id))
-        except Exception as error:
-            # Concurrent reconciliations can hit the unique key; another
-            # worker's existing row is never changed or silently overwritten.
-            if not getattr(error, "args", ()) or error.args[0] != 1062:
-                raise
-        return self.inspect(repo_id)
+        # Preserve the public helper while using the same guarded lifecycle,
+        # native routing and per-library transaction as storage-reconcile.
+        from .storage_reconcile import StorageReconciler
+        return StorageReconciler(self.connection, self.config).apply_one(repo_id)
 
     def reconcile(self, repo_id=None):
-        counts = Counter()
-        iterator = (self.inspect(repo_id),) if repo_id else self.scan()
-        for item in iterator:
-            if item["status"] == "NATIVE_UNREGISTERED":
-                item = self.register_native(item["repo_id"])
-            counts[item["status"]] += 1
-        return dict(sorted(counts.items()))
+        from .storage_reconcile import StorageReconciler
+        return StorageReconciler(self.connection, self.config).run(apply=True, repo_id=repo_id)['summary']
 
     def unresolved_registry_count(self):
         """Orphan diagnostics only: never retire or delete a record automatically.
@@ -184,71 +164,33 @@ def storage_catalog_status(repo_id, repo_present, key, state, storage_id, readab
     return "READY" if readable else "RESOURCE_UNREADABLE"
 
 def reconcile_from_hub(repo_id=None, *, batch_size=500):
-    """Idempotent native Repo -> cf_library_storage reconciliation from Seahub.
+    """Use native reconciliation rules from the current Seahub connection.
 
-    This uses the current Seafile schema through Django's existing connection,
-    not a second set of DB credentials. Etech and the native create endpoint
-    share the same guarded insertion, and existing V2 auto-local mappings win.
+    Startup/admin discovery handles native and auto-local bindings only.
+    Pinned classes and invalid bindings are reported without conversion.
     """
-    from django.db import connection, IntegrityError
+    import os
+    from pathlib import Path
+    from django.db import connection, transaction
     from seahub.utils.db_api import SeafileDB
-    from .schema import identifier
+    from .storage_reconcile import StorageConfig, StorageReconciler
 
-    schema = identifier(SeafileDB().db_name)
-    repo = schema + '.Repo'
-    routes = schema + '.RepoStorageId'
-    virtual = schema + '.VirtualRepo'
-    registry = schema + '.cf_library_storage'
-    if repo_id is not None and native_key(repo_id) is None:
-        raise ValueError('Invalid canonical Repo UUID')
-    added = 0
-    already = 0
-    after = ''
-    while True:
-        with connection.cursor() as cursor:
-            if repo_id:
-                cursor.execute(
-                    'SELECT r.repo_id FROM ' + repo + ' r '
-                    'LEFT JOIN ' + virtual + ' v ON v.repo_id=r.repo_id '
-                    'WHERE r.repo_id=%s AND v.repo_id IS NULL', [repo_id])
-            else:
-                cursor.execute(
-                    'SELECT r.repo_id FROM ' + repo + ' r '
-                    'LEFT JOIN ' + virtual + ' v ON v.repo_id=r.repo_id '
-                    'WHERE r.repo_id>%s AND v.repo_id IS NULL '
-                    'ORDER BY r.repo_id LIMIT %s', [after, batch_size])
-            ids = [row[0] for row in cursor.fetchall()]
-        if not ids:
-            break
-        for native_id in ids:
-            if native_key(native_id) is None:
-                continue
-            # The query decides the route at write time. New routed repos,
-            # tombstones, and existing business bindings are NEVER changed.
-            with connection.cursor() as cursor:
-                try:
-                    cursor.execute(
-                        'INSERT INTO ' + registry + ' (repo_key,repo_id,state) '
-                        "SELECT %s,r.repo_id,'active' FROM " + repo + ' r '
-                        'LEFT JOIN ' + routes + ' s ON s.repo_id=r.repo_id '
-                        'LEFT JOIN ' + virtual + ' v ON v.repo_id=r.repo_id '
-                        'LEFT JOIN ' + registry + ' c ON c.repo_id=r.repo_id '
-                        'WHERE r.repo_id=%s AND s.repo_id IS NULL '
-                        'AND v.repo_id IS NULL AND c.repo_id IS NULL',
-                        ['native-' + native_id, native_id])
-                    added += cursor.rowcount
-                except IntegrityError as exc:
-                    if getattr(exc, 'args', (None,))[0] != 1062:
-                        raise
-                    # Another instance inserted the same UUID concurrently.
-                    cursor.execute('SELECT 1 FROM ' + registry + ' WHERE repo_id=%s', [native_id])
-                    if cursor.fetchone() is None:
-                        raise
-                    already += 1
-        after = ids[-1]
-        if repo_id or len(ids) < batch_size:
-            break
-    return {'registered': added, 'already': already}
+    data = os.environ.get('SEAFILE_DATA_DIR', '')
+    conf = os.environ.get('SEAFILE_CENTRAL_CONF_DIR') or data
+    if not data or not conf:
+        raise RuntimeError('SEAFILE_STORAGE_CONFIGURATION_UNAVAILABLE')
+    config = StorageConfig.read(Path(conf) / 'seafile.conf', data)
+    discovery = StorageReconciler(connection, config, schema=SeafileDB().db_name,
+                                  atomic=transaction.atomic)
+    discovery.ensure_schema()
+    report = discovery.run(apply=True, repo_id=repo_id, batch_size=batch_size)
+    import logging
+    for item in report['items'] + report['orphan_directories']:
+        if item['status'] in ('BLOCKED', 'NATIVE_CLASS_PINNED', 'ORPHAN_DIRECTORY'):
+            logging.getLogger(__name__).warning('Storage reconciliation: %s', item)
+    report['registered'] = sum(item.get('action') == 'REGISTERED' for item in report['items'])
+    report['already'] = report['summary'].get('REGISTERED', 0) - report['registered']
+    return report
 
 
 def inspect_from_hub(repo_ids):

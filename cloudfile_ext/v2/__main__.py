@@ -1,4 +1,4 @@
-"""Explicit fresh install/check entry point; secrets are never CLI arguments."""
+"""Explicit install/check and storage preflight; secrets are never CLI arguments."""
 import argparse
 import json
 import os
@@ -7,32 +7,56 @@ import sys
 
 from .schema import FreshSchema
 from .native_discovery import NativeLibraryDiscovery
+from .storage_reconcile import StorageConfig, StorageReconciler
 
 
-def main():
+def main(argv=None):
     parser = argparse.ArgumentParser()
-    parser.add_argument('command', choices=('install', 'check', 'discover', 'reconcile', 'inspect'))
+    parser.add_argument('command', choices=('install', 'check', 'discover', 'reconcile', 'inspect',
+                                            'storage-reconcile'))
     parser.add_argument('--repo-id', help='original native Seafile repository UUID')
-    parser.add_argument('--ddl', type=Path, required=True)
-    args = parser.parse_args()
+    parser.add_argument('--ddl', type=Path)
+    parser.add_argument('--seafile-conf', type=Path)
+    parser.add_argument('--seafile-data', type=Path)
+    parser.add_argument('--batch-size', type=int, default=500)
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument('--dry-run', action='store_true')
+    modes.add_argument('--apply', action='store_true')
+    parser.add_argument('--normalize-native-class', action='append', default=[], metavar='ID')
+    args = parser.parse_args(argv)
+    storage = args.command == 'storage-reconcile'
+    if storage and (not args.seafile_conf or not args.seafile_data):
+        parser.error('storage-reconcile requires --seafile-conf and --seafile-data')
+    if not storage and not args.ddl:
+        parser.error('--ddl is required for schema commands')
+    if not 1 <= args.batch_size <= 2000:
+        parser.error('--batch-size must be between 1 and 2000')
     import pymysql
     try:
+        config = StorageConfig.read(args.seafile_conf, args.seafile_data) if args.seafile_conf and args.seafile_data else None
         with pymysql.connect(host=os.environ['CF_V2_DB_HOST'],
                              port=int(os.environ.get('CF_V2_DB_PORT', '3306')),
                              user=os.environ['CF_V2_DB_USER'],
                              password=os.environ['CF_V2_DB_PASSWORD'],
                              database=os.environ['CF_V2_DB_NAME'],
                              charset='utf8mb4', autocommit=True) as connection:
+            if storage:
+                discovery = StorageReconciler(connection, config)
+                discovery.ensure_schema()
+                report = discovery.run(apply=args.apply, batch_size=args.batch_size,
+                                       normalize=args.normalize_native_class, repo_id=args.repo_id)
+                print(json.dumps(report, sort_keys=True))
+                return 2 if report['summary'].get('BLOCKED', 0) else 0
             NativeLibraryDiscovery.check_native_schema(connection)
             schema = FreshSchema(connection, args.ddl.read_text())
             if args.command == 'install':
                 schema.install()
             else:
                 schema.verify()
-            discovery = NativeLibraryDiscovery(connection)
+            discovery = NativeLibraryDiscovery(connection, config)
             if args.command in ('install', 'reconcile'):
-                print(json.dumps({"statuses": discovery.reconcile(args.repo_id),
-                                  "unresolved_registry": discovery.unresolved_registry_count()}, sort_keys=True))
+                print(json.dumps({'statuses': discovery.reconcile(args.repo_id),
+                                  'unresolved_registry': discovery.unresolved_registry_count()}, sort_keys=True))
             elif args.command == 'inspect':
                 if not args.repo_id:
                     parser.error('inspect requires --repo-id')
@@ -40,6 +64,12 @@ def main():
             elif args.command == 'discover':
                 print(json.dumps(discovery.summary(args.repo_id), sort_keys=True))
     except Exception as error:
+        if storage:
+            reason = str(error) if isinstance(error, ValueError) else type(error).__name__
+            report = dict(mode='apply' if args.apply else 'dry-run', summary={'BLOCKED': 1},
+                          items=[{'status': 'BLOCKED', 'reason': reason}], orphan_directories=[])
+            print(json.dumps(report, sort_keys=True))
+            return 2 if isinstance(error, ValueError) else 1
         print('V2 schema unavailable: ' + type(error).__name__, file=sys.stderr)
         return 1
     print('V2 schema ready: 3 reviewed extension tables, native discovery checked')
