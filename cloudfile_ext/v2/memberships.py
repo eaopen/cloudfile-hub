@@ -160,7 +160,10 @@ class GroupCatalog:
                     if type(group) is not int or not 1 <= group <= 2147483647:
                         raise IdentityUnavailable('native group creation failed')
                 cursor.execute('SELECT group_id,parent_group_id FROM ' + self.groups + ' WHERE group_id=%s', (group,))
-                if cursor.fetchall() != ((group, 0),):
+                native = cursor.fetchall()
+                if (len(native) != 1 or native[0][0] != group or
+                        (kind == 'role' and native[0][1] != 0) or
+                        (kind == 'org' and (type(native[0][1]) is not int or native[0][1] < -1))):
                     raise IdentityUnavailable('mapped group unavailable')
                 if not rows:
                     cursor.execute('INSERT INTO cf_sso_group_map(provider,subject_type,namespace,external_id,group_id) VALUES(%s,%s,%s,%s,%s)', (*key, group))
