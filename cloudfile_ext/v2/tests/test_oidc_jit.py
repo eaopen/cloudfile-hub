@@ -59,7 +59,7 @@ class OIDCProvisioningTests(unittest.TestCase):
         self.assertEqual(len(self.facts.accounts), 4)
 
     def test_missing_invalid_reserved_or_disabled_directory_identity_cannot_create(self):
-        for account in (None, '', 'cfadmin', 'CFADMIN', 'a b', 'a@contact.test'):
+        for account in (None, '', 'cfadmin', 'CFADMIN', 'a b', 'a@contact.test', '中文', ' x ', 'x' * 201):
             self.account = account
             with self.assertRaises((IdentityConflict, IdentityUnavailable)): self.login()
         self.account, self.status = 'admin', 'disabled'
@@ -73,6 +73,38 @@ class OIDCProvisioningTests(unittest.TestCase):
         self.facts.accounts['historical-uuid@auth.local'] = 1
         self.assertEqual(self.login(), 'historical-uuid@auth.local')
         self.assertEqual(self.facts.created, [])
+
+    def test_existing_uid_reuse_and_additional_binding_ignore_new_account_format(self):
+        self.facts.profiles.append(('historical-uuid@auth.local', 'uid'))
+        self.facts.accounts['historical-uuid@auth.local'] = 1
+        # A name is not identity proof: missing/renamed/invalid metadata must
+        # neither split an existing UID nor prevent a second IdP binding.
+        for account in (None, '', '中文', 'a@contact.test', ' x ', 'x' * 201):
+            with self.subTest(account=account):
+                self.account = account
+                self.assertEqual(self.login(), 'historical-uuid@auth.local')
+                self.assertEqual(self.login(provider='idp-two', subject='sub-two'), 'historical-uuid@auth.local')
+        self.assertEqual(self.facts.created, [])
+        self.assertEqual(len(self.facts.social), 2)
+
+    def test_existing_binding_still_requires_current_status_and_exact_uid(self):
+        self.login()
+        self.account = None
+        self.status = 'disabled'
+        with self.assertRaises(IdentityUnavailable): self.login()
+        self.status, self.uid = 'active', 'other-uid'
+        with self.assertRaises(IdentityUnavailable): self.login()
+        self.uid = None
+        self.facts.accounts['10280993@auth.local'] = 0
+        with self.assertRaises(IdentityUnavailable): self.login()
+        self.assertEqual(len(self.facts.social), 1)
+
+    def test_generic_preparation_retains_opaque_naming_but_missing_etech_account_cannot_request_it(self):
+        username = self.native.prepare(uid='generic', login_name='Generic user')
+        self.assertRegex(username, r'^[a-f0-9]{32}@auth\.local$')
+        with self.assertRaises(IdentityConflict):
+            self.native.prepare(uid='etech', login_name='Etech user', account=None)
+        self.assertEqual(self.facts.created, [username])
 
     def test_provider_subject_conflict_is_rejected_before_any_new_account(self):
         self.login()

@@ -17,10 +17,15 @@ def validate_subject(value, uid, *, now=None):
         if generated.tzinfo is None or not -60 <= (now - generated).total_seconds() <= 60:
             raise ValueError()
         attrs = value['attributes']
+        if not isinstance(attrs, dict):
+            raise ValueError()
         login = attrs.get('login_name', attrs.get('employee_no'))
         if attrs.get('login_name', login) != attrs.get('employee_no', login):
             raise ValueError()
-        text(login, 200)
+        # Account metadata names new users only. Existing UID owners and their
+        # memberships remain valid when that metadata is missing or noncanonical.
+        if login is not None and not isinstance(login, str):
+            raise ValueError()
         text(value['etag'])
         desired = set()
         for field, kind in (('organizations', 'org'), ('organization_ancestors', 'org'), ('roles', 'role')):

@@ -15,7 +15,6 @@ from django.conf import settings
 
 from .errors import IdentityConflict, IdentityUnavailable, SubjectNotFound
 from .identity import NativeIdentity, text
-from cloudfile_ext.v2.account_names import account_username
 from .memberships import GroupCatalog, Memberships, is_ready, readiness_key, validate_subject
 
 
@@ -140,7 +139,7 @@ def runtime():
 
 
 def verified_account(directory, uid):
-    """Shared Directory proof, independent of login/administrator authorization."""
+    """Prove UID/status; NativeIdentity validates account names on creation only."""
     subject = directory.subject(uid)
     login, _ = validate_subject(subject, uid)
     if subject['status'] != 'active':
@@ -148,10 +147,6 @@ def verified_account(directory, uid):
     # employee_no carries Etech account_, including nonnumeric accounts.
     # Only the trusted Directory supplies it; request aliases are not proof.
     account = subject['attributes'].get('employee_no')
-    try:
-        account_username(account)
-    except ValueError:
-        raise IdentityConflict('invalid Directory account') from None
     return login, account
 
 

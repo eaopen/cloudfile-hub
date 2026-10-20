@@ -13,6 +13,9 @@ from .schema import database_lock, identifier
 from cloudfile_ext.v2.account_names import account_username
 
 
+_UNSPECIFIED_ACCOUNT = object()
+
+
 def text(value, maximum=225):
     if (not isinstance(value, str) or not 1 <= len(value) <= maximum or
             value != value.strip() or any(ord(c) < 32 or ord(c) == 127 for c in value)):
@@ -44,9 +47,9 @@ class NativeIdentity:
             if cursor.fetchall() != ((username, 1),):
                 raise IdentityUnavailable('native account inactive')
 
-    def prepare(self, *, uid, login_name, account=None):
+    def prepare(self, *, uid, login_name, account=_UNSPECIFIED_ACCOUNT):
         """Pre-create only a Directory-verified UID; never invent an OAuth sub."""
-        uid, login_name = text(uid), text(login_name, 200)
+        uid = text(uid)
         with database_lock(self.connection, 'identity:uid:' + uid):
             with self.connection.cursor() as cursor:
                 cursor.execute('SELECT user,login_id FROM ' + self.profiles + ' WHERE login_id=%s', (uid,))
@@ -60,9 +63,13 @@ class NativeIdentity:
             if self.create_account is None:
                 raise IdentityUnavailable('native account creation unavailable')
             try:
-                username = account_username(account) if account is not None else uuid4().hex + '@auth.local'
+                # Naming metadata must never block reuse of an exact UID owner.
+                # An explicitly missing Directory account cannot request UUID fallback.
+                username = (uuid4().hex + '@auth.local' if account is _UNSPECIFIED_ACCOUNT
+                            else account_username(account))
             except ValueError:
                 raise IdentityConflict('invalid Directory account') from None
+            login_name = text(login_name, 200)
             # Serialize case variants too: CE account lookup is case insensitive.
             # Never adopt an unbound native account after a failed RPC/SQL attempt.
             with database_lock(self.connection, 'identity:account:' + username.lower()):
