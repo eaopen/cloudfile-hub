@@ -37,6 +37,7 @@ class HTTPTests(TestCase):
     def test_directory_rules_allow_native_repo_admin_without_system_staff(self):
         with patch('cloudfile_ext.v2.acl_http.require_repo_manage') as guard, \
              patch('cloudfile_ext.v2.acl_http.store') as rules, \
+             patch('seaserv.seafile_api.get_dir_id_by_path', return_value='d' * 40), \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
             settings.CF_ACL_PROVIDER = 'etech'
             rules.return_value.list_path.return_value = []
@@ -47,6 +48,28 @@ class HTTPTests(TestCase):
             self.assertEqual(result.data['data'], [])
             guard.side_effect = PermissionError('no repo-admin rights')
             self.assertEqual(self.request(DirectoryRules, dict(repo_id=RID,path='/folder')).status_code,403)
+
+    def test_management_existence_is_not_a_content_listing_or_grant(self):
+        # A machine administrator may publish policy without native content
+        # access. Only a boolean is returned; failures never mean "missing".
+        with patch('cloudfile_ext.v2.acl_http.require_repo_manage') as guard, \
+             patch('cloudfile_ext.v2.acl_http.store') as rules, \
+             patch('seaserv.seafile_api.get_dir_id_by_path') as exists, \
+             patch('seaserv.seafile_api.list_dir_with_perm') as listing:
+            rules.return_value.list_path.return_value = []
+            for value in ('d' * 40, None):
+                exists.return_value = value
+                result = self.request(DirectoryRules, dict(repo_id=RID, path='/folder'))
+                self.assertEqual(result.status_code, 200)
+                self.assertIs(result.data['directory_exists'], bool(value))
+                self.assertNotIn('dirent_list', result.data)
+            exists.side_effect = RuntimeError('native RPC unavailable')
+            self.assertEqual(self.request(DirectoryRules, dict(repo_id=RID, path='/folder')).status_code, 503)
+            exists.reset_mock()
+            guard.side_effect = PermissionError()
+            self.assertEqual(self.request(DirectoryRules, dict(repo_id=RID, path='/folder')).status_code, 403)
+            exists.assert_not_called()
+            listing.assert_not_called()
 
     def test_native_repo_admin_marker_is_required_for_acl_delegation(self):
         from cloudfile_ext.v2.acl_http import require_repo_manage

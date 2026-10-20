@@ -129,8 +129,16 @@ class DirectoryRules(AuthenticatedACL):
             if set(args) != {'repo_id', 'path'} or any(len(args.getlist(k)) != 1 for k in args):
                 raise ValueError()
             require_repo_manage(request.user, args['repo_id'])
+            # Policy publication needs existence, not content browsing. CE admin
+            # directory listing is Pro-only and a machine admin has no implicit
+            # read grant. Return only this managed path's existence, no dirents.
+            from seaserv import seafile_api
+            from .acl_policy import canonical_path
+            canonical_path(args['path'])
+            exists = bool(seafile_api.get_dir_id_by_path(args['repo_id'], args['path']))
             rows = store().list_path(args['repo_id'], args['path'], getattr(settings, 'CF_ACL_PROVIDER', 'etech'))
-            return response({'data': [dict(**asdict(rule), revision=revision) for rule, revision in rows]})
+            return response({'data': [dict(**asdict(rule), revision=revision) for rule, revision in rows],
+                             'directory_exists': exists})
         except Exception as error:
             return failure(error)
 
