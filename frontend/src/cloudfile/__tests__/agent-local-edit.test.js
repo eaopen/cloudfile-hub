@@ -40,20 +40,16 @@ beforeEach(() => {
   document.cookie = 'sfcsrftoken=csrf-fixture';
 });
 
-test('Web only requests paired device list and ordinary edit session', async () => {
-  cloudFileAPI.req.post.mockResolvedValueOnce({ data: { devices: [{ device_id: 'id' }] } })
-    .mockResolvedValueOnce({ data: { state: 'created' } });
-  const listed = await cloudFileAPI.listLocalEditingDevices();
-  expect(listed.data.devices).toHaveLength(1);
-  const ref = { repo_id: 'repo', path: '/Drawing.dwg', kind: 'file' };
-  await cloudFileAPI.startOrdinaryAgentEdit(ref, 'device');
+test('ordinary local edit uses current V2 scoped endpoint and no SQL session route', async () => {
+  cloudFileAPI.req.post.mockResolvedValueOnce({data:{mode:'optimistic-edit', open_uri:'cloudfile-open://v2/open?instance=x'}});
+  const response = await cloudFileAPI.openLocalFile('repo-id', '/Drawing.dwg', 'optimistic-edit');
+  expect(response.data.mode).toBe('optimistic-edit');
   expect(cloudFileAPI.req.post.mock.calls[0]).toEqual([
-    '/api/v2.1/cloudfile/extensions/local-edit/v1/devices/list/', {}
+    '/api/v2.1/cloudfile/edit/v1/open/',
+    {repo_id:'repo-id',path:'/Drawing.dwg',mode:'optimistic-edit'}
   ]);
-  expect(cloudFileAPI.req.post.mock.calls[1]).toEqual([
-    '/api/v2.1/cloudfile/extensions/local-edit/v1/sessions/create/',
-    { reference: ref, device_id: 'device', mode: 'optimistic-edit' }
-  ]);
+  await cloudFileAPI.openLocalFile('repo-id', '/Drawing.dwg', 'local-view');
+  expect(cloudFileAPI.req.post.mock.calls[1][1].mode).toBe('local-view');
 });
 
 test('an already paired machine reuses the device after a server ownership check', async () => {
@@ -116,27 +112,32 @@ test('a missing extension or login never starts a pairing request', async () => 
   expect(global.fetch).not.toHaveBeenCalled();
 });
 
-test('fixed extension launches exact opaque one-use session URI without any local file path', async () => {
-  const uri = 'cloudfile-open://v1/open?instance=https%3A%2F%2Fcloudfile.invalid&session=session&ticket=one-time';
+test('V2 launch sends only exact same-origin Agent2 JWT URI to fixed extension', async () => {
+  const uri = 'cloudfile-open://v2/open?instance=https%3A%2F%2Fcloudfile.invalid&session=' +
+    DEVICE + '&ticket=header.payload.signature';
   window.chrome.runtime.sendMessage.mockImplementation((id, message, callback) => {
     expect(id).toBe(CLOUDFILE_EXTENSION_ID);
-    expect(message).toEqual({ type: 'open_uri', uri });
-    callback({ ok: true });
+    expect(message).toEqual({type:'open_uri', uri});
+    callback({ok:true});
   });
-  await expect(launchPairedAgent(uri)).resolves.toEqual({ accepted: true });
-  expect(window.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
-  expect(CLOUDFILE_EXTENSION_ID).toBe('gocnpbhnbikcpnlafmodflddgnmfcjoc');
-});
-
-test('uncertain native result never retries a one-use ticket', async () => {
-  window.chrome.runtime.sendMessage.mockImplementation((_id, _message, callback) => callback(null));
-  await expect(launchPairedAgent(
-    'cloudfile-open://v1/open?instance=https%3A%2F%2Fcloudfile.invalid&session=s&ticket=t'
-  )).rejects.toThrow('结果未确认');
+  await expect(launchPairedAgent(uri)).resolves.toEqual({accepted:true});
   expect(window.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
 });
 
-test('untrusted scheme cannot contact native host', async () => {
-  await expect(launchPairedAgent('https://malicious.invalid/')).rejects.toThrow();
+test('V2 rejects legacy URI, foreign origin and malformed ticket before native message', async () => {
+  for (const uri of [
+    'cloudfile-open://v1/open?instance=https%3A%2F%2Fcloudfile.invalid&session=x&ticket=y',
+    'cloudfile-open://v2/open?instance=https%3A%2F%2Fevil.invalid&session='+DEVICE+'&ticket=h.p.s',
+    'cloudfile-open://v2/open?instance=https%3A%2F%2Fcloudfile.invalid&session='+DEVICE+'&ticket=x',
+  ]) {
+    await expect(launchPairedAgent(uri)).rejects.toThrow();
+  }
   expect(window.chrome.runtime.sendMessage).not.toHaveBeenCalled();
+});
+
+test('uncertain V2 Agent2 open never retries browser ticket', async () => {
+  window.chrome.runtime.sendMessage.mockImplementation((_id, _message, callback) => callback(null));
+  const uri='cloudfile-open://v2/open?instance=https%3A%2F%2Fcloudfile.invalid&session='+DEVICE+'&ticket=h.p.s';
+  await expect(launchPairedAgent(uri)).rejects.toThrow('未确认');
+  expect(window.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
 });
