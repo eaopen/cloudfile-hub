@@ -43,13 +43,18 @@ class NativeGateTests(unittest.TestCase):
     def test_invisible_denies(self):
         self.assertIsNone(self.run_gate('r', 'invisible')[0])
 
-    def test_admin_and_custom_permissions_are_untouched(self):
-        for permission in ('admin', 'custom-share'):
-            self.assertEqual(self.run_gate(permission, 'rw')[0], permission)
+    def test_every_native_verdict_uses_the_authority(self):
+        for permission in ('admin', 'custom-share', None):
+            self.assertIsNone(self.run_gate(permission, 'invisible')[0])
+            self.assertEqual(self.run_gate(permission, 'rw')[0], 'rw')
 
     def test_runtime_error_refuses_native_fallback(self):
-        value, _ = self.run_gate('rw', None, error=RuntimeError('acl down'))
-        self.assertIsNone(value)
+        from cloudfile_ext.v2.acl_runtime import ACLUnavailable
+        with self.assertRaises(ACLUnavailable):
+            self.run_gate('rw', None, error=RuntimeError('acl down'))
+
+    def test_inactive_or_missing_subject_remains_a_denial(self):
+        self.assertIsNone(self.run_gate('rw', None, error=PermissionError())[0])
 
     def test_path_is_evaluated_as_a_directory(self):
         _, authority = self.run_gate('r', 'rw')

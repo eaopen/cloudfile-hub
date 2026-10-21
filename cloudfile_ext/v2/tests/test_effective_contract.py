@@ -97,14 +97,14 @@ class EffectiveContractTests(unittest.TestCase):
         self.assertEqual(result.data, {'code': 'ACL_UNAVAILABLE'})
         self.assertNotIn('write', result.data)
 
-    def test_native_read_or_revoke_can_narrow_a_scope_grant(self):
+    def test_native_read_qualifies_explicit_write_and_revoke_denies(self):
         for permission, status in (('r', 200), (None, 403), ('invisible', 403)):
             with self.subTest(permission=permission):
                 self.api.check_permission.side_effect = None
                 self.api.check_permission.return_value = permission
                 result, _ = self.request()
                 self.assertEqual(result.status_code, status)
-                self.assertFalse(result.data.get('write', False))
+                self.assertEqual(result.data.get('write', False), permission == 'r')
 
     def test_native_cannot_widen_scope_or_readonly_repository(self):
         self.api.check_permission.side_effect = None

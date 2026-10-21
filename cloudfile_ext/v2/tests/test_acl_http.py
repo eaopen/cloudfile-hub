@@ -111,7 +111,7 @@ class HTTPTests(TestCase):
     def test_effective_is_bound_to_authenticated_user(self):
         with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
             authority.return_value.effective.return_value = Decision('rw', '/shared', True)
-            authority.return_value.api.check_permission_by_path.return_value = 'rw'
+            authority.return_value.api.check_permission.return_value = 'rw'
             result = self.request(EffectivePermission, dict(repo_id=RID, path='/shared'))
             self.assertEqual(result.status_code, 200)
             self.assertEqual(result.data['qualified_root'], '/shared')
@@ -124,7 +124,7 @@ class HTTPTests(TestCase):
         # the library root and an explicit native denial keep failing closed.
         with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
             authority.return_value.effective.return_value = Decision('rw', '/shared/team', True)
-            authority.return_value.api.check_permission_by_path.return_value = None
+            authority.return_value.api.check_permission.return_value = None
             result = self.request(EffectivePermission, dict(repo_id=RID, path='/shared/team'))
             self.assertEqual(result.status_code, 200)
             self.assertTrue(result.data['write'])
@@ -132,7 +132,7 @@ class HTTPTests(TestCase):
             authority.return_value.effective.return_value = Decision('rw', '/', True)
             self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID, path='/')).status_code, 403)
             authority.return_value.effective.return_value = Decision('rw', '/shared/team', True)
-            authority.return_value.api.check_permission_by_path.return_value = 'invisible'
+            authority.return_value.api.check_permission.return_value = 'invisible'
             self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID, path='/shared/team')).status_code, 403)
 
     def test_subject_or_sql_outage_is_not_native_fallback(self):
@@ -195,6 +195,7 @@ class HTTPTests(TestCase):
             authority.return_value.effective.return_value = Decision('rw','/shared',True)
             good = dict(is_internal=True,exp=int(time.time())+60)
             self.assertEqual(self.native(good).status_code,200)
+            authority.assert_called_once_with('native')
             for bad in (dict(exp=int(time.time())+60),dict(is_internal=True,exp=1),dict(is_internal='true',exp=int(time.time())+60),dict(is_internal=True,exp=int(time.time())+3600)):
                 self.assertEqual(self.native(bad).status_code,403)
             authority.return_value.effective.return_value = Decision('invisible','/shared',True)

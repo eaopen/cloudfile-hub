@@ -166,9 +166,9 @@ class NoManagedLibraryRegression(unittest.TestCase):
 
     def test_native_errors_never_restore_ce_permission(self):
         source = (ROOT / 'cloudfile_ext/v2/native_gate.py').read_text()
-        start = source.index('    except Exception:', source.index('def check_permission('))
+        start = source.index('    except Exception as error:', source.index('def check_permission('))
         end = source.index('    if not decision.can_read:', start)
-        self.assertIn('return None', source[start:end])
+        self.assertIn('raise ACLUnavailable', source[start:end])
         self.assertNotIn('return permission', source[start:end])
         rule = (ROOT / 'cloudfile_ext/v2/tests/test_native_gate.py').read_text()
         self.assertIn('test_runtime_error_refuses_native_fallback', rule)
