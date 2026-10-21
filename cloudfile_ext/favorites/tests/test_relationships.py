@@ -209,22 +209,8 @@ def test_disabled_extension_preserves_native_path_star_and_missing_list_behavior
     api.get_file_id_by_path.assert_not_called()
 
 
-def test_directory_listing_stars_exact_path_not_equal_content_and_survives_edits():
-    from cloudfile_ext.tests.test_directory_page import API, endpoint, request, wire, native_item
-    _, manager, _ = runtime()
-    repo = '11111111-1111-4111-8111-111111111111'
-    row(manager, repo=repo, path='/a/', obj='a' * 40)
-    api = API()
-    view = endpoint(api)
-    view.get.__globals__['UserStarredFiles'] = SimpleNamespace(objects=manager)
-    view.get.__globals__['is_favorites_id_enabled'] = lambda: True
-    for changed in (False, True):
-        api.cf_list_dir_page = Mock(return_value=wire(scanned_count=2, scan_exhausted=True,
-            next_scan_position=None, visible_count=2,
-            visible_items=[native_item(obj_name='a', obj_id=('b' if changed else 'a') * 40),
-                           native_item(obj_name='b', obj_id='a' * 40)]))
-        response = request(view)
-        assert response.status_code == 200
-        entries = response.data['dirent_list']
-        assert entries[0]['name'] == 'a' and entries[0]['starred'] is True
-        assert entries[1]['name'] == 'b' and entries[1]['starred'] is False
+# 目录列表里按 obj_id 标记 starred 的用例已退役：2162cf022 收敛 V2 适配器时
+# 删除了 cloudfile_ext/directory_page 和 test_directory_page 的端点夹具，而当前
+# seahub/api2/endpoints/dir.py 按路径标记 starred（dir_path.rstrip('/') in
+# starred_item_path_list），不再做 obj_id 内容对等。收藏的 obj_id 语义由本文件
+# 上面的同一内容/同一路径用例在 starred_items 侧覆盖，不再保留依赖已删模块的夹具。
