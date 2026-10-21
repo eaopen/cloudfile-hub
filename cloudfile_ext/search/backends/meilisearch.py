@@ -264,7 +264,7 @@ def _obj_desc_clauses(obj_desc):
 class MeilisearchProvider(object):
     """search_files() contract -- see cloudfile_ext.registry.register_search_provider."""
 
-    #: Declared per cloudfile-docker/docs/EXTENSION-POINTS.md section six's
+    #: Declared per EXTENSION-POINTS.md section six's
     #: example. Combined search (feature 41) is not wired up yet -- nothing
     #: feeds cloudfile_ext.search_query predicates today -- but declaring the
     #: operators this backend can actually translate now means that feature

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """Validate a directory snapshot before the reconciler plans against it.
 
-Decision source: eap-cloudfile docs/review/cloudfile_decision_20260827.md §3.
+Decision source: CloudFile 决策 20260827 §3.
 The directory contract grows three optional fields::
 
     revision           opaque string; the same revision means the same snapshot,

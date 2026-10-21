@@ -7,7 +7,7 @@ Shadows the native ``/api2/repos/{repo}/fileops/{copy,move}/`` endpoints when
 The permission model is CE's ``r``/``rw``/``admin`` (see cloudfile-docker/
 docs/roles-semantics.md); no five-level role is introduced.
 
-Spec: cloudfile-docker/docs/features/fileops.md. The pure decision logic is in
+Spec: fileops.md. The pure decision logic is in
 ``policy.py``, which is Django-free so it shares the same test discipline as the
 ACL and fileop case sets.
 """

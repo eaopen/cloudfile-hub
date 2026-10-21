@@ -1,6 +1,6 @@
 # Agent 与 Agent2 服务端兼容边界
 
-更新：2026-09-30。当前 .NET Agent 完成已承诺功能和首发验收后进入维护；Agent2（Go）先覆盖基础能力，再承接 v0.6 回写。两者接入同一 Hub/Server，不按语言创建独立业务后端。完整路线见 [统一契约](../../eap-cloudfile/docs/features/agent-server-contract-evolution.md)。
+更新：2026-09-30。当前 .NET Agent 完成已承诺功能和首发验收后进入维护；Agent2（Go）先覆盖基础能力，再承接 v0.6 回写。两者接入同一 Hub/Server，不按语言创建独立业务后端。完整路线见内部 Agent 契约演进记录（不在本仓维护）。
 
 | 消费者 | 保留的服务端契约 | 当前边界 |
 | --- | --- | --- |

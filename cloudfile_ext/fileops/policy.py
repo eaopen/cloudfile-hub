@@ -5,8 +5,8 @@ No Django, database, or Seafile imports: this module is the shareable,
 unit-testable core of the fileops capability. The HTTP/Seafile wiring lives in
 ``service.py`` and ``views.py``.
 
-Semantics: ``cloudfile-docker/docs/features/fileops.md``. Permission levels
-follow ``cloudfile-docker/docs/roles-semantics.md`` -- only CE's ``r``/``rw``/
+Semantics: ``fileops.md``. Permission levels
+follow ``roles-semantics.md`` -- only CE's ``r``/``rw``/
 ``admin`` (plus ``none``) exist, so the five-level role model is never spoken
 here.
 """

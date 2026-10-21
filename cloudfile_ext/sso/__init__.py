@@ -25,7 +25,7 @@ Nothing here touches an upstream file. The registration below uses only seams
 the baseline already provides, plus ``seahub.auth.signals.user_logged_in``,
 which is upstream's own signal.
 
-See cloudfile-docker/docs/sso-mapping.md for the semantics and for the one
+See sso-mapping.md for the semantics and for the one
 compromise this design makes (eventual consistency).
 """
 

@@ -62,7 +62,7 @@ if HAS_FILE_SEARCH:
 # reimplementing it (getting that wrong would leak files across libraries).
 #
 # meilisearch is one such backend, not the mechanism -- see
-# cloudfile-docker/docs/EXTENSION-POINTS.md. With no provider selected this
+# EXTENSION-POINTS.md. With no provider selected this
 # returns None and Elasticsearch answers exactly as before. The fallback keeps
 # this file working in a checkout without cloudfile_ext.
 try:
