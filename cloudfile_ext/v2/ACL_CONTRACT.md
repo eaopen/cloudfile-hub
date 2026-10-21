@@ -253,6 +253,10 @@ must call the existing Memberships TTL projector successfully; failure raises.
 Only then does Hub read `cf_sso_group_map JOIN GroupUser`. Missing adapter means
 503, never stale-group fallback. This package does not claim package A is wired.
 
+### Shared native batch for directory listing
+
+The internal `/cloudfile/acl/check/` accepts the optional exact boolean `"partial": true` **only** for trusted internal JWT calls. Normal calls remain atomic: one denied path denies the entire request. In partial mode, `permissions` has one aligned item per authenticated input path (`"r"`, `"rw"`, or `null` for an inaccessible child), with the same Authority for every item. The C native directory listing uses bounded batches (up to 512 per call), drops null entries and preserves CE listing order. Invalid policy, identity, schema or a failed Hub request never exposes an unfiltered listing. This avoids one HTTP/Redis round trip per directory child while preventing an ACL on an unrelated sibling from hiding the rest of the library.
+
 ## Revocation And Efficiency
 
 Rules are sparse compared with library files, so Hub caches **all rows of one
