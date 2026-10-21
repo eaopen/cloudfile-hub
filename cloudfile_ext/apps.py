@@ -38,9 +38,8 @@ class CloudFileConfig(AppConfig):
         Gated only by a configured ``cf_dir_acl`` database. The authorization
         routes are mounted unconditionally in ``seahub.urls``, so the ACL is
         live in every deployment that has the schema -- including ones that
-        never set ``CLOUDFILE_AUTHORIZATION_ENABLED``. Gating the hook on that
-        flag silently disabled it while managed libraries still refused the
-        legacy entry, which denied the whole library.
+        never set ``CLOUDFILE_AUTHORIZATION_ENABLED``. The old flag must not disable V2 ACL checks or cause an unrelated
+        directory rule to suppress the whole library.
         """
         from django.conf import settings
 

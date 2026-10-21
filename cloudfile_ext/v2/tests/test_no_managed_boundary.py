@@ -74,6 +74,12 @@ class NoManagedLibraryRegression(unittest.TestCase):
                    if not self._resolve_extension_module(name)]
         self.assertEqual(missing, [])
 
+    def test_retired_v08_acl_package_stays_removed(self):
+        self.assertFalse((ROOT / 'cloudfile_ext/acl').exists())
+        facade = (ROOT / 'cloudfile_ext/permissions.py').read_text()
+        self.assertIn('from cloudfile_ext.v2.acl_runtime import Authority', facade)
+        self.assertNotIn('from cloudfile_ext.acl import service', facade)
+
     def test_current_runtime_has_no_enrollment_sql(self):
         for module in (ROOT / 'cloudfile_ext/v2').rglob('*.py'):
             if module.name.startswith('test_'):
