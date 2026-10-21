@@ -5,6 +5,7 @@ owns tag and Checkout/Checkin transitions; Etech owns permission audit.
 No history index, cursor table, Outbox, full-repo scan or Pro-only endpoint.
 """
 import datetime
+import hashlib
 import json
 from uuid import UUID
 
@@ -89,13 +90,23 @@ class OperationLogs(APIView):
             cutoff = datetime.datetime.now(datetime.timezone.utc).replace(
                 tzinfo=None) - datetime.timedelta(days=days)
             native = _activity_rows(repo_id, cutoff)
+            path_hash = hashlib.sha256(path.encode('utf-8')).digest()
             extension = list(AuditEvent.objects.filter(
-                repo_id=repo_id, occurred_at__gte=cutoff,
+                repo_id=repo_id, path_hash=path_hash, occurred_at__gte=cutoff,
             ).order_by('-occurred_at', '-id').values_list(*AUDIT_EVENT_COLUMNS)[:SCAN_LIMIT])
             records = []
+            expanded = 0
+            scan_limited = len(native) == SCAN_LIMIT or len(extension) == SCAN_LIMIT
             for row in native:
-                records.extend(event for event in _expand_activity(row)
-                               if event.get('path') == path or event.get('old_path') == path)
+                for event in _expand_activity(row):
+                    expanded += 1
+                    if expanded > 2000:
+                        scan_limited = True
+                        break
+                    if event.get('path') == path or event.get('old_path') == path:
+                        records.append(event)
+                if expanded > 2000:
+                    break
             for row in extension:
                 event = serialize_audit_event(row)
                 if event.get('path') == path or event.get('old_path') == path:
@@ -103,7 +114,7 @@ class OperationLogs(APIView):
             records.sort(key=lambda x: (str(x['time']), str(x['event_id'])), reverse=True)
             return Response({
                 'events': records[:limit],
-                'scan_limited': len(native) == SCAN_LIMIT or len(extension) == SCAN_LIMIT,
+                'scan_limited': scan_limited,
                 'returned': min(limit, len(records)),
                 'scope': 'self',
             })
