@@ -126,15 +126,18 @@ class SharedRootTests(unittest.TestCase):
 
 
 class NativeNarrowingTests(unittest.TestCase):
-    """The native library gate narrows a V2 decision; a share root is its own grant."""
+    """The native library grant qualifies a V2 decision; a share root is its own grant."""
 
     def decide(self, path, rows, native='rw'):
         return resolve(REPO, path, U, native, rows)
 
-    def test_native_read_still_caps_a_v2_write(self):
+    def test_native_read_qualifies_a_v2_write(self):
+        # 设计口径：库 r 可经有效目录规则提升为 rw；native 是资格，不是上限。
         decision = narrow_to_native(Decision('rw', '/', True), 'r')
-        self.assertEqual(decision.permission, 'r')
+        self.assertEqual(decision.permission, 'rw')
         self.assertEqual(narrow_to_native(Decision('rw', '/', True), 'rw').permission, 'rw')
+        # 规则自身的降级仍然有效。
+        self.assertEqual(narrow_to_native(Decision('r', '/Projects', True), 'rw').permission, 'r')
 
     def test_share_root_survives_an_absent_native_grant(self):
         # No library membership: CE reports none/None, yet the share root is readable.

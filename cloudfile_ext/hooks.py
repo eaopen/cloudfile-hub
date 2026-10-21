@@ -18,11 +18,13 @@ logger = logging.getLogger(__name__)
 
 
 def check_permission(username, repo_id, path, permission):
-    """Narrow `permission` through every registered permission hook.
+    """Hand the native verdict to every registered authorization hook.
 
     Called from seahub.views.check_folder_permission. Returns the permission
     unchanged when no capability has registered a hook, which is the case with
-    every CF_ENABLE_* switch off.
+    every CF_ENABLE_* switch off. A hook may narrow the verdict, or raise a
+    library read to write when a stored directory rule matches the qualified
+    subject; it may never grant access without native qualification.
     """
     if not registry.permission_checks:
         return permission

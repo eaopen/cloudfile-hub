@@ -112,15 +112,18 @@ class Decision:
 def narrow_to_native(decision, native):
     """What the native library gate leaves of a V2 decision; None means deny.
 
-    A native r/rw may only narrow a grant. A directory share exists for users
-    with no native library permission at all, so there the absence of a native
-    grant is the normal case and the V2 share root is the authorization. Every
-    other path still requires a native grant: an absent ('none', None) or denied
-    ('invisible') native permission keeps failing closed.
+    The native grant is a *qualification*, not a ceiling: a library read may be
+    raised to write by a matching directory rule (见
+    docs/v2.0/directory-inheritance-deny-ce-pro-20261016.md「库 r 可经有效目录
+    规则提升为 rw」). A library write is still narrowed by the rules, because
+    the decision passed in already evaluated them on top of the native base.
+    A directory share exists for users with no native library permission at
+    all, so at a positive share root the absence of a native grant is the
+    normal case and that root is the authorization. Every other path still
+    requires a native grant: an absent ('none', None) or denied ('invisible')
+    native permission keeps failing closed.
     """
     if native in ('r', 'rw'):
-        if native == 'r' and decision.can_write:
-            return Decision('r', decision.qualified_root, decision.from_rule)
         return decision
     if native in (None, 'none') and decision.from_rule and decision.qualified_root not in (None, '/'):
         return decision

@@ -27,7 +27,28 @@ class CloudFileConfig(AppConfig):
         for module in (base, audit, office):
             module.register(registry)
 
+        self._register_native_acl_gate(registry)
+
         registry.seal()
+
+    @staticmethod
+    def _register_native_acl_gate(registry):
+        """Let the V2 directory decision reach the Seahub write paths.
+
+        Gated by the same switch as the authorization routes it mirrors
+        (``CLOUDFILE_AUTHORIZATION_ENABLED``) and by a configured
+        ``cf_dir_acl`` database. Without both, every folder check keeps the
+        plain native verdict -- the baseline behaviour.
+        """
+        from django.conf import settings
+
+        if not getattr(settings, 'CLOUDFILE_AUTHORIZATION_ENABLED', False):
+            return
+        if not getattr(settings, 'CF_DATABASE_NAME', ''):
+            return
+
+        from cloudfile_ext.v2 import native_gate
+        registry.register_permission_check(native_gate.check_permission)
 
     def _configure_database(self):
         """Add the seafile-db connection and the cf_* router.

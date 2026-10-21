@@ -89,13 +89,17 @@ class Registry(object):
         self.menu.append(entry)
 
     def register_permission_check(self, func):
-        """Add a permission narrowing hook.
+        """Add an authorization hook applied to native folder verdicts.
 
         Signature: ``func(username, repo_id, path, permission) -> permission``
 
         Hooks run in registration order, each receiving the previous result.
-        A hook must only ever return a permission that is at most as
-        privileged as the one it was given -- see docs/acl-semantics.md.
+        A hook receives the native CE verdict, which is a *qualification*, not
+        a ceiling: a directory rule may raise a library read to write for a
+        qualified subject (see ``docs/v2.0/directory-inheritance-deny-ce-pro-20261016.md``
+        in the private repo). A hook must still never grant access without a
+        native qualification, and must never invent a permission it cannot
+        justify from stored rules.
         """
         self._check_open('permission checks')
         self.permission_checks.append(func)
