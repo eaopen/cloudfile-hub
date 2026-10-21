@@ -3,6 +3,7 @@ import { DropdownItem } from 'reactstrap';
 import classnames from 'classnames';
 import PropTypes from 'prop-types';
 import urlJoin from 'url-join';
+import { openV2LocalFile } from '@/cloudfile/agent-local-edit';
 import { toggleStar } from '@/components/dirent-operation-menu/dirent-operations';
 import { menuHandlers } from '@/components/dirent-operation-menu/menuHandlers';
 import CustomDropdown from '@/components/dropdown';
@@ -17,7 +18,6 @@ import FileTagsFormatter from '@/features/metadata/components/cell-formatter/fil
 import { PRIVATE_COLUMN_KEY } from '@/features/metadata/constants';
 import { getNumberDisplayString } from '@/features/metadata/utils/cell';
 import { Dirent } from '@/models';
-import { openV2LocalFile } from '@/cloudfile/agent-local-edit';
 import { imageThumbnailCenter, videoThumbnailCenter } from '@/services/thumbnail-center';
 import { gettext, siteRoot, mediaUrl, enableVideoThumbnail, enablePDFThumbnail, enableThumbnailServer } from '@/utils/constants';
 import TextTranslation from '@/utils/text-translation';
