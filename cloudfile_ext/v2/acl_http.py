@@ -199,7 +199,12 @@ class NativeACLCheck(APIView):
             return response({'code': 'NATIVE_AUTH_REQUIRED'}, 403)
         try:
             data = request.data
-            if set(data) != {'username', 'repo_id', 'checks'}:
+            # Internal listing batch: one trusted call returns one permission
+            # per supplied path, with null for hidden entries. Existing atomic
+            # read/write checks retain their all-or-deny behaviour.
+            partial = data.get('partial') is True
+            expected = {'username', 'repo_id', 'checks', 'partial'} if partial else {'username', 'repo_id', 'checks'}
+            if set(data) != expected:
                 raise ValueError()
             uuid(data['repo_id'])
             if not isinstance(data['username'], str) or not data['username'] or len(data['username']) > 255:
@@ -214,8 +219,11 @@ class NativeACLCheck(APIView):
                     raise ValueError()
                 decision = authority.effective(data['repo_id'], check['path'], check['kind'])
                 if not (decision.can_read if check['action'] == 'read' else decision.can_write):
-                    raise PermissionError()
-                permissions.append(decision.permission)
+                    if not partial:
+                        raise PermissionError()
+                    permissions.append(None)
+                else:
+                    permissions.append(decision.permission)
             # `permissions` is aligned with `checks` and carries the V2 level,
             # not just the batch verdict. Native C asks here for a single path
             # when it has no library grant at all, and it needs to know whether
