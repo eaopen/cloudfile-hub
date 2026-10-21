@@ -15,11 +15,8 @@ It never grants access without a native qualification: an absent or denied
 native verdict is refused by ``resolve()``/``narrow_to_native()`` before this
 hook returns anything stronger.
 
-Failure policy: a runtime error must not silently drop a stored deny, but it
-also must not take the whole entry point down — Seahub has no 503 mapping for
-this seam (today it enforces no ACL at all here). The hook therefore keeps the
-native verdict on error and logs loudly; an ACL outage degrades to the CE
-behaviour instead of a false 403 for every user.
+Failure policy: an ACL outage must not silently restore the more permissive
+native verdict. The hook refuses on error, rather than bypassing V2 policy.
 
 Scope note: the seam carries only a path, not an object kind. The decision is
 therefore evaluated as a directory, which covers the directory rules and the
@@ -62,9 +59,9 @@ def check_permission(username, repo_id, path, permission):
         decision = _authority(username).effective(repo_id, _canonical(path), 'dir')
     except Exception:
         logger.exception(
-            'CloudFile ACL unavailable; keeping the native verdict '
+            'CloudFile ACL unavailable; refusing native fallback '
             '(user=%s repo=%s path=%s permission=%s)', username, repo_id, path, permission)
-        return permission
+        return None
     if not decision.can_read:
         return None
     # 'rw' here may exceed the native verdict on purpose: a directory rule that

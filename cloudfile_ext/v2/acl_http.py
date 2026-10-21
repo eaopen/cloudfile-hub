@@ -77,12 +77,9 @@ class EffectivePermission(AuthenticatedACL):
             decision = authority.effective(args['repo_id'], args['path'], args.get('kind', 'dir'))
             if not decision.can_read:
                 raise PermissionError('content access denied')
-            # The per-path native RPC answers NULL for every managed library by
-            # design (a stored cf_dir_acl row makes the legacy seam refuse to
-            # adjudicate). Using it as the qualification denied every managed
-            # library, its own root included. The V2 decision already evaluated
-            # the stored rules on top of the library grant, so the library-level
-            # permission is the only qualification left to verify here.
+            # Recheck native library qualification after the path-scoped V2
+            # decision. Sparse directory rules never classify a whole library;
+            # a shared subtree qualifies independently of native membership.
             native = authority.api.check_permission(args['repo_id'], request.user.username)
             if native == 'admin':
                 native = 'rw'

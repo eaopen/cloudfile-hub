@@ -47,9 +47,9 @@ class NativeGateTests(unittest.TestCase):
         for permission in ('admin', 'custom-share'):
             self.assertEqual(self.run_gate(permission, 'rw')[0], permission)
 
-    def test_runtime_error_keeps_the_native_verdict(self):
+    def test_runtime_error_refuses_native_fallback(self):
         value, _ = self.run_gate('rw', None, error=RuntimeError('acl down'))
-        self.assertEqual(value, 'rw')
+        self.assertIsNone(value)
 
     def test_path_is_evaluated_as_a_directory(self):
         _, authority = self.run_gate('r', 'rw')

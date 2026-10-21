@@ -69,10 +69,6 @@ class DirectoryShares:
             cursor.execute('UPDATE cf_dir_acl SET share_mode=1,lifecycle_ref=%s,revision=%s '
                 'WHERE repo_id=%s AND id=%s', (birth, revision, ref['repo_id'], current['id']))
             return dict(current, share_mode=1, lifecycle_ref=birth, revision=revision, etag='"' + revision + '"'), True
-        # Creating a shared ACL must close legacy unguarded publication in
-        # this same transaction, including internal store callers.
-        cursor.execute('INSERT INTO cf_managed_library(repo_id,created_at) VALUES(%s,UTC_TIMESTAMP(6)) '
-            'ON DUPLICATE KEY UPDATE repo_id=VALUES(repo_id)', (ref['repo_id'],))
         id_, revision = str(uuid4()), str(uuid4())
         fields = (id_, ref['repo_id'], ref['path'], digest(ref['path']), 'dir', s['type'],
             s['provider'], s['namespace'], s['external_id'], self.subject_hash(s), 'r', 1, revision, 1, birth)

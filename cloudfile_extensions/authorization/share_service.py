@@ -104,9 +104,6 @@ class DirectoryShareService:
                                 return result
                         result, action = change(cursor)
                         if action is not None:
-                            # Enrollment closes legacy unguarded publication.
-                            cursor.execute('INSERT INTO cf_managed_library(repo_id,created_at) VALUES(%s,UTC_TIMESTAMP(6)) '
-                                'ON DUPLICATE KEY UPDATE repo_id=VALUES(repo_id)', (ref['repo_id'],))
                             EventWriter().append(cursor, dict(event_id=str(uuid4()),
                                 occurred_at=datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
                                 request_id=authority.rules.request_id, actor_user_id=authority.actor,

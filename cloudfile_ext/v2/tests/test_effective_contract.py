@@ -108,7 +108,7 @@ class EffectiveContractTests(unittest.TestCase):
 
     def test_native_cannot_widen_scope_or_readonly_repository(self):
         self.api.check_permission.side_effect = None
-        self.api.check_permission.return_value = 'rw'
+        self.api.check_permission.return_value = 'r'
         result, _ = self.request('/sibling')
         self.assertFalse(result.data['write'])
         self.api.get_repo_status.return_value = 1

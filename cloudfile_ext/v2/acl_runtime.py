@@ -162,7 +162,13 @@ class Authority:
             # sparse rule rows are shared across requests.
             if repo_id not in self._native:
                 base = self.api.check_permission(repo_id, self.username)
-                self._native[repo_id] = 'rw' if base == 'admin' else base or None
+                if base == 'admin':
+                    base = 'rw'
+                elif base in (None, 'none', 'invisible'):
+                    base = None
+                elif base not in ('r', 'rw'):
+                    raise ACLUnavailable('unknown native permission')
+                self._native[repo_id] = base
             decision = resolve(repo_id, directory, self.principal, self._native[repo_id],
                                self._rules(repo_id, directory))
             self._decisions[key] = decision
