@@ -1,5 +1,5 @@
 """Runtime integration failures never become native membership readiness."""
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest import TestCase
@@ -8,7 +8,9 @@ from unittest.mock import Mock, patch
 from django.test import override_settings
 
 from cloudfile_ext.v2.etech_directory import Directory, prepare_user, prepare_group, ensure_subject
-from cloudfile_ext.v2.errors import IdentityUnavailable
+from cloudfile_ext.v2.errors import IdentityUnavailable, IdentityConflict
+from cloudfile_ext.v2.identity import NativeIdentity
+from cloudfile_ext.v2.tests.native_identity_facts import NativeFacts
 
 
 def subject(status='active'):
@@ -31,7 +33,7 @@ class DirectoryRuntimeTests(TestCase):
         with patch('cloudfile_ext.v2.etech_directory.runtime',self.runtime):
             self.assertEqual(prepare_user('uid'),'opaque@auth.local')
         self.directory.subject.assert_called_once_with('uid')
-        self.identity.prepare.assert_called_once_with(uid='uid',login_name='E001')
+        self.identity.prepare.assert_called_once_with(uid='uid',login_name='E001',account='E001')
         self.memberships.ensure.assert_not_called()
 
     def test_disabled_or_changed_uid_cannot_create_native_account(self):
@@ -44,6 +46,43 @@ class DirectoryRuntimeTests(TestCase):
             with patch('cloudfile_ext.v2.etech_directory.runtime',runtime):
                 with self.assertRaises(IdentityUnavailable):prepare_user('uid')
             self.identity.prepare.assert_not_called()
+
+    def test_missing_reserved_or_invalid_directory_account_cannot_precreate(self):
+        for account in (None, '', 'cfadmin', 'CFADMIN', 'a b', 'a@contact.test'):
+            @contextmanager
+            def runtime():
+                with self.runtime():
+                    facts = NativeFacts()
+                    native = NativeIdentity(facts, account_schema='accounts', hub_schema='hub',
+                                            issuer='https://directory.test', create_account=facts.create)
+                    value = subject()
+                    value['attributes'] = {'login_name': 'display-only'} if account is None else {'employee_no': account}
+                    self.directory.subject.return_value = value
+                    yield self.directory, native, self.catalog, self.memberships
+            with patch('cloudfile_ext.v2.etech_directory.runtime', runtime), \
+                    patch('cloudfile_ext.v2.identity.database_lock', side_effect=lambda *args: nullcontext()), \
+                    self.assertRaises((IdentityUnavailable, IdentityConflict)):
+                prepare_user('uid')
+
+    def test_prepared_uid_reuses_native_user_with_missing_or_invalid_account_metadata(self):
+        for account in (None, '', '中文', 'a@contact.test', ' x ', 'x' * 201):
+            facts = NativeFacts()
+            facts.profiles.append(('historical@auth.local', 'uid'))
+            facts.accounts['historical@auth.local'] = 1
+            native = NativeIdentity(facts, account_schema='accounts', hub_schema='hub',
+                                    issuer='https://directory.test', create_account=facts.create)
+            @contextmanager
+            def runtime():
+                with self.runtime():
+                    value = subject()
+                    value['attributes'] = {'employee_no': account}
+                    self.directory.subject.return_value = value
+                    yield self.directory, native, self.catalog, self.memberships
+            with self.subTest(account=account), \
+                    patch('cloudfile_ext.v2.etech_directory.runtime', runtime), \
+                    patch('cloudfile_ext.v2.identity.database_lock', side_effect=lambda *args: nullcontext()):
+                self.assertEqual(prepare_user('uid'), 'historical@auth.local')
+                self.assertEqual(facts.created, [])
 
     def test_group_mapping_uses_exact_type_namespace_and_external_id(self):
         with patch('cloudfile_ext.v2.etech_directory.runtime',self.runtime):

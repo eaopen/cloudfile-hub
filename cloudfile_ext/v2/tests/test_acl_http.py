@@ -7,7 +7,7 @@ import jwt
 from rest_framework.test import APIRequestFactory, force_authenticate
 
 from cloudfile_ext.v2.acl_http import EffectivePermission, SharedDirectories, DirectoryRules, NativeACLCheck, DirectoryEntries
-from cloudfile_ext.v2.acl_policy import Decision
+from cloudfile_ext.v2.acl_policy import Decision, PolicyError, StoredACLError
 from cloudfile_ext.v2.acl_runtime import ACLUnavailable
 
 RID = '00000000-0000-4000-8000-000000000001'
@@ -37,6 +37,7 @@ class HTTPTests(TestCase):
     def test_directory_rules_allow_native_repo_admin_without_system_staff(self):
         with patch('cloudfile_ext.v2.acl_http.require_repo_manage') as guard, \
              patch('cloudfile_ext.v2.acl_http.store') as rules, \
+             patch('seaserv.seafile_api.get_dir_id_by_path', return_value='d' * 40), \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
             settings.CF_ACL_PROVIDER = 'etech'
             rules.return_value.list_path.return_value = []
@@ -47,6 +48,28 @@ class HTTPTests(TestCase):
             self.assertEqual(result.data['data'], [])
             guard.side_effect = PermissionError('no repo-admin rights')
             self.assertEqual(self.request(DirectoryRules, dict(repo_id=RID,path='/folder')).status_code,403)
+
+    def test_management_existence_is_not_a_content_listing_or_grant(self):
+        # A machine administrator may publish policy without native content
+        # access. Only a boolean is returned; failures never mean "missing".
+        with patch('cloudfile_ext.v2.acl_http.require_repo_manage') as guard, \
+             patch('cloudfile_ext.v2.acl_http.store') as rules, \
+             patch('seaserv.seafile_api.get_dir_id_by_path') as exists, \
+             patch('seaserv.seafile_api.list_dir_with_perm') as listing:
+            rules.return_value.list_path.return_value = []
+            for value in ('d' * 40, None):
+                exists.return_value = value
+                result = self.request(DirectoryRules, dict(repo_id=RID, path='/folder'))
+                self.assertEqual(result.status_code, 200)
+                self.assertIs(result.data['directory_exists'], bool(value))
+                self.assertNotIn('dirent_list', result.data)
+            exists.side_effect = RuntimeError('native RPC unavailable')
+            self.assertEqual(self.request(DirectoryRules, dict(repo_id=RID, path='/folder')).status_code, 503)
+            exists.reset_mock()
+            guard.side_effect = PermissionError()
+            self.assertEqual(self.request(DirectoryRules, dict(repo_id=RID, path='/folder')).status_code, 403)
+            exists.assert_not_called()
+            listing.assert_not_called()
 
     def test_native_repo_admin_marker_is_required_for_acl_delegation(self):
         from cloudfile_ext.v2.acl_http import require_repo_manage
@@ -88,6 +111,7 @@ class HTTPTests(TestCase):
     def test_effective_is_bound_to_authenticated_user(self):
         with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
             authority.return_value.effective.return_value = Decision('rw', '/shared', True)
+            authority.return_value.api.check_permission_by_path.return_value = 'rw'
             result = self.request(EffectivePermission, dict(repo_id=RID, path='/shared'))
             self.assertEqual(result.status_code, 200)
             self.assertEqual(result.data['qualified_root'], '/shared')
@@ -95,10 +119,40 @@ class HTTPTests(TestCase):
             self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID,path='/shared',username='owner')).status_code, 400)
             self.assertEqual(result['Cache-Control'], 'no-store')
 
+    def test_directory_share_does_not_require_native_library_permission(self):
+        # A user with no library membership must still act inside a shared subtree;
+        # the library root and an explicit native denial keep failing closed.
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
+            authority.return_value.effective.return_value = Decision('rw', '/shared/team', True)
+            authority.return_value.api.check_permission_by_path.return_value = None
+            result = self.request(EffectivePermission, dict(repo_id=RID, path='/shared/team'))
+            self.assertEqual(result.status_code, 200)
+            self.assertTrue(result.data['write'])
+            self.assertEqual(result.data['qualified_root'], '/shared/team')
+            authority.return_value.effective.return_value = Decision('rw', '/', True)
+            self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID, path='/')).status_code, 403)
+            authority.return_value.effective.return_value = Decision('rw', '/shared/team', True)
+            authority.return_value.api.check_permission_by_path.return_value = 'invisible'
+            self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID, path='/shared/team')).status_code, 403)
+
     def test_subject_or_sql_outage_is_not_native_fallback(self):
         with patch('cloudfile_ext.v2.acl_http.Authority', side_effect=ACLUnavailable()):
             self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID,path='/shared')).status_code,503)
             self.assertEqual(self.request(SharedDirectories).status_code,503)
+
+    def test_stored_acl_inconsistency_is_not_blamed_on_the_caller(self):
+        # A row that contradicts its own path or hash is our fault: 503, never
+        # 400 INVALID_ACL_REQUEST, which consumers read as ACL unavailable anyway.
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
+            authority.return_value.effective.side_effect = StoredACLError('ACL path hash mismatch')
+            result = self.request(EffectivePermission, dict(repo_id=RID, path='/shared'))
+            self.assertEqual(result.status_code, 503)
+            self.assertEqual(result.data['code'], 'ACL_UNAVAILABLE')
+            authority.return_value.entries.side_effect = StoredACLError('malformed stored ACL')
+            self.assertEqual(self.request(DirectoryEntries, dict(repo_id=RID, path='/shared')).status_code, 503)
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
+            authority.return_value.effective.side_effect = PolicyError('invalid object kind')
+            self.assertEqual(self.request(EffectivePermission, dict(repo_id=RID, path='/shared')).status_code, 400)
 
     def test_directory_entries_require_authentication_and_preserve_root(self):
         self.assertIn(self.request(DirectoryEntries, authenticated=False).status_code,(401,403))
@@ -145,6 +199,31 @@ class HTTPTests(TestCase):
                 self.assertEqual(self.native(bad).status_code,403)
             authority.return_value.effective.return_value = Decision('invisible','/shared',True)
             self.assertEqual(self.native(good).status_code,403)
+
+    def test_native_answer_carries_the_level_not_only_the_verdict(self):
+        # Native C has no library grant at a share root, so it needs the V2
+        # level (r vs rw) out of this one call: probing again with
+        # action=write would double the round trip on every upload.
+        claims = dict(is_internal=True, exp=int(time.time()) + 60)
+        checks = [dict(path='/shared', kind='dir', action='read'),
+                  dict(path='/shared/file', kind='file', action='write')]
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
+            # One read-only directory grant and one writable file grant:
+            # the read check may return r, while a write check must be rw.
+            authority.return_value.effective.side_effect = [Decision('r', '/shared', True),
+                                                            Decision('rw', '/shared', True)]
+            result = self.native(claims, dict(username='native', repo_id=RID, checks=checks))
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.data['permissions'], ['r', 'rw'])
+            self.assertTrue(result.data['allowed'])
+            self.assertEqual(result.data['contract'], 'cf-acl-v1')
+            # Denial still answers 403 and never leaks a partial level list.
+            authority.return_value.effective.side_effect = None
+            authority.return_value.effective.return_value = Decision('r', '/shared', True)
+            denied = self.native(claims, dict(username='native', repo_id=RID, checks=[
+                dict(path='/shared/file', kind='file', action='write')]))
+            self.assertEqual(denied.status_code, 403)
+            self.assertNotIn('permissions', denied.data)
 
     def test_native_missing_subject_adapter_and_unknown_checks_fail_closed(self):
         with patch('cloudfile_ext.v2.acl_http.Authority',side_effect=ACLUnavailable()):

@@ -11,8 +11,8 @@ from rest_framework.views import APIView
 from seahub.api2.authentication import TokenAuthentication, SessionAuthentication
 from seahub.api2.utils import JWT_PRIVATE_KEY
 
-from .acl_policy import PolicyError, Rule
-from .acl_runtime import Authority, store
+from .acl_policy import PolicyError, Rule, StoredACLError, narrow_to_native
+from .acl_runtime import ACLUnavailable, Authority, store
 from .acl_store import uuid, RevisionConflict
 from .errors import SubjectNotFound
 from . import tag_display
@@ -31,6 +31,12 @@ def failure(error):
         # "No business subject for this account" is an answer, not an outage.
         # Callers (EAP admin paths) must be able to tell it apart from 503.
         return response({'code': 'SUBJECT_NOT_FOUND'}, 404)
+    if isinstance(error, StoredACLError):
+        # A stored row that contradicts its own path, hash or column shape is a
+        # server-side fault. Answering 400 (INVALID_ACL_REQUEST) blamed the
+        # caller and let one legacy path_hash encoding read as an ACL outage.
+        logger.error('CloudFile stored ACL inconsistent: %s', error)
+        return response({'code': 'ACL_UNAVAILABLE'}, 503)
     if isinstance(error, (ValueError, TypeError, KeyError, PolicyError)):
         return response({'code': 'INVALID_ACL_REQUEST'}, 400)
     if isinstance(error, PermissionError):
@@ -67,7 +73,19 @@ class EffectivePermission(AuthenticatedACL):
             args = request.query_params
             if set(args) - {'repo_id', 'path', 'kind'} or any(len(args.getlist(k)) != 1 for k in args):
                 raise ValueError()
-            decision = Authority(request.user.username).effective(args['repo_id'], args['path'], args.get('kind', 'dir'))
+            authority = Authority(request.user.username)
+            decision = authority.effective(args['repo_id'], args['path'], args.get('kind', 'dir'))
+            if not decision.can_read:
+                raise PermissionError('content access denied')
+            # Native library permission can only narrow C's decision, never widen
+            # it; management authority is not a content write permission. An
+            # absent native grant at a share root is the share's normal case.
+            native = authority.api.check_permission_by_path(args['repo_id'], args['path'], request.user.username)
+            if native not in (None, 'none', 'r', 'rw', 'invisible'):
+                raise ACLUnavailable('invalid native content permission')
+            decision = narrow_to_native(decision, native)
+            if decision is None:
+                raise PermissionError('native content access denied')
             return response(dict(**asdict(decision), read=decision.can_read, write=decision.can_write,
                                  visible=decision.visible, protected_publication=False))
         except Exception as error:
@@ -116,8 +134,16 @@ class DirectoryRules(AuthenticatedACL):
             if set(args) != {'repo_id', 'path'} or any(len(args.getlist(k)) != 1 for k in args):
                 raise ValueError()
             require_repo_manage(request.user, args['repo_id'])
+            # Policy publication needs existence, not content browsing. CE admin
+            # directory listing is Pro-only and a machine admin has no implicit
+            # read grant. Return only this managed path's existence, no dirents.
+            from seaserv import seafile_api
+            from .acl_policy import canonical_path
+            canonical_path(args['path'])
+            exists = bool(seafile_api.get_dir_id_by_path(args['repo_id'], args['path']))
             rows = store().list_path(args['repo_id'], args['path'], getattr(settings, 'CF_ACL_PROVIDER', 'etech'))
-            return response({'data': [dict(**asdict(rule), revision=revision) for rule, revision in rows]})
+            return response({'data': [dict(**asdict(rule), revision=revision) for rule, revision in rows],
+                             'directory_exists': exists})
         except Exception as error:
             return failure(error)
 
@@ -180,13 +206,21 @@ class NativeACLCheck(APIView):
             if not isinstance(checks, list) or not 1 <= len(checks) <= 4096:
                 raise ValueError()
             authority = Authority(data['username'])
+            permissions = []
             for check in checks:
                 if set(check) != {'path', 'kind', 'action'} or check['action'] not in ('read', 'write'):
                     raise ValueError()
                 decision = authority.effective(data['repo_id'], check['path'], check['kind'])
                 if not (decision.can_read if check['action'] == 'read' else decision.can_write):
                     raise PermissionError()
-            return response({'allowed': True, 'contract': 'cf-acl-v1'})
+                permissions.append(decision.permission)
+            # `permissions` is aligned with `checks` and carries the V2 level,
+            # not just the batch verdict. Native C asks here for a single path
+            # when it has no library grant at all, and it needs to know whether
+            # the qualified share root is r or rw: probing again with
+            # action=write would double the round trip for every write.
+            return response({'allowed': True, 'contract': 'cf-acl-v1',
+                             'permissions': permissions})
         except Exception as error:
             return failure(error)
 

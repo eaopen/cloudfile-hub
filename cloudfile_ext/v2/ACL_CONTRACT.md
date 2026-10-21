@@ -28,6 +28,24 @@ not alter policy.
 stored paths/hashes/revisions, and limits candidate results to 4096. Sharing uses
 the existing `acl_shared_subject` index. No new tables or legacy migrations.
 
+`path_hash` is `BINARY(32)`, the SHA-256 of the canonical path, and that is the
+only accepted shape. A text cell (64 hex characters in a `CHAR` column, or bytes
+written into a text column) means the table is not this V2 table; decoding names
+it as a stored fault instead of encoding around it, because such data is fixed by
+migrating it (`UNHEX` after verifying `SHA2(path,256)`), not by `.encode()` in
+the reader. A row that contradicts its own path, hash, revision or column shape
+is a server-side fault: it stays fail-closed and answers `503 ACL_UNAVAILABLE`,
+never `400 INVALID_ACL_REQUEST`, which consumers read as "the permission service
+is unavailable". The natural key needs InnoDB `DYNAMIC` (or `COMPRESSED`) row
+format: the primary key is ~1612 bytes, so a `COMPACT` table rejects this DDL
+outright instead of truncating an index column.
+
+**Directory identity is the canonical path.** A directory deleted and recreated at
+the same path keeps the rules stored for that path: V2 stores no directory birth,
+object ID or `lifecycle_ref`, and deleting a directory does not delete its rules.
+This is the accepted behaviour for the current version, not an unimplemented
+lifecycle binding; a deletion that must revoke access is an explicit rule change.
+
 The internal writer uses the natural row key
 `(repo_id,path_hash,subject_type,provider,namespace,external_id)`.
 `expected=None` creates; otherwise it compares the current revision. A fresh UUID
@@ -83,11 +101,40 @@ Under `api/v2.1/cloudfile/authorization/v1/`:
 
 All require a native session/token, use its username, reject subject overrides,
 and return `Cache-Control: no-store`. These are content checks, not management
-checks. Native file `check-access` also uses this authority for protected repos,
+checks. Effective-permission also requires native C `check_permission_by_path`
+for the authenticated username and exact path. Its result can only narrow the
+current V2 scope decision: a library `r` with a child `rw` remains writable at
+that child, while root/sibling `r` responses have `write=false`.
+**Exception, and only there:** when the decision comes from a share root
+(`from_rule` and `qualified_root` outside the library root), an absent native
+grant (`None`/`none`) does not deny; the share root itself is the authorisation,
+because a directory share exists for accounts with no library membership. An
+explicit native `invisible`, and every non-share path, still fail closed. No readable
+content permission returns HTTP 403; unavailable or invalid native policy
+returns HTTP 503. A management role never supplies content `rw`.
+Native file `check-access` also uses this authority for protected repos,
 so directory-only access does not fail a preliminary whole-library permission
 check. Repo API tokens cannot impersonate current users on protected repos.
 Whether a repo is protected is answered from the same library rule snapshot
 (a virtual repo also checks its origin; an over-budget library is protected).
+
+### Native write entries consume the same share root
+
+The exception above is not only a Hub-side shape. Native upload links, mkdir,
+rename, move, delete and seafdav all gate on C's
+`seafile_check_permission_by_path`, whose native library answer for a
+non-member is "none". C therefore asks this same authority, once, at the exact
+path, when -- and only when -- the library gate denied (an RPC *failure* is
+propagated, never retried as a share question). The answer is `r`/`rw` for that
+path; the library root and every unshared path stay denied, `admin` is never
+producible, and the Go/C final publication checks are unchanged.
+
+`/cloudfile/acl/check/` carries the level in `permissions`, aligned with
+`checks`, because a second `action=write` probe would double the round trip on
+every share-root write. A caller that ignores the field, or an older Hub that
+does not send it, keeps the *deny* reading: not "assume rw". The seam is
+registered only where the V2 managed schema exists and an internal Hub channel
+is configured; elsewhere a stock CE denial is byte-identical to before.
 
 ### Paged CE directory listing
 
@@ -288,7 +335,13 @@ binding, an inactive account or any check error takes the locked path, which
 behaves as before. Readiness lifetime and revocation timing are unchanged.
 
 Staff identity resolution pre-creates a native CE User/Profile only after a fresh
-active Directory UID proof. It creates no OAuth subject; first OAuth/OIDC login
+active Directory UID proof. New Etech users require the trusted Directory account
+(`employee_no`, currently Etech `account_`) and use `account@auth.local`. Numeric
+and named accounts, including `admin`, are ordinary non-staff users. New native
+names follow Seafile RPC lowercase normalization; UIDs remain byte-exact; `cfadmin`,
+missing/invalid accounts and native name collisions reject creation. Existing
+UID owners retain their exact historical native names, independent of contact
+email. It creates no OAuth subject; first OAuth/OIDC login
 reuses that UID's native account. Existing UID collation aliases and inactive
 accounts reject. Local CE users without a Profile UID use a disjoint native
 principal and do not inherit external group claims.
@@ -299,3 +352,20 @@ Optional issuer/audience defaults match EAP (`cloudfile-sso` / `eap-directory`).
 `CF_DIRECTORY_GROUP_OWNER` is an existing active native service administrator
 that owns newly created flat Groups. Redis comes from native `CACHES.default`
 LOCATION. These are connection/identity inputs, not feature switches.
+
+
+OIDC-only login provisioning uses `cloudfile_ext.v2.jit.SQLJITProvisioner` after
+ID Token verification and exact signed/UserInfo `userId` agreement, with fresh
+active Directory proof. It uses only native User/Profile/SocialAuthUser facts;
+no legacy job, audit, outbox or extension schema is required. Staff preparation
+never invokes this login adapter. OAuth-only callbacks retain existing-UID
+reuse; a second provider adds its own subject binding to the same UID owner.
+A native RPC success followed by SQL failure can leave a precreated/unbound
+account, as with staff preparation; no password or session is issued on failure.
+
+
+## 四表运行路由边界（2026-10-21）
+
+默认根路由不再挂载历史 Resource/Intent/SchemaRunner 控制面。原生库/文件读取保留；`extensions/authorization/v1/effective-permission/`、`shared-directories/`、`directory-entries/` 直接使用本契约对应的 V2 视图、参数和回执，不再调用旧 NativeRead。旧 `directory-address`、`library-rules`、`directory-shares`、`directory/sync`、扩展 identity/session/editing/transfer 等路由不再由根路由提供；当前管理/目录同步入口保持不变。原生 OAuth 与 `/oidc/` 保持现有接线，不依赖旧 PolicyHost。
+
+`test_root_routes.py` 验证真实根路由解析及旧路由缺席；既有 ACL HTTP、有效权限、原生 Cookie 和 Checkout 用例验证授权及回执。历史源码只用于追溯，不能据其存在恢复额外表或旧运行入口。

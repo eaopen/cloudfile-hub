@@ -8,7 +8,7 @@ from urllib.parse import urlsplit, parse_qs
 import jwt
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from cloudfile_ext.v2.rust_edit import RustLocalEditOpen, issue_ticket
+from cloudfile_ext.v2.rust_edit import RustLocalEditOpen, issue_ticket, checkout_available
 
 
 RID = "11111111-1111-4111-8111-111111111111"
@@ -71,3 +71,27 @@ class ViewScopeTests(unittest.TestCase):
         self.assertTrue(issue_ticket(mode="local-view", **base))
         with self.assertRaises(ValueError):
             issue_ticket(mode="unlimited", **base)
+
+
+class CheckoutCapabilityTests(unittest.TestCase):
+    def test_disabled_checkout_never_discovers_schema(self):
+        checkout_available.cache_clear()
+        try:
+            with patch('cloudfile_ext.features.is_enabled', return_value=False), \
+                 patch('cloudfile_ext.v2.checkout_schema.path_checkout_available') as qualify:
+                self.assertFalse(checkout_available())
+                qualify.assert_not_called()
+        finally:
+            checkout_available.cache_clear()
+
+    def test_enabled_checkout_still_qualifies_the_guard(self):
+        checkout_available.cache_clear()
+        try:
+            with patch('cloudfile_ext.features.is_enabled', return_value=True), \
+                 patch('seahub.utils.db_api.SeafileDB') as database, \
+                 patch('cloudfile_ext.v2.checkout_schema.path_checkout_available', return_value=True) as qualify:
+                database.return_value.db_name='fixture_files'
+                self.assertTrue(checkout_available())
+                self.assertEqual(qualify.call_args.args[1], 'fixture_files')
+        finally:
+            checkout_available.cache_clear()

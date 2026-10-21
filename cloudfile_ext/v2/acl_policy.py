@@ -17,6 +17,15 @@ class PolicyError(ValueError):
     """Invalid ACL or missing trusted context: caller must fail closed."""
 
 
+class StoredACLError(PolicyError):
+    """A stored row contradicts its own path, hash, revision or schema shape.
+
+    Kept apart from a caller mistake on purpose: it is still fail-closed, but it
+    is our fault, not the requester's. Reporting it as a bad request blamed the
+    caller and let one legacy encoding look like an ACL outage (DEV 2026-10-20).
+    """
+
+
 def canonical_path(value):
     if (not isinstance(value, str) or not value.startswith('/') or
             len(value.encode('utf-8')) > 4096 or '\\' in value or
@@ -100,6 +109,24 @@ class Decision:
         return self.permission != 'invisible'
 
 
+def narrow_to_native(decision, native):
+    """What the native library gate leaves of a V2 decision; None means deny.
+
+    A native r/rw may only narrow a grant. A directory share exists for users
+    with no native library permission at all, so there the absence of a native
+    grant is the normal case and the V2 share root is the authorization. Every
+    other path still requires a native grant: an absent ('none', None) or denied
+    ('invisible') native permission keeps failing closed.
+    """
+    if native in ('r', 'rw'):
+        if native == 'r' and decision.can_write:
+            return Decision('r', decision.qualified_root, decision.from_rule)
+        return decision
+    if native in (None, 'none') and decision.from_rule and decision.qualified_root not in (None, '/'):
+        return decision
+    return None
+
+
 def _track_permission(rules, principal, path, kind):
     winner = None
     for level in ancestors(path):
@@ -148,10 +175,10 @@ def resolve(repo_id, path, principal, native_permission, rules, *, hard_readonly
     unique = set()
     for rule in rules:
         if not isinstance(rule, Rule) or rule.repo_id != repo_id or rule.provider != principal.provider:
-            raise PolicyError('mixed or malformed ACL candidate set')
+            raise StoredACLError('mixed or malformed ACL candidate set')
         key = (rule.path, rule.provider, rule.subject_type, rule.namespace, rule.external_id)
         if key in unique:
-            raise PolicyError('conflicting ACL rows')
+            raise StoredACLError('conflicting ACL rows')
         unique.add(key)
         if within(path, rule.path):
             selected.append(rule)

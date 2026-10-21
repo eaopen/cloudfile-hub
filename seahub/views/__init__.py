@@ -1161,7 +1161,8 @@ def react_fake_view(request, **kwargs):
 
     guide_enabled = UserOptions.objects.is_user_guide_enabled(username)
     if guide_enabled:
-        create_default_library(request)
+        UserOptions.objects.disable_user_guide(username)
+        guide_enabled = False
 
     try:
         expire_days = seafile_api.get_server_config_int('library_trash',

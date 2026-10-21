@@ -399,6 +399,11 @@ def sync(registry=None):
     outcome lands in cf_sso_sync_state, which is what the admin endpoint and
     the capability gate both read.
     """
+    # V2 owns org/role mappings and current-user GroupUser projection. Even if
+    # an old provider selector survives deployment, never run the dept/group
+    # writer alongside it: failed legacy map inserts leave duplicate native groups.
+    if getattr(_settings(), 'CF_DIRECTORY_URL', ''):
+        return _record(STATUS_SKIPPED, 'V2 Directory owns native groups and memberships')
     from cloudfile_ext.registry import registry as default_registry
 
     source = directory.active(registry or default_registry)
@@ -554,6 +559,10 @@ def sync_user(username, registry=None):
     *after* ``auth.login()`` fires the signal) must not burn the throttle
     window. Keep the two apart if this is ever refactored.
     """
+    # Login remains non-blocking; V2's authority refreshes the exact UID before
+    # content access. The legacy login signal must not mutate its group projection.
+    if getattr(_settings(), 'CF_DIRECTORY_URL', ''):
+        return None
     from cloudfile_ext.registry import registry as default_registry
     from cloudfile_ext.identity import login_of
     from seaserv import ccnet_api

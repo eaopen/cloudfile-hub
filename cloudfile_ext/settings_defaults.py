@@ -43,7 +43,7 @@ EXTRA_INSTALLED_APPS = [
 # Operators can invert any switch through the compose .env; these defaults only
 # apply when nothing is configured. Per-switch list: cloudfile-docker's
 # docs/configuration.md.
-CF_ENABLE_DIR_ACL = False
+CF_ENABLE_DIR_ACL = True
 CF_ENABLE_AUDIT = True
 CF_ENABLE_METADATA = True
 CF_ENABLE_TAGS = True

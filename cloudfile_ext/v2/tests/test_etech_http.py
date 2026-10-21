@@ -15,7 +15,7 @@ class EtechIdentityLookupTests(TestCase):
         return IdentityResolve.as_view()(request)
 
     def test_existing_uid_keeps_opaque_native_username(self):
-        with patch('cloudfile_ext.v2.http.Profile.objects.get_username_by_login_id', return_value='opaque@auth.local'), \
+        with patch('cloudfile_ext.v2.http.Profile.objects.filter', return_value=Mock(values_list=Mock(return_value=[('opaque@auth.local', '417137619324108800')]))), \
                 patch('cloudfile_ext.v2.http.User.objects.get', return_value=SimpleNamespace(username='opaque@auth.local', is_active=True)), \
                 patch('cloudfile_ext.v2.http.Profile.objects.get_profile_by_user', return_value=SimpleNamespace(login_id='417137619324108800')):
             response = self.request({'external_user_id': '417137619324108800', 'login_id': '417137619324108800'})
@@ -24,7 +24,7 @@ class EtechIdentityLookupTests(TestCase):
         self.assertEqual(response.data['login_id'], '417137619324108800')
 
     def test_uid_mismatch_is_rejected_before_lookup(self):
-        with patch('cloudfile_ext.v2.http.Profile.objects.get_username_by_login_id') as lookup:
+        with patch('cloudfile_ext.v2.http.Profile.objects.filter') as lookup:
             self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'other'}).status_code, 400)
             lookup.assert_not_called()
 
@@ -33,7 +33,7 @@ class EtechIdentityLookupTests(TestCase):
 
     def test_unknown_uid_requires_trusted_directory_preparation(self):
         from cloudfile_ext.v2.errors import IdentityUnavailable
-        with patch('cloudfile_ext.v2.http.Profile.objects.get_username_by_login_id', return_value=None), \
+        with patch('cloudfile_ext.v2.http.Profile.objects.filter', return_value=Mock(values_list=Mock(return_value=[]))), \
                 patch('cloudfile_ext.v2.etech_directory.prepare_user', side_effect=IdentityUnavailable()) as prepare, \
                 patch('cloudfile_ext.v2.http.User.objects.get') as user:
             self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'uid'}).status_code, 503)
@@ -41,13 +41,36 @@ class EtechIdentityLookupTests(TestCase):
             user.assert_not_called()
 
     def test_prepared_user_is_read_back_and_uid_alias_is_rejected(self):
-        with patch('cloudfile_ext.v2.http.Profile.objects.get_username_by_login_id', return_value=None), \
+        with patch('cloudfile_ext.v2.http.Profile.objects.filter', return_value=Mock(values_list=Mock(return_value=[]))), \
                 patch('cloudfile_ext.v2.etech_directory.prepare_user', return_value='new@auth.local'), \
                 patch('cloudfile_ext.v2.http.Profile.objects.get_profile_by_user', return_value=SimpleNamespace(login_id='uid')) as profile, \
                 patch('cloudfile_ext.v2.http.User.objects.get', return_value=SimpleNamespace(username='new@auth.local', is_active=True)):
             self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'uid'}).status_code, 200)
             profile.return_value.login_id = 'UID'
             self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'uid'}).status_code, 409)
+
+    def test_ambiguous_or_case_aliased_uid_cannot_prepare_or_select_a_user(self):
+        for rows in ([('a@auth.local', 'uid'), ('b@auth.local', 'uid')], [('a@auth.local', 'UID')]):
+            with patch('cloudfile_ext.v2.http.Profile.objects.filter', return_value=Mock(values_list=Mock(return_value=rows))), \
+                    patch('cloudfile_ext.v2.etech_directory.prepare_user') as prepare:
+                self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'uid'}).status_code, 409)
+                prepare.assert_not_called()
+
+    def test_disabled_reserved_or_changed_native_account_is_rejected(self):
+        for username, active, returned in (('old@auth.local', False, 'old@auth.local'),
+                                           ('cfadmin@auth.local', True, 'cfadmin@auth.local'),
+                                           ('old@auth.local', True, 'OLD@auth.local')):
+            with patch('cloudfile_ext.v2.http.Profile.objects.filter', return_value=Mock(values_list=Mock(return_value=[(username, 'uid')]))), \
+                    patch('cloudfile_ext.v2.http.Profile.objects.get_profile_by_user', return_value=SimpleNamespace(login_id='uid')), \
+                    patch('cloudfile_ext.v2.http.User.objects.get', return_value=SimpleNamespace(username=returned, is_active=active)):
+                self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'uid'}).status_code, 409)
+
+    def test_request_alias_is_ignored(self):
+        from cloudfile_ext.v2.errors import IdentityConflict
+        with patch('cloudfile_ext.v2.http.Profile.objects.filter', return_value=Mock(values_list=Mock(return_value=[]))), \
+                patch('cloudfile_ext.v2.etech_directory.prepare_user', side_effect=IdentityConflict()) as prepare:
+            self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'uid', 'login_email': 'attacker@auth.local'}).status_code, 409)
+            prepare.assert_called_once_with('uid')
 
 
 class EtechOAuthBindingTests(TestCase):
@@ -69,7 +92,7 @@ class EtechOAuthBindingTests(TestCase):
             self.assertNotIn('oauth_nonce', request.session)
 
     def callback(self, oauth_binding, profile_username, profile_uid, *, oidc=False, invalid_token=False,
-                 userinfo_sub='trusted-sub'):
+                 userinfo_sub='trusted-sub', missing_uid=False, generic=False, id_uid='business-uid'):
         request = APIRequestFactory().get('/cfile/oauth/callback/?code=test&state=expected')
         request.session = {'oauth_state': 'expected'}
         if oidc:
@@ -79,17 +102,19 @@ class EtechOAuthBindingTests(TestCase):
         session.fetch_token.return_value = {}
         session.get.return_value.status_code = 200
         session.get.return_value.json.return_value = {'sub': userinfo_sub, 'userId': 'business-uid'}
+        if missing_uid:
+            session.get.return_value.json.return_value = {'sub': userinfo_sub}
         profile = SimpleNamespace(login_id=profile_uid, nickname='', contact_email='', save=Mock())
-        from cloudfile_extensions.identity.legacy_oauth import UIDBindingError
+        from cloudfile_ext.v2.oauth_identity import UIDBindingError
         conflicting = (oauth_binding is not None and oauth_binding.username != profile_username)
         conflicting = conflicting or profile_uid != 'business-uid'
         from cloudfile_ext.v2.errors import IdentityUnavailable
         with patch('cloudfile_ext.v2.oidc.configuration', return_value=('https://idp.example.test/', 'https://idp.example.test/jwks')), \
-                patch('cloudfile_ext.v2.oidc.verify_id_token', return_value={'sub': 'trusted-sub'},
+                patch('cloudfile_ext.v2.oidc.verify_id_token', return_value=({'sub': 'trusted-sub'} if id_uid is None else {'sub': 'trusted-sub', 'userId': id_uid}),
                       side_effect=IdentityUnavailable('rejected') if invalid_token else None) as verify, \
                 patch.object(views, 'OAuth2Session', return_value=session), \
-                patch.object(views, 'OAUTH_ATTRIBUTE_MAP', {'sub': (True, 'uid'), 'userId': (True, 'login_id')}), \
-                patch('cloudfile_extensions.identity.legacy_oauth.bind_existing_uid',
+                patch.object(views, 'OAUTH_ATTRIBUTE_MAP', ({'sub': (True, 'uid')} if generic else {'sub': (True, 'uid'), 'userId': (False, 'login_id')})), \
+                patch('cloudfile_ext.v2.oauth_identity.bind_existing_uid',
                       return_value=profile_username,
                       side_effect=UIDBindingError('UID conflict') if conflicting else None) as bind, \
                 patch.object(views.Profile.objects, 'get_or_create', return_value=(profile, False)), \
@@ -97,7 +122,7 @@ class EtechOAuthBindingTests(TestCase):
                     username='existing@auth.local', is_active=True)) as authenticate, \
                 patch.object(views.auth, 'login'), \
                 patch.object(views, 'get_api_token', return_value=SimpleNamespace(key='test-token')), \
-                patch.object(views, 'get_service_url', return_value='https://files.example.test/cfile'), \
+                patch.object(views, 'get_service_url', return_value='https://files.example.test'), \
                 patch.object(views, 'render_error', return_value='binding-error'):
             response = views.oauth_callback(request)
         self.assertEqual(session.fetch_token.call_args.kwargs['authorization_response'],
@@ -151,6 +176,44 @@ class EtechOAuthBindingTests(TestCase):
         self.assertEqual(response, 'binding-error')
         authenticate.assert_not_called()
         bind.assert_called_once()
+
+    def test_missing_optional_trusted_uid_cannot_fall_back_to_ce_signup(self):
+        response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', missing_uid=True)
+        self.assertEqual(response, 'binding-error')
+        authenticate.assert_not_called()
+
+    def test_directory_config_cannot_enter_employee_claim_compatibility_path(self):
+        with patch.object(views.settings, 'CF_DIRECTORY_URL', 'https://directory.test', create=True):
+            response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', generic=True)
+        self.assertEqual(response, 'binding-error')
+        authenticate.assert_not_called()
+        bind.assert_not_called()
+
+    def test_generic_ce_oauth_without_directory_keeps_existing_provider_resolution(self):
+        with patch.object(views.settings, 'CF_DIRECTORY_URL', '', create=True), \
+                patch.object(views.SocialAuthUser.objects, 'get_by_provider_and_uid', return_value=SimpleNamespace(username='existing@auth.local')):
+            response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', generic=True)
+        self.assertEqual(response.status_code, 302)
+        authenticate.assert_called_once_with(remote_user='existing@auth.local')
+        bind.assert_not_called()
+
+    def test_signed_oidc_identity_uses_v2_jit_and_oauth_remains_reuse_only(self):
+        with patch.object(views.settings, 'CF_DIRECTORY_URL', 'https://directory.test', create=True), \
+                patch('cloudfile_ext.v2.etech_directory.provision_oidc_user', return_value='existing@auth.local') as provision, \
+                patch('cloudfile_ext.v2.etech_directory.ensure_subject'):
+            response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True)
+        self.assertEqual(response.status_code, 302)
+        provision.assert_called_once_with(uid='business-uid', provider=views.OAUTH_PROVIDER, subject='trusted-sub')
+        bind.assert_not_called()
+
+    def test_missing_signed_business_uid_cannot_provision_even_with_userinfo_uid(self):
+        with patch.object(views.settings, 'CF_DIRECTORY_URL', 'https://directory.test', create=True), \
+                patch('cloudfile_ext.v2.etech_directory.provision_oidc_user') as provision:
+            response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True, id_uid=None)
+        self.assertEqual(response, 'binding-error')
+        provision.assert_not_called()
+        authenticate.assert_not_called()
+        bind.assert_not_called()
 
     def test_missing_state_cannot_fetch_tokens(self):
         for saved, supplied in (({}, 'expected'), ({'oauth_state': 'expected'}, '错误-state')):
