@@ -24,9 +24,8 @@ class EffectiveContractTests(unittest.TestCase):
         self.api = Mock()
         self.api.get_repo.return_value = SimpleNamespace(is_virtual=False, version=1)
         self.api.get_repo_status.return_value = 0
+        # 库级授权是资格；具体路径由规则决定，不再按路径问原生权限。
         self.api.check_permission.return_value = 'r'
-        self.api.check_permission_by_path.side_effect = lambda repo, path, username: (
-            'rw' if path == '/writable' or path.startswith('/writable/') else 'r')
         self.rules = Mock()
         self.rules.library.return_value = (
             Rule(RID, '/writable', 'etech', 'user', 'user', 'uid', 'rw'),)
@@ -52,7 +51,7 @@ class EffectiveContractTests(unittest.TestCase):
         self.assertEqual(result.data, dict(permission='rw', qualified_root='/', from_rule=True,
             read=True, write=True, visible=True, protected_publication=False))
         factory.assert_called_once_with(USERNAME)
-        self.api.check_permission_by_path.assert_called_once_with(RID, '/writable/new-folder', USERNAME)
+        self.api.check_permission.assert_called_with(RID, USERNAME)
 
     def test_file_uses_exact_native_resource_and_shared_scope_stays_bounded(self):
         self.api.check_permission.return_value = None
@@ -62,7 +61,7 @@ class EffectiveContractTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertTrue(result.data['write'])
         self.assertEqual(result.data['qualified_root'], '/writable')
-        self.api.check_permission_by_path.assert_called_once_with(RID, '/writable/proof.txt', USERNAME)
+        self.api.check_permission.assert_called_with(RID, USERNAME)
         self.assertEqual(self.request('/')[0].status_code, 403)
 
     def test_library_root_and_sibling_read_deny_upload(self):
@@ -80,7 +79,7 @@ class EffectiveContractTests(unittest.TestCase):
         result, _ = self.request()
         self.assertEqual(result.status_code, 403)
         self.assertEqual(result.data, {'code': 'ACL_DENIED'})
-        self.api.check_permission_by_path.assert_not_called()
+        self.api.check_permission.assert_called_with(RID, USERNAME)
 
     def test_management_role_does_not_supply_content_write(self):
         result, _ = self.request('/', staff=True)
@@ -92,7 +91,7 @@ class EffectiveContractTests(unittest.TestCase):
         self.assertEqual(result.status_code, 403)
 
     def test_native_policy_outage_never_returns_allow(self):
-        self.api.check_permission_by_path.side_effect = RuntimeError('native policy offline')
+        self.api.check_permission.side_effect = RuntimeError('native policy offline')
         result, _ = self.request()
         self.assertEqual(result.status_code, 503)
         self.assertEqual(result.data, {'code': 'ACL_UNAVAILABLE'})
@@ -101,41 +100,42 @@ class EffectiveContractTests(unittest.TestCase):
     def test_native_read_or_revoke_can_narrow_a_scope_grant(self):
         for permission, status in (('r', 200), (None, 403), ('invisible', 403)):
             with self.subTest(permission=permission):
-                self.api.check_permission_by_path.side_effect = None
-                self.api.check_permission_by_path.return_value = permission
+                self.api.check_permission.side_effect = None
+                self.api.check_permission.return_value = permission
                 result, _ = self.request()
                 self.assertEqual(result.status_code, status)
                 self.assertFalse(result.data.get('write', False))
 
     def test_native_cannot_widen_scope_or_readonly_repository(self):
-        self.api.check_permission_by_path.side_effect = None
-        self.api.check_permission_by_path.return_value = 'rw'
+        self.api.check_permission.side_effect = None
+        self.api.check_permission.return_value = 'rw'
         result, _ = self.request('/sibling')
         self.assertFalse(result.data['write'])
         self.api.get_repo_status.return_value = 1
         result, _ = self.request('/writable')
         self.assertFalse(result.data['write'])
 
-    def test_native_management_marker_or_invalid_permission_is_not_rw(self):
-        for permission in ('admin', 'unknown'):
-            with self.subTest(permission=permission):
-                self.api.check_permission_by_path.side_effect = None
-                self.api.check_permission_by_path.return_value = permission
-                result, _ = self.request()
-                self.assertEqual(result.status_code, 503)
-                self.assertNotIn('write', result.data)
+    def test_native_admin_marker_is_normalised_but_unknown_is_rejected(self):
+        # 属主的 'admin' 是内容 rw，不是管理权；未知值仍然是配置错误。
+        self.api.check_permission.return_value = 'admin'
+        result, _ = self.request()
+        self.assertEqual(result.status_code, 200)
+        self.assertTrue(result.data['write'])
+        self.api.check_permission.return_value = 'unknown'
+        result, _ = self.request()
+        self.assertEqual(result.status_code, 503)
+        self.assertNotIn('write', result.data)
 
     def test_sql_failure_does_not_fall_back_to_native_write(self):
         self.rules.library.side_effect = RuntimeError('SQL offline')
         result, _ = self.request()
         self.assertEqual(result.status_code, 503)
-        self.api.check_permission_by_path.assert_not_called()
 
     def test_subject_override_is_rejected_before_policy(self):
         result, factory = self.request(extra={'username': 'owner'})
         self.assertEqual(result.status_code, 400)
         factory.assert_not_called()
-        self.api.check_permission_by_path.assert_not_called()
+        self.api.check_permission.assert_not_called()
 
     def test_anonymous_cannot_inspect_content_permissions(self):
         raw = APIRequestFactory().get(ENDPOINT, dict(repo_id=RID, path='/writable'))
@@ -144,4 +144,4 @@ class EffectiveContractTests(unittest.TestCase):
         with patch.object(EffectivePermission, 'authentication_classes', ()):
             result = EffectivePermission.as_view()(raw)
         self.assertEqual(result.status_code, 403)
-        self.api.check_permission_by_path.assert_not_called()
+        self.api.check_permission.assert_not_called()
