@@ -54,6 +54,75 @@ class NoManagedLibraryRegression(unittest.TestCase):
                             missing.append('%s: %s' % (path.relative_to(ROOT), name))
         self.assertEqual(missing, [])
 
+    def test_all_first_party_absolute_imports_resolve(self):
+        """Resolve in-repo imports across native Seahub and both CloudFile trees.
+
+        A removed package must never leave a delayed ImportError in search,
+        tags, SSO, API routes or deployed extension hooks. This is a cheap
+        syntax/tree check without importing Django or opening databases.
+        """
+        import ast
+        missing = []
+        prefixes = ('cloudfile_ext', 'cloudfile_extensions')
+        for base in ('seahub', 'cloudfile_ext', 'cloudfile_extensions'):
+            directory = ROOT / base
+            if not directory.is_dir():
+                continue
+            for path in directory.rglob('*.py'):
+                try:
+                    syntax = ast.parse(path.read_text(encoding='utf-8'), filename=str(path))
+                except SyntaxError as exc:
+                    missing.append('%s: syntax error %s' % (path.relative_to(ROOT), exc))
+                    continue
+                for node in ast.walk(syntax):
+                    if isinstance(node, ast.Import):
+                        names = [alias.name for alias in node.names]
+                    elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                        names = [node.module] if node.module else []
+                    else:
+                        continue
+                    for name in names:
+                        if not any(name == prefix or name.startswith(prefix + '.')
+                                   for prefix in prefixes):
+                            continue
+                        if not self._resolve_extension_module(name):
+                            missing.append('%s: %s' % (path.relative_to(ROOT), name))
+        self.assertEqual(missing, [])
+
+    def test_retired_acl_and_search_imports_are_absent(self):
+        """No compatibility test may reintroduce the old resolver or snapshot."""
+        import ast
+        retired = (
+            'cloudfile_ext.acl',
+            'cloudfile_ext.search.access',
+            'cloudfile_ext.search.access_runtime',
+            'cloudfile_ext.search.native_many',
+            'cloudfile_ext.search.native_transport',
+        )
+        violations = []
+        for base in ('cloudfile_ext', 'seahub', 'cloudfile_extensions'):
+            root = ROOT / base
+            if not root.exists():
+                continue
+            for path in root.rglob('*.py'):
+                syntax = ast.parse(path.read_text(encoding='utf-8'))
+                for node in ast.walk(syntax):
+                    if isinstance(node, ast.Import):
+                        names = [alias.name for alias in node.names]
+                    elif isinstance(node, ast.ImportFrom) and node.level == 0:
+                        names = [node.module] if node.module else []
+                        # Catch from cloudfile_ext.search import access as well.
+                        names.extend('%s.%s' % (node.module, alias.name)
+                                     for alias in node.names if node.module)
+                    else:
+                        continue
+                    if any(name == gone or name.startswith(gone + '.')
+                           for name in names for gone in retired):
+                        violations.append(str(path.relative_to(ROOT)))
+        self.assertEqual(violations, [])
+        legacy = (ROOT / 'cloudfile_ext/search/bounded_view.py').read_text()
+        self.assertIn('from cloudfile_ext.v2.search.http import SearchQuery as BoundedSearch', legacy)
+
     def test_deploy_wired_extension_modules_exist(self):
         # Modules the Docker deployment settings/middleware/gunicorn hooks
         # resolve by name at runtime. Their removal needs a coordinated Docker
