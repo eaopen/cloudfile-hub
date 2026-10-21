@@ -26,7 +26,6 @@ class AuditBackground:
             self.cleanup_connection = connect_database(environment)
             if self.job_connection is self.cleanup_connection:
                 raise ValueError("dedicated audit background connections required")
-            for connection in (self.job_connection, self.cleanup_connection):
             self.worker = JobWorker(JobStore(self.job_connection), owner=owner,
                 handlers={"audit.export": Handler(factory.export_handler(result_root=factory.result_root))},
                 lease_seconds=lease_seconds)
