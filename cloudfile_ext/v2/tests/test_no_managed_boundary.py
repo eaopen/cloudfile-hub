@@ -37,5 +37,12 @@ class NoManagedLibraryRegression(unittest.TestCase):
         rule = (ROOT / 'cloudfile_ext/v2/tests/test_native_gate.py').read_text()
         self.assertIn('test_runtime_error_refuses_native_fallback', rule)
 
+    def test_internal_batch_is_path_qualified_not_repo_mode(self):
+        api = (ROOT / 'cloudfile_ext/v2/acl_http.py').read_text()
+        self.assertIn("partial = data.get('partial') is True", api)
+        self.assertIn('permissions.append(None)', api)
+        self.assertIn('raise PermissionError()', api)
+        self.assertIn('authority.effective(data', api)
+
 if __name__ == '__main__':
     unittest.main()
