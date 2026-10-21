@@ -44,14 +44,15 @@ def validate_subject(value, uid, *, now=None):
         raise IdentityUnavailable('invalid current Directory response') from None
 
 
-# cf_sso_group_map is shared: the Directory hierarchy contract stores
-# 'dept'/'group' (cloudfile_ext/sso/snapshot.py, decision 2026-08-27 §3) while
-# the V2 subject contract speaks 'org'/'role'. Translate at this table boundary
-# instead of rewriting rows the SSO sync owns -- DEV 2026-10-20, where the two
-# domains never intersected and every projection failed with
-# "required native group mapping missing" (503 for every authorized request).
-STORED_KIND = {'org': 'dept', 'role': 'group'}
-SUBJECT_KIND = {stored: subject for subject, stored in STORED_KIND.items()}
+# cf_sso_group_map is shared. The installed V2 schema constrains
+# subject_type to ('org','role') -- and every existing row uses them -- while
+# some legacy writers used the hierarchy contract's 'dept'/'group'. Writing the
+# legacy spelling aborted the whole projection with
+# "CONSTRAINT `sso_group_type` failed" as soon as the Directory reported one
+# entity that was not mapped yet, which turned every authorized request into a
+# 503. Write the schema's spelling; still read both.
+STORED_KIND = {'org': 'org', 'role': 'role'}
+SUBJECT_KIND = {'org': 'org', 'role': 'role', 'dept': 'org', 'group': 'role'}
 
 
 def readiness_key(database, provider, uid, username):
