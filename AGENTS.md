@@ -41,3 +41,10 @@
 - 新版当前只明确新增四张业务表：`cf_library_storage`、`cf_dir_acl`、`cf_sso_group_map`、`cf_edit_guard`。历史表仅作备份或迁移输入，不属于新版运行库及运行依赖；增加业务表须先确认，历史数据单独归档，不直接删除。
 - 开发期建表、升级及数据迁移通过 Docker 仓 `database/` 下独立、人工执行的 SQL 交付，DEV 验证与 PROD 发布复用固定脚本及校验和。启动/重启仅校验，不自动执行扩展 DDL、旧迁移链或兼容补丁。
 - 仅明确审核的成熟版本之间才考虑自动升级；须定义精确源/目标范围和数据/中断恢复验证。不得根据 dev 分支、表名存在或旧台账自动推断升级路径，不自动回滚。
+
+## 本地查看/编辑（V2 运行合同）
+
+- Web 入口统一使用 `POST /api/v2.1/cloudfile/edit/v1/open/`，`mode` 仅 `local-view`、`optimistic-edit`、`exclusive-edit`；受信 Chrome 插件交给 Agent2 `cloudfile-open://v2/open`。
+- Server Go `/cf-edit/v1/*` 负责最终权限、内容 CAS 与独占 Guard。仅 `cf_edit_guard` 持久化独占状态；本机编辑任务/待提交状态归 Agent2 Journal。
+- **不得恢复** `cf_edit_session`、`cf_resource`、`cf_commit_intent`、旧设备/会话/回执表，也不得让旧 `extensions/local-edit/v1/*` / `file_actions.local-sessions` 重新参与运行。
+- 本地普通编辑无需 Checkout；独占编辑按 Guard 及实际启用能力返回。出现 `cf_edit_session doesn't exist` 是旧调用或旧部署证据，禁止以补表修复。

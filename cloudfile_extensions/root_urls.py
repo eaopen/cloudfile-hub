@@ -22,11 +22,14 @@ def _extension_urlconfs():
     for name, module in sorted(configured.items()):
         if not isinstance(name, str) or not EXTENSION_NAME_RE.fullmatch(name):
             raise ImproperlyConfigured(f"invalid CloudFile extension name: {name!r}")
-        if name == 'local-edit':
-            raise ImproperlyConfigured(
-                'legacy local-edit Session/Device routes are retired; use V2 /api/v2.1/cloudfile/edit/v1/open/')
         if name in RESERVED_DOMAINS:
             raise ImproperlyConfigured("deployment extension cannot replace a core CloudFile domain")
+        if name == 'local-edit' or (
+                isinstance(module, str) and
+                module.startswith('cloudfile_extensions.local_edit')):
+            raise ImproperlyConfigured(
+                'retired local-edit Session/Device routes are unavailable; '
+                'use /api/v2.1/cloudfile/edit/v1/open/')
         if not isinstance(module, str) or not URLCONF_RE.fullmatch(module):
             raise ImproperlyConfigured(f"invalid CloudFile extension URLConf: {module!r}")
         result.append((name, module))
