@@ -22,7 +22,7 @@ def has_permission_checks():
 
     Lets a caller tell "no hook configured" (keep the native answer) apart from
     "hook says deny" (None), which matters where the native answer is a
-    deliberate NULL -- a managed library, for instance.
+    deliberate NULL -- a native path with no direct CE grant, for instance.
     """
     return bool(registry.permission_checks)
 
@@ -192,7 +192,7 @@ def is_search_path_denied(username, repo_id, path):
 
     修改逻辑（2026-10-15 v0.9-only）：不再委托 v0.8 ``is_path_denied``——统一
     schema 下该读取器恒失败并返回 True，等于把搜索结果全部判为不可见。v0.8
-    规则源已退役，本缝不再有第二套裁决；受管库的结果裁剪由 v0.9 搜索路径
+    规则源已退役，本缝不再有第二套裁决；目录可见性由当前 V2 Authority 路径
     （``cloudfile_extensions.search`` 的 native guards）负责，入口权限仍由
     原生检查约束。保留函数与接缝是为了不改动上游 ``seahub.search.utils``。
     """

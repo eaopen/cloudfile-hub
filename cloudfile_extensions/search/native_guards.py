@@ -1,4 +1,4 @@
-"""CE14 managed-library guards on the same SQL connection as each read.
+"""CE14 native Branch snapshot guards on the same SQL connection as each read.
 
 Until native byte facts are transactionally projected, a changed Branch head
 requires a new generation. Never advertise the previous snapshot as current.
@@ -29,9 +29,6 @@ class NativeSearchGuards:
 
     @staticmethod
     def head(sql, repo):
-        sql.execute("SELECT repo_id FROM cf_managed_library WHERE repo_id=%s FOR UPDATE", (repo,))
-        if sql.fetchone() != (repo,):
-            raise ContractError("SEARCH_UNAVAILABLE", "Search requires a managed library", 503)
         sql.execute("SELECT commit_id FROM Branch WHERE repo_id=%s AND name='master' FOR UPDATE", (repo,))
         row = sql.fetchone()
         if row is None or not NativeResourceReader.commit_id(row[0]):
@@ -71,7 +68,7 @@ class NativeSearchGuards:
     @contextmanager
     def capture_scope(self, connection, repo):
         with scope_locks(connection, self.scopes(repo)):
-            # Named guards serialize supported managed native publications and
+            # Named guards serialize supported native publications and
             # metadata producers across the transactions owned by the store.
             connection.begin()
             try:

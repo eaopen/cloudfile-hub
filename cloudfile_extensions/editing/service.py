@@ -107,13 +107,6 @@ class EditingService:
             protected['proof_digest'] = hashlib.sha256(request['token'].encode()).hexdigest()
 
         def apply(sql, reference):
-            if operation == 'checkout':
-                # Enroll before the lifecycle reader pins Branch. Legacy final
-                # publications also lock this marker before Branch, so a write
-                # that passed an earlier lock preflight cannot bypass Checkout.
-                # Enrollment uses the existing policy gate and is monotonic.
-                sql.execute("INSERT INTO cf_managed_library(repo_id,created_at) VALUES(%s,UTC_TIMESTAMP(6)) "
-                    "ON DUPLICATE KEY UPDATE repo_id=VALUES(repo_id)", (ref['repo_id'],))
             evidence, row = self._resource(sql, reference)
             if row is None:
                 # Bind sparse resource identity under current native authority.

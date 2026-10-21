@@ -192,15 +192,10 @@ def check_folder_permission(request, repo_id, path):
     if permission == PERMISSION_INVISIBLE:
         return None
     if not permission:
-        # A managed library (any stored directory rule) makes the native path
-        # RPC answer NULL on purpose: the four-argument native seam cannot
-        # carry the trusted subject snapshot the V2 core needs, so returning
-        # the native permission would bypass the managed rules. The registered
-        # authorization hook does have that context, so let it adjudicate
-        # instead of failing closed here. Without a hook (baseline CE) the
-        # previous fail-closed answer stands; a subject with no qualification
-        # still gets None, and an explicit native deny never reaches this
-        # branch.
+        # A native path RPC may return no direct CE grant even when the
+        # V2 Authority can qualify a distinct shared-directory entry.
+        # The registered V2 hook independently adjudicates the actual user
+        # and path; no directory rule classifies the complete repository.
         if not _cf_has_permission_checks():
             return None
         adjudicated = _cf_check_permission(username, repo_id, path, PERMISSION_READ)
