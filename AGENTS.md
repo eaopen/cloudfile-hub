@@ -20,7 +20,7 @@
 
 本仓是 `haiwen/seahub` 的 fork，负责 Web、API、SSO/OIDC、目录与文件展示、搜索及 V2 权限接口；Server 负责不可绕过的文件访问和写入终判，Docker 负责跨仓构建和部署。
 
-- **当前实现以 `cloudfile_ext/v2/`、原生 CE14 的真实执行入口及当前代码/契约为准。** `cloudfile_extensions/`、旧 `cloudfile_ext/*`、`CLOUDFILE.md` 里的 V0.x 内容可能是历史/兼容实现，不能直接复制旧架构和旧任务表。
+- **当前实现以 `cloudfile_ext/v2/`、原生 CE14 的真实执行入口及当前代码/契约为准。** `cloudfile_extensions/` 和旧 `cloudfile_ext/acl/` 已从 dev 删除；历史文件只能从 Git 历史追溯；`CLOUDFILE.md` 的 V0.x 内容不得作为现行权限依据，不能直接复制旧架构和旧任务表。
 - 目录 ACL、原生 Tag、Checkout 等已成为 V2 内置能力时，不要重新添加旧 `CF_ENABLE_*` / `v2_acl_enabled` 开关。外部 Meilisearch、OIDC 等保留必要连接配置与真实可用性判断，不另造功能启用体系。
 - 不依靠隐藏按钮或“返回 HTTP 200”代表授权；目录展示和实际读取/上传/提交必须使用相应的 V2 权限校验与 Server 终判。受保护的入口出现错误时不得退回宽松的旧路径。
 - 新增功能优先放 CloudFile 独立目录；修改上游 Seahub 文件须证明必要性，并核对 Docker 仓的 [上游改动清单](https://github.com/eaopen/cloudfile-docker/tree/dev/docs/upstream-patches)。
