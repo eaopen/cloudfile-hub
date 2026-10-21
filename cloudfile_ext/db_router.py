@@ -5,7 +5,7 @@ The ACL tables have to be readable by seaf-server (C) and the Go fileserver,
 neither of which connects to seahub-db. They therefore live in seafile-db and
 are never created by Django migrations. Legacy integration tables are owned by
 cloudfile-server's scripts/sql; the current directory ACL/admin/share trio is
-owned by cloudfile_extensions.schema. The models here describe the legacy
+owned by the current V2 SQL. Historical models may still describe old
 layout, are ``managed = False``, and must not be used to write upgraded tables.
 This router only decides which connection they use.
 

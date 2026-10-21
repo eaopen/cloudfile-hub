@@ -5,7 +5,6 @@ from threading import Lock
 from ..common.errors import ContractError
 from ..resources.paths import resource_ref, normalize_path
 from ..resources.store import ResourceStore
-from ..schema.runner import SchemaRunner
 from ..tags.definitions import uuid_value
 from .snapshot import IndexSnapshotReader
 
@@ -36,7 +35,6 @@ class OwnedIndexSource:
         try:
             if not connection.get_autocommit():
                 raise ContractError("SEARCH_PROJECTION_PENDING", "Clean source connection required", 503)
-            SchemaRunner(connection).require_current()
             def forbidden(*args, **kwargs):
                 raise ContractError("ACCESS_DENIED", "Index source cannot use legacy resource writes", 403)
             store = ResourceStore(connection, inspector=forbidden, write_guard=forbidden,
@@ -84,7 +82,6 @@ class OwnedIndexSource:
         try:
             if not connection.get_autocommit():
                 raise ContractError("SEARCH_PROJECTION_PENDING", "Clean global source connection required", 503)
-            SchemaRunner(connection).require_current()
             connection.begin()
             try:
                 with connection.cursor() as cursor:

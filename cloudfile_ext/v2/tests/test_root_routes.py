@@ -3,6 +3,7 @@ import importlib
 from types import ModuleType
 import sys
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from django.urls import resolve, Resolver404
@@ -11,6 +12,23 @@ from cloudfile_ext.v2.acl_http import EffectivePermission, SharedDirectories, Di
 
 
 class RootRoutesTests(unittest.TestCase):
+    def test_v2_agent2_entrypoints_never_restore_edit_session_sql(self):
+        base = Path(__file__).resolve().parents[3]
+        for name in ('cloudfile_ext/file_actions/service.py',
+                     'cloudfile_ext/file_actions/apis.py',
+                     'cloudfile_ext/file_actions/__init__.py',
+                     'cloudfile_ext/v2/rust_edit.py'):
+            body = (base / name).read_text()
+            self.assertNotIn('cf_edit_session', body, name)
+            self.assertNotIn('cf_resource', body, name)
+        api = (base / 'frontend/src/cloudfile/cloudfile-api.js').read_text()
+        self.assertIn('/api/v2.1/cloudfile/edit/v1/open/', api)
+        self.assertNotIn('/extensions/local-edit/v1/', api)
+        launcher = (base / 'frontend/src/cloudfile/agent-local-edit.js').read_text()
+        self.assertIn('cloudfile-open://v2/open', launcher)
+        self.assertIn("uri.hostname !== 'v2'", launcher)
+
+
     def test_compatibility_reads_resolve_to_v2_and_old_mutations_are_absent(self):
         # Only unrelated CE views and its large URL inventory are doubled.
         # Resolve the real root URLconf; real V2 request/auth contracts are

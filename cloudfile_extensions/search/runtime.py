@@ -5,7 +5,6 @@ import re
 
 from ..common.errors import ContractError
 from ..events.outbox import Outbox
-from ..schema.runner import SchemaRunner
 from .consumer import SearchEventConsumer
 from .event_execution import SearchEventExecution
 from .fanout_coordinator import TagFanoutCoordinator
@@ -47,7 +46,6 @@ class SearchInitializationFactory:
         try:
             if not connection.get_autocommit():
                 raise ContractError("SEARCH_UNAVAILABLE", "Clean initialization connection required", 503)
-            SchemaRunner(connection).require_current()
             yield self._assemble(connection)
         finally:
             try:
@@ -157,7 +155,6 @@ class SearchConsumerFactory:
         try:
             if not connection.get_autocommit():
                 raise ContractError("SEARCH_UNAVAILABLE", "Clean worker connection required", 503)
-            SchemaRunner(connection).require_current()
             client = MeilisearchTasks(endpoint=self.endpoint, index=self.index, key=self.key)
             source = OwnedIndexSource(connection_factory=self.connection_factory, worker_connection=connection,
                 repo_scope=self.repo_scope, lifecycle_scope=self.lifecycle_scope, secret=self.secret)

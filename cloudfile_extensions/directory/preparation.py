@@ -10,7 +10,6 @@ from uuid import uuid4
 from ..common.errors import ContractError
 from ..common.validation import identifier
 from ..events.outbox import EventWriter
-from ..schema.runner import SchemaRunner
 from .contexts import SubjectContexts
 from .native_state import NativeSubjectState
 from .project import NativeMembershipProjector
@@ -25,9 +24,6 @@ class SubjectPreparation:
         identifier(request_id)
         if not isinstance(directory, DirectoryProvider):
             raise ValueError("trusted directory provider required")
-        # This is a check, never runtime DDL. Dedicated connection is not shared
-        # across requests or worker threads and must not automatically reconnect.
-        SchemaRunner(connection).require_current()
         self.actor = actor_user_id
         self._read_epoch = None
         self.state = NativeSubjectState(connection, native_schema=native_schema,

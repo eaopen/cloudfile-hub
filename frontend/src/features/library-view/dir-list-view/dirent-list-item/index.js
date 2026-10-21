@@ -3,6 +3,7 @@ import { DropdownItem } from 'reactstrap';
 import classnames from 'classnames';
 import PropTypes from 'prop-types';
 import urlJoin from 'url-join';
+import { openV2LocalFile } from '@/cloudfile/agent-local-edit';
 import { toggleStar } from '@/components/dirent-operation-menu/dirent-operations';
 import { menuHandlers } from '@/components/dirent-operation-menu/menuHandlers';
 import CustomDropdown from '@/components/dropdown';
@@ -367,11 +368,15 @@ class DirentListItem extends React.Component {
     eventBus.dispatch(EVENT_BUS_TYPE.ACCESS_LOG, direntPath, dirent.name);
   };
 
-  onOpenWithDefault = () => {
-    let repoID = this.props.repoID;
-    let filePath = this.getDirentPath(this.props.dirent);
-    let url = URLDecorator.getUrl({ type: 'open_with_default', repoID: repoID, filePath: filePath });
-    window.open(url, '_blank');
+  onOpenWithDefault = async () => {
+    const repoID = this.props.repoID;
+    const filePath = this.getDirentPath(this.props.dirent);
+    const mode = this.canDrag ? 'optimistic-edit' : 'local-view';
+    try {
+      await openV2LocalFile({ repoID, path: filePath, mode });
+    } catch (error) {
+      window.alert(error.message || gettext('Local open unavailable'));
+    }
   };
 
   onOpenWithOnlyOffice = () => {

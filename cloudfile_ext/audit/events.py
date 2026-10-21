@@ -96,3 +96,28 @@ def record_tag_event(operator, repo_id, operation, before=None, after=None,
     except Exception as exc:
         logger.warning('failed to append tag audit event: %s', exc)
         return None
+
+
+def record_resource_tag_event(*, operator, repo_id, path, kind, operation,
+                              tag_name):
+    """Record a successful CE file/dir tag binding mutation, not a read.
+    
+    This is supplementary to native Activity, not a second tag store.
+    The native mutation has already committed in seahub_db; a failure here
+    is logged, never misreported as a failed tag change.
+    """
+    try:
+        from cloudfile_ext.features import is_enabled
+        if not is_enabled('CF_ENABLE_AUDIT'):
+            return None
+        from cloudfile_ext.audit.models import AuditEvent
+        return AuditEvent.objects.append(
+            object_type=kind, object_id='', operation=operation,
+            operator=operator, repo_id=repo_id, source='api',
+            source_path=path,
+            before={'tag': tag_name} if operation == 'tag_remove' else None,
+            after={'tag': tag_name} if operation == 'tag_add' else None,
+        )
+    except Exception:
+        logger.exception('supplementary tag operation log unavailable')
+        return None

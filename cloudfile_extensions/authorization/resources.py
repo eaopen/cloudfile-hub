@@ -6,7 +6,6 @@ from ..directory.preparation import SubjectPreparation
 from ..directory.project import qualified
 from ..directory.provider import DirectoryProvider
 from ..jobs.runtime import connect_database
-from ..schema.runner import SchemaRunner
 
 
 class PolicyResources:
@@ -33,7 +32,6 @@ class PolicyResources:
             # server default or weakening checks to accommodate READ COMMITTED.
             with connection.cursor() as cursor:
                 cursor.execute("SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ")
-            SchemaRunner(connection).require_current()
             yield connection
         finally:
             try:

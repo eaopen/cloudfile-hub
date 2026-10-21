@@ -9,14 +9,6 @@ import re
 
 from .schema import identifier
 
-STORAGE_DDL = """CREATE TABLE cf_library_storage (
-    repo_key VARCHAR(80) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    repo_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    state VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
-    PRIMARY KEY (repo_key),
-    UNIQUE KEY library_storage_repo (repo_id),
-    CONSTRAINT library_storage_state CHECK (state IN ('reserved','active','retired'))
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin"""
 KINDS = ('commits', 'fs', 'blocks')
 
 
@@ -160,10 +152,10 @@ class StorageReconciler:
             raise
 
     def ensure_schema(self, *, apply=True):
-        """Read the exact contract; only an explicit apply may create it.
+        """Verify the current V2 storage table, never initialize DDL.
 
-        Both modes inspect existing metadata without disposable tables or any
-        writes. Missing registry metadata is an independent dry-run result.
+        Fresh setup owns schema creation. Existing repositories are discovered
+        only from native Seafile facts, not historical CloudFile records.
         """
         with self.connection.cursor() as cursor:
             required = {'Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId'}
@@ -176,16 +168,11 @@ class StorageReconciler:
                            "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name='cf_library_storage'",
                            (self.schema,))
             table = cursor.fetchone()
-            if table is None and not apply:
-                self.registry_present = False
-                return 'SCHEMA_MISSING'
             if table is None:
-                cursor.execute(STORAGE_DDL.replace('CREATE TABLE cf_library_storage',
-                               'CREATE TABLE IF NOT EXISTS ' + self.table('cf_library_storage'), 1))
-                cursor.execute("SELECT engine,table_collation FROM information_schema.tables "
-                               "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name='cf_library_storage'",
-                               (self.schema,))
-                table = cursor.fetchone()
+                self.registry_present = False
+                if not apply:
+                    return 'SCHEMA_MISSING'
+                raise RuntimeError('V2_FIVE_TABLE_SCHEMA_REQUIRED')
             cursor.execute("SELECT column_name,column_type,is_nullable,column_default,character_set_name,"
                            "collation_name,extra FROM information_schema.columns "
                            "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name='cf_library_storage' "

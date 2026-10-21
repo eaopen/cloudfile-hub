@@ -4,7 +4,6 @@ from ..common.errors import ContractError
 from ..common.validation import identifier, object_fields
 from ..jobs.authority import scope_locks
 from ..jobs.store import JobStore
-from ..schema.runner import SchemaRunner
 from .native_state import NativeSubjectState
 from .refresh_worker import UserRefreshJob
 from uuid import UUID
@@ -25,7 +24,6 @@ class UserRefreshManagement:
             actor.require(UserRefreshJob.KIND)
         elif not isinstance(actor, AuthenticatedPolicyActor):
             raise ValueError("actually authenticated native administrator required")
-        SchemaRunner(connection).require_current()
         self.actor = actor
         self.service_verifier = service_verifier
         self.actor_id = actor.service_id if self.machine else actor.user_id

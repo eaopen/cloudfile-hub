@@ -1,6 +1,7 @@
 import React, { Fragment } from 'react';
 import { Button, ButtonGroup } from 'reactstrap';
 import PropTypes from 'prop-types';
+import { openV2LocalFile } from '@/cloudfile/agent-local-edit';
 import { gettext, siteRoot } from '@/utils/constants';
 import { Utils, isImageRotateable } from '@/utils/utils';
 import Icon from '../../components/icon';
@@ -47,8 +48,20 @@ class FileToolbar extends React.Component {
     location.href = '?open_with_onlyoffice=true';
   };
 
-  handleOpenWithClient = () => {
-    location.href = `seafile://openfile?repo_id=${encodeURIComponent(repoID)}&path=${encodeURIComponent(filePath)}`;
+  handleOpenWithClient = async () => {
+    try {
+      await openV2LocalFile({ repoID, path: filePath, mode: 'optimistic-edit' });
+    } catch (error) {
+      window.alert(error.message || gettext('Local edit unavailable'));
+    }
+  };
+
+  handleLocalView = async () => {
+    try {
+      await openV2LocalFile({ repoID, path: filePath, mode: 'local-view' });
+    } catch (error) {
+      window.alert(error.message || gettext('Local open unavailable'));
+    }
   };
 
   handleOpenHistory = () => {
@@ -76,10 +89,17 @@ class FileToolbar extends React.Component {
         onClick: this.handleOpenWithOnlyOffice,
       });
     }
+    if (filePerm === 'r' || filePerm === 'rw') {
+      items.push({
+        key: 'local-view',
+        label: gettext('Open locally'),
+        onClick: this.handleLocalView,
+      });
+    }
     if (filePerm === 'rw') {
       items.push({
         key: 'open-with-client',
-        label: gettext('Open with client'),
+        label: gettext('Edit locally'),
         onClick: this.handleOpenWithClient,
       });
     }

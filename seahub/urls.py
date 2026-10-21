@@ -6,6 +6,7 @@ from cloudfile_ext.v2.tag_http import TagBatch
 from cloudfile_ext.v2.http import IdentityResolve, GroupResolve, CatalogSync, StorageReconcile
 from cloudfile_ext.v2.oidc import oidc_login
 from cloudfile_ext.v2.search.http import SearchQuery
+from cloudfile_ext.v2.operation_logs import OperationLogs
 from cloudfile_ext.v2.rust_edit import RustLocalEditOpen, RustCheckoutInfo
 
 from seahub.api2.endpoints.file_comments import FileCommentsView, FileCommentView, FileCommentRepliesView, \
@@ -253,6 +254,7 @@ urlpatterns = [
     path('api/v2.1/admin/cloudfile/directory/entities/sync/', CatalogSync.as_view()),
     path('api/v2.1/admin/cloudfile/sso/groups/resolve/', GroupResolve.as_view()),
     path('api/v2.1/cloudfile/search/', SearchQuery.as_view()),
+    path('api/v2.1/cloudfile/operation-logs/', OperationLogs.as_view()),
 path('api/v2.1/cloudfile/edit/v1/open/', RustLocalEditOpen.as_view()),
 path('api/v2.1/cloudfile/edit/v1/lock-info/', RustCheckoutInfo.as_view()),
     path('accounts/', include('seahub.base.registration_urls')),

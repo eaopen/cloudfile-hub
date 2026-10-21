@@ -7,13 +7,11 @@ import secrets
 from ..common.validation import identifier
 from ..common.errors import ContractError
 from ..jobs.store import canonical
-from ..schema.runner import SchemaRunner
 from .logout_token import LogoutNotification
 
 
 class OIDCSessionIndex:
     def __init__(self, connection, *, issuer, client_id):
-        SchemaRunner(connection).require_current()
         identifier(issuer)
         identifier(client_id)
         self.connection = connection

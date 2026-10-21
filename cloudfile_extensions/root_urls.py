@@ -24,6 +24,10 @@ def _extension_urlconfs():
             raise ImproperlyConfigured(f"invalid CloudFile extension name: {name!r}")
         if name in RESERVED_DOMAINS:
             raise ImproperlyConfigured("deployment extension cannot replace a core CloudFile domain")
+        if isinstance(module, str) and module.startswith('cloudfile_extensions.'):
+            raise ImproperlyConfigured(
+                'retired CloudFile extension routes are unavailable; '
+                'use /api/v2.1/cloudfile/edit/v1/open/')
         if not isinstance(module, str) or not URLCONF_RE.fullmatch(module):
             raise ImproperlyConfigured(f"invalid CloudFile extension URLConf: {module!r}")
         result.append((name, module))

@@ -14,6 +14,7 @@ points it at the CF_DATABASE_ALIAS connection.
 """
 
 import datetime
+import hashlib
 import json
 import uuid
 
@@ -29,8 +30,13 @@ class AuditEventManager(models.Manager):
 
     def append(self, object_type, object_id, operation, operator, repo_id='',
                source='api', result='success', before=None, after=None,
-               source_path=None, target_path=None, failure_reason=None):
+               source_path=None, target_path=None, failure_reason=None,
+               commit_id=None):
+        path = target_path or source_path
+        digest = hashlib.sha256(path.encode('utf-8')).digest() if path else None
         event = self.model(
+            path_hash=digest,
+            commit_id=commit_id,
             repo_id=repo_id or '',
             object_type=object_type,
             object_id=object_id or '',
@@ -62,6 +68,8 @@ class AuditEvent(models.Model):
     after = models.TextField(null=True)
     source_path = models.CharField(max_length=1000, null=True)
     target_path = models.CharField(max_length=1000, null=True)
+    path_hash = models.BinaryField(max_length=32, null=True)
+    commit_id = models.CharField(max_length=40, null=True)
     result = models.CharField(max_length=16, db_index=True)
     failure_reason = models.TextField(null=True)
     occurred_at = models.DateTimeField(db_index=True)

@@ -10,7 +10,6 @@ from ..common.validation import identifier
 from ..directory.preparation import SubjectPreparation
 from ..directory.provider import DirectoryProvider
 from ..jobs.store import JobStore
-from ..schema.runner import SchemaRunner
 from .browser_binding import BrowserLoginBindings
 from .jit import SQLJITProvisioner
 from .login import PreparedOIDCLogin
@@ -33,7 +32,6 @@ class LoginRuntime:
                 not 1 <= len(prefix) <= 128 or not prefix.isascii() or
                 any(not (char.isalnum() or char in ":_-.") for char in prefix)):
             raise ValueError("fixed deployment Redis namespace required")
-        SchemaRunner(connection).require_current()
         self.connection, self.redis = connection, redis
         self.directory, self.provider = directory, provider_id
         self.native_schema, self.identity_schema = native_schema, identity_schema

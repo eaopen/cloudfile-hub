@@ -15,7 +15,6 @@ from ..common.validation import identifier, object_fields
 from ..events.outbox import EventWriter
 from ..jobs.authority import scope_locks
 from ..resources.paths import resource_ref, normalize_path
-from ..schema.runner import SchemaRunner
 from .requests import require_storage as require_request_storage, response as saved_response
 
 
@@ -69,7 +68,6 @@ class ACLRules:
             raise ValueError("transactional final assertion required")
         if authorize_change is not None and not callable(authorize_change):
             raise ValueError("transactional change authorization required")
-        SchemaRunner(connection).require_current()
         self.connection, self.provider, self.actor = connection, provider, actor
         self.request_id, self.authorize = request_id, authorize
         self.finalize = finalize

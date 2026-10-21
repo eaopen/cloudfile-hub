@@ -1,13 +1,12 @@
+"""Thin compatibility namespace for the current CE / V2 native routes.
+
+Historical PolicyHost / hosted OIDC / SchemaRunner activation is retired.
+Authentication uses native Seahub OAuth/OIDC, while Etech entities and
+memberships are projected by cloudfile_ext.v2.
+"""
 from django.apps import AppConfig
 
 
 class CloudFileExtensionsConfig(AppConfig):
     name = "cloudfile_extensions"
     verbose_name = "CloudFile Extensions"
-
-    def ready(self):
-        from django.conf import settings
-        if getattr(settings, "CLOUDFILE_OIDC_ENABLED", False) is False:
-            return
-        from .identity.configuration import configure_oidc_host
-        configure_oidc_host(settings)

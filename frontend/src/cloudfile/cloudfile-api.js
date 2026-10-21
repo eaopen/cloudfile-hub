@@ -61,48 +61,19 @@ class CloudFileAPI {
 
   // -- file actions -------------------------------------------------------
 
-  // The caller retains this key and original body through an unknown reply.
-  // Retrying must never silently mint another Checkout or session identity.
-  listLocalEditingDevices() {
-    // Server checks current OIDC/CSRF actor and returns only owned active IDs.
-    return this.req.post(this.server +
-      '/api/v2.1/cloudfile/extensions/local-edit/v1/devices/list/', {});
-  }
-
-  startOrdinaryAgentEdit(reference, deviceID) {
-    return this.req.post(this.server +
-      '/api/v2.1/cloudfile/extensions/local-edit/v1/sessions/create/',
-    { reference, device_id: deviceID, mode: 'optimistic-edit' });
-  }
-
-  startExclusiveEdit(reference, deviceID, baseFileID, requestKey) {
-    if (typeof requestKey !== 'string' || !/^[\x21-\x7e]{1,128}$/.test(requestKey)) {
-      return Promise.reject(new Error('Stable exclusive request key required'));
+  // V2 Agent2: the Hub issues one short-lived scoped JWT from the browser
+  // session. Agent2 keeps its own Journal; no Device, Session or Intent SQL.
+  openLocalFile(repoID, path, mode = 'optimistic-edit') {
+    if (!['local-view', 'optimistic-edit', 'exclusive-edit'].includes(mode)) {
+      return Promise.reject(new Error('Unsupported V2 local edit mode'));
     }
-    return this.req.post(this.server + '/api/v2.1/cloudfile/extensions/local-edit/v1/sessions/start-exclusive/', {
-      reference, device_id: deviceID, base_file_id: baseFileID,
-    }, { headers: { 'Idempotency-Key': requestKey } });
+    return this.req.post(this.server + '/api/v2.1/cloudfile/edit/v1/open/',
+      { repo_id: repoID, path, mode });
   }
 
-  abandonExclusiveEdit(reference, deviceID, originalBaseFileID, checkout, requestKey) {
-    if (typeof requestKey !== 'string' || !/^[\x21-\x7e]{1,128}$/.test(requestKey)) {
-      return Promise.reject(new Error('Original exclusive request key required'));
-    }
-    return this.req.post(this.server + '/api/v2.1/cloudfile/extensions/local-edit/v1/sessions/abandon-exclusive/', {
-      reference, device_id: deviceID, base_file_id: originalBaseFileID,
-      guard_id: checkout.guard_id, generation: checkout.generation,
-      credential_epoch: checkout.credential_epoch,
-    }, { headers: { 'Idempotency-Key': requestKey } });
-  }
-
-  checkoutFile(repoID, path, source = 'manual') {
-    const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/checkout/';
-    return this.req.post(url, { path: path, source: source });
-  }
-
-  releaseCheckout(repoID, path, generation) {
-    const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/checkout/';
-    return this.req.delete(url, { data: { path: path, generation: generation } });
+  getLocalCheckoutInfo(repoID, path) {
+    return this.req.get(this.server + '/api/v2.1/cloudfile/edit/v1/lock-info/',
+      { params: { repo_id: repoID, path } });
   }
 
   // -- external sources ---------------------------------------------------
