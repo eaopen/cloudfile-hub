@@ -118,7 +118,7 @@ export function launchPairedAgent(openURI) {
           [...uri.searchParams.keys()].join(',') !== 'instance,session,ticket' ||
           instance !== window.location.origin ||
           !DEVICE_ID.test(session || '') ||
-          !/^[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+\\.[A-Za-z0-9_-]+$/.test(ticket || '')) {
+          !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(ticket || '')) {
         throw new Error('invalid local edit intent');
       }
       runtime.sendMessage(CLOUDFILE_EXTENSION_ID,
