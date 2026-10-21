@@ -112,9 +112,9 @@ because a directory share exists for accounts with no library membership. An
 explicit native `invisible`, and every non-share path, still fail closed. No readable
 content permission returns HTTP 403; unavailable or invalid native policy
 returns HTTP 503. A management role never supplies content `rw`.
-Native file `check-access` also uses this authority for protected repos,
+Native file `check-access` also uses this authority for repositories with path policy,
 so directory-only access does not fail a preliminary whole-library permission
-check. Repo API tokens cannot impersonate current users on protected repos.
+check. Repo API tokens cannot impersonate current users on repositories with path policy.
 Whether a repo is protected is answered from the same library rule snapshot
 (a virtual repo also checks its origin; an over-budget library is protected).
 
@@ -133,7 +133,7 @@ producible, and the Go/C final publication checks are unchanged.
 `checks`, because a second `action=write` probe would double the round trip on
 every share-root write. A caller that ignores the field, or an older Hub that
 does not send it, keeps the *deny* reading: not "assume rw". The seam is
-registered only where the V2 managed schema exists and an internal Hub channel
+registered only where the current V2 extension schema exists and an internal Hub channel
 is configured; elsewhere a stock CE denial is byte-identical to before.
 
 ### Paged CE directory listing
@@ -285,7 +285,7 @@ library checks due to missing configuration.
 The first supported seam is current-path read/Range and fresh byte uploads /
 overwrites, with actual final-diff checks under Branch CAS. C trusted post/put
 file calls carry the actor explicitly. Unscoped commits never infer it from commit
-metadata. Object-only tickets, native sync and public links on protected repos
+metadata. Object-only tickets, native sync and public links on repositories with path policy
 remain closed. Native copy/move is closed **throughout ACL mode** until both
 source and destination can be proven transactionally; checking an initially
 unprotected source is insufficient. Other structural operations on protected
