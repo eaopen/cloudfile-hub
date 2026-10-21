@@ -691,41 +691,6 @@ class LibContentView extends React.Component {
     window.history.pushState({ url: url, path: path }, path, url);
   };
 
-  onCloudFileManualReturn = async (file, original) => {
-    // Explicit Web fallback for a locally edited Agent copy. The original
-    // selected file identity is captured before opening the OS file picker.
-    // This never switches the cloud target to the local GUID filename.
-    if (this.cloudFileManualUploading) return;
-    this.cloudFileManualUploading = true;
-    try {
-      const originalPath = original && original.path;
-      // The original Agent session baseline wins over a freshly refreshed
-      // listing. A newer cloud version must not silently become upload base.
-      const started = this.cloudLocalEditOriginals && this.cloudLocalEditOriginals[originalPath];
-      const baseFileID = started || original && original.baseFileID;
-      const parent = originalPath && originalPath.substring(0, originalPath.lastIndexOf('/')) || '/';
-      if (!/^[0-9a-f]{40}$/.test(baseFileID || '') || !originalPath ||
-          parent !== this.state.path || !file) {
-        throw new Error('必须选择原始云端文件及其编辑时的原始版本');
-      }
-      if (!window.confirm('确认将选中的本地文件上传，替换原始云端文件 ' + originalPath +
-        '？若云端文件已变化将拒绝覆盖。')) return;
-      await seafileAPI.cloudFileUpload(this.props.repoID, parent, file, true,
-        { originalPath, baseFileID });
-      // This original Agent opening has been explicitly reconciled by Web.
-      // Do not reuse its old base on a later independent manual replacement.
-      if (this.cloudLocalEditOriginals) delete this.cloudLocalEditOriginals[originalPath];
-      // Refresh actual File ID, not just mtime. The old listing base must
-      // never be reused as if it were the newly published cloud version.
-      if (this.state.path === parent) await this.loadDirentList(parent);
-      toaster.success(gettext('Cloud file updated'));
-    } catch (error) {
-      toaster.danger(error.message || Utils.getErrorMsg(error));
-    } finally {
-      this.cloudFileManualUploading = false;
-    }
-  };
-
   onCloudFileLocalEdit = async (filePath, selectedBaseFileID) => {
     // v0.7 explicitly selected ONE existing file. It is not v0.8's
     // resident TaskManager and does not upload upon a filesystem save.
@@ -3267,7 +3232,6 @@ class LibContentView extends React.Component {
                               onItemConvert={this.onConvertItem}
                               loadDirentList={this.loadDirentList}
                               onCloudFileLocalEdit={this.onCloudFileLocalEdit}
-                              onCloudFileManualReturn={this.onCloudFileManualReturn}
                             />
                           )
                         ) : (

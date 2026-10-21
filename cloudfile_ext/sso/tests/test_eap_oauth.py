@@ -167,35 +167,3 @@ def test_dev_http_keys_still_enforce_signed_identity():
             validate(dict(claims, **{field: value}))
     with pytest.raises(ContractError):
         validate(claims, rsa.generate_private_key(public_exponent=65537, key_size=2048))
-
-
-@pytest.mark.parametrize('failure', [None, 'issuer', 'directory'])
-def test_legacy_callback_uses_owned_directory_and_closes_client(monkeypatch, failure):
-    import sys
-    from contextlib import nullcontext
-    from types import SimpleNamespace as NS
-    from unittest.mock import Mock
-    from cloudfile_extensions.identity.resources import LoginResources
-    from cloudfile_extensions.directory.provider import DirectoryProvider
-    from cloudfile_ext.sso.eap_oauth import identity_context
-    source = Mock(spec=DirectoryProvider)
-    source.client = Mock()
-    source.fetch.return_value = {'user_id': '123', 'status': 'active'}
-    resources = Mock(spec=LoginResources)
-    resources.oidc = NS(issuer='https://idp.test/')
-    resources.resources = NS(directory_factory=lambda: source)
-    settings = NS(CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE=lambda: nullcontext(resources),
-                  CF_SSO_EAP_OIDC_ISSUER='https://other.test/' if failure == 'issuer' else 'https://idp.test/')
-    monkeypatch.setitem(sys.modules, 'django.conf', NS(settings=settings))
-    if failure == 'directory':
-        source.fetch.side_effect = IdentityConflict('unavailable')
-    if failure:
-        with pytest.raises(IdentityConflict):
-            identity_context('123')
-    else:
-        assert identity_context('123') == source.fetch.return_value
-    if failure == 'issuer':
-        source.fetch.assert_not_called()
-    else:
-        source.fetch.assert_called_once_with('123')
-        source.client.session.close.assert_called_once()

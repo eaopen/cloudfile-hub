@@ -19,10 +19,8 @@ class NativeRepoView(RepoView):
             access = current.effective(repo_id, '/')
             if not access.can_read:
                 raise PermissionError('Library access denied')
-            # Qualify with the library-level grant. The per-path RPC answers NULL
-            # for every managed library by design (a stored cf_dir_acl row makes
-            # the legacy seam refuse to adjudicate), so using it here denied the
-            # library even to members whose V2 decision was readable.
+            # Library metadata requires CE membership; shared directories have
+            # their own V2 entry and never expose the library root.
             native = current.api.check_permission(repo_id, request.user.username)
             if native == 'admin':
                 native = 'rw'

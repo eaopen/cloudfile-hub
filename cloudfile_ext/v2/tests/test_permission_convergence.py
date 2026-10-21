@@ -78,3 +78,38 @@ class NativeRequestFailureTests(unittest.TestCase):
         result = middleware(request)
         self.assertEqual(result.status_code, 503)
         self.assertIn('no-store', result['Cache-Control'])
+
+
+class NativeAdapterTests(unittest.TestCase):
+    def authority(self, native=None):
+        api = Mock()
+        api.get_repo.return_value = SimpleNamespace(is_virtual=False, version=1)
+        api.get_repo_status.return_value = 0
+        api.check_permission.return_value = native
+        rules = Mock()
+        rules.library.return_value = (Rule(RID, '/A', 'test', 'user', 'user', 'u', 'rw', share_mode=True),)
+        return Authority('native', principal=Principal('test', 'u'), rules=rules, api=api)
+
+    def test_smart_link_only_grants_shared_target_and_children(self):
+        from cloudfile_extensions.authorization.internal_link import scoped_directory_address
+        request = SimpleNamespace(user=SimpleNamespace(username='native'))
+        with patch('cloudfile_ext.v2.acl_runtime.Authority', return_value=self.authority()):
+            for path, kind in (('/A', 'dir'), ('/A/file.txt', 'file')):
+                result = scoped_directory_address(request, RID, path, kind)
+                self.assertEqual(result['root_path'], '/A')
+                self.assertEqual(result['permission'], 'rw')
+            for path in ('/', '/B', '/Another'):
+                with self.assertRaises(PermissionError):
+                    scoped_directory_address(request, RID, path)
+
+    def test_library_list_does_not_expose_root_for_directory_only_share(self):
+        from rest_framework.response import Response
+        from cloudfile_extensions.authorization.browsing import web_list
+        request = SimpleNamespace(user=SimpleNamespace(username='native'))
+        view = web_list('libraries')(lambda self, request: Response({'repos': [{'repo_id': RID}]}))
+        with patch('cloudfile_ext.v2.acl_runtime.Authority', return_value=self.authority()):
+            self.assertEqual(view(None, request).data['repos'], [])
+        with patch('cloudfile_ext.v2.acl_runtime.Authority', return_value=self.authority('r')):
+            self.assertEqual(view(None, request).data['repos'][0]['permission'], 'r')
+        with patch('cloudfile_ext.v2.acl_runtime.Authority', side_effect=ACLUnavailable('offline')):
+            self.assertEqual(view(None, request).status_code, 503)

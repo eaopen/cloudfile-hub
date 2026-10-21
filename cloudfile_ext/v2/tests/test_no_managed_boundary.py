@@ -133,11 +133,7 @@ class NoManagedLibraryRegression(unittest.TestCase):
             'cloudfile_extensions.permission_middleware',
             'cloudfile_extensions.authorization.browsing',
             'cloudfile_extensions.authorization.global_admin',
-            'cloudfile_extensions.authorization.gunicorn',
-            'cloudfile_extensions.editing.runtime',
-            'cloudfile_extensions.resources.native',
             'cloudfile_extensions.resources.paths',
-            'cloudfile_extensions.identity.native_session',
         )
         missing = [name for name in required
                    if not self._resolve_extension_module(name)]
@@ -179,6 +175,34 @@ class NoManagedLibraryRegression(unittest.TestCase):
         self.assertIn('permissions.append(None)', api)
         self.assertIn('raise PermissionError()', api)
         self.assertIn('authority.effective(data', api)
+
+    def test_retired_authorization_stack_and_relative_imports_stay_removed(self):
+        import ast
+        forbidden = ('cf_dir_admin', 'cf_policy_request', 'PolicyCore', 'ContentReadAuthority')
+        missing = []
+        for path in (ROOT / 'cloudfile_extensions').rglob('*.py'):
+            source = path.read_text()
+            for token in forbidden:
+                self.assertNotIn(token, source, str(path))
+            package = list(path.relative_to(ROOT).parts[:-1])
+            for node in ast.walk(ast.parse(source)):
+                if not isinstance(node, ast.ImportFrom) or not node.level:
+                    continue
+                parts = package[:len(package) - node.level + 1]
+                if node.module:
+                    parts += node.module.split('.')
+                    name = '.'.join(parts)
+                    if not self._resolve_extension_module(name): missing.append(name)
+                else:
+                    for alias in node.names:
+                        name = '.'.join(parts + [alias.name])
+                        if not self._resolve_extension_module(name): missing.append(name)
+        self.assertEqual(missing, [])
+        for name in ('authorization/host.py', 'authorization/core.py', 'authorization/rules.py',
+                     'authorization/directory_management.py', 'authorization/native_read.py',
+                     'authorization/scoped_read.py', 'identity/user_delegation.py',
+                     'identity/read_ticket.py', 'identity/native_session.py'):
+            self.assertFalse((ROOT / 'cloudfile_extensions' / name).exists(), name)
 
 if __name__ == '__main__':
     unittest.main()
