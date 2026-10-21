@@ -6,9 +6,15 @@ source scans, audit archiving, metadata upkeep. It is not a separate service --
 the cf-worker container runs this command from the same image as the
 application.
 
-SSO registers its directory-sync task when enabled; P2 and later capabilities
-can register their work in the same way. With no enabled task the command exits
-immediately, which is why the compose service sits behind the `worker` profile.
+Registration happens in ``CloudFileConfig.ready()``. The V2 runtime registers
+no periodic task today: the SSO/search/external-source modules that used to own
+one are retired, and their tables are not part of the V2 schema (SSO directory
+sync is the push trigger at
+``/api/v2.1/admin/cloudfile/directory/entities/sync/``, and the Meilisearch
+indexer is the isolated ``cloudfile_ext.v2.search.worker`` process rather than
+a registry task). With no enabled task the command exits 0 immediately, so a
+deployment must not restart the container on a clean exit -- only a real
+failure is worth retrying.
 """
 
 import logging
