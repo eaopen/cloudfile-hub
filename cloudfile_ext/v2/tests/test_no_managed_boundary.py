@@ -74,6 +74,10 @@ class NoManagedLibraryRegression(unittest.TestCase):
                    if not self._resolve_extension_module(name)]
         self.assertEqual(missing, [])
 
+    def test_legacy_extension_test_suite_is_not_a_v2_gate(self):
+        self.assertFalse((ROOT / 'cloudfile_extensions/tests').exists())
+        self.assertFalse((ROOT / 'cloudfile_extensions/urls.py').exists())
+
     def test_retired_v08_acl_package_stays_removed(self):
         self.assertFalse((ROOT / 'cloudfile_ext/acl').exists())
         facade = (ROOT / 'cloudfile_ext/permissions.py').read_text()
