@@ -370,6 +370,6 @@ account, as with staff preparation; no password or session is issued on failure.
 
 ## 四表运行路由边界（2026-10-21）
 
-默认根路由不再挂载历史 Resource/Intent/SchemaRunner 控制面。原生库/文件读取保留；`extensions/authorization/v1/effective-permission/`、`shared-directories/`、`directory-entries/` 直接使用本契约对应的 V2 视图、参数和回执，不再调用旧 NativeRead。旧 `directory-address`、`library-rules`、`directory-shares`、`directory/sync`、扩展 identity/session/editing/transfer 等路由不再由根路由提供；当前管理/目录同步入口保持不变。原生 OAuth 与 `/oidc/` 保持现有接线，不依赖旧 PolicyHost。
+默认根路由不再挂载历史 Resource/Intent/SchemaRunner 控制面。原生库/文件读取保留；`/api/v2.1/cloudfile/authorization/v1/` 是当前唯一授权路由前缀，`extensions/authorization/v1/` 的只读别名也已删除。旧目录管理员、独立 ACL/share 持久层、PolicyHost/PolicyCore、资源委托/epoch 票据和其专用部署模块退役。库列表与 Smart Link 只调用现有 `Authority.effective()`；目录 ACL 页面使用现行 DirectoryRules 的行 revision/CAS 协议和 user/org/role 类型。普通浏览器下载、上传与退出继续使用 CE；V2 Agent2、原生 OAuth 与 `/oidc/` 保持现有接线。
 
 `test_root_routes.py` 验证真实根路由解析及旧路由缺席；既有 ACL HTTP、有效权限、原生 Cookie 和 Checkout 用例验证授权及回执。历史源码只用于追溯，不能据其存在恢复额外表或旧运行入口。

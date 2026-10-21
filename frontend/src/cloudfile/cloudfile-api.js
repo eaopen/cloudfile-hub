@@ -28,35 +28,14 @@ class CloudFileAPI {
 
   // -- directory ACL ------------------------------------------------------
 
-  listDirectoryPolicy(repoID, path, domain = 'rules', after = null) {
-    const url = this.server + '/api/v2.1/cloudfile/extensions/authorization/v1/directory-' + domain + '/';
-    return this.req.get(url, { params: { repo_id: repoID, path, kind: 'dir', limit: 50, ...(after ? { after } : {}) } });
+  listDirectoryPolicy(repoID, path) {
+    return this.req.get(this.server + '/api/v2.1/cloudfile/authorization/v1/directory-rules/',
+      { params: { repo_id: repoID, path } });
   }
 
-  createDirectoryPolicy(reference, value, domain, requestKey) {
-    const url = this.server + '/api/v2.1/cloudfile/extensions/authorization/v1/directory-' + domain + '/';
-    return this.req.post(url, { reference, value }, { headers: { 'Idempotency-Key': requestKey } });
-  }
-
-  deleteDirectoryPolicy(reference, rule, domain, requestKey) {
-    const url = this.server + '/api/v2.1/cloudfile/extensions/authorization/v1/directory-' + domain + '/' + rule.id + '/';
-    return this.req.delete(url, { data: { reference }, headers: {
-      'If-Match': rule.etag, 'Idempotency-Key': requestKey,
-    } });
-  }
-
-  replaceDirectoryRule(reference, value, rule, requestKey) {
-    const url = this.server + '/api/v2.1/cloudfile/extensions/authorization/v1/directory-rules/' + rule.id + '/';
-    return this.req.put(url, { reference, value }, { headers: {
-      'If-Match': rule.etag, 'Idempotency-Key': requestKey,
-    } });
-  }
-
-  // Answers "why can this user not open that folder" -- inheritance across
-  // levels and subject types is hard to read off the raw rule list.
-  getEffectivePermission(repoID, path, user) {
-    const url = this.server + '/api/v2.1/cloudfile/repos/' + repoID + '/dir-acl/effective/';
-    return this.req.get(url, { params: { path: path, user: user } });
+  writeDirectoryRule(rule, remove = false) {
+    const url = this.server + '/api/v2.1/cloudfile/authorization/v1/directory-rules/';
+    return remove ? this.req.delete(url, { data: rule }) : this.req.post(url, rule);
   }
 
   // -- file actions -------------------------------------------------------

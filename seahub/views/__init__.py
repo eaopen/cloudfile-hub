@@ -168,6 +168,15 @@ def _cloudfile_watch_enabled():
     return _cf_feature_enabled('CF_ENABLE_WATCH')
 
 
+def _cloudfile_path_permission(request, repo_id, path, permission):
+    from cloudfile_ext.v2.acl_runtime import ACLUnavailable
+    try:
+        return _cf_check_permission(request.user.username, repo_id, path, permission)
+    except ACLUnavailable:
+        _cf_mark_permission_unavailable(request)
+        return None
+
+
 def check_folder_permission(request, repo_id, path):
     """Check repo/folder/file access permission of a user.
 
@@ -198,7 +207,7 @@ def check_folder_permission(request, repo_id, path):
         # and path; no directory rule classifies the complete repository.
         if not _cf_has_permission_checks():
             return None
-        adjudicated = _cf_check_permission(username, repo_id, path, PERMISSION_READ)
+        adjudicated = _cloudfile_path_permission(request, repo_id, path, PERMISSION_READ)
         if adjudicated not in (PERMISSION_READ, PERMISSION_READ_WRITE):
             return None
         # A read-only library stays read-only for the adjudicated answer too.
@@ -211,7 +220,7 @@ def check_folder_permission(request, repo_id, path):
     if seafile_api.get_repo_status(repo_id) == 1:
         permission = PERMISSION_READ
 
-    return _cf_check_permission(username, repo_id, path, permission)
+    return _cloudfile_path_permission(request, repo_id, path, permission)
 
 def get_seadoc_file_uuid(repo, path):
     repo_id = repo.repo_id
@@ -1264,13 +1273,7 @@ def react_fake_view(request, **kwargs):
         'llm_models': json.dumps(LLM_MODELS)
     }
 
-    from seahub.auth import BACKEND_SESSION_KEY
-    from cloudfile_extensions.identity.native_session import BACKEND
-    from django.conf import settings as runtime_settings
-    return_dict['cloudfile_web_enabled'] = (getattr(runtime_settings, 'CLOUDFILE_TRANSFER_ENABLED', False)
-        and request.session.get(BACKEND_SESSION_KEY) == BACKEND)
-    return_dict['cloudfile_annotations_enabled'] = (getattr(runtime_settings, 'CLOUDFILE_ANNOTATIONS_ENABLED', False) is True
-        and request.session.get(BACKEND_SESSION_KEY) == BACKEND)
+    return_dict['cloudfile_annotations_enabled'] = False
 
     return render(request, "react_app.html", return_dict)
 

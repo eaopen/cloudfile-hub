@@ -27,7 +27,6 @@ class CookieNativeRouteTests(TestCase):
         self.api.get_repo_status.return_value = 0
         self.api.get_repo_owner.return_value = 'owner'
         self.api.check_permission.return_value = 'rw'
-        self.api.check_permission_by_path.return_value = 'rw'
         self.rules = Mock()
         self.rules.library.return_value = []
 
@@ -52,16 +51,16 @@ class CookieNativeRouteTests(TestCase):
         self.assertEqual(result['Cache-Control'], 'no-store')
 
     def test_native_readonly_and_v2_deny_are_not_widened(self):
-        self.api.check_permission_by_path.return_value = 'r'
+        self.api.check_permission.return_value = 'r'
         self.assertEqual(self.call().data['permission'], 'r')
         self.rules.library.return_value = [Rule(RID, '/', 'etech', 'user', 'user', 'uid', 'invisible')]
         self.assertEqual(self.call(staff=True).status_code, 403)
 
     def test_native_denial_and_outage_never_become_access(self):
-        self.api.check_permission_by_path.return_value = None
+        self.api.check_permission.return_value = None
         self.assertEqual(self.call(staff=True).status_code, 403)
         self.assertEqual(self.call(error=ACLUnavailable()).status_code, 503)
-        self.api.check_permission_by_path.side_effect = RuntimeError('RPC unavailable')
+        self.api.check_permission.side_effect = RuntimeError('RPC unavailable')
         self.assertEqual(self.call().status_code, 503)
 
     def test_file_route_inherits_current_native_download_guard(self):
