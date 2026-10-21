@@ -1,11 +1,11 @@
 """Opt-in metadata on an already authorized native directory page."""
 import logging
 import posixpath
+from contextlib import nullcontext
 
 from rest_framework.response import Response
 from seaserv import seafile_api
 
-from cloudfile_ext.acl.service import directory_inputs
 from cloudfile_ext.features import is_enabled
 from cloudfile_ext.hooks import check_permission
 from .contract import VERSION, MODEL
@@ -47,10 +47,10 @@ def enrich_page(data, username, repo_id):
 
 
 def directory_response(view, instance, request, *args, **kwargs):
-    # Scope the raw ACL cache reads to one response, removing per-item Redis I/O.
+    # V2 Authority owns request-scoped decisions; no retired ACL reader/cache.
     # The opt-in only supports native pages; recursive/unlimited callers retain
     # their existing response and EAP's compatibility permission checks.
-    with directory_inputs():
+    with nullcontext():
         response = view(instance, request, *args, **kwargs)
         if response.status_code == 200 and 'has_more' in response.data:
             try:
