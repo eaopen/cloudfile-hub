@@ -30,67 +30,28 @@ def _extension_urlconfs():
     return result
 
 
+# Current V2 routes are registered by seahub.urls. Do not mount the historical
+# Resource/Intent control plane here: it requires the retired migration ledger
+# and would turn a valid four-table installation into an SQL failure on use.
+# Keep native compatibility reads on V2 Authority; legacy policy readers must
+# not be reached through an old URL alias either.
+from .library_configuration import LibraryConfiguration
+from .authorization.native_http import NativeRepoView
+from cloudfile_ext.v2.acl_http import EffectivePermission, SharedDirectories, DirectoryEntries
+from .authorization.native_file_http import NativeFileView
+
 urlpatterns = [
-    re_path(r"^api/v2.1/cloudfile/", include("cloudfile_extensions.urls")),
+    re_path(r"^api/v2.1/cloudfile/libraries/(?P<repo_id>[-0-9a-f]{36})/configuration/$",
+        LibraryConfiguration.as_view()),
+    re_path(r"^api2/repos/(?P<repo_id>[-0-9a-f]{36})/file/$", NativeFileView.as_view(), name="native-policy-file"),
+    re_path(r"^api/v2.1/repos/(?P<repo_id>[-0-9a-f]{36})/$", NativeRepoView.as_view(), name="native-policy-repo"),
+    re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/effective-permission/$",
+        EffectivePermission.as_view(), name="native-effective-permission"),
+    re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/shared-directories/$",
+        SharedDirectories.as_view(), name="shared-directories"),
+    re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-entries/$",
+        DirectoryEntries.as_view(), name="directory-entries"),
 ]
-# 修改逻辑（2026-10-15 v0.9-only）：v0.8 目录 ACL 运行时已退役，不再在
-# CF_ENABLE_DIR_ACL 下挂载指向旧视图的 effective-permission 兼容路由。
-# 目录级有效权限只由 CLOUDFILE_AUTHORIZATION_ENABLED 下的 v0.9 路由提供。
-if getattr(settings, "CLOUDFILE_OIDC_ENABLED", False):
-    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/identity/v1/",
-        include("cloudfile_extensions.identity.urls")))
-if getattr(settings, "CLOUDFILE_ADMIN_POLICY_ENABLED", not getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False)):
-    if getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False):
-        raise ImproperlyConfigured("Administrator and session policy route ownership must be distinct")
-    from .authorization.admin_http import AdministratorPolicyView
-    from .authorization.native_http import NativeEffectiveView, NativeRepoView, NativeDirectoryAccessView
-    from .authorization.native_file_http import NativeFileView
-    urlpatterns.extend([
-        re_path(r"^api2/repos/(?P<repo_id>[-0-9a-f]{36})/file/$",
-            NativeFileView.as_view(), name="native-policy-file"),
-        re_path(r"^api/v2.1/repos/(?P<repo_id>[-0-9a-f]{36})/$",
-            NativeRepoView.as_view(), name="native-policy-repo"),
-        # Native authentication shares the deployed C policy; no administrator content grant.
-        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/effective-permission/$",
-            NativeEffectiveView.as_view(), name="native-effective-permission"),
-        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/shared-directories/$",
-            NativeDirectoryAccessView.as_view(operation='shared'), name="shared-directories"),
-        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-address/$",
-            NativeDirectoryAccessView.as_view(operation='resolve'), name="directory-address"),
-        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-entries/$",
-            NativeDirectoryAccessView.as_view(operation='entries'), name="directory-entries"),
-        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-rules/$",
-            AdministratorPolicyView.as_view(), name="administrator-policy-list"),
-        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-rules/(?P<rule_id>[-0-9a-f]{36})/$",
-            AdministratorPolicyView.as_view(), name="administrator-policy-item"),
-        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-shares/$",
-            AdministratorPolicyView.as_view(shares=True), name="administrator-directory-share-list"),
-        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-shares/(?P<rule_id>[-0-9a-f]{36})/$",
-            AdministratorPolicyView.as_view(shares=True), name="administrator-directory-share-item"),
-        re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/library-rules/$",
-            AdministratorPolicyView.as_view(library_page=True), name="administrator-library-policy-list"),
-    ])
-if getattr(settings, "CLOUDFILE_AUTHORIZATION_ENABLED", False):
-    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/authorization/",
-        include("cloudfile_extensions.authorization.urls")))
-if getattr(settings, "CLOUDFILE_ANNOTATIONS_ENABLED", False):
-    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/annotations/",
-        include("cloudfile_extensions.resources.urls")))
-if getattr(settings, "CLOUDFILE_LOCAL_EDIT_ENABLED", False):
-    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/local-edit/",
-        include("cloudfile_extensions.local_edit.urls")))
-if getattr(settings, "CLOUDFILE_EDITING_ENABLED", False):
-    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/editing/",
-        include("cloudfile_extensions.editing.urls")))
-if getattr(settings, "CLOUDFILE_TRANSFER_ENABLED", False):
-    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/transfer/",
-        include("cloudfile_extensions.transfer.urls")))
-if getattr(settings, "CLOUDFILE_RESOURCE_SEARCH_ENABLED", False):
-    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/search/",
-        include("cloudfile_extensions.search.urls")))
-if getattr(settings, "CLOUDFILE_AUDIT_QUERY_ENABLED", False):
-    urlpatterns.append(re_path(r"^api/v2.1/cloudfile/extensions/audit/",
-        include("cloudfile_extensions.events.urls")))
 urlpatterns.extend(
     re_path(rf"^api/v2.1/cloudfile/extensions/{name}/", include(module))
     for name, module in _extension_urlconfs()

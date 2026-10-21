@@ -30,23 +30,24 @@ from .acl_runtime import Authority
 
 MAX_TICKET_SECONDS = 3600
 
-# Internal schema capability, not a user-facing feature flag. A controlled
-# Guard migration must restart Hub and both native processes.
+# Existing Checkout configuration and schema are qualified together. Changing
+# the capability or migrating Guard requires restarting Hub/native processes.
 from functools import lru_cache
 
 
 @lru_cache(maxsize=1)
 def checkout_available():
+    from cloudfile_ext.features import is_enabled
+    # A baseline table is not feature activation. Keep ordinary transfer and
+    # optimistic editing independent of Guard discovery when Checkout is off.
+    if not is_enabled('CF_ENABLE_CHECKOUT'):
+        return False
     from seahub.utils.db_api import SeafileDB
     schema = SeafileDB().db_name
-    with connection.cursor() as cursor:
-        cursor.execute(
-            "SELECT COUNT(*) FROM information_schema.TABLES "
-            "WHERE TABLE_SCHEMA=%s AND TABLE_NAME='cf_edit_guard'", (schema,))
-        rows = cursor.fetchone()
-    if not rows or rows[0] not in (0, 1):
-        raise RuntimeError("Checkout schema availability cannot be proven")
-    return rows[0] == 1
+    from .checkout_schema import path_checkout_available
+    # Qualify the optional contract by columns/indexes, not by a colliding
+    # table name. Native read/upload must not acquire a Checkout session.
+    return path_checkout_available(connection, schema)
 
 
 def issue_ticket(*, username, uid, repo_id, path, mode, file_id, now, secret):
