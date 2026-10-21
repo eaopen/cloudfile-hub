@@ -7,7 +7,6 @@ connections. A failed connection is closed, never transparently reconnected.
 from ..jobs.runtime import connect_database, run_loop
 from ..jobs.store import JobStore
 from ..jobs.worker import Handler, JobWorker
-from ..schema.runner import SchemaRunner
 from .retention import AuditExportRetention
 from .runtime import AuditQueryFactory
 
@@ -27,8 +26,6 @@ class AuditBackground:
             self.cleanup_connection = connect_database(environment)
             if self.job_connection is self.cleanup_connection:
                 raise ValueError("dedicated audit background connections required")
-            for connection in (self.job_connection, self.cleanup_connection):
-                SchemaRunner(connection).require_current()
             self.worker = JobWorker(JobStore(self.job_connection), owner=owner,
                 handlers={"audit.export": Handler(factory.export_handler(result_root=factory.result_root))},
                 lease_seconds=lease_seconds)

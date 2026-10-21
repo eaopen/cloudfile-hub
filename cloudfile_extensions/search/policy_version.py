@@ -2,7 +2,6 @@
 import hashlib
 from uuid import UUID
 
-from ..schema.runner import SchemaRunner
 from .meilisearch import unavailable
 
 
@@ -39,7 +38,6 @@ class SearchPolicyVersionReader:
             if not connection.get_autocommit():
                 connection = None
                 raise ValueError()
-            SchemaRunner(connection).require_current()
             with connection.cursor() as sql:
                 # A single statement observes both streams in the same read
                 # view. FORCE INDEX avoids a library-wide or payload scan.

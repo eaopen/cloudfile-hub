@@ -1,6 +1,7 @@
 import React, { Fragment } from 'react';
 import { Button, ButtonGroup } from 'reactstrap';
 import PropTypes from 'prop-types';
+import { openV2LocalFile } from '@/cloudfile/agent-local-edit';
 import { gettext, siteRoot } from '@/utils/constants';
 import { Utils, isImageRotateable } from '@/utils/utils';
 import Icon from '../../components/icon';
@@ -9,7 +10,6 @@ import CustomDropdown from '../dropdown';
 import IconButton from '../icon-button';
 import Tooltip from '../tooltip';
 import ImageZoomer from './image-zoomer';
-import { openV2LocalFile } from '@/cloudfile/agent-local-edit';
 
 const propTypes = {
   isLocked: PropTypes.bool.isRequired,

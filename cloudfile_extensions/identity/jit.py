@@ -17,7 +17,6 @@ from ..directory.provider import DirectoryProvider
 from ..directory.native_state import NativeSubjectState
 from ..events.outbox import EventWriter
 from ..jobs.authority import scope_locks
-from ..schema.runner import SchemaRunner
 from .bindings import IdentityBindings, conflict
 from .sql_bindings import SQLIdentityBindings
 from cloudfile_ext.v2.account_names import account_username
@@ -32,7 +31,6 @@ class SQLJITProvisioner:
         identifier(request_id)
         self.bindings, self.directory, self.enabled = bindings, directory, enabled
         self.issuer, self.request_id = trusted_https_url(issuer), request_id
-        SchemaRunner(bindings.connection).require_current()
         self.state = NativeSubjectState(bindings.connection, native_schema=bindings.native_schema,
                                        identity_schema=bindings.identity_schema, provider=bindings.provider)
 
