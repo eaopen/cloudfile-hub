@@ -200,6 +200,26 @@ class HTTPTests(TestCase):
             authority.return_value.effective.return_value = Decision('invisible','/shared',True)
             self.assertEqual(self.native(good).status_code,403)
 
+    def test_native_partial_directory_listing_preserves_hidden_children(self):
+        claims = dict(is_internal=True, exp=int(time.time()) + 60)
+        checks = [
+            dict(path='/shared/allowed', kind='dir', action='read'),
+            dict(path='/shared/hidden', kind='dir', action='read'),
+        ]
+        payload = dict(username='native', repo_id=RID, checks=checks, partial=True)
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
+            authority.return_value.effective.side_effect = lambda repo, path, kind: (
+                Decision('invisible', '/', True) if path.endswith('/hidden')
+                else Decision('r', '/', True))
+            result = self.native(claims, payload)
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.data['permissions'], ['r', None])
+            self.assertTrue(result.data['allowed'])
+            payload.pop('partial')
+            self.assertEqual(self.native(claims, payload).status_code, 403)
+            payload['partial'] = False
+            self.assertEqual(self.native(claims, payload).status_code, 400)
+
     def test_native_answer_carries_the_level_not_only_the_verdict(self):
         # Native C has no library grant at a share root, so it needs the V2
         # level (r vs rw) out of this one call: probing again with
