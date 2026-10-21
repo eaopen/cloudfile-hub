@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 import io
 import json
 import os
+import re
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from threading import Barrier
@@ -12,7 +13,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 from uuid import uuid4
 
-from cloudfile_ext.v2.storage_reconcile import StorageConfig, StorageReconciler, STORAGE_DDL, valid_key
+from cloudfile_ext.v2.storage_reconcile import StorageConfig, StorageReconciler, valid_key
 
 
 class ConfigTests(unittest.TestCase):
@@ -92,6 +93,16 @@ class StorageSQLTests(unittest.TestCase):
         cls.options = dict(host='127.0.0.1', port=int(os.environ['CF_STORAGE_TEST_MYSQL_PORT']),
                            user='root', password='storage-test-only', autocommit=True, charset='utf8mb4')
         cls.admin = pymysql.connect(**cls.options)
+        schema_path = Path(os.environ.get('CF_V2_DDL') or (
+            Path(__file__).resolve().parents[4] /
+            'cloudfile-server/scripts/sql/mysql/cloudfile-v2.sql'))
+        if not schema_path.is_file():
+            raise unittest.SkipTest('current Server V2 DDL fixture unavailable')
+        content = schema_path.read_text()
+        match = re.search(r'CREATE TABLE cf_library_storage \([\s\S]*?\) ENGINE=InnoDB[^;]*;', content)
+        if not match:
+            raise AssertionError('Server V2 storage table definition missing')
+        cls.storage_ddl = match.group().rstrip(';')
 
     @classmethod
     def tearDownClass(cls):
@@ -115,9 +126,7 @@ class StorageSQLTests(unittest.TestCase):
             for table in ('Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo'):
                 cursor.execute('CREATE TABLE ' + table + '(repo_id CHAR(36) PRIMARY KEY) ENGINE=InnoDB')
             cursor.execute('CREATE TABLE RepoStorageId(repo_id CHAR(36) PRIMARY KEY,storage_id VARCHAR(255)) ENGINE=InnoDB')
-            # The legacy table exists with no usable fields: touching it breaks tests.
-            cursor.execute('CREATE TABLE cf_library_storage_key(untouched INT) ENGINE=InnoDB')
-            cursor.execute('INSERT INTO cf_library_storage_key VALUES(42)')
+            cursor.execute(self.storage_ddl)
         self.service = StorageReconciler(self.connection, self.config)
         self.service.ensure_schema()
 
@@ -143,10 +152,9 @@ class StorageSQLTests(unittest.TestCase):
             (self.auto / route[11:] / 'storage' / 'commits' / rid).mkdir(parents=True, exist_ok=True)
         return rid
 
-    def test_schema_exact_idempotent_and_legacy_untouched(self):
+    def test_schema_exact_idempotent_without_dynamic_ddl(self):
         self.service.ensure_schema()
         self.service.ensure_schema()
-        self.assertEqual(self.sql('SELECT * FROM cf_library_storage_key'), ((42,),))
         self.sql('ALTER TABLE cf_library_storage ADD bad INT')
         with self.assertRaisesRegex(RuntimeError, 'STORAGE_SCHEMA_DRIFT'):
             self.service.ensure_schema()
@@ -379,7 +387,7 @@ class StorageSQLTests(unittest.TestCase):
         self.assertEqual(len(report['items']), 1)
         self.assertEqual(report['orphan_directories'], [])
 
-    def test_missing_registry_dry_run_classifies_without_creating_then_apply_installs(self):
+    def test_missing_registry_dry_run_reports_missing_and_apply_does_not_create(self):
         from cloudfile_ext.v2.__main__ import main
         rid = self.repo()
         self.sql('DROP TABLE cf_library_storage')
@@ -398,8 +406,9 @@ class StorageSQLTests(unittest.TestCase):
         self.assertEqual(self.sql("SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_library_storage'"), ())
         self.assertEqual(self.sql('SELECT * FROM cf_library_storage_key'), ((42,),))
         with patch.dict(os.environ, env), redirect_stdout(io.StringIO()):
-            self.assertEqual(main(['storage-reconcile', '--seafile-conf', str(conf), '--seafile-data', str(self.native), '--apply']), 0)
-        self.assertEqual(self.sql('SELECT state FROM cf_library_storage WHERE repo_id=%s', (rid,)), (('active',),))
+            self.assertEqual(main(['storage-reconcile', '--seafile-conf', str(conf), '--seafile-data', str(self.native), '--apply']), 1)
+        self.assertEqual(self.sql(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_library_storage'"), ())
 
     def test_dry_run_works_with_select_only_user_and_read_only_transaction(self):
         import pymysql
@@ -428,10 +437,10 @@ class StorageSQLTests(unittest.TestCase):
                 cursor.execute('DROP USER %s', (username,))
 
     def test_read_only_schema_verifier_rejects_changed_contract_without_altering_it(self):
-        variants = [STORAGE_DDL.replace("'reserved','active','retired'", "'reserved','active'"),
-                    STORAGE_DDL.replace('    UNIQUE KEY library_storage_repo (repo_id),\n', ''),
-                    STORAGE_DDL.replace('COLLATE=utf8mb4_bin', 'COLLATE=utf8mb4_general_ci'),
-                    STORAGE_DDL.replace('state VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL',
+        variants = [self.storage_ddl.replace("'reserved','active','retired'", "'reserved','active'"),
+                    self.storage_ddl.replace('    UNIQUE KEY library_storage_repo (repo_id),\n', ''),
+                    self.storage_ddl.replace('COLLATE=utf8mb4_bin', 'COLLATE=utf8mb4_general_ci'),
+                    self.storage_ddl.replace('state VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL',
                                         "state VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT 'active'")]
         for ddl in variants:
             with self.subTest(ddl=ddl):

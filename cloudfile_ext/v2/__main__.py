@@ -49,7 +49,10 @@ def main(argv=None):
                 print(json.dumps(report, sort_keys=True))
                 return 2 if report['summary'].get('BLOCKED', 0) else 0
             NativeLibraryDiscovery.check_native_schema(connection)
-            schema = FreshSchema(connection, args.ddl.read_text())
+            schema = FreshSchema(
+                connection, args.ddl.read_text(),
+                edit_ddl=args.ddl.with_name('cloudfile-v2-edit.sql').read_text(),
+                audit_ddl=args.ddl.with_name('cloudfile-v2-audit.sql').read_text())
             if args.command == 'install':
                 schema.install()
             else:
@@ -73,7 +76,7 @@ def main(argv=None):
             return 2 if isinstance(error, ValueError) else 1
         print('V2 schema unavailable: ' + type(error).__name__, file=sys.stderr)
         return 1
-    print('V2 schema ready: 3 reviewed extension tables, native discovery checked')
+    print('V2 schema ready: 5 reviewed extension tables, native discovery checked')
     return 0
 
 
