@@ -17,16 +17,21 @@ class NoManagedLibraryRegression(unittest.TestCase):
         self.assertNotIn('ManagedLibraryShare', api)
         self.assertNotIn('AdminLibrarySharesReconcileView', api)
 
+    def test_retired_extension_tree_is_absent(self):
+        # Old CloudFile V0.x resources, session and share ledgers are not an
+        # alternative runtime; prevent the entire package being copied back.
+        self.assertFalse((ROOT / 'cloudfile_extensions').exists())
+
     def test_current_runtime_has_no_enrollment_sql(self):
-        for name in ('cloudfile_extensions/authorization/share_service.py',
-                     'cloudfile_extensions/authorization/shares.py'):
-            source = (ROOT / name).read_text()
-            self.assertNotIn('INSERT INTO cf_managed_library(', source, name)
-        for module in ('cloudfile_ext/v2/acl_runtime.py',
-                       'cloudfile_ext/v2/acl_http.py',
-                       'cloudfile_ext/v2/acl_policy.py'):
-            text = (ROOT / module).read_text()
-            self.assertNotIn('managed library', text.lower(), module)
+        for module in (ROOT / 'cloudfile_ext/v2').rglob('*.py'):
+            if module.name.startswith('test_'):
+                continue
+            source = module.read_text(encoding='utf-8')
+            with self.subTest(module=str(module.relative_to(ROOT))):
+                self.assertNotIn('INSERT INTO cf_managed_library(', source)
+                self.assertNotIn('FROM cf_managed_library ', source)
+                self.assertNotIn('cf_library_share_revision', source)
+                self.assertNotIn('managed library', source.lower())
 
     def test_native_errors_never_restore_ce_permission(self):
         source = (ROOT / 'cloudfile_ext/v2/native_gate.py').read_text()
