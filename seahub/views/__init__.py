@@ -65,7 +65,7 @@ from seahub.settings import AVATAR_FILE_STORAGE, ENABLE_REPO_SNAPSHOT_LABEL, \
 
 from seahub.ocm.settings import ENABLE_OCM, OCM_REMOTE_SERVERS
 from seahub.ocm_via_webdav.settings import ENABLE_OCM_VIA_WEBDAV
-from seahub.constants import PERMISSION_READ, PERMISSION_INVISIBLE
+from seahub.constants import PERMISSION_READ, PERMISSION_READ_WRITE, PERMISSION_INVISIBLE
 from seahub.group.settings import GROUP_IMPORT_MEMBERS_EXTRA_MSG
 
 from seahub.weixin.settings import ENABLE_WEIXIN
@@ -135,10 +135,14 @@ def get_system_default_repo_id():
 # cloudfile_ext.
 try:
     from cloudfile_ext.hooks import check_permission as _cf_check_permission
+    from cloudfile_ext.hooks import has_permission_checks as _cf_has_permission_checks
     from cloudfile_ext.features import is_enabled as _cf_feature_enabled
 except ImportError:
     def _cf_check_permission(username, repo_id, path, permission):
         return permission
+
+    def _cf_has_permission_checks():
+        return False
 
     def _cf_feature_enabled(name):
         return False
@@ -185,8 +189,27 @@ def check_folder_permission(request, repo_id, path):
         # false 403 "Permission denied."
         _cf_mark_permission_unavailable(request)
         return None
-    if not permission or permission == PERMISSION_INVISIBLE:
+    if permission == PERMISSION_INVISIBLE:
         return None
+    if not permission:
+        # A managed library (any stored directory rule) makes the native path
+        # RPC answer NULL on purpose: the four-argument native seam cannot
+        # carry the trusted subject snapshot the V2 core needs, so returning
+        # the native permission would bypass the managed rules. The registered
+        # authorization hook does have that context, so let it adjudicate
+        # instead of failing closed here. Without a hook (baseline CE) the
+        # previous fail-closed answer stands; a subject with no qualification
+        # still gets None, and an explicit native deny never reaches this
+        # branch.
+        if not _cf_has_permission_checks():
+            return None
+        adjudicated = _cf_check_permission(username, repo_id, path, PERMISSION_READ)
+        if adjudicated not in (PERMISSION_READ, PERMISSION_READ_WRITE):
+            return None
+        # A read-only library stays read-only for the adjudicated answer too.
+        if adjudicated == PERMISSION_READ_WRITE and seafile_api.get_repo_status(repo_id) == 1:
+            return PERMISSION_READ
+        return adjudicated
 
     # A read-only repository makes every existing permission read-only; it
     # must not grant access to users who have no permission for the repository.

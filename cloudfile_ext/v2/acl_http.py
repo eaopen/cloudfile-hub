@@ -77,13 +77,15 @@ class EffectivePermission(AuthenticatedACL):
             decision = authority.effective(args['repo_id'], args['path'], args.get('kind', 'dir'))
             if not decision.can_read:
                 raise PermissionError('content access denied')
-            # The native library grant is the qualification, not the ceiling: a
-            # library read may be raised to write by a matching directory rule
-            # (directory-inheritance-deny-ce-pro-20261016, 「库 r 可经有效目录
-            # 规则提升为 rw」). Management authority is still not a content
-            # write permission. An absent native grant is only acceptable at a
-            # directory share root.
-            native = authority.api.check_permission_by_path(args['repo_id'], args['path'], request.user.username)
+            # The per-path native RPC answers NULL for every managed library by
+            # design (a stored cf_dir_acl row makes the legacy seam refuse to
+            # adjudicate). Using it as the qualification denied every managed
+            # library, its own root included. The V2 decision already evaluated
+            # the stored rules on top of the library grant, so the library-level
+            # permission is the only qualification left to verify here.
+            native = authority.api.check_permission(args['repo_id'], request.user.username)
+            if native == 'admin':
+                native = 'rw'
             if native not in (None, 'none', 'r', 'rw', 'invisible'):
                 raise ACLUnavailable('invalid native content permission')
             decision = narrow_to_native(decision, native)

@@ -17,6 +17,16 @@ from cloudfile_ext.registry import SEARCH, registry
 logger = logging.getLogger(__name__)
 
 
+def has_permission_checks():
+    """Whether an authorization hook is registered for native folder verdicts.
+
+    Lets a caller tell "no hook configured" (keep the native answer) apart from
+    "hook says deny" (None), which matters where the native answer is a
+    deliberate NULL -- a managed library, for instance.
+    """
+    return bool(registry.permission_checks)
+
+
 def check_permission(username, repo_id, path, permission):
     """Hand the native verdict to every registered authorization hook.
 
