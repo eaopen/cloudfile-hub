@@ -11,7 +11,7 @@ import Cookies from 'js-cookie';
 import PropTypes from 'prop-types';
 import metadataAPI from '@/api/metadata-api';
 import { seafileAPI } from '@/api/seafile-api';
-import { launchPairedAgent, ensurePairedLocalAgent } from '@/cloudfile/agent-local-edit';
+import { launchPairedAgent } from '@/cloudfile/agent-local-edit';
 import { cloudFileAPI } from '@/cloudfile/cloudfile-api';
 import { loadFeatures } from '@/cloudfile/features';
 import CopyMoveDirentProgressDialog from '@/components/dialog/copy-move-dirent-progress-dialog';
@@ -732,18 +732,15 @@ class LibContentView extends React.Component {
     if (this.localEditLaunching) return;
     this.localEditLaunching = true;
     try {
-      // First use pairs THIS machine from the page's own login session; later
-      // opens reuse it. The server still authorizes every session, so the
-      // local key never grants more than the current user already has.
-      const local = await ensurePairedLocalAgent({ servicePath: siteRoot.replace(/\/$/, '') });
-      const response = await cloudFileAPI.startOrdinaryAgentEdit({
-        repo_id: this.props.repoID, path: filePath, kind: 'file'
-      }, local.device_id);
-      const session = response && response.data;
-      if (!session || session.state !== 'created' || typeof session.open_uri !== 'string')
-        throw new Error('原会话已领取或结果未知，请先检查本机 Agent，不重新创建会话');
-      await launchPairedAgent(session.open_uri);
-      const originalBase = session.base_file_id || selectedBaseFileID;
+      // 修改逻辑（2026-10-21）：CloudFile V2 用一次性 edit/v1/open 票据取代设备配对与会话；
+      // 修改原因：local-edit devices/sessions 路由已移除，旧配对流程不再可用。
+      const response = await cloudFileAPI.openLocalFile(
+        this.props.repoID, filePath, 'optimistic-edit');
+      const opened = response && response.data;
+      if (!opened || opened.mode !== 'optimistic-edit' || typeof opened.open_uri !== 'string')
+        throw new Error(gettext('服务未返回有效的 V2 本地编辑票据'));
+      await launchPairedAgent(opened.open_uri);
+      const originalBase = opened.file_id || selectedBaseFileID;
       if (/^[a-f0-9]{40}$/.test(originalBase || '')) {
         this.cloudLocalEditOriginals = this.cloudLocalEditOriginals || {};
         this.cloudLocalEditOriginals[filePath] = originalBase;
