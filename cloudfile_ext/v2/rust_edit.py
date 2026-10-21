@@ -28,7 +28,11 @@ from seahub.profile.models import Profile
 from .acl_runtime import Authority
 
 
-MAX_TICKET_SECONDS = 3600
+# 票据寿命按"一个弹性工作日"给：Guard 租约只有 10 分钟且滚动续租，票据却是硬过期，
+# 1 小时会让长编辑在 Guard 仍有效时被 401 打断；18 小时会卡在"下午开工、干到凌晨、
+# 次日继续"这种跨度的边缘。取 24 小时是为了跟墙钟对齐（"明天这一时刻"），并覆盖
+# 两个日间加中间睡眠。服务端 cfEditClaimsFor 必须用同一个值，两处必须同批发布。
+MAX_TICKET_SECONDS = 86400
 
 # Existing Checkout configuration and schema are qualified together. Changing
 # the capability or migrating Guard requires restarting Hub/native processes.
