@@ -112,6 +112,10 @@ class RepoFileTagsView(APIView):
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
+        from cloudfile_ext.audit.events import record_resource_tag_event
+        record_resource_tag_event(
+            operator=request.user.username, repo_id=repo_id, path=file_path,
+            kind='file', operation='tag_add', tag_name=repo_tag.name)
         return Response({"file_tag": file_tag.to_dict()}, status=status.HTTP_201_CREATED)
 
 
@@ -135,6 +139,12 @@ class RepoFileTagView(APIView):
             error_msg = 'file_tag %s not found.' % file_tag_id
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
+        if file_tag.repo_tag.repo_id != repo_id:
+            return api_error(status.HTTP_404_NOT_FOUND, 'file_tag not found.')
+        import posixpath
+        path = posixpath.join(file_tag.file_uuid.parent_path, file_tag.file_uuid.filename)
+        removed_tag = file_tag.repo_tag.name
+
         # permission check
         if check_folder_permission(request, repo_id, '/') != PERMISSION_READ_WRITE:
             error_msg = 'Permission denied.'
@@ -146,6 +156,10 @@ class RepoFileTagView(APIView):
             error_msg = 'Internal Server Error'
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
 
+        from cloudfile_ext.audit.events import record_resource_tag_event
+        record_resource_tag_event(
+            operator=request.user.username, repo_id=repo_id, path=path,
+            kind='file', operation='tag_remove', tag_name=removed_tag)
         return Response({"success": "true"}, status=status.HTTP_200_OK)
 
 
