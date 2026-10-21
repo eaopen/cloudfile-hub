@@ -5,7 +5,7 @@ def plan(cursor, repo_id, provider, desired):
     ledger = {row[0]: row[1:] for row in cursor.fetchall()}
     if any(type(row[0]) is not int or row[0] <= 0 or row[1] not in ('r', 'rw')
            or row[2] not in ('APPLIED', 'REVOKED', 'PENDING') for row in ledger.values()):
-        raise ValueError('Invalid managed library share ledger')
+        raise ValueError('Invalid library share ledger')
     resolved = {}
     errors = []
     for external_id in desired:
