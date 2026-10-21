@@ -17,10 +17,62 @@ class NoManagedLibraryRegression(unittest.TestCase):
         self.assertNotIn('ManagedLibraryShare', api)
         self.assertNotIn('AdminLibrarySharesReconcileView', api)
 
-    def test_retired_extension_tree_is_absent(self):
-        # Old CloudFile V0.x resources, session and share ledgers are not an
-        # alternative runtime; prevent the entire package being copied back.
-        self.assertFalse((ROOT / 'cloudfile_extensions').exists())
+    def _resolve_extension_module(self, name):
+        target = ROOT.joinpath(*name.split('.'))
+        return target.with_suffix('.py').exists() or (target / '__init__.py').exists()
+
+    def test_live_extension_imports_resolve(self):
+        """A module may only be deleted after every live import is rewired.
+
+        The 2026-10-21 wholesale deletion of ``cloudfile_extensions`` left
+        ``seahub`` startup imports pointing at missing modules. Resolve every
+        in-repo import so a future deletion cannot silently ship a broken Hub.
+        """
+        import ast
+
+        missing = []
+        for base in ('seahub', 'cloudfile_ext'):
+            for path in (ROOT / base).rglob('*.py'):
+                text = path.read_text(encoding='utf-8')
+                if 'cloudfile_extensions' not in text:
+                    continue
+                try:
+                    tree = ast.parse(text)
+                except SyntaxError:
+                    continue
+                for node in ast.walk(tree):
+                    if isinstance(node, ast.ImportFrom):
+                        names = [node.module] if node.module else []
+                    elif isinstance(node, ast.Import):
+                        names = [alias.name for alias in node.names]
+                    else:
+                        continue
+                    for name in names:
+                        if not name.startswith('cloudfile_extensions'):
+                            continue
+                        if not self._resolve_extension_module(name):
+                            missing.append('%s: %s' % (path.relative_to(ROOT), name))
+        self.assertEqual(missing, [])
+
+    def test_deploy_wired_extension_modules_exist(self):
+        # Modules the Docker deployment settings/middleware/gunicorn hooks
+        # resolve by name at runtime. Their removal needs a coordinated Docker
+        # change, not a one-sided deletion.
+        required = (
+            'cloudfile_extensions',
+            'cloudfile_extensions.root_urls',
+            'cloudfile_extensions.permission_middleware',
+            'cloudfile_extensions.authorization.browsing',
+            'cloudfile_extensions.authorization.global_admin',
+            'cloudfile_extensions.authorization.gunicorn',
+            'cloudfile_extensions.editing.runtime',
+            'cloudfile_extensions.resources.native',
+            'cloudfile_extensions.resources.paths',
+            'cloudfile_extensions.identity.native_session',
+        )
+        missing = [name for name in required
+                   if not self._resolve_extension_module(name)]
+        self.assertEqual(missing, [])
 
     def test_current_runtime_has_no_enrollment_sql(self):
         for module in (ROOT / 'cloudfile_ext/v2').rglob('*.py'):

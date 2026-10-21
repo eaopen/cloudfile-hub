@@ -1,0 +1,155 @@
+{
+  "schema_version": 1,
+  "source": "eap-cloudfile/contracts",
+  "path_cases": [
+    {
+      "id": "path-root",
+      "input": {
+        "transport": "json",
+        "path": "/",
+        "kind": "dir"
+      },
+      "expected": {
+        "path": "/"
+      }
+    },
+    {
+      "id": "path-dir-trailing",
+      "input": {
+        "transport": "json",
+        "path": "/parts/",
+        "kind": "dir"
+      },
+      "expected": {
+        "path": "/parts"
+      }
+    },
+    {
+      "id": "path-file-trailing",
+      "input": {
+        "transport": "json",
+        "path": "/part.prt/",
+        "kind": "file"
+      },
+      "expected": {
+        "error": "INVALID_PATH"
+      }
+    },
+    {
+      "id": "path-relative",
+      "input": {
+        "transport": "json",
+        "path": "parts/a",
+        "kind": "file"
+      },
+      "expected": {
+        "error": "INVALID_PATH"
+      }
+    },
+    {
+      "id": "path-parent",
+      "input": {
+        "transport": "json",
+        "path": "/parts/../secret",
+        "kind": "file"
+      },
+      "expected": {
+        "error": "INVALID_PATH"
+      }
+    },
+    {
+      "id": "path-current",
+      "input": {
+        "transport": "json",
+        "path": "/parts/./a",
+        "kind": "file"
+      },
+      "expected": {
+        "error": "INVALID_PATH"
+      }
+    },
+    {
+      "id": "path-nul",
+      "input": {
+        "transport": "json",
+        "path": "/parts/\u0000a",
+        "kind": "file"
+      },
+      "expected": {
+        "error": "INVALID_PATH"
+      }
+    },
+    {
+      "id": "path-case-unicode",
+      "input": {
+        "transport": "json",
+        "path": "/零件/A.prt",
+        "kind": "file"
+      },
+      "expected": {
+        "path": "/零件/A.prt"
+      }
+    },
+    {
+      "id": "path-query-decode-once",
+      "input": {
+        "transport": "url_query_raw",
+        "path": "%2Fparts%2F..%2Fsecret",
+        "kind": "file"
+      },
+      "expected": {
+        "error": "INVALID_PATH"
+      }
+    },
+    {
+      "id": "path-json-percent-literal",
+      "input": {
+        "transport": "json",
+        "path": "/parts/%2e%2e.prt",
+        "kind": "file"
+      },
+      "expected": {
+        "path": "/parts/%2e%2e.prt"
+      }
+    },
+    {
+      "id": "path-prefix-not-ancestor",
+      "input": {
+        "transport": "json",
+        "path": "/ab/file",
+        "kind": "file",
+        "ancestor": "/a"
+      },
+      "expected": {
+        "path": "/ab/file",
+        "is_descendant": false
+      }
+    }
+  ],
+  "subject_snapshot": {
+    "userId": "user-1",
+    "status": "active",
+    "attributes": {
+      "employee_no": "E001",
+      "display_name": "示例用户",
+      "email": null
+    },
+    "organizations": [
+      {
+        "namespace": "directory",
+        "external_id": "dept-1",
+        "is_primary": true
+      }
+    ],
+    "roles": [
+      {
+        "namespace": "role",
+        "external_id": "role-1"
+      }
+    ],
+    "revision": "42",
+    "etag": "sha256:example",
+    "organization_revision": "18",
+    "generated_at": "2026-09-26T00:00:00Z"
+  }
+}
