@@ -58,3 +58,18 @@ class NativeGateTests(unittest.TestCase):
 
 if __name__ == '__main__':
     unittest.main()
+
+
+class PathNormalisationTests(unittest.TestCase):
+    """Seahub passes '/dir/' while the policy core only accepts '/dir'."""
+
+    def test_trailing_and_duplicate_slashes_are_normalised(self):
+        import cloudfile_ext.v2.native_gate as gate
+        from cloudfile_ext.v2.acl_policy import canonical_path
+        for raw, expected in (('/a/', '/a'), ('/a//b/', '/a/b'), ('/', '/'), ('', '/')):
+            self.assertEqual(canonical_path(gate._canonical(raw)), expected)
+
+    def test_traversal_is_rejected(self):
+        import cloudfile_ext.v2.native_gate as gate
+        with self.assertRaises(ValueError):
+            gate._canonical('/a/../b')

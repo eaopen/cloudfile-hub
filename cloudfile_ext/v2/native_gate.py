@@ -41,12 +41,25 @@ def _authority(username):
     return Authority(username)
 
 
+def _canonical(path):
+    """Collapse duplicate and trailing slashes; reject traversal.
+
+    Seahub hands this seam paths like ``/dir/`` -- canonical_path() rejects a
+    trailing slash, which used to abort the whole adjudication and fall back to
+    the native verdict. Normalising here keeps one contract for every caller.
+    """
+    segments = [seg for seg in (path or '').split('/') if seg not in ('', '.')]
+    if any(seg == '..' for seg in segments):
+        raise ValueError('invalid path')
+    return '/' + '/'.join(segments)
+
+
 def check_permission(username, repo_id, path, permission):
     """Return the effective permission for ``path``, or None to deny."""
     if permission not in _NATIVE_CONTENT_PERMISSIONS:
         return permission
     try:
-        decision = _authority(username).effective(repo_id, path, 'dir')
+        decision = _authority(username).effective(repo_id, _canonical(path), 'dir')
     except Exception:
         logger.exception(
             'CloudFile ACL unavailable; keeping the native verdict '
