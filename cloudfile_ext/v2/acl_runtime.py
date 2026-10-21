@@ -122,6 +122,7 @@ class Authority:
             api = seafile_api
         self.api = api
         self._repos = {}
+        self._virtual = {}
         self._versions = {}
         self._decisions = {}
         self._native = {}
@@ -148,10 +149,23 @@ class Authority:
             if repo is None:
                 raise PermissionError('missing repository')
             if repo.is_virtual:
-                raise ACLUnavailable('virtual repository scope unavailable')
+                origin = uuid(repo.origin_repo_id)
+                root = canonical_path(repo.origin_path)
+                if origin == repo_id:
+                    raise ACLUnavailable('invalid native virtual repository mapping')
+                original = self.api.get_repo(origin)
+                if original is None or original.is_virtual:
+                    raise ACLUnavailable('native origin repository unavailable')
+                self._virtual[repo_id] = (origin, root)
             status = self.api.get_repo_status(repo_id)
             if status not in (-1, 0, 1):
                 raise ACLUnavailable('unknown repository status')
+            if repo_id in self._virtual:
+                origin_status = self.api.get_repo_status(self._virtual[repo_id][0])
+                if origin_status not in (-1, 0, 1):
+                    raise ACLUnavailable('unknown origin repository status')
+                if origin_status == 1:
+                    status = 1
             self._repos[repo_id] = status
             # Validated only where it matters (page scans fail closed on unknown).
             self._versions[repo_id] = getattr(repo, 'version', None)
@@ -169,8 +183,21 @@ class Authority:
                 elif base not in ('r', 'rw'):
                     raise ACLUnavailable('unknown native permission')
                 self._native[repo_id] = base
-            decision = resolve(repo_id, directory, self.principal, self._native[repo_id],
-                               self._rules(repo_id, directory))
+            if repo_id in self._virtual:
+                # CE supplies both the sharing grant and the origin mapping.
+                # Never qualify access to a virtual library via an origin ACL
+                # alone, or expose origin paths in virtual-library responses.
+                origin, root = self._virtual[repo_id]
+                if self._native[repo_id] is None:
+                    decision = Decision('invisible', None, False)
+                else:
+                    mapped = posixpath.join(root, directory.lstrip('/')).rstrip('/') or '/'
+                    access = resolve(origin, mapped, self.principal, self._native[repo_id],
+                                     self._rules(origin, mapped))
+                    decision = Decision(access.permission, '/', access.from_rule)
+            else:
+                decision = resolve(repo_id, directory, self.principal, self._native[repo_id],
+                                   self._rules(repo_id, directory))
             self._decisions[key] = decision
         # Hard native repository status is still checked once per request.
         if self._repos[repo_id] == 1 and decision.can_write:
@@ -184,6 +211,9 @@ class Authority:
         snapshot budget and decisions read per-directory candidates instead.
         """
         self.effective(repo_id, '/')
+        if repo_id in self._virtual:
+            # Virtual paths must be checked after native origin translation.
+            return dict(native=self._native[repo_id], status=self._repos[repo_id], rules=None)
         self._rules(repo_id, '/')
         rules = self._library[repo_id]
         return dict(native=self._native[repo_id], status=self._repos[repo_id],
