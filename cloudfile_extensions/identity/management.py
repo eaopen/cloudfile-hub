@@ -6,7 +6,6 @@ from ..common.errors import ContractError
 from ..common.validation import identifier
 from ..directory.native_state import NativeSubjectState
 from ..events.outbox import EventWriter
-from ..schema.runner import SchemaRunner
 from .sql_bindings import SQLIdentityBindings
 
 
@@ -15,7 +14,6 @@ class IdentityManagement:
                  actor_user_id, request_id):
         identifier(actor_user_id, maximum=225)
         identifier(request_id)
-        SchemaRunner(connection).require_current()
         self.actor = actor_user_id
         self.state = NativeSubjectState(connection, native_schema=native_schema,
                                        identity_schema=identity_schema, provider=directory_provider)

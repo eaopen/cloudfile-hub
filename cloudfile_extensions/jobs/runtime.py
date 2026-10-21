@@ -18,7 +18,6 @@ from ..migration.stage import ImportStage
 from ..migration.working_copy import WorkingCopyBuilder
 from ..migration.verify_copy import WorkingCopyVerifier
 from ..migration.verify_stage import ImportVerifyStage
-from ..schema.runner import SchemaRunner
 from .store import JobStore
 from .worker import Handler, JobWorker
 
@@ -100,7 +99,6 @@ def main(argv=None):
             raise ValueError("invalid worker limits")
         handlers = configured_handlers(os.environ)
         connection = connect_database(os.environ)
-        SchemaRunner(connection).require_current()
         worker = JobWorker(JobStore(connection), owner="worker-" + uuid4().hex,
                            handlers=handlers, lease_seconds=arguments.lease_seconds,
                            observe=lambda value: print(json.dumps(value), flush=True))

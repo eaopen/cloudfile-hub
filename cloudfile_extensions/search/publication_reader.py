@@ -1,7 +1,6 @@
 """Fixed-index publication/version adapter, never an authorization decision."""
 from uuid import UUID
 
-from ..schema.runner import SchemaRunner
 from .generations import SearchGenerationStore
 from .meilisearch import unavailable
 from .rebuild_store import SearchRebuildStore
@@ -37,7 +36,6 @@ class SearchPublicationReader:
                 # Do not roll back or close another owner's transaction.
                 connection = None
                 raise ValueError()
-            SchemaRunner(connection).require_current()
             with SearchRebuildStore(connection)._owned(self.generation, self.index) as sql:
                 # Same generation -> publication lock order as publishing.
                 sql.execute("SELECT generation,revision FROM cf_search_publication WHERE repo_id=%s FOR UPDATE", (repo,))

@@ -107,7 +107,6 @@ class NativeAdministratorResources:
 
     @contextmanager
     def connection(self):
-        from ..schema.runner import SchemaRunner
         # A private wrapper preserves TLS/options without borrowing a request
         # transaction; ACLRules owns its transaction on this raw connection.
         wrapper = self.database.copy(alias='cloudfile_admin_policy')
@@ -117,7 +116,6 @@ class NativeAdministratorResources:
             connection = wrapper.connection
             with connection.cursor() as cursor:
                 cursor.execute('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ')
-            SchemaRunner(connection).require_current()
             yield connection
         finally:
             wrapper.close()

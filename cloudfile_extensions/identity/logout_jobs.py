@@ -3,7 +3,6 @@ import hashlib
 
 from ..common.errors import ContractError
 from ..jobs.store import JobStore, canonical
-from ..schema.runner import SchemaRunner
 from .logout_token import LogoutTokenValidator
 from .session_index import OIDCSessionIndex
 
@@ -14,7 +13,6 @@ class BackchannelJobs:
     def __init__(self, store, validator):
         if not isinstance(store, JobStore) or not isinstance(validator, LogoutTokenValidator):
             raise ValueError("actual durable job store and signed notification validator required")
-        SchemaRunner(store.connection).require_current()
         self.store, self.validator = store, validator
         config = validator.config
         digest = hashlib.sha256(canonical([config.issuer, config.client_id]).encode()).hexdigest()
