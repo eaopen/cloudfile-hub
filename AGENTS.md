@@ -48,3 +48,9 @@
 - Server Go `/cf-edit/v1/*` 负责最终权限、内容 CAS 与独占 Guard。仅 `cf_edit_guard` 持久化独占状态；本机编辑任务/待提交状态归 Agent2 Journal。
 - **不得恢复** `cf_edit_session`、`cf_resource`、`cf_commit_intent`、旧设备/会话/回执表，也不得让旧 `extensions/local-edit/v1/*` / `file_actions.local-sessions` 重新参与运行。
 - 本地普通编辑无需 Checkout；独占编辑按 Guard 及实际启用能力返回。出现 `cf_edit_session doesn't exist` 是旧调用或旧部署证据，禁止以补表修复。
+
+## 仅允许当前五张扩展表
+
+- 当前 V2 数据模型：`cf_library_storage`、`cf_sso_group_map`、`cf_dir_acl`、`cf_edit_guard`、`cf_audit_event`。Tag 属于 CE 原生表，文件版本/动作使用 CE Commit/Activity。
+- `cloudfile_extensions/schema/migrations` 的旧 001–042 迁移链已移除；不得从历史 Git 分支复制回来，也不得注册 `cloudfile_extensions.*` 旧 URLConf 或启动旧 PolicyHost/Worker。
+- 当前 URI/Agent2 编辑流程不使用 SQL Session、Resource、Intent，历史编辑服务可能还出现在 Git 树中以便追溯，但不属于当前运行或发布合同。
