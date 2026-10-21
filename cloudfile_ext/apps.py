@@ -18,14 +18,13 @@ class CloudFileConfig(AppConfig):
 
         from cloudfile_ext.registry import registry
 
-        from cloudfile_ext import (
-            base, acl, sso, audit, metadata, search,
-            external_sources, file_actions, fileops, office, storage,
-        )
+        # V2's native ACL, SSO, tags, search and edit routes are wired in
+        # seahub.urls. Do not register retired extensions backed by Resource,
+        # Session, SyncState, FileOpTask, search-ledger or external-source tables.
+        # Retain only extension entry points that require no historical tables.
+        from cloudfile_ext import base, audit, office
 
-        for module in (base, acl, sso, audit, metadata, search,
-                       external_sources, file_actions, fileops,
-                       office, storage):
+        for module in (base, audit, office):
             module.register(registry)
 
         registry.seal()

@@ -6,6 +6,7 @@ import re
 
 TABLES = frozenset({'cf_library_storage', 'cf_dir_acl', 'cf_sso_group_map'})
 EDIT_TABLES = frozenset({'cf_edit_guard'})
+AUDIT_TABLES = frozenset({'cf_audit_event'})
 
 
 class SchemaError(RuntimeError):
@@ -55,16 +56,18 @@ def statements(ddl, *, allowed=TABLES):
 
 
 class FreshSchema:
-    def __init__(self, connection, ddl, *, edit_ddl=None):
+    def __init__(self, connection, ddl, *, edit_ddl=None, audit_ddl=None):
         if not connection.get_autocommit():
             raise ValueError('dedicated autocommit connection required')
         # One-table CF-EDIT is opt-in; the standard MVP
         # stays three tables and rejects unexpected additions by default.
         self.connection = connection
-        self.tables = TABLES | EDIT_TABLES if edit_ddl is not None else TABLES
+        self.tables = TABLES | (EDIT_TABLES if edit_ddl is not None else frozenset()) | (AUDIT_TABLES if audit_ddl is not None else frozenset())
         self.ddl = statements(ddl)
         if edit_ddl is not None:
             self.ddl.update(statements(edit_ddl, allowed=EDIT_TABLES))
+        if audit_ddl is not None:
+            self.ddl.update(statements(audit_ddl, allowed=AUDIT_TABLES))
 
     def _tables(self, cursor):
         cursor.execute('SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE()')

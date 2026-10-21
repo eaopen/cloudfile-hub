@@ -25,7 +25,8 @@ from cloudfile_ext.audit.events import (
 # Operation vocabulary. ``update`` exists for the repo-tag rename/recolour
 # path; Activity only ever emits create/edit/delete/rename/move/recover.
 VALID_OPS = frozenset((
-    'create', 'edit', 'update', 'delete', 'rename', 'move', 'recover'))
+    'create', 'edit', 'update', 'delete', 'rename', 'move', 'recover',
+    'tag_add', 'tag_remove', 'tag_replace', 'checkout', 'checkin', 'checkout_cancel'))
 VALID_OBJECTS = frozenset(('file', 'dir', 'tag'))
 
 MAX_PAGE_SIZE = 200
