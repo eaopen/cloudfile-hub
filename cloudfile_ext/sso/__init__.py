@@ -25,7 +25,7 @@ Nothing here touches an upstream file. The registration below uses only seams
 the baseline already provides, plus ``seahub.auth.signals.user_logged_in``,
 which is upstream's own signal.
 
-See cloudfile-docker/docs/sso-mapping.md for the semantics and for the one
+See sso-mapping.md for the semantics and for the one
 compromise this design makes (eventual consistency).
 """
 
@@ -51,8 +51,7 @@ def register(registry):
     from cloudfile_ext.sso.token_api import EmployeeTokenView
     from cloudfile_ext.sso.account_api import EmployeeAccountInfo
     from cloudfile_ext.sso.apis import (
-        AdminLibrarySharesDesiredView, AdminLibrarySharesReconcileView,
-        AdminLibrarySharesStatusView, AdminSSOGroupMapView, AdminSSOSyncView,
+        AdminSSOGroupMapView, AdminSSOSyncView,
         SSODirectoryWebhookView,
     )
 
@@ -85,18 +84,6 @@ def register(registry):
         path('api/v2.1/cloudfile/sso/directory-webhook/',
              SSODirectoryWebhookView.as_view(),
              name='cloudfile-sso-directory-webhook'),
-        # Managed library shares (decision 2026-08-27 §4.3): the external
-        # system PUTs its whole desired state per repo, reads back what was
-        # applied, and reconciles or dry-runs from there.
-        path('api/v2.1/admin/cloudfile/library-shares/<str:repo_id>/desired/',
-             AdminLibrarySharesDesiredView.as_view(),
-             name='cloudfile-admin-library-shares-desired'),
-        path('api/v2.1/admin/cloudfile/library-shares/<str:repo_id>/status/',
-             AdminLibrarySharesStatusView.as_view(),
-             name='cloudfile-admin-library-shares-status'),
-        path('api/v2.1/admin/cloudfile/library-shares/<str:repo_id>/reconcile/',
-             AdminLibrarySharesReconcileView.as_view(),
-             name='cloudfile-admin-library-shares-reconcile'),
     ])
 
     registry.register_menu({

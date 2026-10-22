@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """The hierarchical directory contract: validation and create ordering.
 
-Decision source: eap-cloudfile docs/review/cloudfile_decision_20260827.md §3.
+Decision source: CloudFile 决策 20260827 §3.
 Every case below is a way a directory could describe something Seafile cannot
 represent, or that the ACL walker would misread once written -- a cycle, a
 missing parent, a duplicate id, a group with a parent. All of them must be

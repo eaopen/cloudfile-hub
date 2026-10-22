@@ -29,7 +29,7 @@ class RootRoutesTests(unittest.TestCase):
         self.assertIn("uri.hostname !== 'v2'", launcher)
 
 
-    def test_compatibility_reads_resolve_to_v2_and_old_mutations_are_absent(self):
+    def test_retired_authorization_aliases_are_absent(self):
         # Only unrelated CE views and its large URL inventory are doubled.
         # Resolve the real root URLconf; real V2 request/auth contracts are
         # exercised by test_acl_http and test_effective_contract.
@@ -52,7 +52,7 @@ class RootRoutesTests(unittest.TestCase):
                 for path, view in [('effective-permission/', EffectivePermission),
                                    ('shared-directories/', SharedDirectories),
                                    ('directory-entries/', DirectoryEntries)]:
-                    self.assertIs(resolve(prefix + path, urlconf=urls).func.view_class, view)
+                    with self.assertRaises(Resolver404): resolve(prefix + path, urlconf=urls)
                 for path in ('directory-rules/', 'directory-shares/', 'library-rules/'):
                     with self.assertRaises(Resolver404): resolve(prefix + path, urlconf=urls)
                 for path in ('directory/sync/', 'extensions/identity/v1/begin/'):

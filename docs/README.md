@@ -23,9 +23,9 @@
 下列主题不在本仓复制维护，避免三份说明漂移：
 
 - 部署、镜像、环境变量生成：`cloudfile-docker/deploy/compose/`。
-- 跨仓能力总表、产品定位与上游策略：`cloudfile-docker/docs/feature-matrix.md`、`upstream-contribution.md`。
-- 目录 ACL、搜索、外部源、SSO、存储的完整规格：`cloudfile-docker/docs/` 对应专题。
-- 上游兼容补丁登记与 PR 总表：`cloudfile-docker/docs/upstream-patches/` 及其上层索引。
+- 跨仓能力总表、产品定位与上游策略：`feature-matrix.md`、`upstream-contribution.md`。
+- 目录 ACL、搜索、外部源、SSO、存储的完整规格：`cloudfile-docker` 仓的专题文档（本仓不复制正文）。
+- 上游兼容补丁登记与 PR 总表：`cloudfile-docker/docs/upstream-patches/` 登记。
 - C/Go 强制校验与数据库 DDL：`cloudfile-server/`。
 
 ## 仓内其他 Markdown

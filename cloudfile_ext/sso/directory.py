@@ -83,7 +83,7 @@ class Directory(object):
 
     Members are login strings as the directory knows them; resolving those to
     the identity Seafile enforces against is the service layer's job
-    (cloudfile_ext.acl.subjects), not the provider's -- a backend should not
+    (V2 Memberships), not the provider's -- a backend should not
     have to know that Seafile 14 separated identity from email.
     """
 
@@ -110,7 +110,7 @@ class StaticDirectory(Directory):
 
     Not a stub: it is the complete implementation of "the directory is the
     config file". A source that cannot answer is not registered at all --
-    see the note in cloudfile_ext.acl.sources about why an empty answer is the
+    see the note in V2 ACL subject adapter about why an empty answer is the
     worst possible failure mode.
     """
 

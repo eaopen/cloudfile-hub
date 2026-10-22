@@ -41,7 +41,6 @@ def _extension_urlconfs():
 # not be reached through an old URL alias either.
 from .library_configuration import LibraryConfiguration
 from .authorization.native_http import NativeRepoView
-from cloudfile_ext.v2.acl_http import EffectivePermission, SharedDirectories, DirectoryEntries
 from .authorization.native_file_http import NativeFileView
 
 urlpatterns = [
@@ -49,12 +48,7 @@ urlpatterns = [
         LibraryConfiguration.as_view()),
     re_path(r"^api2/repos/(?P<repo_id>[-0-9a-f]{36})/file/$", NativeFileView.as_view(), name="native-policy-file"),
     re_path(r"^api/v2.1/repos/(?P<repo_id>[-0-9a-f]{36})/$", NativeRepoView.as_view(), name="native-policy-repo"),
-    re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/effective-permission/$",
-        EffectivePermission.as_view(), name="native-effective-permission"),
-    re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/shared-directories/$",
-        SharedDirectories.as_view(), name="shared-directories"),
-    re_path(r"^api/v2.1/cloudfile/extensions/authorization/v1/directory-entries/$",
-        DirectoryEntries.as_view(), name="directory-entries"),
+
 ]
 urlpatterns.extend(
     re_path(rf"^api/v2.1/cloudfile/extensions/{name}/", include(module))

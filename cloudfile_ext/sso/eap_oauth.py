@@ -71,21 +71,6 @@ def identity_lock(provider, uid, employee, subject):
 def identity_context(uid):
     """Reuse the configured native directory without enabling the old publisher."""
     from django.conf import settings
-    scope = getattr(settings, 'CLOUDFILE_OIDC_LOGIN_RESOURCE_SCOPE', None)
-    if callable(scope):
-        from cloudfile_extensions.identity.resources import LoginResources
-        from cloudfile_extensions.directory.provider import DirectoryProvider
-        with scope() as resources:
-            if (not isinstance(resources, LoginResources)
-                    or resources.oidc.issuer != settings.CF_SSO_EAP_OIDC_ISSUER):
-                raise IdentityConflict('directory issuer mismatch')
-            source = resources.resources.directory_factory()
-            if not isinstance(source, DirectoryProvider):
-                raise IdentityConflict('directory unavailable')
-            try:
-                return source.fetch(uid)
-            finally:
-                source.client.session.close()
     from cloudfile_ext.registry import registry
     from . import directory
     source = directory.active(registry)

@@ -5,7 +5,7 @@ Exposes the two backend pieces the self-service allocation UI needs -- list
 the configured storage classes, and create a repo pinned to one -- as CloudFile
 API endpoints.  No UI is implemented here (frontend work is deferred by design).
 
-Spec: cloudfile-docker/docs/features/storage-backends.md.
+Spec: storage-backends.md.
 """
 
 

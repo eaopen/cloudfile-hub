@@ -11,15 +11,11 @@ This hook applies the one decision produced by :class:`Authority`, which
 evaluates the stored rules on top of the native grant. A library read may be
 raised to write by a matching rule — the native grant is the qualification,
 not the ceiling (see ``docs/v2.0/directory-inheritance-deny-ce-pro-20261016.md``).
-It never grants access without a native qualification: an absent or denied
-native verdict is refused by ``resolve()``/``narrow_to_native()`` before this
-hook returns anything stronger.
+A positive shared directory can qualify a user without library membership.
+Every content verdict, including native owner/admin, goes through Authority.
 
-Failure policy: a runtime error must not silently drop a stored deny, but it
-also must not take the whole entry point down — Seahub has no 503 mapping for
-this seam (today it enforces no ACL at all here). The hook therefore keeps the
-native verdict on error and logs loudly; an ACL outage degrades to the CE
-behaviour instead of a false 403 for every user.
+Failure policy: refusals return None; authority failures raise a distinct
+exception so the native request seam can mark the response as unavailable.
 
 Scope note: the seam carries only a path, not an object kind. The decision is
 therefore evaluated as a directory, which covers the directory rules and the
@@ -29,11 +25,6 @@ not the input of this check.
 import logging
 
 logger = logging.getLogger(__name__)
-
-# Permissions this hook is allowed to reinterpret. ``admin`` is a management
-# marker with owner-level bypass and custom permissions are Pro-specific; both
-# are returned untouched rather than flattened into r/rw.
-_NATIVE_CONTENT_PERMISSIONS = ('r', 'rw')
 
 
 def _authority(username):
@@ -56,15 +47,16 @@ def _canonical(path):
 
 def check_permission(username, repo_id, path, permission):
     """Return the effective permission for ``path``, or None to deny."""
-    if permission not in _NATIVE_CONTENT_PERMISSIONS:
-        return permission
     try:
         decision = _authority(username).effective(repo_id, _canonical(path), 'dir')
-    except Exception:
+    except PermissionError:
+        return None
+    except Exception as error:
         logger.exception(
-            'CloudFile ACL unavailable; keeping the native verdict '
+            'CloudFile ACL unavailable; refusing native fallback '
             '(user=%s repo=%s path=%s permission=%s)', username, repo_id, path, permission)
-        return permission
+        from .acl_runtime import ACLUnavailable
+        raise ACLUnavailable('ACL unavailable') from error
     if not decision.can_read:
         return None
     # 'rw' here may exceed the native verdict on purpose: a directory rule that

@@ -4,7 +4,7 @@
 This module is the whole of the interesting part of SSO group mapping, and it
 is deliberately free of Django, seaserv and the database: it takes plain data
 in and returns plain data out, so the case set in
-cloudfile-docker/docs/sso-cases.json can drive it directly and every guard
+cloudfile-docker/tests/cases/sso-cases.json can drive it directly and every guard
 below can be tested without a running server.
 
 The shape mirrors cloudfile_ext.acl.resolver for the same reason -- the part

@@ -18,7 +18,7 @@ has no single right answer, so several capabilities may each contribute::
 
     ``urls``                 extra URL patterns, assembled by cloudfile_ext.urls
     ``menu``                 navigation/menu entries surfaced to the frontend
-    ``permission_check``     narrow an already-computed permission (never widen)
+    ``permission_check``     apply the verified V2 path decision (may narrow or raise locally)
     ``file_op``              pre/post hooks around file operations
     ``search_indexer``       feed documents to an index (several may co-exist:
                              a full-text index and an audit trail both want

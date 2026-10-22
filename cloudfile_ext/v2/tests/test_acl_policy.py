@@ -161,5 +161,23 @@ class NativeNarrowingTests(unittest.TestCase):
         self.assertIsNone(narrow_to_native(share, 'invisible'))
 
 
+class SparseDirectoryRuleTests(unittest.TestCase):
+    """A rule in one directory never changes another directory's CE grant."""
+
+    def test_unrelated_acl_never_enrolls_or_blocks_the_library(self):
+        rows = [rule('/Private', 'user', 'uid-a', 'invisible')]
+        self.assertEqual(permission('/', rows, native='rw').permission, 'rw')
+        self.assertEqual(permission('/Public', rows, native='rw').permission, 'rw')
+        self.assertEqual(permission('/Public/file.txt', rows, native='rw').permission, 'rw')
+        self.assertFalse(permission('/Private', rows, native='rw').can_read)
+
+    def test_shared_subtree_does_not_expose_siblings(self):
+        rows = [rule('/Shared', 'user', 'uid-a', 'r', share=True),
+                rule('/Elsewhere', 'user', 'uid-a', 'rw')]
+        self.assertTrue(permission('/Shared/a', rows, native=None).can_read)
+        self.assertFalse(permission('/Elsewhere', rows, native=None).can_read)
+        self.assertFalse(permission('/', rows, native=None).can_read)
+
+
 if __name__ == '__main__':
     unittest.main()

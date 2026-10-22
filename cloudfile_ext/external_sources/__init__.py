@@ -4,7 +4,7 @@ Seafile model. v1 is scoped to local paths only: SMB/NFS, OpenList and every
 other external form are normalized to a local directory on the host first, and
 direct SMB support is cancelled by decision rather than deferred.
 
-Gated by CF_ENABLE_EXTERNAL_SOURCES. Spec: cloudfile-docker/docs/
+Gated by CF_ENABLE_EXTERNAL_SOURCES. Spec: external-sources 能力说明（见 features/external-sources 文档）
 features/external-sources.md.
 
 **External sources never enter the repo/commit/block model.** That is the

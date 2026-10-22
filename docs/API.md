@@ -67,22 +67,27 @@
 
 `CF_ENABLE_WATCH` 只把上游 `is_pro_version()` gate 扩展为“Pro 或 CloudFile 开关开启”；模型、接口形状和缓存仍由 CE 提供。当前没有 CloudFile 专项测试或通知消费链的本仓验收。
 
-## 文件动作、锁与本地 Agent
+## 文件动作与本地 Agent
 
 | 方法 | 路径 | 认证 | 说明 |
 |---|---|---|---|
 | GET | `/api/v2.1/cloudfile/repos/{repo_id}/file-actions/` | 用户 | 根据真实路径权限、扩展名和锁 provider 返回可用动作 |
-| POST | `/api/v2.1/cloudfile/repos/{repo_id}/local-sessions/` | 用户 | 创建 `local-view` 或 `local-edit` 一次性 ticket |
-| POST | `/api/v2.1/cloudfile/agent-sessions/claim/` | 一次性 ticket | 原子领取 ticket，返回短时文件 capability |
-| PATCH | `/api/v2.1/cloudfile/agent-sessions/{session_id}/heartbeat/` | Bearer capability | 续租当前 generation 的本地编辑会话 |
-| PUT | `/api/v2.1/cloudfile/agent-sessions/{session_id}/content/` | Bearer capability | `multipart/form-data` 的 `file` 字段回写新版本 |
-| POST/DELETE | `/api/v2.1/cloudfile/repos/{repo_id}/checkout/` | 用户 | 创建/释放手工或第三方签出租约；释放必须带 generation |
-| GET/PUT/PATCH/DELETE | `/api/v2.1/cloudfile/repos/{repo_id}/file-lock/` | 用户 | 查询、获取、续租、释放文件锁 |
-| POST | `/api/v2.1/admin/cloudfile/repos/{repo_id}/file-lock/force-release/` | 管理员 | 按管理员已查看的 generation 强制释放 |
+| POST | `/api/v2.1/cloudfile/edit/v1/open/` | 用户 | 按 `{repo_id, path, mode}` 签发 scoped JWT，返回 `cloudfile-open://v2/open?instance=&session=&ticket=` |
+| GET | `/api/v2.1/cloudfile/edit/v1/lock-info/` | 用户 | 查当前 Checkout 可见性（`?repo_id=&path=`）；只读，不是发布凭据 |
 
-读取动作由 `CF_ENABLE_FILE_PREVIEW`/`CF_ENABLE_LOCAL_APP` 控制；写动作还受 `CF_ENABLE_CHECKOUT`/`CF_ENABLE_FILE_LOCK`、编辑权限和 server 锁 provider 控制。Agent claim/content/heartbeat 不接受普通登录凭据，只接受一次性 ticket 或单会话 capability。
+`mode` 只有三个值，能力由签发方与数据面共同执行：
 
-已知限制：会话创建响应当前未返回前端下载函数需要的 `session.file.name`，所以 `.cloudfile` 浏览器下载流程仍为部分完成。
+| mode | 允许的数据面操作 | 前置条件 |
+|---|---|---|
+| `local-view` | 仅 `read` | 用户对目标路径可读；只读是硬限制，不因账号可写而放宽 |
+| `optimistic-edit` | `read` / `status` / `publish`（`X-CF-Action: optimistic`） | 用户可写；不创建 Guard，Checkout 关闭时仍可用 |
+| `exclusive-edit` | `checkout` / `renew` / `release` / `publish` | `CF_ENABLE_CHECKOUT` 开启且 `cf_edit_guard` 可用，否则 409 |
+
+票据是 HS256 scoped JWT（`iss=cloudfile-v2-edit`、`aud=cloudfile-edit-agent`、`exp` 上限 **24 小时（86400 秒）**），绑定 `repo_id`/`path`/`file_id`/`mode`。有效期按一个工作日给：Guard 租约只有 10 分钟且靠 `renew` 滚动续期，票据却是硬过期，1 小时会让长编辑在 Guard 仍有效时被 401 打断。Hub 的 `MAX_TICKET_SECONDS` 与 Go fileserver `cfEditClaimsFor` 的 24 小时上限必须同批发布，改一处而漏另一处会让所有票据被服务端拒绝。Agent 只拿到这枚票据，不接收浏览器 cookie、完整 API token 或 Seafile 登录凭据。数据面在 Go fileserver 的 `/seafhttp/cf-edit/v1/*`，每次请求重新判定权限并校验原生 `file_id`；服务端不保存 Session/Intent/Device 表，独占编辑只写 `cf_edit_guard` 单行，未确认任务留在 Agent 本地 Journal。
+
+已退役且不得按旧契约开发：`POST /api/v2.1/cloudfile/repos/{repo_id}/local-sessions/`、`POST /api/v2.1/cloudfile/agent-sessions/claim/`、`PATCH .../agent-sessions/{session_id}/heartbeat/`、`PUT .../agent-sessions/{session_id}/content/`。一次性 ticket 换 capability 的通道已删除，调用不会获得服务。
+
+未启用（2026-10-21 决定：不启用，无实际使用）：`POST/DELETE /api/v2.1/cloudfile/repos/{repo_id}/checkout/`、`GET/PUT/PATCH/DELETE /api/v2.1/cloudfile/repos/{repo_id}/file-lock/`、`POST /api/v2.1/admin/cloudfile/repos/{repo_id}/file-lock/force-release/`。Hub 侧没有注册这三个前缀，`CF_ENABLE_FILE_LOCK` 保持关闭，前端 `seafile-api.js` 的 `lockfile`/`unlockfile` 只在开关打开时才会走到该路径，因此维持现状、不补路由也不改调用点。锁与 Checkout 的执行面在 C/Go 侧，独占编辑请走本文上面的 `exclusive-edit`。
 
 ## 外部文件源
 

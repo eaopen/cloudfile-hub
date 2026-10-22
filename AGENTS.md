@@ -20,7 +20,7 @@
 
 本仓是 `haiwen/seahub` 的 fork，负责 Web、API、SSO/OIDC、目录与文件展示、搜索及 V2 权限接口；Server 负责不可绕过的文件访问和写入终判，Docker 负责跨仓构建和部署。
 
-- **当前实现以 `cloudfile_ext/v2/`、原生 CE14 的真实执行入口及当前代码/契约为准。** `cloudfile_extensions/`、旧 `cloudfile_ext/*`、`CLOUDFILE.md` 里的 V0.x 内容可能是历史/兼容实现，不能直接复制旧架构和旧任务表。
+- **当前实现以 `cloudfile_ext/v2/`、原生 CE14 的真实执行入口及当前代码/契约为准。** `cloudfile_extensions/` 的**仍被启动/部署引用的兼容模块**暂予保留并须核对真实调用；旧 `cloudfile_ext/acl/` 已退出且清除。不能把保留兼容依赖解释为恢复旧 V0.x 权限/Schema，也不能整目录删除仍被启动配置或 middleware 引用的模块；历史 V0.x 行为不得作为现行权限依据，不能直接复制旧架构和旧任务表。
 - 目录 ACL、原生 Tag、Checkout 等已成为 V2 内置能力时，不要重新添加旧 `CF_ENABLE_*` / `v2_acl_enabled` 开关。外部 Meilisearch、OIDC 等保留必要连接配置与真实可用性判断，不另造功能启用体系。
 - 不依靠隐藏按钮或“返回 HTTP 200”代表授权；目录展示和实际读取/上传/提交必须使用相应的 V2 权限校验与 Server 终判。受保护的入口出现错误时不得退回宽松的旧路径。
 - 新增功能优先放 CloudFile 独立目录；修改上游 Seahub 文件须证明必要性，并核对 Docker 仓的 [上游改动清单](https://github.com/eaopen/cloudfile-docker/tree/dev/docs/upstream-patches)。
@@ -54,3 +54,11 @@
 - 当前 V2 数据模型：`cf_library_storage`、`cf_sso_group_map`、`cf_dir_acl`、`cf_edit_guard`、`cf_audit_event`。Tag 属于 CE 原生表，文件版本/动作使用 CE Commit/Activity。
 - `cloudfile_extensions/schema/migrations` 的旧 001–042 迁移链已移除；不得从历史 Git 分支复制回来，也不得注册 `cloudfile_extensions.*` 旧 URLConf 或启动旧 PolicyHost/Worker。
 - 当前 URI/Agent2 编辑流程不使用 SQL Session、Resource、Intent，历史编辑服务可能还出现在 Git 树中以便追溯，但不属于当前运行或发布合同。
+
+## 现行 V2 权限契约：禁止“托管库”复活（2026-10-21）
+
+- `dev` **不存在托管库/非托管库两种类别**。任何 `cf_dir_acl` 行只代表其目标路径和主体的显式规则，不能被用于判定整库被托管、整库访问关闭、旧入口一律拒绝或重新进入单独的库级安全模式。
+- 唯一权限链：Seafile CE 原生库资格 + Hub `Authority.effective()` 对当前身份和实际路径的 ACL/共享目录结果 + C/Go 真实文件与最终 Commit 终判。无整库资格但有 `share_mode=true` 的用户只从共享目录根进入，不得开放库根、父级或兄弟目录。
+- **坚决禁止**恢复 `cf_managed_library`、`cf_managed_library_share`、`cf_library_share_revision`、`checkLegacyLibrary`、`cf_policy_check_legacy_library`、`managed_library_guard`、`allow_legacy_managed_reads`，也禁止恢复用于断言“库有任意 ACL 行就应全库拒绝”的测试。
+- 没有可信当前用户/路径的整库同步或无范围票据，允许因该**操作缺乏授权证明**而拒绝；这不是库分类。任何有路径证明的 Web/API/Agent/下载/上传必须按实际目标裁决，不能用无关目录的 ACL 拒绝整个库。策略异常不回退宽权限。
+- 当前文档与测试应以 V2 权限终判契约及五张扩展表为准；历史文档只用于追溯，不得作为实施依据。跨仓变更必须维护防复活的源码扫描和正反权限用例。

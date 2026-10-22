@@ -295,7 +295,7 @@ def _apply(plan, owner):
                     parent_id = parent_gid
                 else:
                     # Top-level department: -1 in ccnet's convention, read back
-                    # by cloudfile_ext.acl.service._load_subjects as dept.
+                    # by V2 current_principal as dept.
                     parent_id = -1
             group_id = ccnet_api.create_group(
                 entry['name'], owner, None, parent_id)

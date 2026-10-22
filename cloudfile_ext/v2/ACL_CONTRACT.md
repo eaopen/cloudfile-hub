@@ -112,9 +112,9 @@ because a directory share exists for accounts with no library membership. An
 explicit native `invisible`, and every non-share path, still fail closed. No readable
 content permission returns HTTP 403; unavailable or invalid native policy
 returns HTTP 503. A management role never supplies content `rw`.
-Native file `check-access` also uses this authority for protected repos,
+Native file `check-access` also uses this authority for repositories with path policy,
 so directory-only access does not fail a preliminary whole-library permission
-check. Repo API tokens cannot impersonate current users on protected repos.
+check. Repo API tokens cannot impersonate current users on repositories with path policy.
 Whether a repo is protected is answered from the same library rule snapshot
 (a virtual repo also checks its origin; an over-budget library is protected).
 
@@ -133,7 +133,7 @@ producible, and the Go/C final publication checks are unchanged.
 `checks`, because a second `action=write` probe would double the round trip on
 every share-root write. A caller that ignores the field, or an older Hub that
 does not send it, keeps the *deny* reading: not "assume rw". The seam is
-registered only where the V2 managed schema exists and an internal Hub channel
+registered only where the current V2 extension schema exists and an internal Hub channel
 is configured; elsewhere a stock CE denial is byte-identical to before.
 
 ### Paged CE directory listing
@@ -253,6 +253,10 @@ must call the existing Memberships TTL projector successfully; failure raises.
 Only then does Hub read `cf_sso_group_map JOIN GroupUser`. Missing adapter means
 503, never stale-group fallback. This package does not claim package A is wired.
 
+### Shared native batch for directory listing
+
+The internal `/cloudfile/acl/check/` accepts the optional exact boolean `"partial": true` **only** for trusted internal JWT calls. Normal calls remain atomic: one denied path denies the entire request. In partial mode, `permissions` has one aligned item per authenticated input path (`"r"`, `"rw"`, or `null` for an inaccessible child), with the same Authority for every item. The C native directory listing uses bounded batches (up to 512 per call), drops null entries and preserves CE listing order. Invalid policy, identity, schema or a failed Hub request never exposes an unfiltered listing. This avoids one HTTP/Redis round trip per directory child while preventing an ACL on an unrelated sibling from hiding the rest of the library.
+
 ## Revocation And Efficiency
 
 Rules are sparse compared with library files, so Hub caches **all rows of one
@@ -285,7 +289,7 @@ library checks due to missing configuration.
 The first supported seam is current-path read/Range and fresh byte uploads /
 overwrites, with actual final-diff checks under Branch CAS. C trusted post/put
 file calls carry the actor explicitly. Unscoped commits never infer it from commit
-metadata. Object-only tickets, native sync and public links on protected repos
+metadata. Object-only tickets, native sync and public links on repositories with path policy
 remain closed. Native copy/move is closed **throughout ACL mode** until both
 source and destination can be proven transactionally; checking an initially
 unprotected source is insufficient. Other structural operations on protected
@@ -366,6 +370,6 @@ account, as with staff preparation; no password or session is issued on failure.
 
 ## 四表运行路由边界（2026-10-21）
 
-默认根路由不再挂载历史 Resource/Intent/SchemaRunner 控制面。原生库/文件读取保留；`extensions/authorization/v1/effective-permission/`、`shared-directories/`、`directory-entries/` 直接使用本契约对应的 V2 视图、参数和回执，不再调用旧 NativeRead。旧 `directory-address`、`library-rules`、`directory-shares`、`directory/sync`、扩展 identity/session/editing/transfer 等路由不再由根路由提供；当前管理/目录同步入口保持不变。原生 OAuth 与 `/oidc/` 保持现有接线，不依赖旧 PolicyHost。
+默认根路由不再挂载历史 Resource/Intent/SchemaRunner 控制面。原生库/文件读取保留；`/api/v2.1/cloudfile/authorization/v1/` 是当前唯一授权路由前缀，`extensions/authorization/v1/` 的只读别名也已删除。旧目录管理员、独立 ACL/share 持久层、PolicyHost/PolicyCore、资源委托/epoch 票据和其专用部署模块退役。库列表与 Smart Link 只调用现有 `Authority.effective()`；目录 ACL 页面使用现行 DirectoryRules 的行 revision/CAS 协议和 user/org/role 类型。普通浏览器下载、上传与退出继续使用 CE；V2 Agent2、原生 OAuth 与 `/oidc/` 保持现有接线。
 
 `test_root_routes.py` 验证真实根路由解析及旧路由缺席；既有 ACL HTTP、有效权限、原生 Cookie 和 Checkout 用例验证授权及回执。历史源码只用于追溯，不能据其存在恢复额外表或旧运行入口。
