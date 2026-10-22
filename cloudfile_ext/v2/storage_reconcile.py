@@ -221,9 +221,60 @@ class StorageReconciler:
                 ids = [row[0] for row in cursor.fetchall()]
             if not ids:
                 return
-            for repo_id in ids:
-                yield self.inspect(repo_id)
+            yield from self.inspect_batch(ids)
             after = ids[-1]
+
+    def inspect_batch(self, repo_ids):
+        """Read already-registered bindings in bounded pages, without stale caches.
+
+        A full inventory used to repeat every join and route-conflict scan twice
+        per repository, exceeding callers' HTTP deadlines. Only verified existing
+        bindings take this read-only path; missing or abnormal bindings still use
+        inspect/apply_one and its locked mutation checks.
+        """
+        from .native_discovery import native_key
+        if not self.registry_present:
+            for repo_id in repo_ids:
+                yield self.inspect(repo_id)
+            return
+        tables = {name: self.table(name) for name in
+                  ('Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId', 'cf_library_storage')}
+        sources = ' UNION ALL '.join('SELECT %s AS repo_id' for _ in repo_ids)
+        # SQL performs duplicate-route comparison with the native column's
+        # collation, including routes outside this page and retired repositories.
+        sql = ('SELECT i.repo_id,r.repo_id,t.repo_id,g.repo_id,v.repo_id,'
+               's.repo_id,s.storage_id,c.repo_key,c.state,d.storage_id '
+               'FROM (' + sources + ') i '
+               'LEFT JOIN {Repo} r ON r.repo_id=i.repo_id '
+               'LEFT JOIN {RepoTrash} t ON t.repo_id=i.repo_id '
+               'LEFT JOIN {GarbageRepos} g ON g.repo_id=i.repo_id '
+               'LEFT JOIN {VirtualRepo} v ON v.repo_id=i.repo_id '
+               'LEFT JOIN {RepoStorageId} s ON s.repo_id=i.repo_id '
+               'LEFT JOIN {cf_library_storage} c ON c.repo_id=i.repo_id '
+               'LEFT JOIN (SELECT storage_id FROM {RepoStorageId} '
+               'GROUP BY storage_id HAVING COUNT(*)>1) d ON d.storage_id=s.storage_id').format(**tables)
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql, tuple(repo_ids))
+            rows = {row[0]: row[1:] for row in cursor.fetchall()}
+        for repo_id in repo_ids:
+            present, trash, garbage, virtual, route_owner, route, key, state, duplicate = rows[repo_id]
+            marker = native_key(repo_id)
+            target = 'active' if present or trash else 'retired'
+            category = None
+            if marker and not virtual and (present or trash or garbage):
+                if route_owner is None and key == marker:
+                    category = 'NATIVE'
+                elif (route and route.startswith('auto-local:') and duplicate is None
+                      and key == route[len('auto-local:'):]
+                      and self.config.auto_error(key, repo_id) is None):
+                    category = 'AUTO_LOCAL'
+            if category and (state == target or (state == 'reserved' and target == 'active')):
+                # Matching the unique registered key proves no other registry
+                # owner exists; physical-path and native-route checks remain live.
+                yield dict(repo_id=repo_id, storage_id=route, status='REGISTERED',
+                           category=category, repo_key=key, state=state, expected_state=target)
+            else:
+                yield self.inspect(repo_id)
 
     def inspect(self, repo_id, *, lock=False):
         from .native_discovery import native_key
@@ -349,7 +400,9 @@ class StorageReconciler:
         items = []
         iterator = (self.inspect(repo_id),) if repo_id else self.scan(batch_size)
         for item in iterator:
-            if apply:
+            # A registered binding requires no write or second locked scan.
+            # Every prospective mutation still revalidates inside apply_one.
+            if apply and item['status'] != 'REGISTERED':
                 item = self.apply_one(item['repo_id'], normalize)
             items.append(item)
         orphans = self.orphans()

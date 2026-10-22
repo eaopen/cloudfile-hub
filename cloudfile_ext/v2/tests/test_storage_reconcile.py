@@ -174,7 +174,47 @@ class StorageSQLTests(unittest.TestCase):
                     trash: ('trash-key', 'active'), garbage: ('native-' + garbage, 'retired')}
         self.assertEqual({rid: (key, state) for key, rid, state in self.sql('SELECT * FROM cf_library_storage')}, expected)
         self.assertFalse(any('action' in item for item in self.service.run(apply=True)['items']))
-        self.assertEqual(self.sql('SELECT * FROM cf_library_storage_key'), ((42,),))
+        # The current V2 fixture intentionally contains no retired registry.
+
+    def test_registered_pages_match_scalar_checks_without_per_repo_queries(self):
+        ids = [self.repo(key=None) for _ in range(110)]
+        for rid in ids:
+            self.sql('INSERT INTO cf_library_storage VALUES(%s,%s,%s)',
+                     ('native-' + rid, rid, 'active'))
+        ids += [self.repo(route='auto-local:batch-auto', key='batch-auto'),
+                self.repo(route='auto-local:batch-trash', source='RepoTrash', key='batch-trash'),
+                self.repo(source='GarbageRepos')]
+        self.service.apply_one(ids[-1])
+        expected = {rid: self.service.inspect(rid) for rid in ids}
+        with patch.object(self.service, 'inspect', wraps=self.service.inspect) as scalar, \
+                patch.object(self.service, 'apply_one', wraps=self.service.apply_one) as mutate:
+            report = self.service.run(apply=True, batch_size=50)
+        self.assertEqual({item['repo_id']: item for item in report['items']}, expected)
+        self.assertEqual(scalar.call_count, 0)
+        self.assertEqual(mutate.call_count, 0)
+
+    def test_registered_page_detects_route_collision_outside_inventory(self):
+        rid = self.repo(route='auto-local:batch-collision', key='batch-collision')
+        # Native collation aliases also conflict, even outside Repo/Trash/GC.
+        self.sql('INSERT INTO RepoStorageId VALUES(%s,%s)',
+                 (str(uuid4()), 'AUTO-LOCAL:BATCH-COLLISION'))
+        item = self.service.run(apply=True, batch_size=1)['items'][0]
+        self.assertEqual((item['repo_id'], item['reason']), (rid, 'KEY_OCCUPIED'))
+        self.assertEqual(self.sql('SELECT COUNT(*) FROM cf_library_storage'), ((1,),))
+
+    def test_registered_pages_recheck_routes_and_filesystem_on_every_run(self):
+        rid = self.repo(route='auto-local:batch-live', key='batch-live')
+        self.assertEqual(self.service.run(apply=True)['summary']['REGISTERED'], 1)
+        objects = self.auto / 'batch-live' / 'storage' / 'commits' / rid
+        objects.rmdir()
+        objects.symlink_to(self.native, target_is_directory=True)
+        self.assertEqual(self.service.run(apply=True)['items'][0]['reason'], 'SYMLINK_DIRECTORY')
+        objects.unlink()
+        objects.mkdir()
+        self.sql("UPDATE cf_library_storage SET state='retired' WHERE repo_id=%s", (rid,))
+        self.assertEqual(self.service.run(apply=True)['items'][0]['status'], 'STATE_DRIFT')
+        self.sql("UPDATE RepoStorageId SET storage_id='auto-local:changed' WHERE repo_id=%s", (rid,))
+        self.assertEqual(self.service.run(apply=True)['items'][0]['status'], 'BLOCKED')
 
     def test_virtual_skipped_in_all_native_lifecycle_locations(self):
         for source in ('Repo', 'RepoTrash', 'GarbageRepos'):
@@ -404,7 +444,7 @@ class StorageSQLTests(unittest.TestCase):
         self.assertEqual(report['summary']['SCHEMA_MISSING'], 1)
         self.assertEqual(report['schema']['status'], 'SCHEMA_MISSING')
         self.assertEqual(self.sql("SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='cf_library_storage'"), ())
-        self.assertEqual(self.sql('SELECT * FROM cf_library_storage_key'), ((42,),))
+        # The current V2 fixture intentionally contains no retired registry.
         with patch.dict(os.environ, env), redirect_stdout(io.StringIO()):
             self.assertEqual(main(['storage-reconcile', '--seafile-conf', str(conf), '--seafile-data', str(self.native), '--apply']), 1)
         self.assertEqual(self.sql(
