@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-"""Path-qualified upload session for ACL-managed libraries.
+"""Path-qualified upload session for libraries with stored ACL rules.
 
-An ACL-managed library refuses unbound native tickets ("Path-qualified
+A library with stored ACL rules refuses unbound native tickets ("Path-qualified
 authorization required" from `web-accesstoken-mgr.c`), so the browser cannot
 use the legacy ``/api2/repos/{id}/upload-link/`` there. This endpoint
 adjudicates the target directory with the same Authority the fileserver uses
@@ -37,7 +37,7 @@ class UploadSession(AuthenticatedACL):
             mint = getattr(api, 'get_scoped_upload_token', None)
             if mint is None:
                 # A Server without the path-bound upload ticket cannot serve an
-                # ACL-managed library at all; say so instead of falling back to
+                # ACL-governed library at all; say so instead of falling back to
                 # the unbound link that the library refuses.
                 raise ACLUnavailable('scoped upload ticket unavailable')
             token = mint(repo_id, parent_dir, request.user.username)
