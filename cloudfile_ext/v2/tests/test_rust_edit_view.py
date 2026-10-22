@@ -25,7 +25,9 @@ class ViewScopeTests(unittest.TestCase):
                                                  is_authenticated=True, is_active=True))
         policy = SimpleNamespace(can_read=read, can_write=write)
         repo = SimpleNamespace(is_virtual=False, encrypted=False, version=1)
-        file_entry = SimpleNamespace(mode=stat.S_IFREG | 0o644, id=FILE_ID)
+        # Mirror the real CE14 binding: dirents expose obj_id/obj_name, not `.id`.
+        # A fixture with `.id` hides exactly this class of bug (it shipped once).
+        file_entry = SimpleNamespace(mode=stat.S_IFREG | 0o644, obj_id=FILE_ID)
         # Scope denial is tested with Checkout installed; schema discovery has
         # its own tests and must not turn this authorization case into HTTP 503.
         with patch("cloudfile_ext.v2.rust_edit.checkout_available", return_value=True), \

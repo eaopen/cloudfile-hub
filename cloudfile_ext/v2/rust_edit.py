@@ -118,7 +118,13 @@ class RustLocalEditOpen(APIView):
             import stat
             if entry is None or not stat.S_ISREG(entry.mode):
                 return Response({"code": "FILE_MISSING"}, status=404)
-            file_id = entry.id
+            # CE14's `seafile_api.get_dirent_by_path` exposes `obj_id` / `obj_name`
+            # only (every seahub caller uses those, see admin/library_dirents.py).
+            # Reading `.id` raises AttributeError, which the handler below turns
+            # into 400 BAD_EDIT_REQUEST -- surfacing as the eap 503
+            # "CloudFile local open unavailable". Older bindings may still carry
+            # `.id`, so keep the fallback.
+            file_id = getattr(entry, "obj_id", None) or getattr(entry, "id", None)
             now = int(time.time())
             token = issue_ticket(username=user, uid=uid, repo_id=repo_id, path=path,
                                  mode=mode, file_id=file_id, now=now,
