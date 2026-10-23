@@ -28,8 +28,9 @@ from cloudfile_ext.v2.tag_http import page_tags
 class DelayedRows:
     db = 'default'
 
-    def __init__(self, seconds):
+    def __init__(self, seconds, *, scan=False):
         self.seconds = seconds
+        self.scan = scan
 
     def values_list(self, *fields):
         return self
@@ -46,13 +47,23 @@ class DelayedRows:
 
     def __iter__(self):
         with connection.cursor() as cursor:
-            cursor.execute('SELECT 1, SLEEP(%s)', [self.seconds])
+            if self.scan:
+                # Unlike SLEEP(), this exercises normal SELECT cancellation.
+                # MySQL can interrupt SLEEP by returning a value, not an error.
+                cursor.execute('SELECT SUM(a.n + b.n + c.n + d.n) '
+                    'FROM cf_tag_budget_probe a CROSS JOIN cf_tag_budget_probe b '
+                    'CROSS JOIN cf_tag_budget_probe c CROSS JOIN cf_tag_budget_probe d')
+            else:
+                cursor.execute('SELECT 1, SLEEP(%s)', [self.seconds])
             return iter(cursor.fetchall())
 
 
 connection.ensure_connection()
 variable = 'max_statement_time' if connection.mysql_is_mariadb else 'max_execution_time'
 with connection.cursor() as cursor:
+    cursor.execute('CREATE TABLE IF NOT EXISTS cf_tag_budget_probe (n INTEGER NOT NULL)')
+    cursor.execute('TRUNCATE TABLE cf_tag_budget_probe')
+    cursor.executemany('INSERT INTO cf_tag_budget_probe (n) VALUES (%s)', [(n,) for n in range(100)])
     cursor.execute('SELECT @@SESSION.' + variable)
     before = cursor.fetchone()[0]
 
@@ -64,7 +75,7 @@ def slow_reader(repo, references, *, deadline):
     # receive a fresh full budget or leave an unbounded background query.
     _bounded(DelayedRows(0.080), (), deadline=deadline)
     try:
-        _bounded(DelayedRows(2), (), deadline=deadline)
+        _bounded(DelayedRows(2, scan=True), (), deadline=deadline)
     except Exception as error:
         interruptions.append(error)
         raise
