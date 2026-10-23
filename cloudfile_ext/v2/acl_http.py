@@ -221,10 +221,12 @@ class LibraryACLBatch(AuthenticatedACL):
             from .acl_policy import canonical_path
             from seaserv import seafile_api
             paths = []
+            seen = set()
             for item in data['paths']:
                 canonical_path(item)
-                if item in paths:
+                if item in seen:
                     raise PolicyError('duplicate publication path')
+                seen.add(item)
                 paths.append(item)
             missing = []
             for path in paths:
