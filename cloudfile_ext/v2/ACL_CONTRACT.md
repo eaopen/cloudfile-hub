@@ -84,6 +84,51 @@ must be deployed from matching source pins, with current subject, final-byte
 and Etech Publisher readback acceptance before promoting a shared instance.
 Do not treat a Hub-only code update as a safe deployment.
 
+## Additive whole-library ACL publication
+
+Existing `directory-rules/` GET/POST/PUT/DELETE remains **unchanged** for old
+Etech clients. New Etech publishers may use:
+
+`/api/v2.1/cloudfile/authorization/v1/library-acl-batch/`
+
+- `GET ?repo_id=...` returns a complete provider-owned snapshot, fingerprint,
+  and rules with current row revisions (never a user-scoped cache view).
+- `POST` with `{"repo_id":"...","paths":["/a","/b"]}` is a **read-only**
+  preview returning that same snapshot plus `missing_paths`, avoiding a
+  separate HTTP GET for every configured directory. Permission to publish
+  does not imply permission to read directory contents.
+- `PUT` accepts `{"repo_id":"...","expected_fingerprint":"<64 hex>",
+  "managed":[{"path":"/a","subject_type":"user","namespace":"user",
+  "external_id":"uid"}],
+  "desired":[{"path":"/a","subject_type":"user","namespace":"user",
+  "external_id":"uid","permission":"r","inherit":true,"share_mode":true}]}`.
+  Only keys explicitly listed in `managed` may change, and `desired` must
+  be a subset. The provider is server-configured; the request cannot set it.
+- `PUT` obtains the existing transfer fence and Branch(master) in the same
+  order as single-rule writes, locks the provider snapshot, compares the
+  fingerprint (including CAS revisions), computes a bounded differential
+  update, and commits all ACL mutations in **one** transaction. Conflict is
+  409; malformed policy 400; no admin grant 403; storage outage 503.
+- An unchanged row retains its revision; a no-op does no cache invalidation.
+  A successful changed batch invalidates **one** existing per-library cache
+  generation after commit. A timed-out client must GET and compare before
+  trying again, not blindly replay an unknown PUT.
+- Initial limit: 4096 provider rows/managed keys/desired keys/preview paths.
+  A larger library fails closed; this endpoint does not reshape cf_dir_acl,
+  add a table or alter the rule precedence algorithm.
+- Library shares, native administrators and EAP state CAS are independent
+  stages, **not** part of this single ACL SQL transaction. EAP retains its
+  existing managed-intent snapshot for cleanup and partial-stage recovery.
+- A Hub without this new route yields a generic 404 on preview/GET; upgraded
+  EAP detects that before doing any batch write and continues its existing
+  per-path compatibility workflow. All non-404 failures stop; a recognized
+  batch endpoint never falls back after a conflict or uncertain result.
+
+Read and write checks both reuse the same `Authority` library snapshot
+(default Redis TTL 180s), with per-request ancestry-path indexing. This is
+not another cache. Native final Branch and ACL checks are still enforced; a
+bounded cached policy delay does not disable final file-publication fences.
+
 ## Content API
 
 Under `api/v2.1/cloudfile/authorization/v1/`:
