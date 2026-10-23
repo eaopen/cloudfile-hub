@@ -208,6 +208,37 @@ class LibraryACLBatch(AuthenticatedACL):
         except Exception as error:
             return failure(error)
 
+    def post(self, request):
+        """Read-only batch preview: one HTTP trip replaces per-directory GETs."""
+        try:
+            data = request.data
+            if (not isinstance(data, dict) or set(data) != {'repo_id', 'paths'}
+                    or not isinstance(data['paths'], list)
+                    or len(data['paths']) > 4096):
+                raise ValueError()
+            repo_id = uuid(data['repo_id'])
+            require_repo_manage(request.user, repo_id)
+            from .acl_policy import canonical_path
+            from seaserv import seafile_api
+            paths = []
+            for item in data['paths']:
+                canonical_path(item)
+                if item in paths:
+                    raise PolicyError('duplicate publication path')
+                paths.append(item)
+            missing = []
+            for path in paths:
+                # Native directory existence is not content permission: an EAP
+                # administrator may manage ACLs without browsing file bytes.
+                if not seafile_api.get_dir_id_by_path(repo_id, path):
+                    missing.append(path)
+            rows = store().provider_snapshot(repo_id, self._provider())
+            return response(dict(contract=LIBRARY_BATCH_CONTRACT, repo_id=repo_id,
+                                 fingerprint=fingerprint(rows), rules=serialize(rows),
+                                 missing_paths=missing))
+        except Exception as error:
+            return failure(error)
+
     def put(self, request):
         try:
             data = request.data
