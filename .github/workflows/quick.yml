@@ -23,6 +23,9 @@ jobs:
       - name: Reject obsolete managed-library code and native fallback
         run: python3 cloudfile_ext/v2/tests/test_no_managed_boundary.py
 
+      - name: Validate additive ACL batch and shared cache contracts
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_batch_pure
+
       - name: Validate only changed source
         shell: bash
         run: |
