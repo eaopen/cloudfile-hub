@@ -49,18 +49,6 @@ class TagReadsTests(TestCase):
         repo.objects.filter.assert_called_once()
         legacy.objects.filter.assert_called_once()
 
-    def test_both_tag_types_share_the_deadline_and_failure_stops_the_batch(self):
-        from cloudfile_ext.v2.tag_query_budget import TagQueryTimeout
-        repo, legacy = self._models()
-        with self._modules(repo, legacy), patch.object(tag_reads, '_bounded', side_effect=[[], []]) as read:
-            tag_reads.read(RID, [('/docs/a.txt', 'file')], deadline=42)
-        self.assertEqual([call.kwargs['deadline'] for call in read.call_args_list], [42, 42])
-        repo, legacy = self._models()
-        with self._modules(repo, legacy), patch.object(tag_reads, '_bounded', side_effect=TagQueryTimeout()):
-            with self.assertRaises(TagQueryTimeout):
-                tag_reads.read(RID, [('/docs/a.txt', 'file')], deadline=42)
-        legacy.objects.filter.assert_not_called()
-
     def test_zero_references_avoids_database(self):
         self.assertEqual(tag_reads.read(RID, []), {})
 

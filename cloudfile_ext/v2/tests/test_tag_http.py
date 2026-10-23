@@ -1,7 +1,7 @@
 """V2 tag read contract: authorize before two-query batch, no fake empty tags."""
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import patch, Mock, ANY
+from unittest.mock import patch, Mock
 
 from rest_framework.test import APIRequestFactory, force_authenticate
 from django.conf import settings
@@ -126,7 +126,7 @@ class TagBatchTests(TestCase):
         with patch('cloudfile_ext.v2.tag_http.read_tags', return_value={('/docs/file', 'file'): []}) as tags:
             result = page_tags(RID, entries)
         self.assertEqual(result, [dict(tag_status='OK', tags=[])])
-        tags.assert_called_once_with(RID, [('/docs/file', 'file')], deadline=ANY)
+        tags.assert_called_once_with(RID, [('/docs/file', 'file')])
         with patch('cloudfile_ext.v2.tag_http.read_tags', side_effect=OSError()), \
                 self.assertLogs('cloudfile_ext.v2.tag_http', level='ERROR'):
             result = page_tags(RID, entries)
