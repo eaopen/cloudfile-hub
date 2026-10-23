@@ -1,6 +1,6 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import { isEnabled } from '@/cloudfile/features';
+import LocalFileDialog from '@/components/local-file-dialog';
 import { getDirentItemMenuList, getBatchMenuList } from '@/components/dirent-operation-menu/contextMenuUtils';
 import { menuHandlers } from '@/components/dirent-operation-menu/menuHandlers';
 import CustomDropdown from '@/components/dropdown';
@@ -38,6 +38,8 @@ const SINGLE_EXCLUDES = ['Download', 'Delete', 'Share', 'Move', 'Copy'];
 const MULTI_EXCLUDES = ['Download', 'Delete', 'Move', 'Copy'];
 
 class SelectedDirentsToolbar extends React.Component {
+  state = { localFileDialog: false };
+
   onItemsDelete = () => {
     this.props.onItemsDelete();
   };
@@ -182,10 +184,9 @@ class SelectedDirentsToolbar extends React.Component {
     const selected = selectedLen === 1 ? selectedDirentList[0] : null;
     const isFile = selected && (typeof selected.isDir === 'function'
       ? !selected.isDir() : selected.type === 'file');
-    const ordinaryEdit = isEnabled('CF_AGENT_OPTIMISTIC_UPLOAD_READY') && isFile &&
-      this.props.onCloudFileLocalEdit &&
-      this.props.currentRepoInfo.status !== 'read-only' &&
-      this.props.userPerm !== 'r';
+    const permission = selected?.permission || this.props.userPerm;
+    const localOpen = isFile && this.props.onCloudFileLocalEdit &&
+      (permission === 'r' || permission === 'rw');
 
     const { iconOps, menuOps } = this.getSelectedDirentOperations();
     const { iconOps: iconOpsForMulti, menuOps: menuOpsForMulti } = this.getSelectedDirentsOperations();
@@ -202,6 +203,14 @@ class SelectedDirentsToolbar extends React.Component {
           </span>
           <span>{selectedLen}{' '}{gettext('selected')}</span>
         </OpElement>
+        {localOpen && this.state.localFileDialog && (
+          <LocalFileDialog key={this.props.repoID + this.getDirentPath(selected)}
+            repoID={this.props.repoID} path={this.getDirentPath(selected)}
+            permission={permission} readOnly={this.props.currentRepoInfo.status === 'read-only'}
+            onClose={() => this.setState({ localFileDialog: false })}
+            onOpen={({ path, mode }) => this.props.onCloudFileLocalEdit(path, mode)}
+          />
+        )}
         {selectedLen > 1 && (
           <>
             {this.renderIconButtons(iconOpsForMulti)}
@@ -215,10 +224,10 @@ class SelectedDirentsToolbar extends React.Component {
         {selectedLen === 1 && (
           <>
             {this.renderIconButtons(iconOps)}
-            {ordinaryEdit && (
+            {localOpen && (
               <button type="button" className="btn btn-sm btn-outline-primary mr-2"
-                onClick={() => this.props.onCloudFileLocalEdit(this.getDirentPath(selected), selected.id)}>
-                {gettext('Edit with local software')}
+                onClick={() => this.setState({ localFileDialog: true })}>
+                {gettext('Local file operations')}
               </button>
             )}
             <CustomDropdown
