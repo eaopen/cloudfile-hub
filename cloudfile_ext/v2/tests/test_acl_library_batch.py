@@ -63,6 +63,23 @@ class LibraryBatchHTTPTests(TestCase):
             self.assertEqual(request.kwargs['desired'][0].permission, 'r')
             self.assertEqual(request.kwargs['desired'][0].provider, 'etech')
 
+    def test_batch_resource_preview_reuses_one_snapshot_and_checks_every_directory(self):
+        with patch('cloudfile_ext.v2.acl_http.require_repo_manage'), \
+             patch('cloudfile_ext.v2.acl_http.store') as rules, \
+             patch('seaserv.seafile_api.get_dir_id_by_path') as exists, \
+             patch('cloudfile_ext.v2.acl_http.settings') as settings:
+            settings.CF_ACL_PROVIDER = 'etech'
+            exists.side_effect = lambda repo, path: 'd' * 40 if path == '/shared' else None
+            rules.return_value.provider_snapshot.return_value = ((RULE, REVISION),)
+            result = self.request('post', dict(repo_id=RID, paths=['/shared', '/missing']))
+            self.assertEqual(result.status_code, 200)
+            self.assertEqual(result.data['missing_paths'], ['/missing'])
+            self.assertEqual(result.data['fingerprint'], fingerprint(((RULE, REVISION),)))
+            self.assertEqual(exists.call_count, 2)
+            self.assertEqual(rules.return_value.provider_snapshot.call_count, 1)
+            self.assertEqual(self.request('post', dict(
+                repo_id=RID, paths=['/shared', '/shared'])).status_code, 400)
+
     def test_bad_or_unmanaged_payload_never_reaches_sql(self):
         with patch('cloudfile_ext.v2.acl_http.require_repo_manage'), \
              patch('cloudfile_ext.v2.acl_http.store') as rules:
