@@ -103,6 +103,42 @@ class ACLSQLTests(TestCase):
         with self.assertRaises(pymysql.Error):
             ACLStore(self.conn, 'missing_schema', lambda: None).shared(self.principal)
 
+    def test_library_batch_atomic_owned_diff_and_one_invalidation(self):
+        from cloudfile_ext.v2.acl_batch import fingerprint
+        from cloudfile_ext.v2.acl_store import RevisionConflict
+        store = self.store()
+        changed = []
+        store.changed = changed.append
+        other = Rule(RID, '/external', 'etech', 'role', 'role', 'external',
+                     'r', True, False)
+        unrelated = Rule(RID, '/other-provider', 'other', 'user', 'user', 'uid',
+                         'r', True, False)
+        store.mutate(self.rule, expected=None, revision=self.revision)
+        store.mutate(other, expected=None, revision=str(uuid4()))
+        store.mutate(unrelated, expected=None, revision=str(uuid4()))
+        changed.clear()
+        old = store.provider_snapshot(RID, 'etech')
+        managed = [('/shared', 'user', 'user', 'uid'),
+                   ('/new', 'user', 'user', 'uid')]
+        new = Rule(RID, '/new', 'etech', 'user', 'user', 'uid', 'r', True, True)
+        report = store.replace_owned(RID, 'etech', expected=fingerprint(old),
+                                     managed=managed, desired=[new])
+        self.assertEqual((report['inserted'], report['deleted'], report['updated']), (1, 1, 0))
+        self.assertEqual(changed, [RID])
+        self.assertEqual([r.path for r, _ in store.shared(self.principal)], ['/new'])
+        self.assertEqual({r.path for r, _ in store.provider_snapshot(RID, 'etech')},
+                         {'/new', '/external'})
+        self.assertEqual(store.provider_snapshot(RID, 'other')[0][0], unrelated)
+        self.assertEqual(report['fingerprint'], fingerprint(store.provider_snapshot(RID, 'etech')))
+        replay = store.replace_owned(RID, 'etech', expected=report['fingerprint'],
+                                     managed=managed, desired=[new])
+        self.assertEqual((replay['inserted'], replay['updated'], replay['deleted']), (0, 0, 0))
+        self.assertEqual(changed, [RID])
+        with self.assertRaises(RevisionConflict):
+            store.replace_owned(RID, 'etech', expected=fingerprint(old),
+                                managed=managed, desired=[new])
+        self.assertEqual(changed, [RID])
+
     def test_writer_waits_for_native_branch_transaction(self):
         started, finished = Event(), Event()
         other = pymysql.connect(**self.options)
