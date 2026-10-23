@@ -127,16 +127,26 @@ class Authority:
         self._decisions = {}
         self._native = {}
         self._library = {}
+        self._rule_paths = {}
 
     def _rules(self, repo_id, directory):
         if repo_id not in self._library:
             rows = library_rules(self.store, repo_id, cache_ttl())
-            # Only this subject's rows take part; resolve() filters by ancestry.
-            self._library[repo_id] = None if rows is None else [r for r in rows if self.principal.matches(r)]
-        rows = self._library[repo_id]
-        if rows is None:
+            # One shared library snapshot for both read and write checks.
+            # Per-request path buckets avoid rescanning every rule per child
+            # of a large directory page; these are NOT another Redis cache.
+            matched = None if rows is None else [r for r in rows if self.principal.matches(r)]
+            self._library[repo_id] = matched
+            if matched is not None:
+                buckets = {}
+                for rule in matched:
+                    buckets.setdefault(rule.path, []).append(rule)
+                self._rule_paths[repo_id] = buckets
+        if self._library[repo_id] is None:
             return [r for r, _ in self.store.candidates(repo_id, directory, self.principal)]
-        return rows
+        from .acl_policy import ancestors
+        buckets = self._rule_paths[repo_id]
+        return [rule for path in ancestors(directory) for rule in buckets.get(path, ())]
 
     def effective(self, repo_id, path, kind='dir'):
         uuid(repo_id)

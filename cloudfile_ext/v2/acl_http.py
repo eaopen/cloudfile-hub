@@ -14,6 +14,8 @@ from seahub.api2.utils import JWT_PRIVATE_KEY
 from .acl_policy import PolicyError, Rule, StoredACLError, narrow_to_native
 from .acl_runtime import ACLUnavailable, Authority, store
 from .acl_store import uuid, RevisionConflict
+from .acl_store import validate as validate_acl_rule
+from .acl_batch import CONTRACT as LIBRARY_BATCH_CONTRACT, fingerprint, serialize
 from .errors import SubjectNotFound
 from . import tag_display
 
@@ -177,6 +179,108 @@ class DirectoryRules(AuthenticatedACL):
 
     def delete(self, request):
         return self._write(request, delete=True)
+
+class LibraryACLBatch(AuthenticatedACL):
+    """Additive library-level ACL publisher; old directory-rules stays intact.
+
+    Only declared Etech-owned natural keys can be changed. GET reads an
+    authoritative complete provider snapshot and PUT checks that fingerprint
+    under the same native Branch/transfer-fence ordering as per-rule writes.
+    """
+
+    @staticmethod
+    def _provider():
+        provider = getattr(settings, 'CF_ACL_PROVIDER', 'etech')
+        if not isinstance(provider, str) or not provider:
+            raise PolicyError('invalid ACL provider')
+        return provider
+
+    def get(self, request):
+        try:
+            args = request.query_params
+            if set(args) != {'repo_id'} or len(args.getlist('repo_id')) != 1:
+                raise ValueError()
+            repo_id = uuid(args['repo_id'])
+            require_repo_manage(request.user, repo_id)
+            rows = store().provider_snapshot(repo_id, self._provider())
+            return response(dict(contract=LIBRARY_BATCH_CONTRACT, repo_id=repo_id,
+                                 fingerprint=fingerprint(rows), rules=serialize(rows)))
+        except Exception as error:
+            return failure(error)
+
+    def post(self, request):
+        """Read-only batch preview: one HTTP trip replaces per-directory GETs."""
+        try:
+            data = request.data
+            if (not isinstance(data, dict) or set(data) != {'repo_id', 'paths'}
+                    or not isinstance(data['paths'], list)
+                    or len(data['paths']) > 4096):
+                raise ValueError()
+            repo_id = uuid(data['repo_id'])
+            require_repo_manage(request.user, repo_id)
+            from .acl_policy import canonical_path
+            from seaserv import seafile_api
+            paths = []
+            seen = set()
+            for item in data['paths']:
+                canonical_path(item)
+                if item in seen:
+                    raise PolicyError('duplicate publication path')
+                seen.add(item)
+                paths.append(item)
+            missing = []
+            for path in paths:
+                # Native directory existence is not content permission: an EAP
+                # administrator may manage ACLs without browsing file bytes.
+                if not seafile_api.get_dir_id_by_path(repo_id, path):
+                    missing.append(path)
+            rows = store().provider_snapshot(repo_id, self._provider())
+            return response(dict(contract=LIBRARY_BATCH_CONTRACT, repo_id=repo_id,
+                                 fingerprint=fingerprint(rows), rules=serialize(rows),
+                                 missing_paths=missing))
+        except Exception as error:
+            return failure(error)
+
+    def put(self, request):
+        try:
+            data = request.data
+            if (not isinstance(data, dict) or
+                    set(data) != {'repo_id', 'expected_fingerprint', 'managed', 'desired'} or
+                    not isinstance(data['managed'], list) or
+                    not isinstance(data['desired'], list) or
+                    len(data['managed']) > 4096 or len(data['desired']) > 4096):
+                raise ValueError()
+            repo_id = uuid(data['repo_id'])
+            require_repo_manage(request.user, repo_id)
+            provider = self._provider()
+            managed = []
+            for item in data['managed']:
+                if (not isinstance(item, dict) or
+                        set(item) != {'path', 'subject_type', 'namespace', 'external_id'}):
+                    raise ValueError()
+                key = (item['path'], item['subject_type'], item['namespace'], item['external_id'])
+                validate_acl_rule(Rule(repo_id, item['path'], provider, item['subject_type'],
+                                       item['namespace'], item['external_id'], 'r', True, False))
+                managed.append(key)
+            desired = []
+            for item in data['desired']:
+                if (not isinstance(item, dict) or
+                        set(item) != {'path', 'subject_type', 'namespace',
+                                      'external_id', 'permission', 'inherit', 'share_mode'} or
+                        type(item['inherit']) is not bool or type(item['share_mode']) is not bool):
+                    raise ValueError()
+                rule = Rule(repo_id, item['path'], provider, item['subject_type'],
+                            item['namespace'], item['external_id'], item['permission'],
+                            item['inherit'], item['share_mode'])
+                validate_acl_rule(rule)
+                desired.append(rule)
+            applied = store().replace_owned(
+                repo_id, provider, expected=data['expected_fingerprint'],
+                managed=managed, desired=desired)
+            return response(dict(contract=LIBRARY_BATCH_CONTRACT, repo_id=repo_id, **applied))
+        except Exception as error:
+            return failure(error)
+
 
 class NativeACLCheck(APIView):
     """Existing native internal JWT, trusted username, bounded exact paths.
