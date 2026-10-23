@@ -1,0 +1,56 @@
+name: Directory tag budget checks
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - 'cloudfile_ext/v2/tag_*.py'
+      - 'cloudfile_ext/v2/directory_page.py'
+      - 'cloudfile_ext/v2/tests/test_tag*.py'
+      - 'cloudfile_ext/v2/tests/tag_query_budget_sql_check.py'
+      - 'cloudfile_ext/v2/tests/test_directory_page.py'
+      - 'tests/run_tag_contract.py'
+      - 'tests/isolated_native.py'
+      - '.github/workflows/tag-budget.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tags:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        database: ['mariadb:11.4', 'mysql:8.4']
+    services:
+      database:
+        image: ${{ matrix.database }}
+        env:
+          MARIADB_ALLOW_EMPTY_ROOT_PASSWORD: '1'
+          MYSQL_ALLOW_EMPTY_PASSWORD: '1'
+          MARIADB_ROOT_HOST: '%'
+          MYSQL_ROOT_HOST: '%'
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping --silent || mariadb-admin ping --silent"
+          --health-interval 5s --health-timeout 3s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install targeted Python dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq default-libmysqlclient-dev pkg-config
+          pip install 'Django==5.2.*' 'djangorestframework==3.16.*' 'mysqlclient==2.2.*' PyJWT requests python-dateutil six
+      - name: Run tag and directory contract regressions
+        run: python tests/run_tag_contract.py
+      - name: Verify real SQL cancellation and connection reuse
+        env:
+          CF_TAG_BUDGET_DISPOSABLE: '1'
+        run: python cloudfile_ext/v2/tests/tag_query_budget_sql_check.py

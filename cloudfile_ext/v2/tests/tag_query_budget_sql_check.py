@@ -15,11 +15,11 @@ with admin.cursor() as cursor:
     cursor.execute('CREATE DATABASE IF NOT EXISTS cf_tag_budget_test')
 admin.close()
 
+from tests.isolated_native import install
+install()
 from django.conf import settings
 settings.DATABASES = {'default': dict(ENGINE='django.db.backends.mysql', HOST='127.0.0.1',
     NAME='cf_tag_budget_test', USER='root', PASSWORD='', OPTIONS={'charset': 'utf8mb4'})}
-import django
-django.setup()
 from django.db import connection
 from cloudfile_ext.v2.tag_reads import _bounded
 from cloudfile_ext.v2.tag_http import page_tags
@@ -56,11 +56,18 @@ with connection.cursor() as cursor:
     cursor.execute('SELECT @@SESSION.' + variable)
     before = cursor.fetchone()[0]
 
+interruptions = []
+
+
 def slow_reader(repo, references, *, deadline):
     # The first query consumes part of the same deadline; the second must not
     # receive a fresh full budget or leave an unbounded background query.
     _bounded(DelayedRows(0.080), (), deadline=deadline)
-    _bounded(DelayedRows(2), (), deadline=deadline)
+    try:
+        _bounded(DelayedRows(2), (), deadline=deadline)
+    except Exception as error:
+        interruptions.append(error)
+        raise
     raise AssertionError('slow SELECT was not interrupted')
 
 started = time.monotonic()
@@ -68,6 +75,11 @@ with patch('cloudfile_ext.v2.tag_http.read_tags', side_effect=slow_reader):
     result = page_tags('test-repo', [(None, '/open', 'file', 'r')])
 elapsed = time.monotonic() - started
 assert result == [dict(tag_status='FAILED', tags=None)], result
+assert len(interruptions) == 1, interruptions
+# A Python deadline check or unrelated SQL error must not masquerade as
+# successful server cancellation (MariaDB 1969 / MySQL 3024).
+expected_code = 1969 if connection.mysql_is_mariadb else 3024
+assert interruptions[0].args[0] == expected_code, repr(interruptions[0])
 assert 0.15 <= elapsed < 1, elapsed
 with connection.cursor() as cursor:
     cursor.execute('SELECT @@SESSION.' + variable)
@@ -77,6 +89,18 @@ with connection.cursor() as cursor:
 
 rows = _bounded(DelayedRows(0), (), deadline=time.monotonic() + 0.250)
 assert rows == [(1, 0)], rows
+assert not connection.execute_wrappers
+
+
+def fast_reader(repo, references, *, deadline):
+    _bounded(DelayedRows(0.005), (), deadline=deadline)
+    _bounded(DelayedRows(0.005), (), deadline=deadline)
+    return {('/open', 'file'): [dict(tag_name='normal')]}
+
+
+with patch('cloudfile_ext.v2.tag_http.read_tags', side_effect=fast_reader):
+    assert page_tags('test-repo', [(None, '/open', 'file', 'r')]) == [
+        dict(tag_status='OK', tags=[dict(tag_name='normal')])]
 assert not connection.execute_wrappers
 print(('MariaDB' if connection.mysql_is_mariadb else 'MySQL') +
       ': cancelled slow second tag SELECT in %.3fs; connection/session unchanged' % elapsed)
