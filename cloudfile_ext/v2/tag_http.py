@@ -6,6 +6,7 @@ checks before any tag binding is selected for the shared batched SQL read.
 """
 import logging
 import stat
+import time
 
 from rest_framework.response import Response
 from rest_framework.exceptions import ValidationError
@@ -24,6 +25,7 @@ MODEL = 'cloudfile-tag-read'
 MAX_ITEMS = 200
 MAX_BYTES = 65536
 MAX_PATH_BYTES = 4096
+PAGE_TAG_BUDGET_SECONDS = 0.250
 
 
 def reply(data, status=200):
@@ -44,7 +46,7 @@ def page_tags(repo_id, authorized_entries):
     """Metadata in authorized page order; paths/types already belong to dirents."""
     references = [(path, kind) for _, path, kind, _ in authorized_entries]
     try:
-        tags = read_tags(repo_id, references)
+        tags = read_tags(repo_id, references, deadline=time.monotonic() + PAGE_TAG_BUDGET_SECONDS)
         rows = [dict(tag_status='OK', tags=tags[(path, kind)]) for path, kind in references]
     except Exception:
         # Tag failure is display-only and never converts into an empty tag set.
