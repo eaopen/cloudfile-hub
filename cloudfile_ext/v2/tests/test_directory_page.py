@@ -1,7 +1,7 @@
 """Paged CE directory listing through the V2 authority; native RPC is a test double."""
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import Mock, patch, ANY
+from unittest.mock import Mock, patch
 
 from rest_framework.test import APIRequestFactory, force_authenticate
 
@@ -222,23 +222,12 @@ class DirViewPageTests(TestCase):
                          [('FAILED', None), ('FAILED', None)])
         self.assertNotIn('tag_batch', result.data)
 
-    def test_tag_budget_exhaustion_does_not_hide_or_fail_directory_page(self):
-        from cloudfile_ext.v2.tag_query_budget import TagQueryTimeout
-        self.authority.return_value.page.return_value = self.page()
-        with patch('cloudfile_ext.v2.tag_http.read_tags', side_effect=TagQueryTimeout()), \
-                self.assertLogs('cloudfile_ext.v2.tag_http', level='ERROR'):
-            result = self.request(dict(p='/docs', start='0', limit='2', with_display_metadata='true'))
-        self.assertEqual(result.status_code, 200)
-        self.assertEqual(len(result.data['dirent_list']), 2)
-        self.assertEqual([(item['tag_status'], item['tags']) for item in result.data['dirent_list']],
-                         [('FAILED', None), ('FAILED', None)])
-
     def test_empty_authorized_page_never_reads_tags(self):
         self.authority.return_value.page.return_value = self.page(items=[], next_start=2)
         with patch('cloudfile_ext.v2.tag_http.read_tags') as read:
             read.return_value = {}
             result = self.request(dict(p='/docs', start='0', limit='2', with_display_metadata='true'))
-        read.assert_called_once_with(RID, [], deadline=ANY)
+        read.assert_called_once_with(RID, [])
         self.assertEqual(result.data['dirent_list'], [])
         self.assertTrue(result.data['has_more'])
 

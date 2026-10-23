@@ -30,18 +30,3 @@
 
 CI 专项包含多来源标签、跨目录、拒绝访问、缺失对象、重复项、失败不伪空
 与目录页内联。现场 Dev 需要进一步验证具体账号权限和耗时。
-
-## 目录展示标签耗时预算（2026-10-19）
-
-目录页两类标签 SELECT 共用 250ms 的执行预算；第二次查询只使用剩余时间，预算不足
-1ms 时不再执行。MariaDB 使用单语句 `SET STATEMENT max_statement_time`（秒），MySQL
-使用 `MAX_EXECUTION_TIME` SELECT hint（毫秒）；不修改全局或复用连接的 session 设置。
-采用当前 ORM 路由确定的连接别名，作用域退出即移除执行包装。
-
-任一查询超时或失败，整页标签为 `tag_status=FAILED, tags=null`，目录和权限响应保持
-原有语义；不返回半批成功标签，不补读，也不逐项重试。数据库不支持该限制时，同样
-降级标签展示，不能悄悄执行无预算查询。独立标签批量接口和搜索不增加此目录预算。
-
-预算限制的是标签 SELECT；连接建立、网络故障以及数据库取消检查点不构成严格的
-250ms 请求完成保证。数据库取消语义见 [MariaDB 官方说明](https://mariadb.com/docs/server/ha-and-performance/optimization-and-tuning/query-optimizations/aborting-statements)
-和 [MySQL SELECT hint](https://dev.mysql.com/doc/refman/8.4/en/optimizer-hints.html)。
