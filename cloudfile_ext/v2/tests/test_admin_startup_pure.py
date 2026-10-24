@@ -47,13 +47,25 @@ class ProviderAdminRosterTests(unittest.TestCase):
         current = {'old@auth.local': ('old-uid', True, 'default_admin'),
                    'admin@auth.local': ('uid-9', True, 'default_admin')}
         add, remove, keep = changes(
-            current, {'admin@auth.local': 'uid-9', 'operator@auth.local': 'uid-10'})
+            current, {'admin@auth.local': 'uid-9', 'operator@auth.local': 'uid-10'},
+            managed_accounts=('old@auth.local',))
         self.assertEqual(add, {'operator@auth.local'})
         self.assertEqual(remove, {'old@auth.local'})
         self.assertEqual(keep, {'admin@auth.local'})
         self.assertEqual(changes({'admin@auth.local': ('uid-9', True, 'default_admin')},
                                  {'admin@auth.local': 'uid-9'}),
                          (set(), set(), {'admin@auth.local'}))
+
+    def test_unmanaged_native_admin_survives_missing_provider_roster(self):
+        current = {'manual@auth.local': ('manual-uid', True, 'default_admin'),
+                   'old@auth.local': ('old-uid', True, 'default_admin')}
+        add, remove, keep = changes(current, {'new@auth.local': 'new-uid'})
+        self.assertEqual(add, {'new@auth.local'})
+        self.assertEqual(remove, set())
+        add, remove, keep = changes(current, {'new@auth.local': 'new-uid'},
+                                    managed_accounts=('old@auth.local',))
+        self.assertEqual(remove, {'old@auth.local'})
+        self.assertNotIn('manual@auth.local', remove)
 
     def test_staff_or_other_role_is_never_adopted_as_external_admin(self):
         for state in (('same-uid', True, None),
