@@ -16,8 +16,10 @@ ROOT_NATIVE_NAMES = frozenset(('cfadmin', 'cfadmin@auth.local',
 
 def is_native_root(username, uid):
     """Only the exact built-in CE identity can bypass enterprise authority."""
+    # Some CE local root accounts have no Profile.login_id at all; a
+    # *different* external UID on a reserved-looking username is not root.
     return (isinstance(username, str) and
-            username.lower() in ROOT_NATIVE_NAMES and uid == 'cfadmin')
+            username.lower() in ROOT_NATIVE_NAMES and uid in (None, 'cfadmin'))
 
 
 def provider_admin_allowed(username, uid, fetch):
