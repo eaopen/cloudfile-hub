@@ -2,7 +2,8 @@
 from types import SimpleNamespace
 import unittest
 
-from cloudfile_ext.v2.subject_adapter import InvalidSubjectAdapter, selected_adapter
+from cloudfile_ext.v2.subject_adapter import (InvalidSubjectAdapter, selected_adapter,
+    native_admin_identity, reserved_identity_conflict)
 
 
 class SubjectAdapterPureTests(unittest.TestCase):
@@ -31,6 +32,20 @@ class SubjectAdapterPureTests(unittest.TestCase):
             with self.subTest(provider=provider, ensure=ensure), self.assertRaises(InvalidSubjectAdapter):
                 selected_adapter(SimpleNamespace(
                     CF_ACL_PROVIDER=provider, CF_ACL_SUBJECT_ENSURE=ensure))
+
+    def test_builtin_admin_bypass_requires_exact_account_and_uid(self):
+        for username in ('cfadmin@auth.local', 'cfadmin@etech.com'):
+            self.assertTrue(native_admin_identity('cfadmin', username))
+            self.assertFalse(reserved_identity_conflict('cfadmin', username))
+        for uid, username in (
+                ('cfadmin', 'employee@auth.local'),
+                ('9', 'cfadmin@auth.local'),
+                ('cfadmin', 'admin@auth.local'),
+                ('', 'cfadmin@etech.com')):
+            with self.subTest(uid=uid, username=username):
+                self.assertFalse(native_admin_identity(uid, username))
+                self.assertTrue(reserved_identity_conflict(uid, username))
+        self.assertFalse(reserved_identity_conflict('9', 'admin@auth.local'))
 
     def test_half_configured_provider_never_downgrades_to_ce(self):
         for config in (
