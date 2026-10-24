@@ -50,13 +50,16 @@ def validated_roster(snapshot, *, now=None):
         raise IdentityUnavailable('invalid complete administrator roster') from None
 
 
-def changes(current, wanted):
+def changes(current, wanted, *, managed_accounts=()):
     """Pure planning: default_admin in the managed CE namespace is Provider-owned.
 
-    Existing system_admin, cfadmin and users without an external Profile UID
-    must be left alone. A different explicit native administrator role or a
+    Only explicitly managed accounts may be automatically revoked. Native
+    system_admin, cfadmin and other CE administrators remain untouched. A different explicit native administrator role or a
     staff user with no role must not be silently adopted.
     """
+    managed = set(managed_accounts)
+    if not all(isinstance(name, str) and name for name in managed):
+        raise IdentityUnavailable('invalid managed administrator scope')
     add = set()
     remove = set()
     keep = set()
@@ -69,12 +72,12 @@ def changes(current, wanted):
         else:
             raise IdentityUnavailable('native administrator conflict')
     for username, (uid, staff, role) in current.items():
-        if username not in wanted and role == ROLE and uid:
+        if username not in wanted and username in managed and role == ROLE and uid:
             remove.add(username)
     return add, remove, keep
 
 
-def sync_native_admins(identity, roster):
+def sync_native_admins(identity, roster, *, managed_accounts=()):
     """Apply a whole authoritative admin roster once via existing CE facts.
 
     NativeIdentity.prepare() uses CE RPC to pre-create non-staff users with
@@ -130,7 +133,7 @@ def sync_native_admins(identity, roster):
                         current[name] = (uid, True, ROLE)
                     elif role is not None or staff == 1:
                         raise IdentityUnavailable('existing manual administrator cannot be adopted')
-                add, remove, keep = changes(current, wanted)
+                add, remove, keep = changes(current, wanted, managed_accounts=managed_accounts)
                 for name in sorted(add):
                     cursor.execute('INSERT INTO ' + admin_roles +
                                    ' (email,role) VALUES(%s,%s)', (name, ROLE))
