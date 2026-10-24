@@ -15,7 +15,7 @@ ROLE = 'default_admin'
 MAX_ADMINS = 32
 
 
-def validated_roster(snapshot, *, now=None):
+def validated_roster(snapshot, *, now=None, required_account=''):
     """Validate the single complete authenticated Provider snapshot."""
     now = datetime.now(timezone.utc) if now is None else now
     try:
@@ -45,6 +45,9 @@ def validated_roster(snapshot, *, now=None):
             uids.add(uid)
             names.add(name)
             result.append((uid, account))
+        if required_account:
+            if not isinstance(required_account, str) or account_username(required_account) not in names:
+                raise ValueError()
         return tuple(result)
     except (KeyError, TypeError, ValueError, AttributeError):
         raise IdentityUnavailable('invalid complete administrator roster') from None
