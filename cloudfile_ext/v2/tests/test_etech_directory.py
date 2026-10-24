@@ -62,6 +62,20 @@ class DirectoryRuntimeTests(TestCase):
         self.assertEqual(sync.call_args.args[:3],
                          (self.identity, 'uid', 'opaque@auth.local'))
 
+    def test_legacy_oauth_admin_reconcile_requires_opt_in_and_existing_uid(self):
+        from cloudfile_ext.v2.etech_directory import reconcile_verified_oauth_admin
+        with override_settings(CF_PROVIDER_ADMIN_SYNC_ENABLED=False), \
+             patch('cloudfile_ext.v2.etech_directory.runtime', side_effect=AssertionError('disabled')):
+            self.assertIsNone(reconcile_verified_oauth_admin('uid', 'opaque@auth.local'))
+        with override_settings(CF_PROVIDER_ADMIN_SYNC_ENABLED=True), \
+             patch('cloudfile_ext.v2.etech_directory.runtime', self.runtime), \
+             patch('cloudfile_ext.v2.provider_admin_reconcile.reconcile_native_admin') as sync:
+            reconcile_verified_oauth_admin('uid', 'opaque@auth.local')
+        self.identity.active.assert_called_once_with('opaque@auth.local', 'uid')
+        sync.assert_called_once()
+        self.assertEqual(sync.call_args.args[:3],
+                         (self.identity, 'uid', 'opaque@auth.local'))
+
     def test_disabled_or_changed_uid_cannot_create_native_account(self):
         for value in (subject('disabled'),dict(subject(),userId='other')):
             @contextmanager
