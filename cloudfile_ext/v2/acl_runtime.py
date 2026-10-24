@@ -73,23 +73,11 @@ def library_rules(rules, repo_id, ttl):
 
 
 def subject_adapter(config):
-    """Choose one trusted enterprise identity source, never by the UID shape.
-
-    No configured Directory means a standalone CE installation unless the
-    operator explicitly supplied BOTH a provider and its subject callback.
-    The existing Directory URL continues to select the deployed Etech adapter
-    without demanding new settings or an authentication migration.
-    """
-    directory = getattr(config, 'CF_DIRECTORY_URL', '')
-    provider = getattr(config, 'CF_ACL_PROVIDER', None)
-    ensure = getattr(config, 'CF_ACL_SUBJECT_ENSURE', None)
-    if provider is None and ensure is None:
-        return ('etech', 'cloudfile_ext.v2.etech_directory.ensure_subject') if directory else None
-    if (not isinstance(provider, str) or not provider or provider == 'native-local'
-            or not isinstance(ensure, str) or not ensure):
-        raise ACLUnavailable('incomplete enterprise subject adapter')
-    return provider, ensure
-
+    from .subject_adapter import InvalidSubjectAdapter, selected_adapter
+    try:
+        return selected_adapter(config)
+    except InvalidSubjectAdapter as error:
+        raise ACLUnavailable(str(error)) from error
 
 def current_principal(username):
     from seaserv import ccnet_api
