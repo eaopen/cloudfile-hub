@@ -32,6 +32,8 @@ jobs:
           if git diff --name-only HEAD^ HEAD -- cloudfile_ext/storage/ | grep -q .; then
             python3 -m unittest cloudfile_ext.storage.tests.test_key_policy
           fi
+      - name: Verify A-mode ACL publisher scope and CAS (mock SQL)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_publisher_scope_mock -v
 
       - name: Validate only changed source
         shell: bash
