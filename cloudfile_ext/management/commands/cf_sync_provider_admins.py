@@ -67,7 +67,9 @@ class Command(BaseCommand):
             self.stdout.write('CF_ADMIN_SYNC SKIPPED (not configured)')
             return
         try:
-            roster = validated_roster(read_provider_roster())
+            roster = validated_roster(
+                read_provider_roster(),
+                required_account=getattr(settings, 'CF_PROVIDER_ADMIN_EXPECTED_ACCOUNT', ''))
             with native_identity() as identity:
                 managed_accounts = tuple(filter(None, (name.strip() for name in
                     getattr(settings, 'CF_PROVIDER_ADMIN_MANAGED_ACCOUNTS', '').split(','))))
