@@ -17,7 +17,9 @@ def selected_adapter(config):
     ensure = getattr(config, 'CF_ACL_SUBJECT_ENSURE', None)
     if provider is None and ensure is None:
         return ('etech', 'cloudfile_ext.v2.etech_directory.ensure_subject') if directory else None
-    if (not isinstance(provider, str) or not provider or provider == 'native-local'
-            or not isinstance(ensure, str) or not ensure):
+    if (not isinstance(provider, str) or not provider or provider != provider.strip()
+            or len(provider) > 128 or provider == 'native-local'
+            or not isinstance(ensure, str) or not ensure or ensure != ensure.strip()
+            or '.' not in ensure):
         raise InvalidSubjectAdapter('incomplete enterprise subject adapter')
     return provider, ensure
