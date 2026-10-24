@@ -26,11 +26,14 @@ def classify(repo_id, present, route, key, state):
     if marker is None:
         return "INVALID_NATIVE_REPO_ID"
     if route is None and key is None:
-        return "NATIVE_UNREGISTERED"
+        return "NATIVE_REGISTERED"  # Native Seafile needs no CloudFile row.
     if route is None and key == marker and state in ("active", "retired"):
         return "NATIVE_REGISTERED"
     if route is not None and route.startswith("auto-local:"):
-        if key and route == "auto-local:" + key and state in ("reserved", "active", "retired"):
+        # New V2 has only immutable RepoStorageId. Old V2 may have a historical
+        # registry record for a custom outer directory.
+        if key is None or (route == "auto-local:" + key and
+                           state in ("reserved", "active", "retired")):
             return "V2_ROUTED"
         return "STORAGE_BINDING_INCOMPLETE"
     if route is not None and key is None:
@@ -150,7 +153,13 @@ def storage_catalog_status(repo_id, repo_present, key, state, storage_id, readab
     if virtual:
         return "VIRTUAL_REPO"
     if key is None:
-        return "REGISTRATION_MISSING"
+        # Current UUID V2 and original Seafile both have no CloudFile
+        # registry requirement. The actual route remains in RepoStorageId.
+        native = storage_id is None
+        auto = isinstance(storage_id, str) and storage_id.startswith("auto-local:")
+        if native or auto:
+            return "READY" if readable else "RESOURCE_UNREADABLE"
+        return "BINDING_ERROR"
     if state == "retired":
         return "RETIRED"
     if state == "reserved":
@@ -223,7 +232,7 @@ def inspect_from_hub(repo_ids):
                 in_gc=garbage is not None, virtual=virtual is not None)
             result[repo_id] = {
                 'status': status,
-                'source': 'native' if key == 'native-' + repo_id
-                else ('v2' if route and route.startswith('auto-local:') else 'unknown')
+                'source': 'native' if route is None
+                else ('v2' if route.startswith('auto-local:') else 'unknown')
             }
     return result
