@@ -23,3 +23,17 @@ def selected_adapter(config):
             or '.' not in ensure):
         raise InvalidSubjectAdapter('incomplete enterprise subject adapter')
     return provider, ensure
+
+
+# Only the built-in local CE administrator may bypass the configured enterprise
+# subject adapter. A business profile containing the string 'cfadmin' is not
+# sufficient proof that its CE account is the reserved native administrator.
+_NATIVE_ADMINS = frozenset(('cfadmin@auth.local', 'cfadmin@etech.com'))
+
+
+def native_admin_identity(uid, username):
+    return uid == 'cfadmin' and username in _NATIVE_ADMINS
+
+
+def reserved_identity_conflict(uid, username):
+    return (uid == 'cfadmin' or username in _NATIVE_ADMINS) and not native_admin_identity(uid, username)
