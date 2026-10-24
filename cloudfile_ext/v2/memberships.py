@@ -44,7 +44,7 @@ def validate_subject(value, uid, *, now=None):
                 # must be reviewed before enabling orgLevel=0 or >=2.
                 if field != 'organization_ancestors':
                     desired.add(key)
-        if value['status'] == 'disabled' and desired:
+        if value['status'] == 'disabled' and seen:
             raise ValueError()
         return login, desired
     except (KeyError, TypeError, AttributeError, ValueError, IdentityConflict):
