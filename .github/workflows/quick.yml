@@ -32,6 +32,9 @@ jobs:
       - name: Validate native enterprise administrator transitions (pure Python)
         run: python3 -m unittest cloudfile_ext.v2.tests.test_provider_admin_claim cloudfile_ext.v2.tests.test_provider_admin_reconcile_pure
 
+      - name: Validate provider admin Session/Token freshness gate (pure Python)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_provider_admin_gate_pure
+
       - name: Validate only changed source
         shell: bash
         run: |
