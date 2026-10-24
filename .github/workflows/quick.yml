@@ -26,6 +26,9 @@ jobs:
       - name: Validate additive ACL batch and shared cache contracts
         run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_batch_pure
 
+      - name: Validate trusted enterprise superadmin input (pure Python)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_provider_admin_claim
+
       - name: Validate only changed source
         shell: bash
         run: |
