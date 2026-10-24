@@ -13,12 +13,11 @@ def register(registry):
     # Imported inside register() so that importing this package does not pull
     # in Django.
     from cloudfile_ext.features import is_enabled
-    import os
+    from cloudfile_ext.storage.mode import auto_local_enabled
 
-    # Local V2 allocation uses the same RPC without an S3 dependency.
-    # Existing CE installations with neither backend selected stay unchanged.
-    if not (is_enabled('CF_ENABLE_S3_STORAGE') or
-            os.environ.get('CF_LIBRARY_STORAGE') == 'auto'):
+    # Local V2 allocation uses the same RPC without an S3 dependency. Honor
+    # persisted V2 roots across restarts when CF_LIBRARY_STORAGE is omitted.
+    if not (is_enabled('CF_ENABLE_S3_STORAGE') or auto_local_enabled()):
         return
 
     from django.urls import re_path
