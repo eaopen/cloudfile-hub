@@ -93,6 +93,8 @@ def scoped_memberships(direct, parents, *, org_level=1):
                     break
                 node = parents[node]
                 hops += 1
+                if hops > len(parents):
+                    raise ValueError()  # Defensive bound if caller skipped graph validation
         return frozenset(selected)
     except (KeyError, TypeError, ValueError, AttributeError, IdentityConflict):
         raise IdentityUnavailable('invalid scoped organization membership') from None
