@@ -46,13 +46,13 @@ class CurrentPrincipalSelectionTests(TestCase):
         manager = Mock()
         manager.__enter__ = Mock(return_value=cursor)
         manager.__exit__ = Mock(return_value=False)
-        with patch('seaserv.ccnet_api.get_emailuser', return_value=native), \\
-             patch('seahub.profile.models.Profile.objects', owner), \\
-             patch('cloudfile_ext.v2.acl_runtime.settings', config), \\
-             patch('cloudfile_ext.v2.acl_runtime.import_string', return_value=loader) as imported, \\
-             patch('seahub.utils.db_api.SeafileDB', return_value=SimpleNamespace(db_name='seafile_db')), \\
-             patch('seahub.utils.ccnet_db.get_ccnet_db_name', return_value='accounts_db'), \\
-             patch('cloudfile_ext.v2.acl_runtime.identifier', side_effect=lambda value: value), \\
+        with patch('seaserv.ccnet_api.get_emailuser', return_value=native), \
+             patch('seahub.profile.models.Profile.objects', owner), \
+             patch('cloudfile_ext.v2.acl_runtime.settings', config), \
+             patch('cloudfile_ext.v2.acl_runtime.import_string', return_value=loader) as imported, \
+             patch('seahub.utils.db_api.SeafileDB', return_value=SimpleNamespace(db_name='seafile_db')), \
+             patch('seahub.utils.ccnet_db.get_ccnet_db_name', return_value='accounts_db'), \
+             patch('cloudfile_ext.v2.acl_runtime.identifier', side_effect=lambda value: value), \
              patch('cloudfile_ext.v2.acl_runtime.connection.cursor', return_value=manager) as connection:
             if not is_active:
                 with self.assertRaises(PermissionError):
