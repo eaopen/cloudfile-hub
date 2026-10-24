@@ -15,6 +15,7 @@ from django.conf import settings
 
 from .errors import IdentityConflict, IdentityUnavailable, SubjectNotFound
 from .identity import NativeIdentity, text
+from .provider_admin import trusted_super_admin
 from .memberships import GroupCatalog, Memberships, is_ready, readiness_key, validate_subject
 
 
@@ -77,6 +78,9 @@ class Directory:
     def subject(self, uid):
         value = self.get('/users/' + quote(text(uid), safe='') + '/context')
         validate_subject(value, uid)
+        # An optional enterprise-admin flag is always checked as a machine
+        # Directory fact. Checking it does NOT materialize CE is_staff here.
+        trusted_super_admin(value, uid)
         return value
 
     def entities(self):
