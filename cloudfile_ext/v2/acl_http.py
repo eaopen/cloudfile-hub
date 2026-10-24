@@ -210,6 +210,14 @@ class LibraryGrants(AuthenticatedACL):
             seafile_api, repo_id, user_exists=user_exists,
             group_exists=group_exists, protected_admin=protected)
 
+    @staticmethod
+    def _require_native_share_role(user):
+        # Mirror Seafile CE sharing APIs; a custom/guest role with
+        # can_share_repo=False cannot bypass its prohibition via B-mode API.
+        caps = getattr(user, 'permissions', None)
+        if caps is None or not caps.can_share_repo():
+            raise PermissionError('CE role cannot share libraries')
+
     def get(self, request):
         try:
             args = request.query_params
@@ -217,6 +225,7 @@ class LibraryGrants(AuthenticatedACL):
                 raise ValueError()
             repo_id = uuid(args['repo_id'])
             require_repo_manage(request.user, repo_id)
+            self._require_native_share_role(request.user)
             listing = self._service(repo_id).list()
             # CE stores elevated library-administrator grants separately.
             # Read both markers in two bounded queries, never once per user.
@@ -241,6 +250,10 @@ class LibraryGrants(AuthenticatedACL):
                 raise ValueError()
             repo_id = uuid(data['repo_id'])
             require_repo_manage(request.user, repo_id)
+            self._require_native_share_role(request.user)
+            if not delete:
+                from .native_grants import permission as native_permission
+                native_permission(data['permission'])  # PUT null must not revoke
             service = self._service(repo_id)
             result = service.change(
                 data['subject_type'], data['subject'],
