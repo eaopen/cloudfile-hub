@@ -40,8 +40,9 @@ class AuthenticationMiddleware:
         # authority on every Session request. A stale native is_staff flag
         # cannot make an old browser cookie retain sysadmin access.
         # Off by default; native CE users and ordinary file access are intact.
-        if getattr(settings, 'CF_PROVIDER_ADMIN_SYNC_ENABLED', False) is True:
-            from cloudfile_ext.v2.provider_admin_gate import guard_authenticated_user
+        from cloudfile_ext.v2.provider_admin_gate import (
+            enforcement_enabled, guard_authenticated_user)
+        if enforcement_enabled(settings):
             guard_authenticated_user(request.user)
 
         response = self.get_response(request)
