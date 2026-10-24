@@ -207,8 +207,16 @@ class StorageReconciler:
         return 'SCHEMA_READY'
 
     def sources(self):
-        return ' UNION '.join('SELECT repo_id FROM ' + self.table(name)
-                              for name in ('Repo', 'RepoTrash', 'GarbageRepos'))
+        sources = ['SELECT repo_id FROM ' + self.table(name)
+                   for name in ('Repo', 'RepoTrash', 'GarbageRepos')]
+        if self.registry_present:
+            # A failed native create may leave the early, durable UUID
+            # allocation marker without ever creating Repo/Owner. Include it
+            # in *explicit* inventory so it cannot appear successfully active.
+            # Routine V2 startup does not call this full scan.
+            sources.append("SELECT repo_id FROM " + self.table('cf_library_storage') +
+                           " WHERE state='active'")
+        return ' UNION '.join(sources)
 
     def scan(self, batch_size=500):
         if not 1 <= batch_size <= 2000:
