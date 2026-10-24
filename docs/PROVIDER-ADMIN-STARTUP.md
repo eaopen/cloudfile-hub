@@ -119,3 +119,7 @@ Routine PR CI is not a substitute for real CE/MySQL/EAP DEV checks.
 ## Explicit ownership for safe removal
 
 By default, the roster sync **does not revoke existing** `default_admin` users absent from a provider snapshot. To revoke a previously provisioned account automatically, the operator must include its exact CE username in `CF_PROVIDER_ADMIN_MANAGED_ACCOUNTS` (comma-separated). This optional bounded list is an explicit operator declaration of ownership, not a new source-of-truth table. Never add unrelated CE administrators to this list. Normal new grants and unchanged roles remain idempotent. When changing a Provider admin roster, update the managed account list and re-run the same command, or use existing CE native administration for urgent removal. In particular, `cfadmin` stays independent. No per-request check is added.
+
+### Optional deployment administrator compatibility
+
+`CF_PROVIDER_ADMIN_EXPECTED_ACCOUNT` defaults to empty. An enterprise deployment can set it to its known business administrator account (Etech example: `admin`). The **trusted complete machine-authenticated roster must contain that exact account**, otherwise startup synchronization fails without role changes. This is a compatibility/health assertion, **not** an alternate elevation mechanism: username alone never grants CE rights; the normal UID, native Profile and IdP SSO rules still apply. Built-in `cfadmin` remains independent. No runtime Provider checking is introduced.
