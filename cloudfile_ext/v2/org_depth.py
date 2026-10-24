@@ -6,6 +6,7 @@ per-ACL-rule depth requires separate authorization logic and review.
 """
 from .errors import IdentityConflict, IdentityUnavailable
 from .identity import text
+from .provider_contract import direct_memberships, validated_entities
 
 MAX_ENTITIES = 16384
 
@@ -98,3 +99,29 @@ def scoped_memberships(direct, parents, *, org_level=1):
         return frozenset(selected)
     except (KeyError, TypeError, ValueError, AttributeError, IdentityConflict):
         raise IdentityUnavailable('invalid scoped organization membership') from None
+
+
+def trusted_scoped_memberships(context, catalog, uid, *, org_level=1,
+                               expected_namespaces=None, now=None):
+    """Cross-check one trusted user context and one complete entity catalog.
+
+    This is only a pure candidate calculation. No CE GroupUser, ACL, cache
+    marker or login/session state is changed. A source inconsistency refuses
+    the whole calculation; it never silently grants by a role display name.
+    """
+    entities = validated_entities(catalog, expected_namespaces=expected_namespaces,
+                                  now=now)
+    parents = org_parent_map(catalog['groups'])
+    direct = direct_memberships(context, uid)
+    if not direct <= entities.keys():
+        raise IdentityUnavailable('Directory direct membership entity missing')
+    claimed_ancestors = {
+        ('org', item['namespace'], item['external_id'])
+        for item in context['organization_ancestors']
+    }
+    # An ancestor claim must be provable from the same trusted Org catalog.
+    # Providers may omit ancestor hints entirely and rely on the catalog.
+    all_scope = scoped_memberships(direct, parents, org_level=0)
+    if not claimed_ancestors <= (all_scope - direct):
+        raise IdentityUnavailable('Directory ancestry disagrees with Org catalog')
+    return scoped_memberships(direct, parents, org_level=org_level)
