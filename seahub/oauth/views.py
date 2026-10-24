@@ -278,11 +278,15 @@ def oauth_callback(request):
             logger.warning('Trusted OAuth UID has no matching stable provider sub')
             return render_error(request, _('Error, please contact administrator.'))
         try:
+            if protocol == 'oidc':
+                # All strict OIDC UID bindings (not only Etech) require that
+                # the business UID was asserted in the signed ID Token.
+                # Never select an existing CE UID owner from UserInfo alone.
+                from cloudfile_ext.v2.oidc import require_signed_business_uid
+                require_signed_business_uid(claims, oauth_user_info['login_id'])
             if protocol == 'oidc' and getattr(settings, 'CF_DIRECTORY_URL', ''):
-                # Creation requires the business UID in the verified ID Token
-                # as well as UserInfo; OAuth-only callbacks remain reuse-only.
-                if claims.get('userId') != oauth_user_info['login_id']:
-                    raise ValueError('signed business UID required for OIDC JIT')
+                # Only the trusted Directory integration can provision; pure
+                # standalone OIDC still reuses an already-bound CE UID.
                 from cloudfile_ext.v2.etech_directory import provision_oidc_user
                 email = provision_oidc_user(uid=oauth_user_info['login_id'],
                                            provider=OAUTH_PROVIDER, subject=oauth_user_info['uid'])
