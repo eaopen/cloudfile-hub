@@ -302,7 +302,9 @@ CREATE TABLE `base_userstarredfiles` (
   `repo_id` varchar(36) NOT NULL,
   `path` longtext NOT NULL,
   `is_dir` tinyint(1) NOT NULL,
+  `obj_id` varchar(64) DEFAULT NULL,
   PRIMARY KEY (`id`),
+  KEY `base_userstarredfiles_obj_id` (`obj_id`),
   KEY `base_userstarredfiles_email_29e69053` (`email`),
   KEY `base_userstarredfiles_repo_id_f5ecc00a` (`repo_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -410,6 +412,7 @@ CREATE TABLE `django_migrations` (
 /*!40000 ALTER TABLE `django_migrations` DISABLE KEYS */;
 INSERT INTO `django_migrations` VALUES (1,'abuse_reports','0001_initial','2019-11-25 14:33:59.365443'),(2,'admin_log','0001_initial','2019-11-25 14:33:59.469182'),(3,'api2','0001_initial','2019-11-25 14:33:59.693836'),(4,'contenttypes','0001_initial','2019-11-25 14:33:59.777749'),(5,'contenttypes','0002_remove_content_type_name','2019-11-25 14:33:59.858901'),(6,'auth','0001_initial','2019-11-25 14:34:00.633824'),(7,'auth','0002_alter_permission_name_max_length','2019-11-25 14:34:00.680928'),(8,'auth','0003_alter_user_email_max_length','2019-11-25 14:34:00.733661'),(9,'auth','0004_alter_user_username_opts','2019-11-25 14:34:00.752616'),(10,'auth','0005_alter_user_last_login_null','2019-11-25 14:34:00.801604'),(11,'auth','0006_require_contenttypes_0002','2019-11-25 14:34:00.810103'),(12,'auth','0007_alter_validators_add_error_messages','2019-11-25 14:34:00.825053'),(13,'auth','0008_alter_user_username_max_length','2019-11-25 14:34:00.890617'),(14,'avatar','0001_initial','2019-11-25 14:34:01.063878'),(15,'tags','0001_initial','2019-11-25 14:34:01.557738'),(16,'group','0001_initial','2019-11-25 14:34:02.025435'),(17,'base','0001_initial','2019-11-25 14:34:03.226703'),(18,'base','0002_reposecretkey','2019-11-25 14:34:03.319120'),(19,'base','0003_auto_20181016_1242','2019-11-25 14:34:03.417627'),(20,'captcha','0001_initial','2019-11-25 14:34:03.542585'),(21,'contacts','0001_initial','2019-11-25 14:34:03.652793'),(22,'database','0001_initial','2019-11-25 14:34:03.725390'),(23,'database','0002_auto_20190129_2304','2019-11-25 14:34:03.776378'),(24,'django_cas_ng','0001_initial','2019-11-25 14:34:04.033039'),(25,'django_cas_ng','0002_auto_20180410_0948','2019-11-25 14:34:04.169581'),(26,'drafts','0001_initial','2019-11-25 14:34:10.856324'),(27,'drafts','0002_draftreview_author','2019-11-25 14:34:10.929413'),(28,'drafts','0003_auto_20190301_0648','2019-11-25 14:34:11.432905'),(29,'drafts','0004_auto_20190610_0628','2019-11-25 14:34:11.577308'),(30,'file_participants','0001_initial','2019-11-25 14:34:11.763284'),(31,'repo_tags','0001_initial','2019-11-25 14:34:11.903061'),(32,'file_tags','0001_initial','2019-11-25 14:34:12.191192'),(33,'file_tags','0002_remove_filetags_parent_folder_uuid','2019-11-25 14:34:12.272233'),(34,'institutions','0001_initial','2019-11-25 14:34:12.508609'),(35,'institutions','0002_institutionquota','2019-11-25 14:34:12.666828'),(36,'institutions','0003_auto_20180426_0710','2019-11-25 14:34:12.713231'),(37,'invitations','0001_initial','2019-11-25 14:34:12.865889'),(38,'invitations','0002_invitation_invite_type','2019-11-25 14:34:12.922193'),(39,'invitations','0003_auto_20160510_1703','2019-11-25 14:34:12.982345'),(40,'invitations','0004_auto_20160629_1610','2019-11-25 14:34:13.064011'),(41,'invitations','0005_auto_20160629_1614','2019-11-25 14:34:13.096590'),(42,'notifications','0001_initial','2019-11-25 14:34:13.310594'),(43,'notifications','0002_auto_20180426_0710','2019-11-25 14:34:13.355493'),(44,'notifications','0003_auto_20181115_0825','2019-11-25 14:34:13.404819'),(45,'options','0001_initial','2019-11-25 14:34:13.560917'),(46,'options','0002_auto_20181107_0811','2019-11-25 14:34:13.621244'),(47,'organizations','0001_initial','2019-11-25 14:34:13.735566'),(48,'organizations','0002_orgsettings','2019-11-25 14:34:13.846286'),(49,'organizations','0003_auto_20190116_0323','2019-11-25 14:34:13.891216'),(50,'post_office','0001_initial','2019-11-25 14:34:14.814213'),(51,'post_office','0002_add_i18n_and_backend_alias','2019-11-25 14:34:15.077736'),(52,'post_office','0003_longer_subject','2019-11-25 14:34:15.116500'),(53,'post_office','0004_auto_20160607_0901','2019-11-25 14:34:15.488007'),(54,'post_office','0005_auto_20170515_0013','2019-11-25 14:34:15.531781'),(55,'post_office','0006_attachment_mimetype','2019-11-25 14:34:15.590856'),(56,'post_office','0007_auto_20170731_1342','2019-11-25 14:34:15.622814'),(57,'post_office','0008_attachment_headers','2019-11-25 14:34:15.675049'),(58,'profile','0001_initial','2019-11-25 14:34:15.884625'),(59,'profile','0002_auto_20190122_0225','2019-11-25 14:34:15.922660'),(60,'registration','0001_initial','2019-11-25 14:34:16.012897'),(61,'related_files','0001_initial','2019-11-25 14:34:16.156173'),(62,'repo_api_tokens','0001_initial','2019-11-25 14:34:16.290298'),(63,'revision_tag','0001_initial','2019-11-25 14:34:16.522331'),(64,'role_permissions','0001_initial','2019-11-25 14:34:16.607236'),(65,'sessions','0001_initial','2019-11-25 14:34:16.695390'),(66,'share','0001_initial','2019-11-25 14:34:17.428416'),(67,'sysadmin_extra','0001_initial','2019-11-25 14:34:17.556464'),(68,'termsandconditions','0001_initial','2019-11-25 14:34:17.895240'),(69,'trusted_ip','0001_initial','2019-11-25 14:34:17.991415'),(70,'two_factor','0001_initial','2019-11-25 14:34:18.432226'),(71,'wiki','0001_initial','2019-11-25 14:34:18.609279'),(72,'wiki','0002_auto_20180326_0548','2019-11-25 14:34:18.797942'),(73,'wiki','0003_auto_20180428_0619','2019-11-25 14:34:18.851746'),(74,'base','0004_auto_20191125_1555','2019-11-25 15:57:10.821867'),(75,'contacts','0002_auto_20191125_1555','2019-11-25 15:57:10.842151'),(76,'group','0002_auto_20191125_1555','2019-11-25 15:57:10.966529'),(77,'invitations','0006_reposhareinvitation','2019-11-25 15:57:11.090331'),(78,'notifications','0004_auto_20191125_1555','2019-11-25 15:57:11.106563'),(79,'profile','0003_auto_20191125_1555','2019-11-25 15:57:11.124521'),(80,'revision_tag','0002_auto_20191125_1555','2019-11-25 15:57:11.142928'),(81,'share','0002_auto_20191125_1555','2019-11-25 15:57:11.176538'),(82,'termsandconditions','0002_auto_20191125_1555','2019-11-25 15:57:11.231421'),(83,'wiki','0004_auto_20191125_1555','2019-11-25 15:57:11.266350');
 /*!40000 ALTER TABLE `django_migrations` ENABLE KEYS */;
+INSERT INTO `django_migrations` VALUES (84,'base','0005_userstarredfiles_obj_id','2026-10-24 22:30:00.000000'),(85,'repo_tags','0002_repotags_is_system','2026-10-24 22:30:00.000000'),(86,'share','0003_unique_library_administrators','2026-10-24 22:30:00.000000'),(87,'share','0004_library_admin_auto_read','2026-10-24 22:30:00.000000'),(88,'share','0005_library_admin_auto_rw','2026-10-24 22:30:00.000000');
 /*!40101 SET @saved_cs_client     = @@character_set_client */;
 /*!40101 SET character_set_client = utf8 */;
 CREATE TABLE `django_session` (
@@ -837,7 +840,9 @@ CREATE TABLE `repo_tags_repotags` (
   `repo_id` varchar(36) NOT NULL,
   `name` varchar(255) NOT NULL,
   `color` varchar(255) NOT NULL,
+  `is_system` tinyint(1) NOT NULL DEFAULT 0,
   PRIMARY KEY (`id`),
+  KEY `repo_tags_repotags_is_system` (`is_system`),
   KEY `repo_tags_repotags_repo_id_1163a48f` (`repo_id`),
   KEY `repo_tags_repotags_name_3f4c9027` (`name`),
   KEY `repo_tags_repotags_color_1292b6c1` (`color`)
@@ -913,7 +918,11 @@ CREATE TABLE `share_extragroupssharepermission` (
   `repo_id` varchar(36) NOT NULL,
   `group_id` int(11) NOT NULL,
   `permission` varchar(30) NOT NULL,
+  `auto_granted_access` tinyint(1) NOT NULL DEFAULT 0,
+  `auto_granted_permission` varchar(15) NOT NULL DEFAULT '',
+  `auto_grant_previous_permission` varchar(15) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_library_group_admin` (`repo_id`,`group_id`),
   KEY `share_extragroupssharepermission_repo_id_38dbaea1` (`repo_id`),
   KEY `share_extragroupssharepermission_group_id_6ca34bb2` (`group_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;
@@ -928,7 +937,11 @@ CREATE TABLE `share_extrasharepermission` (
   `repo_id` varchar(36) NOT NULL,
   `share_to` varchar(255) NOT NULL,
   `permission` varchar(30) NOT NULL,
+  `auto_granted_access` tinyint(1) NOT NULL DEFAULT 0,
+  `auto_granted_permission` varchar(15) NOT NULL DEFAULT '',
+  `auto_grant_previous_permission` varchar(15) NOT NULL DEFAULT '',
   PRIMARY KEY (`id`),
+  UNIQUE KEY `unique_library_user_admin` (`repo_id`,`share_to`),
   KEY `share_extrasharepermission_repo_id_23cc10fc` (`repo_id`),
   KEY `share_extrasharepermission_share_to_823c16cb` (`share_to`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci;

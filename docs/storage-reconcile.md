@@ -6,6 +6,12 @@ Hub 基线：`ee732e74ce02f184586e1313b489e2198dbc15fe`。
 `Repo ∪ RepoTrash ∪ GarbageRepos`、`VirtualRepo`、`RepoStorageId`、Seafile 配置与物理目录；
 旧存储 key 表不读取、不修改、不删除。对象健康与实际读写需要单独验收。
 
+**2026-10-24 UUID V2 收敛**：V2 新库的外层物理目录固定为 Repo UUID，
+`RepoStorageId=auto-local:<repo_uuid>` 是唯一路由。现存 `cf_library_storage`
+仅在原生路由意外丢失时保护旧目录，不能将业务别名当作新的物理路径。
+已处于 V2 的正常重启和真正的新安装**不执行全库 reconcile**；仅原有
+Seafile CE 向 V2 明确切换时执行预检，历史自定义 V2 目录按既有路由保留。
+
 ## 命令与只读合同
 
 连接凭据使用 `CF_V2_DB_HOST`、`CF_V2_DB_PORT`（默认 3306）、`CF_V2_DB_USER`、
@@ -27,7 +33,7 @@ python -m cloudfile_ext.v2 storage-reconcile \
 {"mode":"dry-run","schema":{"status":"SCHEMA_MISSING"},"summary":{"NATIVE":1,"ORPHAN_DIRECTORY":0,"SCHEMA_MISSING":1},"items":[{"repo_id":"00000000-0000-4000-8000-000000000001","status":"NATIVE","storage_id":null,"category":"NATIVE","repo_key":"native-00000000-0000-4000-8000-000000000001","state":"active"}],"orphan_directories":[]}
 ```
 
-只有 `--apply` 可幂等创建与 Server `cloudfile-v2.sql` 完全一致的登记表并写登记行。
+`--apply` **仅对已经存在且符合 V2 五表合同的登记表幂等写入登记行**，不执行 DDL。若返回 `SCHEMA_MISSING`，请先通过 Docker/Server 现有 V2 初始化入口创建五张表，再重新执行只读预检与 `--apply`。不能把运行时 reconcile 用作升级自动建表。
 `--batch-size` 范围 1–2000；`--repo-id UUID` 可定向检查。正常退出 0；有业务 `BLOCKED` 时退出 2；
 数据库/文件访问、结构漂移等执行错误退出 1，均输出单个 JSON。`SCHEMA_MISSING`、`STATE_DRIFT`
 单独存在时不导致非零退出。旧 install/reconcile 命令拒绝 storage 专用模式参数，避免
@@ -37,6 +43,7 @@ python -m cloudfile_ext.v2 storage-reconcile \
 
 - 无原生路由：`NATIVE`，新登记 key 为 `native-<uuid>`。存在但 storage_id 为 NULL 的路由行为
   `BLOCKED: INVALID_STORAGE_ROUTE`，不会误认作没有路由。
+- `auto-local:<repo_uuid>`：已注册 UUID 本地路由直接 `REGISTERED`；若缺少旧式标记仅报告 `UUID_LOCAL`，不再自动补建一条生命周期记录。历史 `auto-local:<key>` 的自定义物理目录仍继续使用对应 key。
 - `auto-local:<key>`：`AUTO_LOCAL`，要求 key 合法，存储根及祖先、key/storage/type/repo
   目录链没有符号链接，且至少一个对象类型存在真实库目录。
 - 三个 fs 后端均指向真实原生 `seafile-data` 的存储类：`NATIVE_CLASS_PINNED`，默认只报告。
@@ -64,13 +71,13 @@ python -m cloudfile_ext.v2 storage-reconcile \
   --apply --normalize-native-class legacy-default
 ```
 
-切换 filesystem 前处理业务 BLOCKED 与仍然存在的 NATIVE_CLASS_PINNED；缺登记表的只读预检可先通过，
-然后显式 apply 建表、登记。配置优先 `[cloudfile_v2] auto_local_root`，否则读取存储类 JSON 的
+切换 filesystem 前处理业务 BLOCKED 与仍然存在的 NATIVE_CLASS_PINNED；缺登记表时只允许先做只读预检，
+然后由现有 V2 Schema 初始化入口显式建表，再运行 `--apply` 登记。配置优先 `[cloudfile_v2] auto_local_root`，否则读取存储类 JSON 的
 唯一 auto-local/fs 模板。相对 storage_classes_file 与原生 Server 一样相对于 conf 目录；
 CF_STORAGE_CLASSES_JSON 优先于文件。legacy install/reconcile 从现有 Seafile 环境变量和标准目录检测配置。
 
 每库一个事务；INSERT SELECT 在写时复核原生事实与字节精确路由，唯一键冲突不会覆盖其他登记。
-已成功的其他库保留，可幂等重试。Hub runtime 共用规则，只自动处理 NATIVE/AUTO_LOCAL，其他项仅报告。
+已成功的其他库保留，可幂等重试。仅在**显式 CE 升级预检**时按需登记历史 NATIVE/AUTO_LOCAL；V2 新装/正常重启不触发全库扫描或重复登记。
 
 ## 版本证据与验证
 
@@ -93,7 +100,7 @@ CF_STORAGE_TEST_MYSQL_PORT=13320 python3 -m unittest \
 两版本均 `Ran 39 tests ... OK`，后续新增结构变更只读拒绝用例在两版本各单独通过，
 并对用户“native retired 但仍在 Trash”的精确场景在两版本追加定向通过。
 包含 SELECT-only 账户在 `START TRANSACTION READ ONLY` 下的有表/缺表双场景、缺表只读分类后
-apply 安装、reserved 兼容、STATE_DRIFT 保持、原生 symlink 布局、写时路由复核、并发唯一键、
+初始化 V2 Schema 后 apply 登记、reserved 兼容、STATE_DRIFT 保持、原生 symlink 布局、写时路由复核、并发唯一键、
 规范化回滚、Trash/Garbage、Virtual、全局 ORPHAN 与旧表哨兵不变。
 
 实现阶段两轮元数据检查失败分别来自 index_name 默认排序顺序与 MariaDB 对 SELECT-only 用户隐藏
