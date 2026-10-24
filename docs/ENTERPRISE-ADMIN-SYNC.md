@@ -35,7 +35,12 @@ CE system administrator authority.
 
 - `CF_PROVIDER_ADMIN_SYNC_ENABLED`: **unset / False by default**. When
   explicitly set True, eligible trusted login and preprovision paths may
-  reconcile CE Staff and AdminRole, and the request-time gate activates.
+  reconcile CE Staff and AdminRole; the request-time gate also activates.
+- `CF_PROVIDER_ADMIN_GUARD_ENABLED`: **unset / False by default**. Setting
+  this True enforces fresh Provider admin authority on browser Sessions and
+  API Tokens even while `SYNC_ENABLED=False` (no new native admin grants).
+  This is the required **guard-only rollback mode** until persisted
+  provider-managed Staff/AdminRole rows have been safely cleared.
 - `CF_DIRECTORY_URL` and its machine-credential settings: choose the
   existing built-in trusted enterprise Directory adapter.
 - `CF_PROVIDER_ADMIN_SUBJECT_FETCH`: optional fully qualified **server-side**
@@ -53,19 +58,23 @@ CE system administrator authority.
 
 ## Critical operations / rollback warning
 
-**DO NOT simply switch `CF_PROVIDER_ADMIN_SYNC_ENABLED` back to False after
-any enterprise administrator has been materialized.** Turning the enforcement
-flag off while such accounts retain native `is_staff=1` would allow old
-Session/API credentials to use those residual privileges without a Provider
-check. Before any disable/rollback:
+**DO NOT disable both `CF_PROVIDER_ADMIN_SYNC_ENABLED` and
+`CF_PROVIDER_ADMIN_GUARD_ENABLED` while any enterprise administrator remains
+materialized.** Otherwise an old Session/API Token could exploit residual
+`EmailUser.is_staff=1` with no fresh Provider proof. Safe rollback is:
 
-1. Keep the request-time gate active while reconciling or explicitly demoting
-   *every externally managed native administrator* and verifying both CE Staff
-   and AdminRole are cleared. Preserve native `cfadmin`.
-2. Review outstanding user sessions and CE API tokens, and revoke those whose
-   administrator authorization cannot be established.
-3. Confirm independent native administrators are not modified. Only then can
-   the feature be safely disabled.
+1. Disable new grants but **keep read enforcement**:
+   `CF_PROVIDER_ADMIN_SYNC_ENABLED=False`,
+   `CF_PROVIDER_ADMIN_GUARD_ENABLED=True`. Provider revocations and outages
+   continue to deny privileged requests even though native Staff may remain.
+2. Using an independently authenticated native `cfadmin`, reconcile/demote
+   *every external managed administrator*, verify CE Staff and AdminRole
+   readbacks, and revoke old Session/API Tokens as needed. Protect
+   independent native accounts.
+3. Only **after** all external managed Staff records are cleared or
+   otherwise explicitly reviewed and de-scoped, disable the guard if
+   desired. Losing the Directory alone is never a reason to grant fallback
+   system administrator access.
 
 A separate guarded deprovision/rollback procedure and DEV test are **release
 blockers**, not optional enhancements.
