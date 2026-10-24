@@ -69,7 +69,9 @@ class Command(BaseCommand):
         try:
             roster = validated_roster(read_provider_roster())
             with native_identity() as identity:
-                outcome = sync_native_admins(identity, roster)
+                managed_accounts = tuple(filter(None, (name.strip() for name in
+                    getattr(settings, 'CF_PROVIDER_ADMIN_MANAGED_ACCOUNTS', '').split(','))))
+                outcome = sync_native_admins(identity, roster, managed_accounts=managed_accounts)
         except Exception as error:
             # Do not log personal data, service tokens or full error payloads.
             raise CommandError('CF_ADMIN_SYNC FAILED: ' + type(error).__name__) from error
