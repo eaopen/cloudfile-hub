@@ -76,8 +76,11 @@ class RepoWithStorageView(APIView):
         repo_key = request.data.get('repo_key')
         classes = _storage_classes()
         if classes is None:
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
-                             'Failed to load storage classes.')
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
+                             'Native storage capability is unavailable.')
+        if not classes:
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE,
+                             'Storage allocation is not configured.')
         automatic = any(c.get('is_auto') is True for c in classes)
         valid_ids = {c.get('storage_id') for c in classes if not c.get('is_auto')}
         if storage_id and storage_id not in valid_ids:
