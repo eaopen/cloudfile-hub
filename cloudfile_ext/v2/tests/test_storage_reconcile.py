@@ -202,7 +202,7 @@ class StorageSQLTests(unittest.TestCase):
         self.sql("UPDATE cf_library_storage SET state='retired' WHERE repo_id=%s",
                  (rid,))
         report = self.service.run(batch_size=1)
-        self.assertEqual(report['summary']['BLOCKED'], 0)
+        self.assertEqual(report['summary'].get('BLOCKED', 0), 0)
 
     def test_schema_exact_idempotent_without_dynamic_ddl(self):
         self.service.ensure_schema()
