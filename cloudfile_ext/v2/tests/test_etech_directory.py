@@ -36,6 +36,32 @@ class DirectoryRuntimeTests(TestCase):
         self.identity.prepare.assert_called_once_with(uid='uid',login_name='E001',account='E001')
         self.memberships.ensure.assert_not_called()
 
+    def test_opt_in_admin_sync_only_runs_after_trusted_user_preparation(self):
+        with override_settings(CF_PROVIDER_ADMIN_SYNC_ENABLED=True), \
+             patch('cloudfile_ext.v2.etech_directory.runtime', self.runtime), \
+             patch('cloudfile_ext.v2.provider_admin_reconcile.reconcile_native_admin') as sync:
+            self.assertEqual(prepare_user('uid'), 'opaque@auth.local')
+        sync.assert_called_once()
+        args, kwargs = sync.call_args
+        self.assertEqual(args[:3], (self.identity, 'uid', 'opaque@auth.local'))
+        self.assertIs(kwargs['fetch_subject'], self.directory.subject)
+        self.assertIs(kwargs['enabled'], True)
+
+    def test_opt_in_admin_sync_runs_after_verified_oidc_binding(self):
+        from cloudfile_ext.v2.etech_directory import provision_oidc_user
+        with override_settings(CF_PROVIDER_ADMIN_SYNC_ENABLED=True), \
+             patch('cloudfile_ext.v2.etech_directory.runtime', self.runtime), \
+             patch('cloudfile_ext.v2.jit.SQLJITProvisioner') as jit, \
+             patch('cloudfile_ext.v2.provider_admin_reconcile.reconcile_native_admin') as sync:
+            jit.return_value.ensure.return_value = 'opaque@auth.local'
+            self.assertEqual(provision_oidc_user(
+                uid='uid', provider='idp', subject='signed-sub'), 'opaque@auth.local')
+        jit.return_value.ensure.assert_called_once_with(
+            uid='uid', provider='idp', subject='signed-sub')
+        sync.assert_called_once()
+        self.assertEqual(sync.call_args.args[:3],
+                         (self.identity, 'uid', 'opaque@auth.local'))
+
     def test_disabled_or_changed_uid_cannot_create_native_account(self):
         for value in (subject('disabled'),dict(subject(),userId='other')):
             @contextmanager
