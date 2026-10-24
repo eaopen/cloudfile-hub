@@ -1,8 +1,9 @@
 """Lightweight, dependency-free tests for startup-only administrator sync."""
 from datetime import datetime, timedelta, timezone
 import unittest
+from unittest.mock import Mock
 
-from cloudfile_ext.v2.admin_startup import changes, validated_roster
+from cloudfile_ext.v2.admin_startup import changes, managed_scope, sync_native_admins, validated_roster
 from cloudfile_ext.v2.errors import IdentityUnavailable
 
 
@@ -75,6 +76,17 @@ class ProviderAdminRosterTests(unittest.TestCase):
                                     managed_accounts=('old@auth.local',))
         self.assertEqual(remove, {'old@auth.local'})
         self.assertNotIn('manual@auth.local', remove)
+
+    def test_invalid_scope_fails_before_native_account_precreation(self):
+        identity = Mock()
+        for invalid in (('cfadmin@auth.local',), ('dup@auth.local', 'dup@auth.local'),
+                        (' bad@auth.local ',), ('',), tuple('u%d' % i for i in range(33)),
+                        'admin@auth.local'):
+            with self.subTest(invalid=invalid), self.assertRaises(IdentityUnavailable):
+                sync_native_admins(identity, (('uid-9', 'admin'),), managed_accounts=invalid)
+            identity.prepare.assert_not_called()
+        self.assertEqual(managed_scope(()), frozenset())
+        self.assertEqual(managed_scope(('old@auth.local',)), frozenset(('old@auth.local',)))
 
     def test_staff_or_other_role_is_never_adopted_as_external_admin(self):
         for state in (('same-uid', True, None),
