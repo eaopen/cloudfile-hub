@@ -54,3 +54,35 @@ jobs:
           while IFS= read -r path; do
             [[ ! -f "$path" ]] || bash -n "$path"
           done < <(git diff --name-only HEAD^ HEAD -- '*.sh')
+
+  uuid-v2-orphan-allocation-proof:
+    if: github.event_name == 'pull_request' && github.event.pull_request.head.ref == 'fix/v2-uuid-alias-separation-20261024'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: storage-test-only
+          MARIADB_DATABASE: fixture
+        ports:
+          - 13319:3306
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=10s --health-timeout=5s --health-retries=12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: eaopen/cloudfile-server
+          ref: c8c35480a0255e38e38a5b30c7132d04536967ae
+          path: cloudfile-server
+      - name: Verify explicit inventory and missing Repo crash case on disposable MariaDB
+        env:
+          CF_STORAGE_TEST_MYSQL_PORT: '13319'
+        run: |
+          python3 -m pip install --disable-pip-version-check pymysql==1.1.1
+          CF_V2_DDL="$GITHUB_WORKSPACE/cloudfile-server/scripts/sql/mysql/cloudfile-v2.sql" \
+            python3 -m unittest \
+              cloudfile_ext.v2.tests.test_storage_reconcile.ConfigTests \
+              cloudfile_ext.v2.tests.test_storage_reconcile.StorageSQLTests -v
