@@ -19,7 +19,7 @@ Virtual repos are not managed here; use their CE origin/owner scope.
 GET /api/v2.1/cloudfile/authorization/v1/library-grants/?repo_id=00000000-0000-4000-8000-000000000001
 ```
 
-Response describes **current CE facts**, not an A/B configuration source:
+Response describes **current CE facts**, not an A/B configuration source.\n\`is_admin\` is read from CE's existing elevated-share markers in two bounded\nqueries rather than per-recipient database queries:
 
 ```json
 {
@@ -27,8 +27,8 @@ Response describes **current CE facts**, not an A/B configuration source:
   "owner": "owner@auth.local",
   "source": "seafile-ce",
   "grants": [
-    {"subject_type":"user","subject":"worker@auth.local","permission":"r"},
-    {"subject_type":"group","subject":7,"permission":"rw"}
+    {"subject_type":"user","subject":"worker@auth.local","permission":"r","is_admin":false},
+    {"subject_type":"group","subject":7,"permission":"rw","is_admin":false}
   ]
 }
 ```
