@@ -29,6 +29,9 @@ jobs:
       - name: Verify A-mode ACL publisher scope and CAS (mock SQL)
         run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_publisher_scope_mock -v
 
+      - name: Verify native CE library grant management (pure Python)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_native_grants_pure -v
+
       - name: Validate only changed source
         shell: bash
         run: |
