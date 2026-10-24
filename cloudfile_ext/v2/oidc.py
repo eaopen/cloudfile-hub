@@ -54,6 +54,36 @@ def verify_id_token(token, *, issuer, client_id, nonce, jwks_uri):
         raise IdentityUnavailable('OIDC identity proof rejected') from error
 
 
+def verified_oidc_subject(claims, user_info):
+    """Bind only the signed OIDC subject, never a UserInfo email or display name.
+
+    A deployments's optional business UID must agree in both the ID Token
+    and UserInfo before a Directory-aware JIT may reuse that UID.
+    """
+    if (not isinstance(claims, dict) or not isinstance(user_info, dict)
+            or not isinstance(claims.get('sub'), str) or not claims['sub']
+            or claims['sub'] != user_info.get('sub')):
+        raise IdentityUnavailable('OIDC subject mismatch')
+    if 'userId' in claims and (not isinstance(claims['userId'], str)
+                               or not claims['userId']
+                               or claims['userId'] != user_info.get('userId')):
+        raise IdentityUnavailable('OIDC user identity mismatch')
+    return claims['sub']
+
+
+
+def require_signed_business_uid(claims, uid):
+    """A mapped enterprise UID must also be an explicit signed ID Token claim.
+
+    UserInfo alone may supply optional profile metadata, never select a CE UID
+    owner for OIDC. Legacy OAuth2 continues its existing separate path.
+    """
+    if (not isinstance(claims, dict) or not isinstance(uid, str) or not uid
+            or uid != uid.strip() or claims.get('userId') != uid):
+        raise IdentityUnavailable('OIDC signed business UID required')
+    return uid
+
+
 def oidc_login(request):
     # Reuse the configured confidential OAuth code flow and the same callback,
     # account binding, Session, CSRF and downstream authorization.
