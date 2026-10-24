@@ -282,7 +282,9 @@ class FreshDatabaseTest(unittest.TestCase):
         before = {table: self.query("SELECT * FROM " + table)
                   for table in ("Repo", "RepoOwner", "Branch", "RepoStorageId")}
         discovery = NativeLibraryDiscovery(self.connection)
-        self.assertEqual(discovery.inspect(repo)["status"], "NATIVE_UNREGISTERED")
+        # A native Seafile library needs no CloudFile row; the explicit
+        # transition still registers the historical marker through reconcile().
+        self.assertEqual(discovery.inspect(repo)["status"], "NATIVE_REGISTERED")
         self.assertEqual(discovery.reconcile(repo), {"REGISTERED": 1, "ORPHAN_DIRECTORY": 0})
         self.assertEqual(discovery.reconcile(repo), {"REGISTERED": 1, "ORPHAN_DIRECTORY": 0})
         self.schema.install()  # fresh schema recheck must not erase an adopted row
