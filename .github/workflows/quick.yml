@@ -26,6 +26,9 @@ jobs:
       - name: Validate additive ACL batch and shared cache contracts
         run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_batch_pure
 
+      - name: Validate direct Org scope and group-kind contract (pure Python)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_group_kind_contract
+
       - name: Validate only changed source
         shell: bash
         run: |
