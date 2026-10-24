@@ -31,6 +31,24 @@ def verified_user(value, uid, *, account_field='account'):
     return login, account
 
 
+
+def direct_memberships(value, uid):
+    """Read only directly assigned Org/Role keys from one validated snapshot.
+
+    `organization_ancestors` is validated by the common subject parser but
+    excluded from direct membership. This helper has no GroupUser write path;
+    #55/#63 own any authorization-depth changes.
+    """
+    validate_subject(value, uid)
+    if value['status'] != 'active':
+        raise IdentityUnavailable('Directory user disabled')
+    return frozenset(
+        (kind, item['namespace'], item['external_id'])
+        for field, kind in (('organizations', 'org'), ('roles', 'role'))
+        for item in value[field])
+
+
+
 def validated_entities(snapshot, *, expected_namespaces=None, now=None):
     """Validate a bounded Org/Role catalog; return {(kind,ns,id): name}.
 
