@@ -46,6 +46,9 @@ jobs:
       - name: Check B API route and CE management guards (source)
         run: python3 -m unittest cloudfile_ext.v2.tests.test_native_permission_api_source -v
 
+      - name: Verify effective ACL rule matrix (pure Python)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_effective_vectors -v
+
       - name: Check CE and UUID V2 route diagnostics (pure Python)
         run: python3 -m unittest cloudfile_ext.v2.tests.test_native_discovery -v
 
