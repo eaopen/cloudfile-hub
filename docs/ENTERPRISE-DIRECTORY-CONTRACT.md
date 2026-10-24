@@ -30,6 +30,9 @@ installed plugin. It supplies two kinds of data:
    `verified_user(context, uid, account_field='account')` checks the exact
    UID, freshness, duplicates and active state, then returns the optional
    display/login label and creation account. No CE writes occur here.
+   `direct_memberships(context, uid)` returns only directly assigned Org/Role
+   keys; ancestor facts are validated but never converted into membership by
+   this helper. No CE GroupUser writes occur.
 2. A bounded `{contract_version:'2.0', view:'entities', generated_at, groups}`
    snapshot containing `subject_type` (org/role), `namespace`,
    `external_id`, `name`, optional `parent_external_id`.
