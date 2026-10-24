@@ -1,10 +1,9 @@
 # -*- coding: utf-8 -*-
 """Storage-class assignment API views (P2 storage backends).
 
-Backend + API only; no UI.  Both views are registered only when
-``CF_ENABLE_S3_STORAGE`` is on (see ``cloudfile_ext/storage/__init__.py``), so
-with every switch off these routes do not exist and the native CE create-repo
-flow is untouched.
+Backend + API only; no UI. Views are enabled for an existing
+Seafile V2 automatic local root or an explicitly enabled storage-class
+deployment. This API never changes ordinary Seafile native repository routes.
 
 - ``GET  /api/v2.1/cloudfile/storage-classes/`` lists the configured classes.
 - ``POST /api/v2.1/cloudfile/repos/`` creates a repo pinned to ``storage_id``
@@ -109,8 +108,13 @@ class RepoWithStorageView(APIView):
         try:
             repo_id = seafile_api.create_repo_with_storage(json.dumps(payload))
         except SearpcError:
-            return api_error(status.HTTP_409_CONFLICT if repo_key is not None else
-                             status.HTTP_500_INTERNAL_SERVER_ERROR, 'Library allocation failed.')
+            # Native allocation can fail after reserving a key, writing the
+            # first Commit, or recording its owner. A retry may create a second
+            # library and an RPC error alone does not prove a UNIQUE conflict.
+            # Never present a 409 or encourage an automatic retry without
+            # inspecting the original repo/key status.
+            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                             'Library allocation result is unknown; inspect storage before retrying.')
         if not repo_id:
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
                              'Failed to create library.')
