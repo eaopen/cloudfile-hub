@@ -1,0 +1,68 @@
+"""Lightweight, dependency-free tests for startup-only administrator sync."""
+from datetime import datetime, timedelta, timezone
+import unittest
+
+from cloudfile_ext.v2.admin_startup import changes, validated_roster
+from cloudfile_ext.v2.errors import IdentityUnavailable
+
+
+class ProviderAdminRosterTests(unittest.TestCase):
+    def roster(self, entries=None, *, issued=None, complete=True):
+        return {
+            'contract_version': '1.0', 'complete': complete,
+            'generated_at': (issued or datetime.now(timezone.utc)).isoformat(),
+            'admins': ([{'uid': 'external-9', 'account': 'admin'}]
+                       if entries is None else entries),
+        }
+
+    def test_valid_single_and_multiple_sso_administrators(self):
+        self.assertEqual(validated_roster(self.roster()),
+                         (('external-9', 'admin'),))
+        multiple = [{'uid': 'u1', 'account': 'admin'},
+                    {'uid': 'u2', 'account': 'operator'}]
+        self.assertEqual(validated_roster(self.roster(multiple)),
+                         (('u1', 'admin'), ('u2', 'operator')))
+
+    def test_unavailable_or_incomplete_source_is_not_an_empty_revocation(self):
+        cases = [
+            self.roster(complete=False),
+            self.roster([]),
+            self.roster([{'uid': 'a', 'account': 'admin'}] * 33),
+            self.roster(issued=datetime.now(timezone.utc) - timedelta(minutes=10)),
+            self.roster(issued=datetime.now(timezone.utc) + timedelta(minutes=10)),
+            dict(self.roster(), contract_version='old'),
+            dict(self.roster(), generated_at='not a date'),
+            dict(self.roster(), admins=''),
+            self.roster([{'uid': 'a', 'account': 'cfadmin'}]),
+            self.roster([{'uid': 'a', 'account': 'admin'},
+                         {'uid': 'b', 'account': 'ADMIN'}]),
+            self.roster([{'uid': 'a', 'account': 'admin'},
+                         {'uid': 'a', 'account': 'newadmin'}]),
+        ]
+        for invalid in cases:
+            with self.subTest(invalid=invalid), self.assertRaises(IdentityUnavailable):
+                validated_roster(invalid)
+
+    def test_startup_diff_is_idempotent_and_removes_stale_default_admin(self):
+        current = {'old@auth.local': ('old-uid', True, 'default_admin'),
+                   'admin@auth.local': ('uid-9', True, 'default_admin')}
+        add, remove, keep = changes(
+            current, {'admin@auth.local': 'uid-9', 'operator@auth.local': 'uid-10'})
+        self.assertEqual(add, {'operator@auth.local'})
+        self.assertEqual(remove, {'old@auth.local'})
+        self.assertEqual(keep, {'admin@auth.local'})
+        self.assertEqual(changes({'admin@auth.local': ('uid-9', True, 'default_admin')},
+                                 {'admin@auth.local': 'uid-9'}),
+                         (set(), set(), {'admin@auth.local'}))
+
+    def test_staff_or_other_role_is_never_adopted_as_external_admin(self):
+        for state in (('same-uid', True, None),
+                      ('same-uid', True, 'system_admin'),
+                      ('same-uid', False, 'default_admin'),
+                      ('other-uid', True, 'default_admin')):
+            with self.subTest(state=state), self.assertRaises(IdentityUnavailable):
+                changes({'user@auth.local': state}, {'user@auth.local': 'same-uid'})
+
+
+if __name__ == '__main__':
+    unittest.main()
