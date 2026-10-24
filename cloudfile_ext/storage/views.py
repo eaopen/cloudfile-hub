@@ -13,10 +13,8 @@ flow is untouched.
 """
 
 import json
-import re
 
-from django.conf import settings
-from django.db import connections
+from cloudfile_ext.storage.key_policy import valid_repo_key
 from pysearpc import SearpcError
 
 from rest_framework import status
@@ -86,17 +84,17 @@ class RepoWithStorageView(APIView):
         if storage_id and storage_id not in valid_ids:
             return api_error(status.HTTP_400_BAD_REQUEST, 'storage_id invalid.')
         if repo_key is not None:
-            # Keys name managed subdirectories, never host paths. Reservations
-            # remain after deletion; native unique constraints also close races.
-            if (not isinstance(repo_key, str) or not 1 <= len(repo_key) <= 80 or
-                    not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]*[a-z0-9])?', repo_key) or
-                    storage_id or not automatic or repo_key in valid_ids):
-                return api_error(status.HTTP_400_BAD_REQUEST, 'repo_key invalid or conflicting.')
-            alias = getattr(settings, 'CF_DATABASE_ALIAS', 'cloudfile')
-            with connections[alias].cursor() as cursor:
-                cursor.execute('SELECT 1 FROM cf_library_storage_key WHERE repo_key = %s', [repo_key])
-                if cursor.fetchone():
-                    return api_error(status.HTTP_409_CONFLICT, 'Library key is already reserved.')
+            # An explicit key chooses a physical directory. Only administrators
+            # may specify it; ordinary users keep the native UUID default.
+            if not request.user.is_staff:
+                return api_error(status.HTTP_403_FORBIDDEN,
+                                 'Explicit repo_key requires administrator privileges.')
+            if (not valid_repo_key(repo_key) or storage_id or not automatic or
+                    repo_key in valid_ids):
+                return api_error(status.HTTP_400_BAD_REQUEST,
+                                 'repo_key invalid or incompatible with storage class.')
+            # No TOCTOU precheck or old cf_library_storage_key table. Native
+            # RepoStorageId + cf_library_storage transaction is authoritative.
 
         payload = {
             'name': repo_name,
