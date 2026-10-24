@@ -114,13 +114,15 @@ class NativeLibraryGrants:
         before = rows.get((kind, subject))
         if before != expected:
             raise RevisionConflict()
-        if before is not None and self.protected_admin(kind, subject):
-            # CE's separate library-admin marker must not be silently removed
-            # by this deliberately r/rw-only management API.
-            raise PolicyError('native library admin share requires CE admin API')
         if before == desired:
+            # A verified no-op is idempotent even when CE also carries a
+            # separate library-admin marker. No share RPC or admin change.
             return {'repo_id': self.repo_id, 'subject_type': kind,
                     'subject': subject, 'permission': desired, 'changed': False}
+        if before is not None and self.protected_admin(kind, subject):
+            # CE's separate library-admin marker must not be changed or
+            # silently revoked by this r/rw-only management API.
+            raise PolicyError('native library admin share requires CE admin API')
         if desired is not None:
             if kind == 'user' and not self.user_exists(subject):
                 raise PolicyError('native user unavailable')
