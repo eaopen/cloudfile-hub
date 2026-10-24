@@ -69,7 +69,7 @@ def changes(current, wanted):
         else:
             raise IdentityUnavailable('native administrator conflict')
     for username, (uid, staff, role) in current.items():
-        if username not in wanted and role == ROLE and uid and username.endswith('@auth.local'):
+        if username not in wanted and role == ROLE and uid:
             remove.add(username)
     return add, remove, keep
 
@@ -108,8 +108,7 @@ def sync_native_admins(identity, roster):
                                "WHERE a.role=%s FOR UPDATE", (ROLE,))
                 current = {}
                 for name, uid, staff, role in cursor.fetchall():
-                    if (not name or name.lower().split('@', 1)[0] == 'cfadmin'
-                            or not name.endswith('@auth.local') or not uid):
+                    if (not name or name.lower().split('@', 1)[0] == 'cfadmin' or not uid):
                         continue
                     if staff not in (0, 1):
                         raise IdentityUnavailable('invalid existing native administrator')
@@ -140,14 +139,19 @@ def sync_native_admins(identity, roster):
                     if cursor.rowcount != 1:
                         raise IdentityUnavailable('native administrator grant conflict')
                 for name in sorted(remove):
-                    cursor.execute('UPDATE ' + accounts +
-                                   ' SET is_staff=0 WHERE email=%s AND is_staff=1', (name,))
-                    if cursor.rowcount != 1:
-                        raise IdentityUnavailable('native administrator revoke conflict')
+                    if current[name][1]:
+                        cursor.execute('UPDATE ' + accounts +
+                                       ' SET is_staff=0 WHERE email=%s AND is_staff=1', (name,))
+                        if cursor.rowcount != 1:
+                            raise IdentityUnavailable('native administrator revoke conflict')
                     cursor.execute('DELETE FROM ' + admin_roles +
                                    ' WHERE email=%s AND role=%s', (name, ROLE))
                     if cursor.rowcount != 1:
                         raise IdentityUnavailable('native role removal conflict')
+                    cursor.execute('SELECT is_staff FROM ' + accounts +
+                                   ' WHERE email=%s', (name,))
+                    if cursor.fetchall() != ((0,),):
+                        raise IdentityUnavailable('native administrator revoke readback mismatch')
                 for name, uid in wanted.items():
                     cursor.execute('SELECT e.is_staff,p.login_id,a.role FROM ' +
                                    accounts + ' e JOIN ' + profiles + ' p ON p.user=e.email ' +
