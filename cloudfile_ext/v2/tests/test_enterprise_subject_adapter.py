@@ -35,8 +35,8 @@ class SubjectAdapterSelectionTests(TestCase):
 
 
 class CurrentPrincipalSelectionTests(TestCase):
-    def principal(self, uid, config, *, is_active=True, groups=()):
-        native = SimpleNamespace(email=USER, is_active=is_active)
+    def principal(self, uid, config, *, is_active=True, groups=(), username=USER):
+        native = SimpleNamespace(email=username, is_active=is_active)
         owner = Mock()
         owner.get_profile_by_user.return_value = (
             SimpleNamespace(login_id=uid) if uid is not None else None)
@@ -56,9 +56,9 @@ class CurrentPrincipalSelectionTests(TestCase):
              patch('cloudfile_ext.v2.acl_runtime.connection.cursor', return_value=manager) as connection:
             if not is_active:
                 with self.assertRaises(PermissionError):
-                    current_principal(USER)
+                    current_principal(username)
                 return None, imported, loader, connection
-            result = current_principal(USER)
+            result = current_principal(username)
             return result, imported, loader, connection
 
     def test_standalone_numeric_uid_does_not_contact_etech(self):
@@ -97,9 +97,18 @@ class CurrentPrincipalSelectionTests(TestCase):
         loader.assert_called_once_with('A-38', USER)
         connection.assert_called_once()
 
+    def test_etech_business_admin_uses_trusted_directory_not_native(self):
+        config = SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test')
+        result, imported, loader, connection = self.principal(
+            '9', config, username='admin@auth.local')
+        self.assertEqual((result.provider, result.uid), ('etech', '9'))
+        loader.assert_called_once_with('9', 'admin@auth.local')
+        connection.assert_called_once()
+
     def test_builtin_system_identity_keeps_native_admin_path(self):
         result, imported, loader, connection = self.principal(
-            'cfadmin', SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test'))
+            'cfadmin', SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test'),
+            username='cfadmin@auth.local')
         self.assertEqual(result.provider, 'native-local')
         imported.assert_not_called()
         connection.assert_not_called()
