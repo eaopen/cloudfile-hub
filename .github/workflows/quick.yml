@@ -29,6 +29,9 @@ jobs:
       - name: Validate trusted enterprise superadmin input (pure Python)
         run: python3 -m unittest cloudfile_ext.v2.tests.test_provider_admin_claim
 
+      - name: Validate native enterprise administrator transitions (pure Python)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_provider_admin_claim cloudfile_ext.v2.tests.test_provider_admin_reconcile_pure
+
       - name: Validate only changed source
         shell: bash
         run: |
