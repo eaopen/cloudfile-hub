@@ -34,6 +34,8 @@ jobs:
 
       - name: Verify trusted user/catalog depth integration (pure Python)
         run: python3 -m unittest cloudfile_ext.v2.tests.test_org_depth_integration_pure -v
+      - name: Verify A-mode ACL publisher scope and CAS (mock SQL)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_publisher_scope_mock -v
 
       - name: Validate only changed source
         shell: bash
