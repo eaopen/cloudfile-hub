@@ -1,59 +1,80 @@
-# CloudFile ACL configuration writers — Hub #57
+# CloudFile ACL configuration modes — Hub #57
 
-This note accompanies the **existing** A-mode batch publisher; it does not
-activate a new B-mode permission management feature.
+**Product decision (2026-10-24):** CloudFile supports both modes with a single
+execution layer. **B is the default product approach**; **A is an optional
+external-configuration synchronization enhancement**. Each installation and
+library selects the approach that fits its operations. This document describes
+deployment conventions, not another authorization data model.
 
-## One executable ACL truth
+## B — default CloudFile management
 
-Both external configuration (A) and CloudFile native management (B) must
-ultimately write the same CE library grant facts and the same
-`cf_dir_acl` rows, which are evaluated by Hub `Authority` and Server final
-permission checks. A publisher label is not a user/org/role permission and
-must not change any of the [#56 vectors](./ACL-EFFECTIVE-CONTRACT.md).
+CloudFile CE owner/admin management is the normal entry point for configuring
+native library grants and `cf_dir_acl` directory rules (read/write/invisible,
+inheritance, shared roots). Standalone CE/CloudFile must not require an external
+business system to set permissions. Reuse CE native grant and existing Hub
+management APIs. The full consistent B management UI/API remains an incremental
+feature under #57 and needs actual acceptance; **default product positioning
+does not assert that every UI operation has already shipped**.
 
-## What existing A mode already guarantees
+## A — optional external synchronization
 
-`LibraryACLBatch` reads a bounded complete **provider** snapshot and uses
-a fingerprint including row revisions. `ACLStore.replace_owned()` locks the
-native master branch, checks that fingerprint, then inserts/updates/deletes
-only the **natural keys included in the caller's `managed` set**.
-An out-of-set desired rule fails before writing. Unlisted keys and rows
-belonging to another subject provider remain unchanged. Stale fingerprints
-return a conflict rather than silently overwriting updates.
+When an existing business application has authoritative permission settings,
+it may keep its expected configuration and publish it through trusted
+`authorization/v1/library-acl-batch` (GET/preview/PUT). The
+`ACLStore.replace_owned` implementation takes a complete provider snapshot,
+fingerprint/CAS and the declared `managed` natural-key operation scope. It
+changes only declared keys; other keys/providers remain untouched. Etech may
+select A for its business-owned libraries. A never replaces CloudFile's ACL
+executor or makes external systems mandatory for standalone deployments.
 
-The executable `test_acl_publisher_scope_mock.py` checks declared keys,
-out-of-scope desired rules, untouched other-provider rows, CAS conflicts,
-idempotent replay and a simulated SQL error rollback. It is a **mocked
-transaction**, not real MariaDB validation.
+The executable `test_acl_publisher_scope_mock.py` covers intended-key scope,
+out-of-scope desired rejection, stale CAS, idempotent replay and simulated
+transaction rollback. It does not constitute real MariaDB or end-to-end
+publishing acceptance.
 
-## Important unresolved ownership boundary
+## Known management limitation — accepted
 
-A request-supplied `managed` set is an intended *operation scope*, **not
-proof of which writer owns a rule**. `require_repo_manage()` verifies the
-caller's CE repository administration right, but neither that authorization
-nor a CAS fingerprint prevents another authorized writer from naming the same
-natural key. Today `DirectoryRules.mutate()` and
-`LibraryACLBatch.replace_owned()` both target the same provider namespace
-when configured that way.
+When A and B are both authorized to edit the **same** natural key, a
+request-declared `managed` key list and a valid CAS do **not** establish
+permanent writer ownership. They constrain individual operations and detect
+stale snapshots, but do not prevent alternating writes by two administrators.
 
-Therefore **do not enable concurrent A and B writes to the same natural key**
-until an explicit ownership rule is enforced. For a small team, prefer one
-writer per library during initial rollout, with an operator-reviewed snapshot
-and planned handover A↔B. Preserve the existing provider/subject identity
-semantics; do not pretend `provider` denotes the publisher. Do not create a
-second managed-library table, shadow ACL store or periodic reconciler.
+**Adopt an operational convention rather than implementing an additional
+ownership table or enforcement framework now.** This risk is tracked as
+a known deployment/management issue, not a blocker for the B default UX.
 
-## Next smallest #57 implementation decision
+1. Designate **one normal configuration owner per library**: B on ordinary
+   CloudFile installations, or A where a business system synchronizes it.
+   A/B may coexist in **different** libraries of the same instance.
+2. When a library must have A and B managing different rules, agree explicitly
+   on **non-overlapping natural keys** and operators; never schedule both to
+   publish the same key concurrently. This is a human/process convention and
+   is **not technically enforced**.
+3. When changing a library's primary mode, pause the previous writer, inspect
+   the current CE library grants and `cf_dir_acl` snapshot, check expected
+   versus applied permissions, transfer operational responsibility, then
+   resume the new writer.
+4. Retain existing native CE owner/admin checks, CAS, bounded snapshots, API
+   error and rollback behavior. Do not call them cross-writer isolation.
+5. If operational evidence later shows recurring overwrites, unsafe
+   multi-team concurrency or material permission incidents, open a focused
+   bug/feature and consider the smallest server-side mitigation then.
 
-Before enabling a native B management UI/API, review and choose a single
-minimal ownership gate (e.g. an explicit library-level configuration owner
-with a controlled handover). It must be enforced server-side in both A and B
-write routes, not accepted solely from a client claim. Existing deployments
-using per-rule endpoints require compatibility checks before changing the
-default. Do not claim these mock tests solve A/B ownership.
+No second ACL truth, managed-library concept, task queue or distributed
+ownership service.
 
-Subsequent acceptance: owner/admin vs ordinary `rw` user, cross-library
-isolation, managed-key scope, 409/403/503 response handling, existing revision
-CAS, native CE library sharing, A/B handover and actual Server C/Go final
-read/write/commit checks. **No deployment or authorization semantics change
-in this test-only PR.**
+## Next work and acceptance
+
+Proceed with a minimal B management API/UI in small PRs. Keep CE native
+library authorization, shared directory roots and User/Org/Role effective
+permission semantics consistent with the [#56 contract](./ACL-EFFECTIVE-CONTRACT.md).
+A is an optional publication path into the **same** `cf_dir_acl` rows.
+
+Tests should cover B standalone without enterprise Provider, ordinary `rw`
+versus owner/admin permissions, optional A publishing with version conflicts,
+different libraries using A/B, manual handover, 403/409/503 behavior and
+the eventual Hub + Server read/write/Commit checks. Mixed writers to the
+same key are a documented operational risk, not a promised enforced block.
+
+**This PR only tests existing A publisher behavior and documents the choice;
+it does not change or release either configuration mode.**
