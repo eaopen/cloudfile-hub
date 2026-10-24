@@ -32,8 +32,9 @@ def classify(repo_id, present, route, key, state):
     if route is not None and route.startswith("auto-local:"):
         # New V2 has only immutable RepoStorageId. Old V2 may have a historical
         # registry record for a custom outer directory.
-        if key is None or (route == "auto-local:" + key and
-                           state in ("reserved", "active", "retired")):
+        if (key is None and route == "auto-local:" + repo_id) or (
+                key is not None and route == "auto-local:" + key and
+                state in ("reserved", "active", "retired")):
             return "V2_ROUTED"
         return "STORAGE_BINDING_INCOMPLETE"
     if route is not None and key is None:
@@ -156,7 +157,7 @@ def storage_catalog_status(repo_id, repo_present, key, state, storage_id, readab
         # Current UUID V2 and original Seafile both have no CloudFile
         # registry requirement. The actual route remains in RepoStorageId.
         native = storage_id is None
-        auto = isinstance(storage_id, str) and storage_id.startswith("auto-local:")
+        auto = storage_id == "auto-local:" + repo_id
         if native or auto:
             return "READY" if readable else "RESOURCE_UNREADABLE"
         return "BINDING_ERROR"
