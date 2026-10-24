@@ -1,7 +1,6 @@
 """Trusted Etech Directory -> CE User/Group/GroupUser runtime; no shadow tables."""
 from contextlib import contextmanager
 from functools import lru_cache
-from datetime import datetime, timezone
 import json
 import time
 from urllib.parse import quote, urlsplit
@@ -80,26 +79,12 @@ class Directory:
         return value
 
     def entities(self):
-        value = self.get('/groups?view=entities')
-        try:
-            generated = datetime.fromisoformat(value['generated_at'].replace('Z', '+00:00'))
-            if (value['contract_version'] != '2.0' or value['view'] != 'entities' or
-                    generated.tzinfo is None or not -60 <= (datetime.now(timezone.utc)-generated).total_seconds() <= 60 or
-                    not isinstance(value['groups'], list) or len(value['groups']) > 16384):
-                raise ValueError()
-            result = {}
-            for item in value['groups']:
-                kind = item['subject_type']
-                namespace, external = text(item['namespace'], 128), text(item['external_id'])
-                if (kind, namespace) not in (('org', 'directory'), ('role', 'role')):
-                    raise ValueError()
-                key = (kind, namespace, external)
-                if key in result:
-                    raise ValueError()
-                result[key] = text(item['name'], 255)
-            return result
-        except (KeyError, TypeError, ValueError, IdentityConflict):
-            raise IdentityUnavailable('invalid trusted Directory entities') from None
+        # Keep the deployed Etech namespace rule while using the same
+        # provider-neutral bounded entity validator as other integrations.
+        from .provider_contract import validated_entities
+        return validated_entities(
+            self.get('/groups?view=entities'),
+            expected_namespaces={('org', 'directory'), ('role', 'role')})
 
 
 @contextmanager
@@ -141,13 +126,10 @@ def runtime():
 def verified_account(directory, uid):
     """Prove UID/status; NativeIdentity validates account names on creation only."""
     subject = directory.subject(uid)
-    login, _ = validate_subject(subject, uid)
-    if subject['status'] != 'active':
-        raise IdentityUnavailable('Directory account disabled')
-    # employee_no carries Etech account_, including nonnumeric accounts.
-    # Only the trusted Directory supplies it; request aliases are not proof.
-    account = subject['attributes'].get('employee_no')
-    return login, account
+    from .provider_contract import verified_user
+    # Etech maps its account_ field into the established employee_no claim.
+    # Reuse the same UID verification as other trusted Directory providers.
+    return verified_user(subject, uid, account_field='employee_no')
 
 
 def prepare_user(uid):
