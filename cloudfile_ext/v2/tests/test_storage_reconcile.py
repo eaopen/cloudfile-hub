@@ -152,6 +152,23 @@ class StorageSQLTests(unittest.TestCase):
             (self.auto / route[11:] / 'storage' / 'commits' / rid).mkdir(parents=True, exist_ok=True)
         return rid
 
+    def test_uuid_local_never_creates_extra_registry_record(self):
+        rid = str(uuid4())
+        self.sql('INSERT INTO Repo(repo_id) VALUES(%s)', (rid,))
+        self.sql('INSERT INTO RepoStorageId(repo_id,storage_id) VALUES(%s,%s)',
+                 (rid, 'auto-local:' + rid))
+        (self.auto / rid / 'storage' / 'commits' / rid).mkdir(parents=True)
+        inspected = self.service.inspect(rid)
+        self.assertEqual(inspected['status'], 'UUID_LOCAL')
+        self.assertEqual(self.service.apply_one(rid)['status'], 'UUID_LOCAL')
+        report = self.service.run(apply=True, repo_id=rid)
+        self.assertEqual(report['summary']['UUID_LOCAL'], 1)
+        self.assertEqual(self.sql('SELECT * FROM cf_library_storage'), ())
+        self.assertEqual(self.sql('SELECT storage_id FROM RepoStorageId WHERE repo_id=%s', (rid,)),
+                         (('auto-local:' + rid,),))
+        report = self.service.run(apply=True, batch_size=1)
+        self.assertEqual(report['summary']['UUID_LOCAL'], 1)
+
     def test_schema_exact_idempotent_without_dynamic_ddl(self):
         self.service.ensure_schema()
         self.service.ensure_schema()
