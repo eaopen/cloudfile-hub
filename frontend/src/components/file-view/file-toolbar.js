@@ -1,7 +1,7 @@
 import React, { Fragment } from 'react';
 import { Button, ButtonGroup } from 'reactstrap';
 import PropTypes from 'prop-types';
-import { openV2LocalFile } from '@/cloudfile/agent-local-edit';
+import LocalFileDialog from '@/components/local-file-dialog';
 import { gettext, siteRoot } from '@/utils/constants';
 import { Utils, isImageRotateable } from '@/utils/utils';
 import Icon from '../../components/icon';
@@ -44,24 +44,14 @@ const {
 
 class FileToolbar extends React.Component {
 
+  state = { localFileDialog: false };
+
   handleOpenWithOnlyOffice = () => {
     location.href = '?open_with_onlyoffice=true';
   };
 
-  handleOpenWithClient = async () => {
-    try {
-      await openV2LocalFile({ repoID, path: filePath, mode: 'optimistic-edit' });
-    } catch (error) {
-      window.alert(error.message || gettext('Local edit unavailable'));
-    }
-  };
-
-  handleLocalView = async () => {
-    try {
-      await openV2LocalFile({ repoID, path: filePath, mode: 'local-view' });
-    } catch (error) {
-      window.alert(error.message || gettext('Local open unavailable'));
-    }
+  handleLocalOperations = () => {
+    this.setState({ localFileDialog: true });
   };
 
   handleOpenHistory = () => {
@@ -91,16 +81,9 @@ class FileToolbar extends React.Component {
     }
     if (filePerm === 'r' || filePerm === 'rw') {
       items.push({
-        key: 'local-view',
-        label: gettext('Open locally'),
-        onClick: this.handleLocalView,
-      });
-    }
-    if (filePerm === 'rw') {
-      items.push({
-        key: 'open-with-client',
-        label: gettext('Edit locally'),
-        onClick: this.handleOpenWithClient,
+        key: 'local-operations',
+        label: gettext('Local file operations'),
+        onClick: this.handleLocalOperations,
       });
     }
     if (filePerm === 'rw') {
@@ -194,6 +177,10 @@ class FileToolbar extends React.Component {
 
     return (
       <Fragment>
+        {this.state.localFileDialog && (
+          <LocalFileDialog repoID={repoID} path={filePath} permission={filePerm}
+            onClose={() => this.setState({ localFileDialog: false })} />
+        )}
         <div className="d-none d-md-flex justify-content-between align-items-center flex-shrink-0 ml-4">
           {(fileType == 'Image' && !err) && (
             <>

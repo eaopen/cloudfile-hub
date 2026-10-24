@@ -12677,3 +12677,47 @@ msgstr "开启共享后，无库权限也可访问。访问权限和继承由同
 
 msgid "Allow access without library membership"
 msgstr "允许无库权限访问"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Access denied. Refresh the page to check your permissions."
+msgstr "拒绝访问。请刷新页面检查当前权限。"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Exclusive editing is unavailable. You can choose ordinary editing."
+msgstr "独占编辑不可用，可以选择普通编辑。"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Local operation was not confirmed. Check the Agent2 task center before trying again."
+msgstr "本地操作结果尚未确认，请先检查 Agent2 任务中心再重试。"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Local file operations"
+msgstr "本地文件操作"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "View locally"
+msgstr "本地查看"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Edit locally"
+msgstr "普通编辑"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Edit exclusively"
+msgstr "独占编辑"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Local viewing never uploads changes. Ordinary editing publishes saved changes automatically. Exclusive editing requires Commit or Checkin in Agent2 to publish; saving locally does not confirm a cloud version."
+msgstr "本地查看不会上传修改。普通编辑在保存后自动发布修改。独占编辑需要在 Agent2 中执行 Commit 或 Checkin 才会发布；本机保存不代表云端版本已确认。"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Editing requires write permission and a writable library."
+msgstr "编辑需要写权限，且资料库必须可写。"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "This file is checked out. Use the existing Agent2 task to continue; local viewing remains available."
+msgstr "此文件已签出。请在已有的 Agent2 任务中继续；仍可本地查看。"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Checkout is unavailable or has not been confirmed. Ordinary editing remains available."
+msgstr "Checkout 不可用或尚未确认。仍可进行普通编辑。"
