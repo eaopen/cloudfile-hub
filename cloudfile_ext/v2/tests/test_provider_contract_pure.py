@@ -3,7 +3,8 @@ from datetime import datetime, timedelta, timezone
 import unittest
 
 from cloudfile_ext.v2.errors import IdentityUnavailable
-from cloudfile_ext.v2.provider_contract import verified_user, validated_entities
+from cloudfile_ext.v2.provider_contract import (verified_user, direct_memberships,
+                                                validated_entities)
 
 
 def stamp(delta=0):
@@ -38,6 +39,17 @@ class GenericDirectoryUserTests(unittest.TestCase):
                          ('employee-Z', 'employee-Z'))
         with self.assertRaises(IdentityUnavailable):
             verified_user(user, 'employee-Z')
+
+    def test_direct_org_role_facts_exclude_ancestors_without_projecting(self):
+        value = subject(
+            uid='stable-uid-7', organizations=[
+                {'namespace': 'directory', 'external_id': 'leaf'}],
+            ancestors=[{'namespace': 'directory', 'external_id': 'parent'}],
+            roles=[{'namespace': 'role', 'external_id': 'reviewer'}])
+        self.assertEqual(direct_memberships(value, 'stable-uid-7'), frozenset({
+            ('org', 'directory', 'leaf'), ('role', 'role', 'reviewer')}))
+        # No ancestor group permission is inferred here; runtime projection
+        # remains a separate reviewed change in Hub #63.
 
     def test_missing_account_does_not_invent_uid_or_name(self):
         user = subject(uid='stable-uid-7')
