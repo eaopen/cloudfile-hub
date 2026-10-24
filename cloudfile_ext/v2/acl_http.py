@@ -217,7 +217,17 @@ class LibraryGrants(AuthenticatedACL):
                 raise ValueError()
             repo_id = uuid(args['repo_id'])
             require_repo_manage(request.user, repo_id)
-            return response(self._service(repo_id).list())
+            listing = self._service(repo_id).list()
+            # CE stores elevated library-administrator grants separately.
+            # Read both markers in two bounded queries, never once per user.
+            from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
+            admin_users = set(ExtraSharePermission.objects.get_admin_users_by_repo(repo_id))
+            admin_groups = {int(g) for g in
+                            ExtraGroupsSharePermission.objects.get_admin_groups_by_repo(repo_id)}
+            for entry in listing['grants']:
+                entry['is_admin'] = (entry['subject'] in
+                    (admin_users if entry['subject_type'] == 'user' else admin_groups))
+            return response(listing)
         except Exception as error:
             return failure(error)
 
