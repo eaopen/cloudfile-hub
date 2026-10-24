@@ -23,6 +23,15 @@ class ProviderAdminRosterTests(unittest.TestCase):
         self.assertEqual(validated_roster(self.roster(multiple)),
                          (('u1', 'admin'), ('u2', 'operator')))
 
+    def test_optional_etech_admin_compatibility_needs_verified_roster(self):
+        self.assertEqual(validated_roster(self.roster(), required_account='admin'),
+                         (('external-9', 'admin'),))
+        with self.assertRaises(IdentityUnavailable):
+            validated_roster(self.roster([{'uid': 'u2', 'account': 'operator'}]),
+                             required_account='admin')
+        self.assertEqual(validated_roster(self.roster([{'uid': 'u2', 'account': 'operator'}])),
+                         (('u2', 'operator'),))
+
     def test_unavailable_or_incomplete_source_is_not_an_empty_revocation(self):
         cases = [
             self.roster(complete=False),
