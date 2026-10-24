@@ -87,7 +87,10 @@ class TokenAuthentication(BaseAuthentication):
                 user.org = orgs[0]
 
         if user.is_active:
-            return (user, token)
+            # API tokens must never bypass the same current Provider admin
+            # authority check enforced for browser Sessions.
+            from cloudfile_ext.v2.provider_admin_gate import guard_authenticated_user
+            return (guard_authenticated_user(user), token)
 
     def authenticate_v2(self, request, key):
         try:
@@ -138,7 +141,8 @@ class TokenAuthentication(BaseAuthentication):
                 except:
                     logger.exception('error when save token v2:')
 
-            return (user, token)
+            from cloudfile_ext.v2.provider_admin_gate import guard_authenticated_user
+            return (guard_authenticated_user(user), token)
 
 
 class RepoAPITokenAuthentication(BaseAuthentication):
