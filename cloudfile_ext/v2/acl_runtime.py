@@ -91,11 +91,16 @@ def current_principal(username):
     uid = profile.login_id if profile else None
     adapter = subject_adapter(settings)
 
-    # CE-only installation has no enterprise membership. System accounts also
-    # remain native even when an enterprise Directory is configured. Neither
-    # case can match provider-scoped enterprise rules; in particular, a numeric
-    # CE login_id is NOT proof of membership in an external directory.
-    if adapter is None or not uid or uid == 'cfadmin':
+    # CE-only installation has no enterprise membership. Existing CE accounts
+    # with no external UID stay in the native CE namespace, which cannot
+    # match provider-scoped rules. Reserved cfadmin is an exact account/UID
+    # pair, never just an arbitrary Profile.login_id string.
+    if adapter is None or not uid:
+        return Principal('native-local', username, frozenset())
+    from .subject_adapter import native_admin_identity, reserved_identity_conflict
+    if reserved_identity_conflict(uid, username):
+        raise ACLUnavailable('reserved native administrator identity mismatch')
+    if native_admin_identity(uid, username):
         return Principal('native-local', username, frozenset())
     provider, ensure = adapter
 
