@@ -51,6 +51,14 @@ class GenericDirectoryUserTests(unittest.TestCase):
         # No ancestor group permission is inferred here; runtime projection
         # remains a separate reviewed change in Hub #63.
 
+    def test_generic_account_only_has_stable_uid_and_creation_label(self):
+        value = subject(uid='uid-901', account='operator')
+        value['attributes'] = {'account': 'operator'}
+        self.assertEqual(verified_user(value, 'uid-901'),
+                         ('operator', 'operator'))
+        with self.assertRaises(IdentityUnavailable):
+            verified_user(value, 'operator')
+
     def test_missing_account_does_not_invent_uid_or_name(self):
         user = subject(uid='stable-uid-7')
         user['attributes'] = {}
