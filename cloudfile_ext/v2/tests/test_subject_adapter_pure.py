@@ -20,6 +20,18 @@ class SubjectAdapterPureTests(unittest.TestCase):
             CF_ACL_PROVIDER='acme', CF_ACL_SUBJECT_ENSURE='acme.directory.refresh')),
             ('acme', 'acme.directory.refresh'))
 
+    def test_malformed_provider_configuration_fails_before_import(self):
+        for provider, ensure in (
+                (' corp', 'corp.directory.refresh'),
+                ('corp ', 'corp.directory.refresh'),
+                ('corp', ' corp.directory.refresh'),
+                ('corp', 'corp.directory.refresh '),
+                ('corp', 'refresh'),
+                ('a' * 129, 'corp.directory.refresh')):
+            with self.subTest(provider=provider, ensure=ensure), self.assertRaises(InvalidSubjectAdapter):
+                selected_adapter(SimpleNamespace(
+                    CF_ACL_PROVIDER=provider, CF_ACL_SUBJECT_ENSURE=ensure))
+
     def test_half_configured_provider_never_downgrades_to_ce(self):
         for config in (
                 SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test',
