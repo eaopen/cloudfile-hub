@@ -100,6 +100,12 @@ def sync_native_admins(identity, roster, *, managed_accounts=()):
     This does not start an SSO login. A single cross-schema MySQL transaction
     applies and reads back all staff/role changes. No cf_* table is created.
     """
+    # Fail-closed invariant at the apply layer: an empty, malformed or oversized
+    # plan must never be interpreted as "revoke everything inside the managed
+    # scope". The management command validates the roster first; this keeps the
+    # write function itself safe for any caller.
+    if not isinstance(roster, (tuple, list)) or not 1 <= len(roster) <= MAX_ADMINS:
+        raise IdentityUnavailable('invalid complete administrator roster')
     managed_accounts = managed_scope(managed_accounts)
     conn = identity.connection
     accounts = identity.accounts

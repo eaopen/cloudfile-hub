@@ -88,6 +88,17 @@ class ProviderAdminRosterTests(unittest.TestCase):
         self.assertEqual(managed_scope(()), frozenset())
         self.assertEqual(managed_scope(('old@auth.local',)), frozenset(('old@auth.local',)))
 
+    def test_empty_or_oversized_apply_roster_is_rejected_before_any_write(self):
+        # The command validates the roster, but the write function must also
+        # refuse an empty plan instead of revoking every managed account.
+        identity = Mock()
+        cases = ((), [], tuple((str(i), 'admin') for i in range(33)),
+                 'not-a-roster', None)
+        for invalid in cases:
+            with self.subTest(invalid=invalid), self.assertRaises(IdentityUnavailable):
+                sync_native_admins(identity, invalid)
+            identity.prepare.assert_not_called()
+
     def test_staff_or_other_role_is_never_adopted_as_external_admin(self):
         for state in (('same-uid', True, None),
                       ('same-uid', True, 'system_admin'),

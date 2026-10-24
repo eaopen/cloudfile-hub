@@ -37,9 +37,17 @@ Example (illustrative, no credentials):
 }
 ```
 
-The snapshot is rejected if incomplete, stale, malformed, duplicated, unexpectedly
-empty or larger than 32 administrators. A failed call **does not** mean that
-there are zero administrators.
+The snapshot is rejected if it does not assert `contract_version: "1.0"` and
+`complete: true`, if `generated_at` is missing, timezone-naive or outside a
+±60 second window, or if the `admins` list is malformed, duplicated,
+unexpectedly empty or larger than 32 administrators. A failed call **does
+not** mean that there are zero administrators, and none of these rejections
+writes CE admin state.
+
+`complete: true` is the Provider's own assertion, not a fact CloudFile can
+recompute. A list the Provider truncates while still setting `complete: true`
+cannot be distinguished locally, which is why enabling this feature is a trust
+decision in the Provider and in the channel that carries its response.
 
 CloudFile resolves each UID to its existing native CE User/Profile or
 pre-creates an active non-staff account with an unguessable password through
@@ -69,11 +77,16 @@ permissions exactly as before.
   ensure external administrators are not granted a separate usable native
   password or long-lived application tokens that bypass the SSO policy.
 - CloudFile does **not** repeatedly check Provider administrator membership.
-  If the enterprise removes an admin while CloudFile is running, the change
-  is reflected on the **next successful startup sync** (or one manual
-  invocation of the same command). Existing browser sessions may remain
-  active until normal SSO/CE expiry; urgent departures need IdP/session
-  intervention and an immediate controlled sync or restart.
+  A grant is added on the **next successful startup sync** (or one manual
+  invocation of the same command). A **removal is only applied when the
+  affected CE username is listed in `CF_PROVIDER_ADMIN_MANAGED_ACCOUNTS`**;
+  with the default empty scope, an account the Provider no longer lists keeps
+  its CE `default_admin` role until an administrator removes it natively or
+  adds it to the managed scope. Stale `default_admin` rows are therefore
+  retained indefinitely by default, so operators must audit them and keep the
+  managed scope current. Existing browser sessions may remain active until
+  normal SSO/CE expiry; urgent departures need IdP/session intervention and an
+  immediate controlled sync or restart.
 - If the Provider is unavailable at boot, the sync logs FAILED, and the
   existing native administrator state is retained. CloudFile itself still
   starts; `cfadmin` remains a recovery account. There is **no automatic
@@ -87,6 +100,16 @@ Standalone deployments; after verifying the Provider endpoint and reviewing
 existing administrators, the operator can set it to `true` and restart
 CloudFile. The existing enterprise Directory URL/key/secret are reused.
 `CF_PROVIDER_ADMIN_SOURCE` is optional for non-default Provider adapters.
+
+These four names are Django settings written to `conf/seahub_settings.py`; the
+compose deployment generates them from environment variables of the same name.
+`CF_PROVIDER_ADMIN_STARTUP_SYNC_ENABLED` must become boolean `True` (a
+hand-written settings file containing the string `"true"` leaves the sync
+disabled, not enabled). `CF_PROVIDER_ADMIN_SOURCE`, when used, must be a
+server-side Python dotted path and never a value derived from a request or from
+ordinary user input. `CF_DIRECTORY_URL` must be an `https://` URL: the
+Directory adapter also accepts plain `http://`, which is not acceptable for a
+channel that can grant CE superadmin.
 
 Manual one-off invocation is the same management command:
 
@@ -118,7 +141,11 @@ Routine PR CI is not a substitute for real CE/MySQL/EAP DEV checks.
 
 ## Explicit ownership for safe removal
 
-By default, the roster sync **does not revoke existing** `default_admin` users absent from a provider snapshot. To revoke a previously provisioned account automatically, the operator must include its exact CE username in `CF_PROVIDER_ADMIN_MANAGED_ACCOUNTS` (comma-separated). This optional bounded list is an explicit operator declaration of ownership, not a new source-of-truth table. Never add unrelated CE administrators to this list. Normal new grants and unchanged roles remain idempotent. When changing a Provider admin roster, update the managed account list and re-run the same command, or use existing CE native administration for urgent removal. In particular, `cfadmin` stays independent. No per-request check is added.
+By default, the roster sync **does not revoke existing** `default_admin` users absent from a provider snapshot. To revoke a previously provisioned account automatically, the operator must include its exact CE username in `CF_PROVIDER_ADMIN_MANAGED_ACCOUNTS` (comma-separated). This optional bounded list is an explicit operator declaration of ownership, not a new source-of-truth table. Never add unrelated CE administrators to this list. The scope itself is
+validated before any CE account is created: at most 32 unique, non-empty CE
+usernames, none of them `cfadmin`, and an invalid scope aborts the whole sync
+with no writes. Matching is against the exact stored native username, so a typo
+means "no revocation" rather than a broader removal. Normal new grants and unchanged roles remain idempotent. When changing a Provider admin roster, update the managed account list and re-run the same command, or use existing CE native administration for urgent removal. In particular, `cfadmin` stays independent. No per-request check is added.
 
 ### Optional deployment administrator compatibility
 
