@@ -30,8 +30,17 @@ from seaserv import seafile_api
 
 
 def _storage_classes():
-    """Return the configured classes as a list of dicts, or None on error."""
-    raw = seafile_api.get_storage_classes()
+    """Return the configured classes as a list of dicts, or None on error.
+
+    A native RPC failure (unimplemented function during a rolling upgrade,
+    unreadable storage-class config) is a capability-unavailable condition,
+    not a class list: report it as None so callers answer 503 instead of
+    raising an unhandled SearpcError.
+    """
+    try:
+        raw = seafile_api.get_storage_classes()
+    except SearpcError:
+        return None
     if raw is None:
         return None
     try:
