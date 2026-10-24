@@ -4,7 +4,7 @@ from unittest import TestCase
 from unittest.mock import Mock
 
 from cloudfile_ext.v2.provider_admin_gate import (
-    is_native_root, mask_unverified_staff, provider_admin_allowed,
+    enforcement_enabled, is_native_root, mask_unverified_staff, provider_admin_allowed,
 )
 
 
@@ -14,6 +14,18 @@ def staff_user(username='employee@auth.local'):
 
 
 class ProviderAdministratorGateTests(TestCase):
+    def test_guard_can_remain_on_after_new_grants_are_disabled(self):
+        self.assertFalse(enforcement_enabled(SimpleNamespace()))
+        self.assertFalse(enforcement_enabled(SimpleNamespace(
+            CF_PROVIDER_ADMIN_SYNC_ENABLED=False,
+            CF_PROVIDER_ADMIN_GUARD_ENABLED=False)))
+        self.assertTrue(enforcement_enabled(SimpleNamespace(
+            CF_PROVIDER_ADMIN_SYNC_ENABLED=True,
+            CF_PROVIDER_ADMIN_GUARD_ENABLED=False)))
+        self.assertTrue(enforcement_enabled(SimpleNamespace(
+            CF_PROVIDER_ADMIN_SYNC_ENABLED=False,
+            CF_PROVIDER_ADMIN_GUARD_ENABLED=True)))
+
     def test_exact_native_root_remains_available_without_directory(self):
         for name in ('cfadmin', 'cfadmin@auth.local', 'cfadmin@etech.com'):
             fetch = Mock(side_effect=AssertionError('native root never queries Provider'))
