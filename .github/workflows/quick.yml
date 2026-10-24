@@ -26,6 +26,9 @@ jobs:
       - name: Validate additive ACL batch and shared cache contracts
         run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_batch_pure
 
+      - name: Verify A-mode ACL publisher scope and CAS (mock SQL)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_publisher_scope_mock -v
+
       - name: Validate only changed source
         shell: bash
         run: |
