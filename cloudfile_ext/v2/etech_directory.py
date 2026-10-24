@@ -154,17 +154,36 @@ def verified_account(directory, uid):
     return login, account
 
 
+def _maybe_reconcile_admin(uid, username, directory, identity):
+    """Use a trusted Directory only on explicit login / user preparation.
+
+    Normal file and directory accesses never invoke native admin write sync.
+    The separate Session/Token gate checks current admin authority on every
+    request while the opt-in feature is enabled.
+    """
+    if getattr(settings, 'CF_PROVIDER_ADMIN_SYNC_ENABLED', False) is not True:
+        return
+    from .provider_admin_reconcile import reconcile_native_admin
+    reconcile_native_admin(identity, uid, username,
+                           fetch_subject=directory.subject, enabled=True)
+
+
 def prepare_user(uid):
     with runtime() as (directory, identity, catalog, memberships):
         login, account = verified_account(directory, uid)
-        return identity.prepare(uid=uid, login_name=login, account=account)
+        username = identity.prepare(uid=uid, login_name=login, account=account)
+        _maybe_reconcile_admin(uid, username, directory, identity)
+        return username
 
 
 def provision_oidc_user(*, uid, provider, subject):
     """Internal callback only, after verified ID Token/UserInfo UID equality."""
     from .jit import SQLJITProvisioner
     with runtime() as (directory, identity, catalog, memberships):
-        return SQLJITProvisioner(directory, identity).ensure(uid=uid, provider=provider, subject=subject)
+        username = SQLJITProvisioner(directory, identity).ensure(
+            uid=uid, provider=provider, subject=subject)
+        _maybe_reconcile_admin(uid, username, directory, identity)
+        return username
 
 
 def lookup_group(external):
