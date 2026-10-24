@@ -11,8 +11,11 @@ library shares plus the single `cf_dir_acl` table and Hub/Server authority.
 
 Authenticated via the existing CE token or browser session. Every request
 calls `require_repo_manage()`, checking active CE account and actual
-repo owner/admin or appropriate library-management staff permission. An
-ordinary content `rw` grant is NOT enough to configure anyone's access.
+repo owner/admin or appropriate library-management staff permission. It also
+requires the same CE role-level `request.user.permissions.can_share_repo()`
+capability as Seafile's own share endpoints: guest/custom roles denied native
+sharing cannot bypass it via B-mode, even if they have repository-admin facts.
+An ordinary content `rw` grant is NOT enough to configure anyone's access.
 Virtual repos are not managed here; use their CE origin/owner scope.
 
 ```http
@@ -36,8 +39,10 @@ queries rather than per-recipient database queries:
 ```
 
 `PUT` creates or changes one direct CE share to a registered active native
-account or an existing native group. `permission` is **only `r` or `rw`**,
-not `admin`, `invisible`, custom permission or a client-supplied UID:
+account or an existing native group. `permission` is **only `r` or `rw`**;
+`permission: null` is rejected on PUT and can never silently revoke a grant.
+To remove a grant, explicitly send DELETE. Neither `admin`, `invisible`,
+custom permission nor a client-supplied UID is accepted:
 
 ```json
 {
