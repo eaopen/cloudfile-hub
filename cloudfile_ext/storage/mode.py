@@ -1,5 +1,5 @@
 """Detect persisted V2 auto-local mode without introducing an S3 dependency."""
-from configparser import ConfigParser
+from configparser import ConfigParser, Error as ConfigError
 import os
 from pathlib import Path
 
@@ -21,7 +21,7 @@ def auto_local_enabled(environ=None):
                 config = ConfigParser(interpolation=None)
                 config.read(filename)
                 return config.has_option("cloudfile_v2", "auto_local_root")
-        except (OSError, ValueError):
+        except (OSError, ConfigError, ValueError):
             # A bad config must not grant a new allocation capability.
             return False
     return False
