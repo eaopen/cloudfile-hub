@@ -124,6 +124,11 @@ class NativeLibraryGrantTests(TestCase):
 
     def test_owner_and_ce_admin_markers_cannot_be_modified(self):
         self.protected.add(('group', 7))
+        # Exact expected value + unchanged desired permission is a verified
+        # no-op, including for CE admin-marker grants: never emit a share RPC.
+        current = self.service.change('group', 7, expected='rw', desired='rw')
+        self.assertFalse(current['changed'])
+        self.assertEqual(current['permission'], 'rw')
         with self.assertRaises(PolicyError):
             self.service.change('group', 7, expected='rw', desired='r')
         with self.assertRaises(PolicyError):
