@@ -207,8 +207,16 @@ class StorageReconciler:
         return 'SCHEMA_READY'
 
     def sources(self):
-        return ' UNION '.join('SELECT repo_id FROM ' + self.table(name)
-                              for name in ('Repo', 'RepoTrash', 'GarbageRepos'))
+        sources = ['SELECT repo_id FROM ' + self.table(name)
+                   for name in ('Repo', 'RepoTrash', 'GarbageRepos')]
+        if self.registry_present:
+            # A failed native create may leave the early, durable UUID
+            # allocation marker without ever creating Repo/Owner. Include it
+            # in *explicit* inventory so it cannot appear successfully active.
+            # Routine V2 startup does not call this full scan.
+            sources.append("SELECT repo_id FROM " + self.table('cf_library_storage') +
+                           " WHERE state='active'")
+        return ' UNION '.join(sources)
 
     def scan(self, batch_size=500):
         if not 1 <= batch_size <= 2000:
@@ -258,6 +266,14 @@ class StorageReconciler:
             rows = {row[0]: row[1:] for row in cursor.fetchall()}
         for repo_id in repo_ids:
             present, trash, garbage, virtual, route_owner, route, key, state, duplicate = rows[repo_id]
+            # The normal UUID local route is complete without the historical
+            # cf_library_storage row; it must not be re-created by inventory.
+            if (not virtual and (present or trash or garbage) and route_owner and
+                    route == 'auto-local:' + repo_id and key is None and duplicate is None and
+                    self.config.auto_error(repo_id, repo_id) is None):
+                yield dict(repo_id=repo_id, storage_id=route, status='UUID_LOCAL',
+                           category='AUTO_LOCAL', repo_key=repo_id)
+                continue
             marker = native_key(repo_id)
             target = 'active' if present or trash else 'retired'
             category = None
@@ -318,6 +334,10 @@ class StorageReconciler:
         else:
             return blocked('UNSUPPORTED_STORAGE_CLASS')
         item.update(category=category, repo_key=wanted, state=target_state)
+        # UUID-local is the V2 default, not a legacy key reservation. Do not
+        # maintain a second lifecycle marker or touch this table at runtime.
+        if (category == 'AUTO_LOCAL' and wanted == repo_id and key is None):
+            return dict(item, status='UUID_LOCAL')
         with self.connection.cursor() as cursor:
             if self.registry_present:
                 cursor.execute('SELECT repo_id FROM ' + self.table('cf_library_storage') +
@@ -402,7 +422,7 @@ class StorageReconciler:
         for item in iterator:
             # A registered binding requires no write or second locked scan.
             # Every prospective mutation still revalidates inside apply_one.
-            if apply and item['status'] != 'REGISTERED':
+            if apply and item['status'] not in ('REGISTERED', 'UUID_LOCAL'):
                 item = self.apply_one(item['repo_id'], normalize)
             items.append(item)
         orphans = self.orphans()
