@@ -18,19 +18,27 @@ def native_key(repo_id):
     return "native-" + repo_id
 
 
-def classify(repo_id, present, route, key, state):
+def classify(repo_id, present, route, key, state, *, route_row_present=False):
     """Return a user-facing repair state, never silently adopt routed storage."""
     if not present:
         return "NATIVE_RESOURCE_MISSING"
     marker = native_key(repo_id)
     if marker is None:
         return "INVALID_NATIVE_REPO_ID"
+    # An existing RepoStorageId row with a NULL storage_id is corrupt, not
+    # an ordinary CE repository. Match the C/Go fail-closed route readers.
+    if route_row_present and route is None:
+        return "STORAGE_BINDING_INCOMPLETE"
     if route is None and key is None:
-        return "NATIVE_UNREGISTERED"
+        return "NATIVE_REGISTERED"  # Native Seafile needs no CloudFile row.
     if route is None and key == marker and state in ("active", "retired"):
         return "NATIVE_REGISTERED"
     if route is not None and route.startswith("auto-local:"):
-        if key and route == "auto-local:" + key and state in ("reserved", "active", "retired"):
+        # New V2 has only immutable RepoStorageId. Old V2 may have a historical
+        # registry record for a custom outer directory.
+        if (key is None and route == "auto-local:" + repo_id) or (
+                key is not None and route == "auto-local:" + key and
+                state in ("reserved", "active", "retired")):
             return "V2_ROUTED"
         return "STORAGE_BINDING_INCOMPLETE"
     if route is not None and key is None:
@@ -61,25 +69,26 @@ class NativeLibraryDiscovery:
 
     @staticmethod
     def _item(row):
-        repo_id, present, route, key, state = row
+        repo_id, present, route, route_owner, key, state = row
         return {"repo_id": repo_id,
-                "status": classify(repo_id, present is not None, route, key, state)}
+                "status": classify(repo_id, present is not None, route, key, state,
+                                   route_row_present=route_owner is not None)}
 
     def inspect(self, repo_id):
         if native_key(repo_id) is None:
             raise ValueError("repo_id must be a canonical UUID")
         with self.connection.cursor() as cursor:
             cursor.execute(
-                "SELECT t.repo_id,r.repo_id,s.storage_id,c.repo_key,c.state,v.repo_id "
+                "SELECT t.repo_id,r.repo_id,s.storage_id,s.repo_id,c.repo_key,c.state,v.repo_id "
                 "FROM (SELECT %s AS repo_id) t "
                 "LEFT JOIN Repo r ON r.repo_id=t.repo_id "
                 "LEFT JOIN RepoStorageId s ON s.repo_id=t.repo_id "
                 "LEFT JOIN cf_library_storage c ON c.repo_id=t.repo_id "
                 "LEFT JOIN VirtualRepo v ON v.repo_id=t.repo_id", (repo_id,))
             row = cursor.fetchone()
-            if row[5] is not None:
+            if row[6] is not None:
                 return {"repo_id": repo_id, "status": "VIRTUAL_REPO"}
-            return self._item(row[:5])
+            return self._item(row[:6])
 
     def scan(self, batch_size=500):
         if not (1 <= batch_size <= 2000):
@@ -88,7 +97,7 @@ class NativeLibraryDiscovery:
         while True:
             with self.connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT r.repo_id,r.repo_id,s.storage_id,c.repo_key,c.state "
+                    "SELECT r.repo_id,r.repo_id,s.storage_id,s.repo_id,c.repo_key,c.state "
                     "FROM Repo r LEFT JOIN RepoStorageId s ON s.repo_id=r.repo_id "
                     "LEFT JOIN cf_library_storage c ON c.repo_id=r.repo_id "
                     "LEFT JOIN VirtualRepo v ON v.repo_id=r.repo_id "
@@ -133,7 +142,7 @@ class NativeLibraryDiscovery:
             counts[item["status"]] += 1
         return dict(sorted(counts.items()))
 
-def storage_catalog_status(repo_id, repo_present, key, state, storage_id, readable, *, in_trash=False, in_gc=False, virtual=False):
+def storage_catalog_status(repo_id, repo_present, key, state, storage_id, readable, *, in_trash=False, in_gc=False, virtual=False, route_row_present=False):
     """Distinguish a missing registration from a missing native Repo.
 
     A registry entry alone is not proof that the native object tree is healthy.
@@ -149,8 +158,16 @@ def storage_catalog_status(repo_id, repo_present, key, state, storage_id, readab
         return "REPO_MISSING"
     if virtual:
         return "VIRTUAL_REPO"
+    if route_row_present and storage_id is None:
+        return "BINDING_ERROR"
     if key is None:
-        return "REGISTRATION_MISSING"
+        # Current UUID V2 and original Seafile both have no CloudFile
+        # registry requirement. The actual route remains in RepoStorageId.
+        native = storage_id is None
+        auto = storage_id == "auto-local:" + repo_id
+        if native or auto:
+            return "READY" if readable else "RESOURCE_UNREADABLE"
+        return "BINDING_ERROR"
     if state == "retired":
         return "RETIRED"
     if state == "reserved":
@@ -205,7 +222,7 @@ def inspect_from_hub(repo_ids):
         if not batch:
             continue
         keys = ' UNION ALL '.join('SELECT %s AS repo_id' for _ in batch)
-        sql = ('SELECT i.repo_id,r.repo_id,c.repo_key,c.state,s.storage_id,'
+        sql = ('SELECT i.repo_id,r.repo_id,c.repo_key,c.state,s.storage_id,s.repo_id,'
                't.repo_id,g.repo_id,v.repo_id FROM (' + keys + ') i '
                'LEFT JOIN ' + table('Repo') + ' r ON r.repo_id=i.repo_id '
                'LEFT JOIN ' + table('cf_library_storage') + ' c ON c.repo_id=i.repo_id '
@@ -216,14 +233,15 @@ def inspect_from_hub(repo_ids):
         with connection.cursor() as cursor:
             cursor.execute(sql, batch)
             rows = cursor.fetchall()
-        for repo_id, present, key, state, route, trash, garbage, virtual in rows:
+        for repo_id, present, key, state, route, route_owner, trash, garbage, virtual in rows:
             status = storage_catalog_status(
                 repo_id, present is not None, key, state, route,
                 present is not None, in_trash=trash is not None,
-                in_gc=garbage is not None, virtual=virtual is not None)
+                in_gc=garbage is not None, virtual=virtual is not None,
+                route_row_present=route_owner is not None)
             result[repo_id] = {
                 'status': status,
-                'source': 'native' if key == 'native-' + repo_id
+                'source': 'native' if route is None and route_owner is None
                 else ('v2' if route and route.startswith('auto-local:') else 'unknown')
             }
     return result
