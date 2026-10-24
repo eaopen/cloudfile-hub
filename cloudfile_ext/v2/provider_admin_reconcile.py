@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 from .errors import IdentityUnavailable
 from .provider_admin import trusted_super_admin
-from .schema import database_lock, identifier
+from .schema import database_lock
 
 
 class AdminOwnershipConflict(RuntimeError):
@@ -78,12 +78,9 @@ def reconcile_native_admin(identity, uid, username, *, fetch_subject, enabled=Fa
     identity.active(username, uid)
     conn = identity.connection
     native_table = identity.accounts
-    role_table = identifier(identity.hub_schema) + '.role_permissions_adminrole' if hasattr(identity, 'hub_schema') else None
-    if not role_table:
-        # NativeIdentity carries profiles and social table identifiers in the
-        # Seahub schema; obtain that schema from its reviewed profile path.
-        profile_prefix = identity.profiles.rsplit('.', 1)[0]
-        role_table = profile_prefix + '.role_permissions_adminrole'
+    # NativeIdentity already binds this fully qualified, reviewed Seahub
+    # profile table; AdminRole lives in that same native Seahub database.
+    role_table = identity.profiles.rsplit('.', 1)[0] + '.role_permissions_adminrole'
 
     with database_lock(conn, 'identity:admin:' + uid):
         identity.active(username, uid)
