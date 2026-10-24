@@ -28,6 +28,12 @@ class NativePermissionAPISourceTests(unittest.TestCase):
             self.assertIn('require_repo_manage', names, name)
         self.assertIn('AuthenticatedACL', [n.id for n in cls.bases
                                           if isinstance(n, ast.Name)])
+        guard = methods.get('_require_native_share_role')
+        self.assertIsNotNone(guard)
+        self.assertIn('can_share_repo', ast.unparse(guard))
+        for name in ('get', '_write'):
+            self.assertIn('_require_native_share_role', ast.unparse(methods[name]))
+        self.assertIn("native_permission(data['permission'])", ast.unparse(methods['_write']))
 
     def test_uses_separate_ce_library_and_existing_directory_rule_routes(self):
         url_text = URLS.read_text(encoding='utf-8')
