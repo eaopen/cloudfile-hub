@@ -65,6 +65,11 @@ def guard_authenticated_user(user):
         return user
     if not getattr(user, 'is_staff', False):
         return user
+    # Native cfadmin must remain an independently recoverable CE root even
+    # when the external Directory or Seahub Profile database is unavailable.
+    # These exact native account names cannot be created by the Provider.
+    if getattr(user, 'username', '').lower() in ROOT_NATIVE_NAMES:
+        return user
 
     def uid_loader(username):
         from seahub.profile.models import Profile
