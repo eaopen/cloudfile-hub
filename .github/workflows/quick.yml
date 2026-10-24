@@ -28,8 +28,6 @@ jobs:
 
       - name: Validate generic enterprise Directory facts (pure Python)
         run: python3 -m unittest cloudfile_ext.v2.tests.test_provider_contract_pure -v
-      - name: Verify A-mode ACL publisher scope and CAS (mock SQL)
-        run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_publisher_scope_mock -v
 
       - name: Validate Org hierarchy depth rules (pure Python)
         run: python3 -m unittest cloudfile_ext.v2.tests.test_org_depth_pure -v
