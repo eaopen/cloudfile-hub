@@ -71,7 +71,9 @@ library; make any A→B handover deliberately after checking the applied rules.
 The API deliberately does not change native CE library administrator grants,
 which are additionally marked by `ExtraSharePermission` /
 `ExtraGroupsSharePermission`. Use the existing CE administrator lifecycle
-for those rather than passing a forged `admin` permission.
+for those rather than passing a forged `admin` permission. An exact-value
+idempotent PUT on such a grant returns `changed=false` without a native write;
+any actual change or revocation through this r/rw API remains rejected.
 
 For a group-owned library (`<group_id>@seafile_group`), the owning group is
 group ownership rather than a removable r/rw grant. It is therefore not listed
