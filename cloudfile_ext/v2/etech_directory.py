@@ -186,6 +186,20 @@ def provision_oidc_user(*, uid, provider, subject):
         return username
 
 
+def reconcile_verified_oauth_admin(uid, username):
+    """Legacy OAuth2 session path, AFTER exact configured UID/subject binding.
+
+    The native account already exists in this flow; Directory, not the OAuth
+    UserInfo email, supplies all administrator authority. No work when the
+    opt-in write flag is disabled.
+    """
+    if getattr(settings, 'CF_PROVIDER_ADMIN_SYNC_ENABLED', False) is not True:
+        return
+    with runtime() as (directory, identity, catalog, memberships):
+        identity.active(username, uid)
+        _maybe_reconcile_admin(uid, username, directory, identity)
+
+
 def lookup_group(external):
     """Existing native mappings remain resolvable for revoke after entity deletion."""
     from django.db import connection
