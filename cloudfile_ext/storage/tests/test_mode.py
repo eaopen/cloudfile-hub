@@ -14,10 +14,10 @@ class StorageModeTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as path:
             root = Path(path)
             (root / "seafile.conf").write_text(
-                "[cloudfile_v2]\\nauto_local_root = /shared/seafile/library-storage\\n")
+                "[cloudfile_v2]\nauto_local_root = /shared/seafile/library-storage\n")
             self.assertTrue(auto_local_enabled({"SEAFILE_CENTRAL_CONF_DIR": str(root)}))
             (root / "seafile.conf").write_text(
-                "[storage]\\nenable_storage_classes = true\\n")
+                "[storage]\nenable_storage_classes = true\n")
             self.assertFalse(auto_local_enabled({"SEAFILE_CENTRAL_CONF_DIR": str(root)}))
 
 
