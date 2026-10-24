@@ -46,8 +46,7 @@ pre-creates an active non-staff account with an unguessable password through
 the native CE RPC. The *complete* desired set is then reconciled in a single
 MySQL transaction against the CE `EmailUser.is_staff` and Seahub
 `role_permissions_adminrole.role=default_admin`. It grants newly listed
-users, preserves unchanged users and removes previously synchronized
-`default_admin` entries absent from the new complete snapshot.
+users, preserves unchanged users and removes absent `default_admin` entries **only if** explicitly identified in the configured managed-account scope.
 
 **No new permission table, managed-library concept, background task, or
 special administrator revocation service.** Normal usage reads CE native
