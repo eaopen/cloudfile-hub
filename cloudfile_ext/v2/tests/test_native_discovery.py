@@ -10,8 +10,8 @@ class NativeDiscoveryContractTest(unittest.TestCase):
         self.repo_id = str(uuid4())
         self.marker = native_key(self.repo_id)
 
-    def test_existing_native_repo_needs_registration(self):
-        self.assertEqual(classify(self.repo_id, True, None, None, None), 'NATIVE_UNREGISTERED')
+    def test_existing_native_repo_is_already_native(self):
+        self.assertEqual(classify(self.repo_id, True, None, None, None), 'NATIVE_REGISTERED')
         self.assertEqual(classify(self.repo_id, True, None, self.marker, 'active'), 'NATIVE_REGISTERED')
         self.assertEqual(classify(self.repo_id, True, None, self.marker, 'retired'), 'NATIVE_REGISTERED')
 
@@ -23,12 +23,19 @@ class NativeDiscoveryContractTest(unittest.TestCase):
         for route, key, state in (
             (None, self.marker, 'reserved'),
             (None, self.repo_id, 'active'),
-            ('auto-local:' + self.repo_id, None, None),
             ('auto-local:other', self.repo_id, 'active'),
             ('auto-local:' + self.repo_id, self.marker, 'active'),
         ):
             self.assertIn(classify(self.repo_id, True, route, key, state),
                           ('STORAGE_BINDING_CONFLICT', 'STORAGE_BINDING_INCOMPLETE'))
+
+    def test_new_uuid_and_existing_custom_key_both_route(self):
+        self.assertEqual(classify(self.repo_id, True, 'auto-local:' + self.repo_id, None, None),
+                         'V2_ROUTED')
+        self.assertEqual(classify(self.repo_id, True, 'auto-local:old-key', 'old-key', 'active'),
+                         'V2_ROUTED')
+        self.assertEqual(storage_catalog_status(self.repo_id, True, None, None,
+                         'auto-local:' + self.repo_id, True), 'READY')
 
     def test_external_storage_must_not_be_claimed(self):
         self.assertEqual(classify(self.repo_id, True, 'external-s3', None, None),
@@ -41,7 +48,7 @@ class NativeDiscoveryContractTest(unittest.TestCase):
 
     def test_two_way_registry_diagnostic_codes(self):
         rid = self.repo_id
-        self.assertEqual(storage_catalog_status(rid, True, None, None, None, True), 'REGISTRATION_MISSING')
+        self.assertEqual(storage_catalog_status(rid, True, None, None, None, True), 'READY')
         self.assertEqual(storage_catalog_status(rid, False, 'native-' + rid, 'active', None, False), 'REPO_MISSING')
         self.assertEqual(storage_catalog_status(rid, True, 'native-' + rid, 'active', None, True), 'READY')
         self.assertEqual(storage_catalog_status(rid, True, rid, 'active', 'auto-local:' + rid, True), 'READY')
