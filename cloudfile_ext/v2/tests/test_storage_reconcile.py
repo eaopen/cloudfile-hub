@@ -169,6 +169,41 @@ class StorageSQLTests(unittest.TestCase):
         report = self.service.run(apply=True, batch_size=1)
         self.assertEqual(report['summary']['UUID_LOCAL'], 1)
 
+    def test_failed_native_create_allocation_is_visible_in_explicit_inventory(self):
+        # Server inserts cf_library_storage + RepoStorageId before the first
+        # Commit. A later crash must NOT yield a hidden successful allocation.
+        rid = str(uuid4())
+        self.sql("INSERT INTO cf_library_storage VALUES(%s,%s,%s)",
+                 (rid, rid, 'active'))
+        self.sql("INSERT INTO RepoStorageId VALUES(%s,%s)",
+                 (rid, 'auto-local:' + rid))
+        (self.auto / rid / 'storage' / 'commits' / rid).mkdir(parents=True)
+
+        report = self.service.run(batch_size=1)
+        self.assertEqual(report['summary']['BLOCKED'], 1)
+        self.assertEqual(report['items'][0]['reason'], 'NATIVE_RESOURCE_MISSING')
+        self.assertEqual(report['items'][0]['repo_id'], rid)
+
+        applied = self.service.run(apply=True, batch_size=1)
+        self.assertEqual(applied['summary']['BLOCKED'], 1)
+        self.assertEqual(self.sql("SELECT state FROM cf_library_storage WHERE repo_id=%s",
+                                  (rid,)), (('active',),))
+        self.assertEqual(self.sql("SELECT storage_id FROM RepoStorageId WHERE repo_id=%s",
+                                  (rid,)), (('auto-local:' + rid,),))
+
+        # When native creation completes, the same binding is valid without
+        # running a second CloudFile registration/activation step.
+        self.sql("INSERT INTO Repo(repo_id) VALUES(%s)", (rid,))
+        restored = self.service.run(batch_size=1)
+        self.assertEqual(restored['summary']['REGISTERED'], 1)
+
+        # A genuinely retired tombstone after GC is not a new active orphan.
+        self.sql("DELETE FROM Repo WHERE repo_id=%s", (rid,))
+        self.sql("UPDATE cf_library_storage SET state='retired' WHERE repo_id=%s",
+                 (rid,))
+        report = self.service.run(batch_size=1)
+        self.assertEqual(report['summary']['BLOCKED'], 0)
+
     def test_schema_exact_idempotent_without_dynamic_ddl(self):
         self.service.ensure_schema()
         self.service.ensure_schema()
