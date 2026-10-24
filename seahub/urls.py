@@ -1,7 +1,7 @@
 # Copyright (c) 2012-2016 Seafile Ltd.
 from django.urls import include, path, re_path
 from django.views.generic import TemplateView
-from cloudfile_ext.v2.acl_http import EffectivePermission, SharedDirectories, DirectoryRules, NativeACLCheck, DirectoryEntries, LibraryACLBatch
+from cloudfile_ext.v2.acl_http import EffectivePermission, SharedDirectories, DirectoryRules, NativeACLCheck, DirectoryEntries, LibraryACLBatch, LibraryGrants
 from cloudfile_ext.v2.upload_session import UploadSession
 from cloudfile_ext.v2.tag_http import TagBatch
 from cloudfile_ext.v2.http import IdentityResolve, GroupResolve, CatalogSync, StorageReconcile
@@ -250,6 +250,7 @@ urlpatterns = [
     path('api/v2.1/cloudfile/tags/batch/', TagBatch.as_view()),
     path('api/v2.1/cloudfile/authorization/v1/directory-rules/', DirectoryRules.as_view()),
     path('api/v2.1/cloudfile/authorization/v1/library-acl-batch/', LibraryACLBatch.as_view()),
+    path('api/v2.1/cloudfile/authorization/v1/library-grants/', LibraryGrants.as_view()),
     path('api/v2.1/internal/cloudfile/acl/check/', NativeACLCheck.as_view()),
     path('oidc/login/', oidc_login),
     path('api/v2.1/admin/cloudfile/storage/reconcile/', StorageReconcile.as_view()),
