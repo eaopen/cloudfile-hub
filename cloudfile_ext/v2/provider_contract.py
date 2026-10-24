@@ -28,7 +28,10 @@ def verified_user(value, uid, *, account_field='account'):
     account = attrs.get(account_field)
     if account is not None and not isinstance(account, str):
         raise IdentityUnavailable('invalid Directory account value')
-    return login, account
+    # Generic providers may only supply a trusted account without a separate
+    # display login label. NativeIdentity still validates the account name
+    # before creation; existing users are located by exact stable UID.
+    return (login if login is not None else account), account
 
 
 
