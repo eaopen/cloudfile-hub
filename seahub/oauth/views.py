@@ -252,8 +252,8 @@ def oauth_callback(request):
         if attr_value:
             oauth_user_info[user_attr] = attr_value
         elif required:
-            logger.error('Required user attr not found.')
-            logger.error(user_info_json)
+            # UserInfo can contain personal data; never dump it into logs.
+            logger.warning('Required OAuth user attribute missing')
             return render_error(request, _('Error, please contact administrator.'))
 
     # A specifically mapped, trusted business userId is the canonical login_id.
