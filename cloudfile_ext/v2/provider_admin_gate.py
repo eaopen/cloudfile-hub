@@ -58,10 +58,20 @@ def mask_unverified_staff(user, *, enabled, uid_loader, fetch_subject):
     return user
 
 
+def enforcement_enabled(config):
+    """Keep admin-request protection alive when write sync is being rolled back.
+
+    SYNC enables both writes (in the login adapter) and request-time checks.
+    GUARD-only mode denies stale admin credentials without creating new grants.
+    """
+    return (getattr(config, 'CF_PROVIDER_ADMIN_SYNC_ENABLED', False) is True or
+            getattr(config, 'CF_PROVIDER_ADMIN_GUARD_ENABLED', False) is True)
+
+
 def guard_authenticated_user(user):
     """Entrypoint for CE's Session and Token authentication seams."""
     from django.conf import settings
-    if getattr(settings, 'CF_PROVIDER_ADMIN_SYNC_ENABLED', False) is not True:
+    if not enforcement_enabled(settings):
         return user
     if not getattr(user, 'is_staff', False):
         return user
