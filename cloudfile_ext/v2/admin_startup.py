@@ -53,6 +53,20 @@ def validated_roster(snapshot, *, now=None, required_account=''):
         raise IdentityUnavailable('invalid complete administrator roster') from None
 
 
+def managed_scope(accounts):
+    """Validate the explicit revocation scope before any CE account creation."""
+    if not isinstance(accounts, (list, tuple, frozenset)) or len(accounts) > MAX_ADMINS:
+        raise IdentityUnavailable('invalid managed administrator scope')
+    result = set()
+    for name in accounts:
+        if (not isinstance(name, str) or not 1 <= len(name) <= 255
+                or name != name.strip() or name.lower().split('@', 1)[0] == 'cfadmin'
+                or name in result):
+            raise IdentityUnavailable('invalid managed administrator scope')
+        result.add(name)
+    return frozenset(result)
+
+
 def changes(current, wanted, *, managed_accounts=()):
     """Pure planning: default_admin in the managed CE namespace is Provider-owned.
 
@@ -60,9 +74,7 @@ def changes(current, wanted, *, managed_accounts=()):
     system_admin, cfadmin and other CE administrators remain untouched. A different explicit native administrator role or a
     staff user with no role must not be silently adopted.
     """
-    managed = set(managed_accounts)
-    if not all(isinstance(name, str) and name for name in managed):
-        raise IdentityUnavailable('invalid managed administrator scope')
+    managed = managed_scope(managed_accounts)
     add = set()
     remove = set()
     keep = set()
@@ -88,6 +100,7 @@ def sync_native_admins(identity, roster, *, managed_accounts=()):
     This does not start an SSO login. A single cross-schema MySQL transaction
     applies and reads back all staff/role changes. No cf_* table is created.
     """
+    managed_accounts = managed_scope(managed_accounts)
     conn = identity.connection
     accounts = identity.accounts
     profiles = identity.profiles
