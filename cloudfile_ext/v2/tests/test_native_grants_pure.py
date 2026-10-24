@@ -167,6 +167,33 @@ class NativeLibraryGrantTests(TestCase):
             self.service.list()
 
 
+    def test_group_library_owning_group_is_ownership_not_a_grant(self):
+        # On group-owned libraries Seafile lists the owning group through the
+        # ordinary group-share RPC; Seahub's own listings filter it out because
+        # it is ownership, not a removable r/rw grant.
+        ce = CE()
+        ce.owner = '7@seafile_group'
+        ce.users = {}
+        ce.groups = {7: 'rw', 8: 'r'}
+        service = NativeLibraryGrants(
+            ce, REPO, user_exists=lambda u: True,
+            group_exists=lambda g: g in {7, 8},
+            protected_admin=lambda typ, value: False)
+        self.assertEqual(service.list()['grants'], [
+            {'subject_type': 'group', 'subject': 8, 'permission': 'r'}])
+        with self.assertRaises(PolicyError):
+            service.change('group', 7, expected='rw', desired=None)
+        with self.assertRaises(PolicyError):
+            service.change('group', 7, expected=None, desired='rw')
+        self.assertEqual(ce.writes, [])
+        self.assertEqual(ce.groups, {7: 'rw', 8: 'r'})
+        # Ordinary group grants remain manageable on a group-owned library.
+        changed = service.change('group', 8, expected='r', desired='rw')
+        self.assertTrue(changed['changed'])
+        self.assertEqual(ce.groups[8], 'rw')
+        self.assertIn(('set_group', 8, 'rw'), ce.writes)
+
+
 if __name__ == '__main__':
     import unittest
     unittest.main()

@@ -14,6 +14,22 @@ class NativeGrantUnavailable(Exception):
     """A native CE read/write or post-write readback could not be confirmed."""
 
 
+def owner_group(owner):
+    """Group id when the library is owned by a group, else None.
+
+    CE/Pro group-owned libraries are listed by Seafile's own share APIs as a
+    group grant to the owning group. That row is ownership, not a removable
+    grant: Seahub's share listings filter it out of the visible shares and no
+    r/rw management API may revoke it.
+    """
+    if not isinstance(owner, str) or not owner.endswith('@seafile_group'):
+        return None
+    head = owner.split('@', 1)[0]
+    if not head.isdigit() or not 1 <= int(head) <= 2147483647:
+        return None
+    return int(head)
+
+
 def target(kind, value):
     if kind == 'user':
         if (not isinstance(value, str) or not 1 <= len(value) <= 255
@@ -52,6 +68,7 @@ class NativeLibraryGrants:
             raise NativeGrantUnavailable('native CE library shares unavailable')
         if len(users) + len(groups) > MAX_GRANTS:
             raise NativeGrantUnavailable('native share list exceeds safe limit')
+        owning_group = owner_group(owner)
         rows = {}
         for kind, shares in (('user', users), ('group', groups)):
             for item in shares:
@@ -60,6 +77,10 @@ class NativeLibraryGrants:
                     level = permission(item.perm)
                 except (AttributeError, PolicyError) as error:
                     raise NativeGrantUnavailable('malformed native CE share record') from error
+                if kind == 'group' and subject == owning_group:
+                    # The owning group is group ownership, not a grant this
+                    # API may list as revocable or modify.
+                    continue
                 key = (kind, subject)
                 if key in rows:
                     raise NativeGrantUnavailable('duplicate native CE grant')
@@ -88,6 +109,8 @@ class NativeLibraryGrants:
         owner, rows = self.snapshot()
         if kind == 'user' and subject == owner:
             raise PolicyError('cannot share a library to its native owner')
+        if kind == 'group' and subject == owner_group(owner):
+            raise PolicyError('cannot modify the owning group of a group library')
         before = rows.get((kind, subject))
         if before != expected:
             raise RevisionConflict()

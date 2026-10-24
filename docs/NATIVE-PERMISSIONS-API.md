@@ -19,7 +19,9 @@ Virtual repos are not managed here; use their CE origin/owner scope.
 GET /api/v2.1/cloudfile/authorization/v1/library-grants/?repo_id=00000000-0000-4000-8000-000000000001
 ```
 
-Response describes **current CE facts**, not an A/B configuration source.\n\`is_admin\` is read from CE's existing elevated-share markers in two bounded\nqueries rather than per-recipient database queries:
+Response describes **current CE facts**, not an A/B configuration source.
+`is_admin` is read from CE's existing elevated-share markers in two bounded
+queries rather than per-recipient database queries:
 
 ```json
 {
@@ -65,6 +67,11 @@ The API deliberately does not change native CE library administrator grants,
 which are additionally marked by `ExtraSharePermission` /
 `ExtraGroupsSharePermission`. Use the existing CE administrator lifecycle
 for those rather than passing a forged `admin` permission.
+
+For a group-owned library (`<group_id>@seafile_group`), the owning group is
+group ownership rather than a removable r/rw grant. It is therefore not listed
+in `grants` and cannot be changed through this API, matching Seafile's own
+share listings; ordinary user/group grants of that library remain manageable.
 
 ## Directory ACL (existing, reused)
 
