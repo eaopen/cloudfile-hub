@@ -296,6 +296,14 @@ def oauth_callback(request):
                 email = bind_existing_uid(
                     uid=oauth_user_info['login_id'],
                     provider=OAUTH_PROVIDER, subject=oauth_user_info['uid'])
+                # The old, already-bound OAuth2 callback still used by
+                # existing enterprise login must receive the same optional
+                # native admin projection as verified OIDC JIT. This is not
+                # driven by role/email claims in OAuth UserInfo.
+                if (protocol == 'oauth2' and getattr(settings, 'CF_DIRECTORY_URL', '')
+                        and getattr(settings, 'CF_PROVIDER_ADMIN_SYNC_ENABLED', False) is True):
+                    from cloudfile_ext.v2.etech_directory import reconcile_verified_oauth_admin
+                    reconcile_verified_oauth_admin(oauth_user_info['login_id'], email)
         except Exception:
             logger.warning('Trusted OAuth UID cannot resolve its native account')
             return render_error(request, _('Error, please contact administrator.'))
