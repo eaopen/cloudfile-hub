@@ -40,3 +40,25 @@ permission changes.
 
 No new tables, background refresh, migration, network path or recursive
 database query.
+
+## Trusted Provider boundary (stacked on #73)
+
+`trusted_scoped_memberships(context, catalog, uid, org_level=1)` combines
+#73's verified UID-scoped context and validated entity snapshot with this
+pure depth algorithm. It fails closed if the subject is stale/disabled, its
+direct Org/Role is absent from the complete catalog, an Org has an invalid
+parent chain, or supplied ancestor hints cannot be proven from that graph.
+The caller must first authenticate and fetch both objects over the trusted
+Provider channel; this function does not fetch remote data and never updates
+CE GroupUser, admin roles, caches or file ACLs.
+
+The catalog must contain the *complete active Org ancestry* for the subject.
+The two snapshots can be read at different times; in the case of a change or
+inconsistency, reject the computation and retry through normal bounded
+Directory refresh rather than guessing parent membership. Etech keeps the
+existing namespace filter `(org,directory)/(role,role)`. Generic providers
+may use other namespace values.
+
+When #73 lands in `dev`, this stacked PR can be reviewed and merged as the
+small dependent algorithm/integration slice. Release use remains gated on
+#63 and Etech DEV permission regression.
