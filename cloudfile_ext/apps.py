@@ -28,7 +28,8 @@ class CloudFileConfig(AppConfig):
             module.register(registry)
 
         self._register_native_acl_gate(registry)
-        self._register_directory_catalog(registry)
+        # Org/role synchronization is triggered by the owning external app
+        # through the explicit admin API; never register periodic polling here.
 
         registry.seal()
 
@@ -49,26 +50,6 @@ class CloudFileConfig(AppConfig):
 
         from cloudfile_ext.v2 import native_gate
         registry.register_permission_check(native_gate.check_permission)
-
-    @staticmethod
-    def _register_directory_catalog(registry):
-        """Sync enterprise org/role catalog on the existing worker, never on ACL reads.
-
-        The login callback projects an authenticated existing user's memberships;
-        a missing group or user in an ordinary file request does not create it.
-        """
-        from django.conf import settings
-
-        # A Directory URL can also be present for startup-only admin roster
-        # synchronization. That configuration must not create a recurring job.
-        if (not getattr(settings, 'CF_ENABLE_SSO', False) or
-                not getattr(settings, 'CF_DIRECTORY_URL', '')):
-            return
-        interval = getattr(settings, 'CF_DIRECTORY_SYNC_INTERVAL_SECONDS', 600)
-        if type(interval) is not int or not 60 <= interval <= 86400:
-            raise ValueError('CF_DIRECTORY_SYNC_INTERVAL_SECONDS must be 60..86400')
-        from cloudfile_ext.v2.directory_adapter import sync_entity_catalog
-        registry.register_periodic_task('directory-entities', interval, sync_entity_catalog)
 
     def _configure_database(self):
         """Add the seafile-db connection and the cf_* router.
