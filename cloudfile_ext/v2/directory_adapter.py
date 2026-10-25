@@ -229,22 +229,15 @@ def subject_ready(uid, username):
 
 
 def ensure_subject(uid, username):
+    """Login-only refresh for an already authenticated/created native account.
+
+    Never create missing groups as a side effect of user login or ACL lookup.
+    The periodic catalog synchronizer owns organization/role creation; a
+    missing mapped entity refuses membership projection until the next sync.
+    """
     if subject_ready(uid, username):
         return
     with runtime() as (directory, identity, catalog, memberships):
-        # Entity synchronization never expands users. Catalog is consulted only
-        # after the subject TTL expires, including newly assigned departments.
-        def fetch(current_uid):
-            subject = directory.subject(current_uid)
-            _, desired = validate_subject(subject, current_uid)
-            if desired:
-                entities = directory.entities()
-                if not desired <= entities.keys():
-                    raise IdentityUnavailable('Directory membership entity missing')
-                for key in sorted(desired):
-                    catalog.ensure(*key, entities[key])
-            return subject
-        memberships.fetch = fetch
         memberships.ensure(uid, username)
 
 
