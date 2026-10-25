@@ -25,7 +25,7 @@ OAuth2/OIDC 的 `provider + sub` 是 **外部认证凭证的标识**，不是业
 
 1. **enterprise Directory 认证 / 内部调用**：enterprise Directory 的受信目录和服务凭证负责传递 业务 UID；CloudFile 查找已存在且启用的原生账号，或按既有 enterprise Directory 预创建流程建号。enterprise Directory 门户的自身会话不能直接替代 CloudFile 登录证明。
 2. **旧 OAuth2（含旧 ssoauth/Authentik 配置）**：保留 `/oauth/login/`、`/oauth/callback/` 和现有 Provider。只有管理员将可信 UserInfo `userId` 显式映射为 `login_id` 且该 claim 存在时，才强制从精确 UID 选已有原生账号，并验证 `sub` 与原生绑定；冲突、账号不存在或无效时拒绝登录。未映射可信 `userId` 的通用旧 OAuth 保留原生兼容流程，不将员工号或邮箱误当成 业务 UID。
-3. **enterprise Directory 集成**：最新 V2 `dev` 已隔离历史 `cloudfile_ext/sso/eap_oauth.py` 模块，若启用 `CF_SSO_EAP_PROFILE_IDENTITY=true` 则明确拒绝，不恢复旧分支。enterprise Directory 采用可信 `userId` 映射的 OAuth、原生 V2 OIDC 与目录接口，不以工号归并账号。
+3. **enterprise Directory 集成**：V2 继续复用现有受信 `userId → login_id` OAuth/OIDC 身份绑定与 EAP `/ssoAuth` 旁路；废弃的 `CF_SSO_EAP_PROFILE_IDENTITY` 不再参与登录判断，即使历史配置仍为 `true` 也不拒绝合法回调。不会恢复旧 `cloudfile_ext/sso/eap_oauth.py` 桥接，也不以工号归并账号。
 4. **独立 OIDC（Authentik、ssoauth 或其他合规 IdP）**：`/api/v2.1/cloudfile/extensions/identity/v1/begin/` 和 `callback/` 验证固定 issuer、client audience、签名、nonce、state、PKCE、UserInfo `sub`、可信业务 UID 声明后，基于 UID 选同一原生账号。多个 issuer 的同名 `sub` 互不混用。
 
 `/oidc/login/` 是 Seahub OAuth 入口的 OIDC 适配；也须检查 ID Token，而不能仅以拿到 access token 当作身份验证。

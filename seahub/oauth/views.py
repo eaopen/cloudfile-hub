@@ -134,11 +134,8 @@ def oauth_login(request):
     Redirect the user/resource owner to the OAuth provider (i.e. Github)
     using an URL with a few key OAuth parameters.
     """
-    # The deployed EAP bridge must validate the same UID contract before JIT.
-    if getattr(settings, 'CF_SSO_EAP_PROFILE_IDENTITY', False):
-        # V2 does not import the retired v0.9 EAP OAuth bridge.
-        logger.error('Retired EAP SSO bridge is unavailable in CloudFile V2')
-        return render_error(request, _('Error, please contact administrator.'))
+    # Historical CF_SSO_EAP_PROFILE_IDENTITY is ignored. The current trusted
+    # userId -> login_id checks below already serve the existing EAP /ssoAuth flow.
     # /oidc/login/ uses the same OAuth client but additionally requires a
     # verified ID Token. Keep the standalone V2 OIDC entrypoint independent.
     oidc_mode = getattr(request, '_cloudfile_oidc', False) is True
@@ -181,11 +178,8 @@ def oauth_callback(request):
     callback URL. With this redirection comes an authorization code included
     in the redirect URL. We will use that to obtain an access token.
     """
-    # Keep the upstream entry point; isolate EAP identity logic in its extension.
-    if getattr(settings, 'CF_SSO_EAP_PROFILE_IDENTITY', False):
-        # V2 does not import the retired v0.9 EAP OAuth bridge.
-        logger.error('Retired EAP SSO bridge is unavailable in CloudFile V2')
-        return render_error(request, _('Error, please contact administrator.'))
+    # Reuse the normal OAuth callback for /ssoAuth. Ignore the retired EAP
+    # bridge flag; keep state, subject, business UID and CE session validation.
     expected_state = request.session.pop('oauth_state', None)
     state = request.GET.get('state', '')
     protocol = request.session.pop('oauth_protocol', 'oauth2')
