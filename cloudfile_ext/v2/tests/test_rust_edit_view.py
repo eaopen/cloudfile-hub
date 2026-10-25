@@ -91,6 +91,19 @@ class CheckoutCapabilityTests(unittest.TestCase):
             self.assertTrue(checkout_for_repo(RID))
             self.assertFalse(checkout_for_repo('22222222-2222-4222-8222-222222222222'))
 
+    def test_selected_repo_is_still_off_when_global_capability_is_disabled(self):
+        with patch('cloudfile_ext.v2.rust_edit.settings',
+                   SimpleNamespace(CF_CHECKOUT_REPOS=(RID,))), \
+             patch('cloudfile_ext.v2.rust_edit.checkout_available', return_value=False):
+            self.assertFalse(checkout_for_repo(RID))
+
+    def test_malformed_selection_type_fails_safe_to_off(self):
+        with patch('cloudfile_ext.v2.rust_edit.settings',
+                   SimpleNamespace(CF_CHECKOUT_REPOS=RID)), \
+             patch('cloudfile_ext.v2.rust_edit.checkout_available') as available:
+            self.assertFalse(checkout_for_repo(RID))
+            available.assert_not_called()
+
     def test_off_repo_lock_info_never_queries_guard(self):
         req = APIRequestFactory().get('/api/v2.1/cloudfile/edit/v1/lock-info/',
                                       {'repo_id': RID, 'path': FILE})

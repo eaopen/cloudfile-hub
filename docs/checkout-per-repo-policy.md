@@ -54,8 +54,8 @@ at configuration loading. OFF does not implicitly release an old Guard.
 ## Minimal acceptance
 
 - OFF: view/optimistic edit/normal upload; zero Guard SQL in hot write path.
-- OPTIONAL without Guard: ordinary edits and explicit Checkout both available.
+- OPTIONAL with a healthy Guard and no active lease: ordinary edits and explicit Checkout both available.
 - OPTIONAL with active Guard: only owner with proof can Commit/Checkin;
   other writes fail and reads succeed.
-- Guard unavailable: OPTIONAL writes fail closed while OFF stays operational.
+- Guard unavailable: OPTIONAL writes (including ordinary/optimistic writes) fail closed while OFF stays operational.
 - Switching OPTIONAL -> OFF requires confirmed lease drain and service restart.
