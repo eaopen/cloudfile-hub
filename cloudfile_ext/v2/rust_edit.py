@@ -200,7 +200,8 @@ class RustCheckoutInfo(APIView):
             if expires is None or expires <= timezone.now().replace(tzinfo=None):
                 return Response({"checkout_supported": True, "checked_out": False})
             current_uid = Profile.objects.get(user=viewer).login_id
-            privileged = owner_uid == current_uid or bool(request.user.is_staff)
+            owned_by_me = owner_uid == current_uid
+            privileged = owned_by_me or bool(request.user.is_staff)
             details = {
                 "checkout_supported": True,
                 "checked_out": True,
@@ -209,6 +210,9 @@ class RustCheckoutInfo(APIView):
                 "checked_out_at": started.isoformat() + "Z",
                 "last_activity_at": active.isoformat() + "Z",
                 "expires_at": expires.isoformat() + "Z",
+                # The dialog may offer resume only to the Guard owner; the Rust
+                # Agent still verifies the original Guard proof before resuming.
+                "checked_out_by_me": owned_by_me,
             }
             if privileged:
                 details.update(terminal_type=terminal, terminal_name=name,
