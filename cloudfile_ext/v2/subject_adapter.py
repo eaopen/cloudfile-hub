@@ -24,15 +24,10 @@ class InvalidSubjectAdapter(ValueError):
     pass
 
 
-@lru_cache(maxsize=8)
-def _trusted_directory_namespace(url, key_id, secret, issuer, audience):
-    """One authenticated catalog read per worker/config; no per-ACL Directory RPC."""
-    from .directory_adapter import Directory
+def _namespace_from_entities(facts):
+    """Validate the existing trusted entities contract before accepting a provider."""
     from .provider_contract import validated_entities
 
-    # Directory.get sends the existing scoped machine JWT, refuses redirects and
-    # bounds the response. Its validated entities contract proves freshness.
-    facts = Directory().get('/groups?view=entities')
     validated_entities(facts)
     declared = facts.get('provider')
     if declared is None:  # older/generic Directory contract
@@ -41,6 +36,16 @@ def _trusted_directory_namespace(url, key_id, secret, issuer, audience):
     if len(declared) > 32:  # cf_dir_acl.provider / cf_sso_group_map.provider
         raise InvalidSubjectAdapter('Directory provider namespace too long')
     return declared
+
+
+@lru_cache(maxsize=8)
+def _trusted_directory_namespace(url, key_id, secret, issuer, audience):
+    """One authenticated catalog read per worker/config; no per-ACL Directory RPC."""
+    from .directory_adapter import Directory
+
+    # Directory.get sends the existing scoped machine JWT, refuses redirects and
+    # bounds the response. Only a current, valid entities response is trusted.
+    return _namespace_from_entities(Directory().get('/groups?view=entities'))
 
 
 def provider_name(config, default=DEFAULT_PROVIDER):
