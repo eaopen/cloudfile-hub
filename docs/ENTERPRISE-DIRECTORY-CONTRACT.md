@@ -67,6 +67,13 @@ adapter, without inventing a framework or adding cf_* tables.
 
 ## External organization/role synchronization (2026-10-25)
 
+- **Stable provider namespace for existing permissions.** A machine-authenticated
+  `/groups?view=entities` response may include `provider` (Etech uses `etech`).
+  CloudFile uses an explicit `CF_DIRECTORY_PROVIDER` / `CF_ACL_PROVIDER` first,
+  otherwise one validated, cached Directory declaration per Hub worker,
+  otherwise the generic `external` default. No DB/ACL migration, new setting
+  or repeated Directory lookup on warm ACL requests. An invalid declaration
+  fails closed. Already configured provider namespaces are never overridden.
 - **Etech owns the business Directory and schedules catalog updates.** Its existing
   PowerJob `cloudDirectorySync` calls the CloudFile administrator endpoint
   `POST /api/v2.1/admin/cloudfile/directory/entities/sync/`. Other enterprise
