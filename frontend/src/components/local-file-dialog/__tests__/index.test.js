@@ -59,10 +59,30 @@ test('a read-only library still offers local viewing', async () => {
   expect(buttons().map(b => b.disabled)).toEqual([false, true, true]);
 });
 
-test.each([null, { checkout_supported: false, checked_out: false }])('unconfirmed or unsupported Guard affects only exclusive editing', async data => {
-  cloudFileAPI.getLocalCheckoutInfo.mockResolvedValue({ data });
+test('an explicitly OFF library permits ordinary edit without an exclusive button', async () => {
+  cloudFileAPI.getLocalCheckoutInfo.mockResolvedValue({
+    data: { checkout_supported: false, checked_out: false },
+  });
   await render();
   expect(buttons().map(b => b.disabled)).toEqual([false, false, true]);
+});
+
+test.each([null, {}, { checkout_supported: true },
+  { checkout_supported: false, checked_out: true }])('malformed status %p is unknown, never unlocked', async data => {
+  cloudFileAPI.getLocalCheckoutInfo.mockResolvedValue({ data });
+  await render();
+  expect(buttons().map(b => b.disabled)).toEqual([false, true, true]);
+  expect(container.textContent).toContain('lock state could not be confirmed');
+});
+
+test('pending lock-info blocks writes until the response is known', async () => {
+  let resolveInfo;
+  cloudFileAPI.getLocalCheckoutInfo.mockReturnValue(
+    new Promise(resolve => { resolveInfo = resolve; }));
+  await render();
+  expect(buttons().map(b => b.disabled)).toEqual([false, true, true]);
+  await act(async () => resolveInfo({ data: supported }));
+  expect(buttons().map(b => b.disabled)).toEqual([false, false, false]);
 });
 
 test('an unconfirmed lock state blocks new write tasks, not local viewing', async () => {

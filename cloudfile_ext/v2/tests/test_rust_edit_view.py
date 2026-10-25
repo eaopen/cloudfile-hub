@@ -120,6 +120,38 @@ class CheckoutCapabilityTests(unittest.TestCase):
             database.cursor.assert_not_called()
 
 
+    def test_optional_without_guard_refuses_new_edit_tickets(self):
+        with patch('cloudfile_ext.v2.rust_edit.settings',
+                   SimpleNamespace(CF_CHECKOUT_REPOS=(RID,))), \
+             patch('cloudfile_ext.features.is_enabled', return_value=True), \
+             patch('cloudfile_ext.v2.rust_edit.checkout_available', return_value=False):
+            for mode in ('optimistic-edit', 'exclusive-edit'):
+                request = APIRequestFactory().post(
+                    '/api/v2.1/cloudfile/edit/v1/open/',
+                    {'repo_id': RID, 'path': FILE, 'mode': mode}, format='json')
+                force_authenticate(request, SimpleNamespace(username='user@auth.local',
+                                                              is_authenticated=True,
+                                                              is_active=True))
+                response = RustLocalEditOpen.as_view()(request)
+                self.assertEqual(response.status_code, 503)
+                self.assertEqual(response.data['code'], 'GUARD_UNAVAILABLE')
+
+    def test_optional_without_guard_lock_info_returns_503_without_guard_sql(self):
+        request = APIRequestFactory().get('/api/v2.1/cloudfile/edit/v1/lock-info/',
+                                          {'repo_id': RID, 'path': FILE})
+        force_authenticate(request, SimpleNamespace(username='user@auth.local',
+                                                      is_authenticated=True,
+                                                      is_active=True))
+        with patch('cloudfile_ext.v2.rust_edit.settings',
+                   SimpleNamespace(CF_CHECKOUT_REPOS=(RID,))), \
+             patch('cloudfile_ext.features.is_enabled', return_value=True), \
+             patch('cloudfile_ext.v2.rust_edit.checkout_available', return_value=False), \
+             patch('cloudfile_ext.v2.rust_edit.connection') as database:
+            response = RustCheckoutInfo.as_view()(request)
+            self.assertEqual(response.status_code, 503)
+            self.assertEqual(response.data['code'], 'GUARD_UNAVAILABLE')
+            database.cursor.assert_not_called()
+
     def test_disabled_checkout_never_discovers_schema(self):
         checkout_available.cache_clear()
         try:

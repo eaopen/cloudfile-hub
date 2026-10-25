@@ -22,7 +22,17 @@ export default function LocalFileDialog({ repoID, path, permission, readOnly = f
     setLockUnknown(false);
     if (canRead) {
       cloudFileAPI.getLocalCheckoutInfo(repoID, path).then(response => {
-        if (active) setCheckout(response.data);
+        if (!active) return;
+        const data = response?.data;
+        if (data && typeof data.checkout_supported === 'boolean' &&
+            typeof data.checked_out === 'boolean' &&
+            (data.checkout_supported || !data.checked_out)) {
+          setCheckout(data);
+        } else {
+          // A partial/unknown response must not be mistaken for an OFF library.
+          setCheckout(null);
+          setLockUnknown(true);
+        }
       }).catch(() => {
         // Unknown is not "unlocked": disable new write tasks (including ordinary
         // editing) until the lock state can be confirmed again.
@@ -39,7 +49,9 @@ export default function LocalFileDialog({ repoID, path, permission, readOnly = f
   const checkedOutByMe = checkedOut && checkout?.checked_out_by_me === true;
   const locked = checkedOut && !checkedOutByMe;
   const exclusive = canWrite && !lockUnknown && checkout?.checkout_supported === true && !checkedOut;
-  const canEditNormally = canWrite && !checkedOut && !lockUnknown;
+  // Pending lock-info is not a confirmed unlocked state. Never launch a
+  // write task before the first authoritative response has arrived.
+  const canEditNormally = canWrite && checkout?.checked_out === false && !lockUnknown;
   const canResume = canWrite && checkedOutByMe && !lockUnknown;
   const launch = async mode => {
     const allowed = mode === 'local-view'
