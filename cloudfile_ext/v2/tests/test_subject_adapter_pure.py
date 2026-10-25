@@ -139,7 +139,7 @@ class SubjectAdapterPureTests(unittest.TestCase):
                      generated_at=datetime.now(timezone.utc).isoformat(), groups=[])
         with patch.object(module, '_fetch_trusted_entities',
                           side_effect=[IdentityUnavailable('down'), facts]) as call, \
-             patch.object(module.time, 'monotonic', side_effect=[100.0, 100.0, 100.0, 131.0, 131.0]):
+             patch.object(module.time, 'monotonic', side_effect=[100.0, 100.0, 100.0, 100.0, 131.0, 131.0]):
             with self.assertRaises(IdentityUnavailable):
                 module._trusted_directory_namespace(*key)
             with self.assertRaises(IdentityUnavailable):
