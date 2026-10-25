@@ -54,11 +54,11 @@ described in #61. This PR does **not** create generic network routing.
 - A provider supplies facts, **never** executable file permissions.
 - Native GroupUser projection continues under the existing Hub runtime.
 - A parent Org field is checked as data, not automatically converted into
-  inherited CE membership. The default direct-Org / orgLevel behavior is
-  managed separately in Draft #63; do not infer that merging this parser
-  alone changes the currently deployed ancestor behavior.
+  inherited CE membership. Hub #63 has merged direct-Org membership as the
+  default; deployment acceptance must still confirm real enterprise groups.
 - The full hierarchy validation and depth rules (0/1/N) belong to #55.
-- Admin startup roster synchronization remains isolated under #64.
+- Admin startup roster synchronization is implemented but remains opt-in;
+  it is independent of ordinary ACL and Directory lookups (Hub #71 / #64).
 - Runtime CE/enterprise Directory login, GroupUser refresh and MariaDB validation remain a
   separate DEV acceptance gate. Fast Python tests prove only parsing logic.
 
