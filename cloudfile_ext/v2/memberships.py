@@ -175,7 +175,7 @@ class Memberships:
                     cursor.execute('INSERT INTO ' + self.members + '(group_id,user_name,is_staff) VALUES(%s,%s,0)', (group, username))
                 cursor.execute('SELECT group_id,is_staff FROM ' + self.members + ' WHERE user_name=%s ORDER BY group_id FOR UPDATE', (username,))
                 actual = cursor.fetchall()
-                if ({group for group, _ in actual} & owned) != required or any(group in owned and staff != 0 for group, staff in actual):
+                if ({group for group, _ in actual} & (owned | required)) != required or any(group in (owned | required) and staff != 0 for group, staff in actual):
                     raise IdentityUnavailable('native membership readback failed')
             self.connection.commit()
         finally:
