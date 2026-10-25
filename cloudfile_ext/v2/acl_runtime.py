@@ -72,6 +72,13 @@ def library_rules(rules, repo_id, ttl):
                                   lambda rows: [astuple(rule) for rule in rows], _decode_rules(repo_id))
 
 
+def subject_adapter(config):
+    from .subject_adapter import InvalidSubjectAdapter, selected_adapter
+    try:
+        return selected_adapter(config)
+    except InvalidSubjectAdapter as error:
+        raise ACLUnavailable(str(error)) from error
+
 def current_principal(username):
     from seaserv import ccnet_api
     from seahub.profile.models import Profile
@@ -82,21 +89,24 @@ def current_principal(username):
         raise PermissionError('inactive account')
     profile = Profile.objects.get_profile_by_user(username)
     uid = profile.login_id if profile else None
-    # Native local accounts have no external Directory membership to refresh.
-    # Their disjoint provider prevents accidental matching of Etech rules.
-    # System accounts carry a non-numeric login_id (cfadmin -> 'cfadmin'). That
-    # is not a business UID, so the directory answers 404 SUBJECT_NOT_FOUND and
-    # every administrator-initiated call would fail with 503 (DEV 2026-10-20).
-    # Keep them on the native track as well: ACL rules are provider-scoped, so
-    # this widens nothing and only stops treating a system account as a person.
-    if not uid or not str(uid).strip().isdigit():
+    adapter = subject_adapter(settings)
+
+    # CE-only installation has no enterprise membership. Existing CE accounts
+    # with no external UID stay in the native CE namespace, which cannot
+    # match provider-scoped rules. Reserved cfadmin is an exact account/UID
+    # pair, never just an arbitrary Profile.login_id string.
+    if adapter is None or not uid:
         return Principal('native-local', username, frozenset())
-    provider = getattr(settings, 'CF_ACL_PROVIDER', 'etech')
-    ensure = getattr(settings, 'CF_ACL_SUBJECT_ENSURE', 'cloudfile_ext.v2.etech_directory.ensure_subject')
-    if not uid or not provider or not ensure:
-        raise ACLUnavailable('trusted current subject adapter unavailable')
-    # Work package A supplies a server-configured callable (uid, username).
-    # Success means Memberships.ensure() completed; client claims are never used.
+    from .subject_adapter import native_admin_identity, reserved_identity_conflict
+    if reserved_identity_conflict(uid, username):
+        raise ACLUnavailable('reserved native administrator identity mismatch')
+    if native_admin_identity(uid, username):
+        return Principal('native-local', username, frozenset())
+    provider, ensure = adapter
+
+    # A configured Directory owns *all* other external UIDs, including strings
+    # with letters. Missing subjects and expired memberships fail closed; never
+    # treat a non-numeric UID as a native user with broader CE access.
     import_string(ensure)(uid, username)
     schema = identifier(SeafileDB().db_name)
     accounts = identifier(get_ccnet_db_name())
@@ -105,8 +115,6 @@ def current_principal(username):
                        accounts + '.GroupUser gu ON gu.group_id=m.group_id WHERE m.provider=%s AND gu.user_name=%s LIMIT 4097',
                        [provider, username])
         groups = cursor.fetchall()
-        # cf_sso_group_map stores the hierarchy contract's kinds ('dept'/'group');
-        # 'org'/'role' are the V2 names for the same rows.
         if len(groups) > 4096 or any(row[0] not in ('org', 'role', 'dept', 'group') for row in groups):
             raise ACLUnavailable('invalid current membership')
     return Principal(provider, uid, frozenset(groups))

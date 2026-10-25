@@ -292,11 +292,22 @@ is exactly HTTP 200 with `{"allowed":true,"contract":"cf-acl-v1"}`. Redirects, m
 access. A valid bounded cached policy decision is allowed; an old access ticket
 alone is not a policy decision. The native client bounds response size and time.
 
-The built-in Etech provider defaults to `etech`. `CF_ACL_PROVIDER` and the server-configured dotted callable
-`CF_ACL_SUBJECT_ENSURE(uid, username)` are the subject integration seam. The latter
-must call the existing Memberships TTL projector successfully; failure raises.
-Only then does Hub read `cf_sso_group_map JOIN GroupUser`. Missing adapter means
-503, never stale-group fallback. This package does not claim package A is wired.
+Subject selection is configuration only, never UID syntax (`login_id.isdigit()`
+is not a security boundary). The built-in Etech provider is selected when
+`CF_DIRECTORY_URL` is set and neither override below is configured; it defaults
+to `etech` / `cloudfile_ext.v2.etech_directory.ensure_subject`.
+`CF_ACL_PROVIDER` and the server-configured dotted callable
+`CF_ACL_SUBJECT_ENSURE(uid, username)` are the subject integration seam; setting
+either one requires both, and a partial, whitespace, overlong or reserved
+(`native-local`) configuration is refused as 503 rather than silently falling
+back to CE. The callable must call the existing Memberships TTL projector
+successfully; failure raises. Only then does Hub read
+`cf_sso_group_map JOIN GroupUser`. A CE-only installation with no
+`CF_DIRECTORY_URL` and no override selects no adapter and is served as a
+disjoint `native-local` principal with no Directory call; on a configured
+instance only the exact built-in `cfadmin` account/UID pair stays native, and a
+reserved account/UID alias is refused. This package does not claim package A is
+wired.
 
 ### Shared native batch for directory listing
 
