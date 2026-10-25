@@ -36,7 +36,7 @@ class Directory:
     def get(self, path):
         now = int(time.time())
         token = jwt.encode(dict(iss=getattr(settings, 'CF_DIRECTORY_ISSUER', 'cloudfile-sso'),
-            aud=getattr(settings, 'CF_DIRECTORY_AUDIENCE', 'cloudfile-directory'), sub='cloudfile',
+            aud=getattr(settings, 'CF_DIRECTORY_AUDIENCE', 'eap-directory'), sub='cloudfile',
             iat=now, exp=now+60, jti=str(uuid4()), scope='directory.read'), self.secret,
             algorithm='HS256', headers={'kid': self.key_id, 'typ': 'JWT'})
         try:
