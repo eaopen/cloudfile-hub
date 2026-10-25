@@ -195,11 +195,22 @@ class HTTPTests(TestCase):
             authority.return_value.effective.return_value = Decision('rw','/shared',True)
             good = dict(is_internal=True,exp=int(time.time())+60)
             self.assertEqual(self.native(good).status_code,200)
-            authority.assert_called_once_with('native')
+            authority.assert_called_once_with('native', cache_rules=False)
             for bad in (dict(exp=int(time.time())+60),dict(is_internal=True,exp=1),dict(is_internal='true',exp=int(time.time())+60),dict(is_internal=True,exp=int(time.time())+3600)):
                 self.assertEqual(self.native(bad).status_code,403)
             authority.return_value.effective.return_value = Decision('invisible','/shared',True)
             self.assertEqual(self.native(good).status_code,403)
+
+    def test_write_batch_is_one_fresh_authority_and_small_verdict(self):
+        claims = dict(is_internal=True, exp=int(time.time()) + 60)
+        checks = [dict(path='/shared/file', kind='file', action='write')] * 1024
+        with patch('cloudfile_ext.v2.acl_http.Authority') as authority:
+            authority.return_value.effective.return_value = Decision('rw', '/shared', True)
+            result = self.native(claims, dict(username='native', repo_id=RID, checks=checks))
+            self.assertEqual(result.status_code, 200)
+            self.assertTrue(result.data['allowed'])
+            self.assertNotIn('permissions', result.data)
+            authority.assert_called_once_with('native', cache_rules=False)
 
     def test_native_partial_directory_listing_preserves_hidden_children(self):
         claims = dict(is_internal=True, exp=int(time.time()) + 60)
