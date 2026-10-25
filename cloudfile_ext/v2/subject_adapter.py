@@ -13,7 +13,8 @@ No UID format is an authentication or authorization signal.
 DEFAULT_PROVIDER = 'external'
 PREFERRED_PROVIDER_SETTING = 'CF_DIRECTORY_PROVIDER'
 LEGACY_PROVIDER_SETTING = 'CF_ACL_PROVIDER'
-BUILTIN_ENSURE = 'cloudfile_ext.v2.directory_adapter.ensure_subject'
+BUILTIN_ENSURE = None  # CE Profile + GroupUser are read-only on permission paths
+LEGACY_ENSURE = 'cloudfile_ext.v2.directory_adapter.ensure_subject'
 
 
 class InvalidSubjectAdapter(ValueError):
@@ -58,7 +59,7 @@ def selected_adapter(config):
         raise InvalidSubjectAdapter('incomplete enterprise subject adapter')
     if provider is None:
         raise InvalidSubjectAdapter('incomplete enterprise subject adapter')
-    return _checked_provider(provider), ensure
+    return _checked_provider(provider), None if ensure == LEGACY_ENSURE else ensure
 
 
 # Only the built-in local CE administrator may bypass the configured enterprise
