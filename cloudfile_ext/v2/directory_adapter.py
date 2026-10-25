@@ -232,7 +232,7 @@ def ensure_subject(uid, username):
     """Login-only refresh for an already authenticated/created native account.
 
     Never create missing groups as a side effect of user login or ACL lookup.
-    The periodic catalog synchronizer owns organization/role creation; a
+    External admin-triggered catalog synchronization owns organization/role creation; a
     missing mapped entity refuses membership projection until the next sync.
     """
     if subject_ready(uid, username):
@@ -242,7 +242,7 @@ def ensure_subject(uid, username):
 
 
 def sync_entity_catalog():
-    """Scheduled/manual org+role reconciliation; no user or GroupUser writes.
+    """Externally triggered org+role reconciliation; no user or GroupUser writes.
 
     Read current native mappings once. Unchanged thousands of groups must not
     each acquire a provider lock, query CE and call ccnet RPC every ten minutes.
