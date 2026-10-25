@@ -67,11 +67,11 @@ A full system administrator with native `can_manage_library` may also manage
 ACL rules, without acquiring file bytes. No global `IsAdminUser` requirement
 blocks a delegated repository administrator. Ordinary r/rw file editors are
 **not** repo administrators and cannot delegate ACL rules merely because they
-can edit files. Etech business login and management scopes stay in Etech.
+can edit files. enterprise Directory business login and management scopes stay in enterprise Directory.
 
 POST/PUT/DELETE accept a strict rule record:
 `repo_id,path,subject_type,namespace,external_id,permission,inherit,share_mode,expected,revision`.
-Provider comes only from trusted `CF_ACL_PROVIDER`; a caller cannot override it.
+Provider comes only from trusted `CF_DIRECTORY_PROVIDER` (legacy alias `CF_ACL_PROVIDER`); a caller cannot override it.
 The only configurable directory permissions are **r/rw/invisible**, never
 `none`. `revision` uses the existing branch-serialized ACLStore CAS.
 
@@ -81,8 +81,53 @@ Each write still requires current native repository administrator authority,
 valid `r/rw/invisible` input, revision CAS and authoritative SQL; failures
 deny or reject the write. Native C/Go checks are likewise built in and
 must be deployed from matching source pins, with current subject, final-byte
-and Etech Publisher readback acceptance before promoting a shared instance.
+and enterprise Directory Publisher readback acceptance before promoting a shared instance.
 Do not treat a Hub-only code update as a safe deployment.
+
+## Additive whole-library ACL publication
+
+Existing `directory-rules/` GET/POST/PUT/DELETE remains **unchanged** for old
+enterprise Directory clients. New consumer publishers may use:
+
+`/api/v2.1/cloudfile/authorization/v1/library-acl-batch/`
+
+- `GET ?repo_id=...` returns a complete provider-owned snapshot, fingerprint,
+  and rules with current row revisions (never a user-scoped cache view).
+- `POST` with `{"repo_id":"...","paths":["/a","/b"]}` is a **read-only**
+  preview returning that same snapshot plus `missing_paths`, avoiding a
+  separate HTTP GET for every configured directory. Permission to publish
+  does not imply permission to read directory contents.
+- `PUT` accepts `{"repo_id":"...","expected_fingerprint":"<64 hex>",
+  "managed":[{"path":"/a","subject_type":"user","namespace":"user",
+  "external_id":"uid"}],
+  "desired":[{"path":"/a","subject_type":"user","namespace":"user",
+  "external_id":"uid","permission":"r","inherit":true,"share_mode":true}]}`.
+  Only keys explicitly listed in `managed` may change, and `desired` must
+  be a subset. The provider is server-configured; the request cannot set it.
+- `PUT` obtains the existing transfer fence and Branch(master) in the same
+  order as single-rule writes, locks the provider snapshot, compares the
+  fingerprint (including CAS revisions), computes a bounded differential
+  update, and commits all ACL mutations in **one** transaction. Conflict is
+  409; malformed policy 400; no admin grant 403; storage outage 503.
+- An unchanged row retains its revision; a no-op does no cache invalidation.
+  A successful changed batch invalidates **one** existing per-library cache
+  generation after commit. A timed-out client must GET and compare before
+  trying again, not blindly replay an unknown PUT.
+- Initial limit: 4096 provider rows/managed keys/desired keys/preview paths.
+  A larger library fails closed; this endpoint does not reshape cf_dir_acl,
+  add a table or alter the rule precedence algorithm.
+- Library shares, native administrators and EAP state CAS are independent
+  stages, **not** part of this single ACL SQL transaction. EAP retains its
+  existing managed-intent snapshot for cleanup and partial-stage recovery.
+- A Hub without this new route yields a generic 404 on preview/GET; upgraded
+  EAP detects that before doing any batch write and continues its existing
+  per-path compatibility workflow. All non-404 failures stop; a recognized
+  batch endpoint never falls back after a conflict or uncertain result.
+
+Read and write checks both reuse the same `Authority` library snapshot
+(default Redis TTL 180s), with per-request ancestry-path indexing. This is
+not another cache. Native final Branch and ACL checks are still enforced; a
+bounded cached policy delay does not disable final file-publication fences.
 
 ## Content API
 
@@ -247,11 +292,22 @@ is exactly HTTP 200 with `{"allowed":true,"contract":"cf-acl-v1"}`. Redirects, m
 access. A valid bounded cached policy decision is allowed; an old access ticket
 alone is not a policy decision. The native client bounds response size and time.
 
-The built-in Etech provider defaults to `etech`. `CF_ACL_PROVIDER` and the server-configured dotted callable
-`CF_ACL_SUBJECT_ENSURE(uid, username)` are the subject integration seam. The latter
-must call the existing Memberships TTL projector successfully; failure raises.
-Only then does Hub read `cf_sso_group_map JOIN GroupUser`. Missing adapter means
-503, never stale-group fallback. This package does not claim package A is wired.
+Subject selection is configuration only, never UID syntax (`login_id.isdigit()`
+is not a security boundary). The built-in enterprise Directory provider is selected when
+`CF_DIRECTORY_URL` is set and neither override below is configured; it defaults
+to `external` / `cloudfile_ext.v2.directory_adapter.ensure_subject`.
+`CF_DIRECTORY_PROVIDER` (legacy `CF_ACL_PROVIDER`) and the server-configured dotted callable
+`CF_ACL_SUBJECT_ENSURE(uid, username)` are the subject integration seam; setting
+either one requires both, and a partial, whitespace, overlong or reserved
+(`native-local`) configuration is refused as 503 rather than silently falling
+back to CE. The callable must call the existing Memberships TTL projector
+successfully; failure raises. Only then does Hub read
+`cf_sso_group_map JOIN GroupUser`. A CE-only installation with no
+`CF_DIRECTORY_URL` and no override selects no adapter and is served as a
+disjoint `native-local` principal with no Directory call; on a configured
+instance only the exact built-in `cfadmin` account/UID pair stays native, and a
+reserved account/UID alias is refused. This package does not claim package A is
+wired.
 
 ### Shared native batch for directory listing
 
@@ -320,10 +376,10 @@ revocation under cache failures. Cache misses read authoritative SQL; SQL errors
 never grant access. Tags bypass shared cache entirely and read only authorized
 page/search references.
 
-## Built-In Etech Subject Wiring
+## Built-In enterprise Directory Subject Wiring
 
 The default `CF_ACL_SUBJECT_ENSURE` is
-`cloudfile_ext.v2.etech_directory.ensure_subject`. It uses the existing EAP
+`cloudfile_ext.v2.directory_adapter.ensure_subject`. It uses the existing EAP
 `/eap/cloudDrive/directory/users/{uid}/context` and `/groups?view=entities`
 contracts, a short-lived `directory.read` machine JWT, a dedicated autocommit
 SQL connection and native shared Redis. No client-supplied member list is trusted.
@@ -339,8 +395,8 @@ binding, an inactive account or any check error takes the locked path, which
 behaves as before. Readiness lifetime and revocation timing are unchanged.
 
 Staff identity resolution pre-creates a native CE User/Profile only after a fresh
-active Directory UID proof. New Etech users require the trusted Directory account
-(`employee_no`, currently Etech `account_`) and use `account@auth.local`. Numeric
+active Directory UID proof. New enterprise Directory users require the trusted Directory account
+(`employee_no`, currently enterprise Directory `account_`) and use `account@auth.local`. Numeric
 and named accounts, including `admin`, are ordinary non-staff users. New native
 names follow Seafile RPC lowercase normalization; UIDs remain byte-exact; `cfadmin`,
 missing/invalid accounts and native name collisions reject creation. Existing

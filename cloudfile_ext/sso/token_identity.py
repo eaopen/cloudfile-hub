@@ -37,6 +37,6 @@ def resolve_employee_token(identity, source=None, fetch=None):
             or context['attributes'].get('employee_no') != employee):
         raise TokenIdentityError('Directory employee identity did not match')
     native = load_login_identities([uid], fetch=fetch).get(uid)
-    if not native or native.lower() in ('cfadmin@etech.com', 'cfadmin@auth.local'):
+    if not native or native.lower() in ('cfadmin@auth.local',):
         raise TokenIdentityError('Business UID has no unique employee account')
     return native

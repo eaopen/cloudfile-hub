@@ -36,7 +36,7 @@ class NativeIdentity:
         self.create_account = create_account
 
     def active(self, username, uid, *, locked=False):
-        if username.lower() in ('cfadmin@auth.local', 'cfadmin@etech.com'):
+        if username.lower() in ('cfadmin@auth.local',):
             raise IdentityConflict('reserved native account')
         suffix = ' FOR UPDATE' if locked else ''
         with self.connection.cursor() as cursor:

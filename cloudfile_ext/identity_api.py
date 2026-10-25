@@ -16,7 +16,7 @@ from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 
-from cloudfile_ext.identity import unique_identity, AmbiguousSubject, provisioning_provider
+from cloudfile_ext.identity import is_directory_identity_source, unique_identity, AmbiguousSubject, provisioning_provider
 
 
 class AdminExternalIdentityView(APIView):
@@ -64,10 +64,10 @@ class AdminExternalIdentityView(APIView):
         The trusted caller has already resolved the user in its own directory.
         No password is supplied and the account is never chosen by display name.
         """
-        # Etech has exactly one administrator provisioning authority, even
+        # enterprise Directory has exactly one administrator provisioning authority, even
         # when a legacy extension registration is still enabled.
         if (getattr(settings, 'CF_DIRECTORY_URL', '')
-                or request.data.get('identity_source') == 'etech-directory'):
+                or is_directory_identity_source(request.data.get('identity_source'))):
             from cloudfile_ext.v2.http import IdentityResolve
             return IdentityResolve().post(request)
 
@@ -106,7 +106,7 @@ class AdminExternalIdentityView(APIView):
             except User.DoesNotExist:
                 by_email = None
             # 2026-10-14：不再用 contact_email 参与身份判定。
-            # 原因：eTech 目录存在不同账号共用同一邮箱（实测生产 7 组），而其余账号
+            # 原因：企业 Directory存在不同账号共用同一邮箱（实测生产 7 组），而其余账号
             # 「共享邮箱就该跳过」而非「拒绝建号」。原实现把 by_contact 混进身份一致性
             # 校验，会让共享邮箱者（例如同一外部邮箱下的三个账号）永远建不了号。
             # 邮箱归属改由下面的 update_optional_contact_email 决定：
@@ -177,7 +177,7 @@ class AdminExternalIdentityView(APIView):
             return api_error(status.HTTP_409_CONFLICT,
                              'Login ID belongs to another account.')
         # 2026-10-14：contact_email 走「共享邮箱就跳过」的降级语义，不再 fail-closed。
-        # 原因：eTech 目录存在不同账号共用同一邮箱（实测生产 7 组）且大量为空，而
+        # 原因：企业 Directory存在不同账号共用同一邮箱（实测生产 7 组）且大量为空，而
         # Profile.contact_email 是上游唯一索引（2019 起，且上游按它反查账号）。
         # 身份由 login_id / OAuth sub 决定，邮箱只是联系资料 —— 绝不能因为目录里的
         # 共享邮箱让建号与同步整体 409 失败。复用 OAuth 登录路径同一份实现

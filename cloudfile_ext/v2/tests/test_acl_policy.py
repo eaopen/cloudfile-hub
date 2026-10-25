@@ -4,10 +4,10 @@ from cloudfile_ext.v2.acl_policy import (Decision, PolicyError, Principal, Rule,
                                          resolve)
 
 REPO = '00000000-0000-4000-8000-000000000001'
-U = Principal('etech', 'uid-a', frozenset({('org','dept','42'), ('role','role','writer')}))
+U = Principal('external', 'uid-a', frozenset({('org','dept','42'), ('role','role','writer')}))
 
 def rule(path, subject_type, external_id, permission, *, inherit=True, share=False, namespace=None):
-    return Rule(REPO, path, 'etech', subject_type,
+    return Rule(REPO, path, 'external', subject_type,
                 namespace or ('user' if subject_type == 'user' else 'dept' if subject_type == 'org' else 'role'),
                 external_id, permission, inherit, share)
 
@@ -39,18 +39,18 @@ class HierarchicalDirectoryTests(unittest.TestCase):
     def test_same_group_tier_deny_beats_grant(self):
         rows = [rule('/A', 'org', '42', 'r'),
                 rule('/A', 'org', '99', 'invisible')]
-        extra = Principal('etech', 'uid-a', frozenset({('org','dept','42'),('org','dept','99')}))
+        extra = Principal('external', 'uid-a', frozenset({('org','dept','42'),('org','dept','99')}))
         self.assertEqual(permission('/A', rows, principal=extra).permission, 'invisible')
 
     def test_same_level_positive_groups_merge_to_readwrite(self):
         rows = [rule('/A', 'org', '42', 'r'), rule('/A', 'org', '99', 'rw')]
-        user = Principal('etech', 'uid-a', frozenset({('org', 'dept', '42'), ('org', 'dept', '99')}))
+        user = Principal('external', 'uid-a', frozenset({('org', 'dept', '42'), ('org', 'dept', '99')}))
         self.assertEqual(permission('/A', rows, principal=user).permission, 'rw')
         self.assertEqual(permission('/A/child', rows, principal=user).permission, 'rw')
 
     def test_deny_has_priority_even_if_other_group_grants_write(self):
         rows = [rule('/A', 'org', '42', 'invisible'), rule('/A', 'org', '99', 'rw')]
-        user = Principal('etech', 'uid-a', frozenset({('org', 'dept', '42'), ('org', 'dept', '99')}))
+        user = Principal('external', 'uid-a', frozenset({('org', 'dept', '42'), ('org', 'dept', '99')}))
         self.assertFalse(permission('/A', rows, principal=user).can_read)
 
     def test_deeper_group_grant_cannot_bypass_invisible_ancestor(self):
@@ -121,7 +121,7 @@ class SharedRootTests(unittest.TestCase):
         self.assertFalse(permission('/Projects/Sub',rows,native=None).can_read)
 
     def test_unready_subject_fails_closed(self):
-        principal=Principal('etech','uid-a',U.groups,ready=False)
+        principal=Principal('external','uid-a',U.groups,ready=False)
         self.assertFalse(permission('/Projects',[rule('/Projects','org','42','rw',share=True)],native=None,principal=principal).can_read)
 
 

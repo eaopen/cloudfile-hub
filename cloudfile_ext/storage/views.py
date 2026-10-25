@@ -13,10 +13,7 @@ flow is untouched.
 """
 
 import json
-import re
 
-from django.conf import settings
-from django.db import connections
 from pysearpc import SearpcError
 
 from rest_framework import status
@@ -34,7 +31,10 @@ from seaserv import seafile_api
 
 def _storage_classes():
     """Return the configured classes as a list of dicts, or None on error."""
-    raw = seafile_api.get_storage_classes()
+    try:
+        raw = seafile_api.get_storage_classes()
+    except SearpcError:
+        return None
     if raw is None:
         return None
     try:
@@ -86,17 +86,10 @@ class RepoWithStorageView(APIView):
         if storage_id and storage_id not in valid_ids:
             return api_error(status.HTTP_400_BAD_REQUEST, 'storage_id invalid.')
         if repo_key is not None:
-            # Keys name managed subdirectories, never host paths. Reservations
-            # remain after deletion; native unique constraints also close races.
-            if (not isinstance(repo_key, str) or not 1 <= len(repo_key) <= 80 or
-                    not re.fullmatch(r'[a-z0-9](?:[a-z0-9-]*[a-z0-9])?', repo_key) or
-                    storage_id or not automatic or repo_key in valid_ids):
-                return api_error(status.HTTP_400_BAD_REQUEST, 'repo_key invalid or conflicting.')
-            alias = getattr(settings, 'CF_DATABASE_ALIAS', 'cloudfile')
-            with connections[alias].cursor() as cursor:
-                cursor.execute('SELECT 1 FROM cf_library_storage_key WHERE repo_key = %s', [repo_key])
-                if cursor.fetchone():
-                    return api_error(status.HTTP_409_CONFLICT, 'Library key is already reserved.')
+            # Physical directories always use the generated Seafile Repo UUID.
+            # Business aliases are not part of this storage allocation API.
+            return api_error(status.HTTP_400_BAD_REQUEST,
+                             'repo_key is a business alias, not a physical storage key.')
 
         payload = {
             'name': repo_name,
@@ -106,19 +99,18 @@ class RepoWithStorageView(APIView):
             'desc': request.data.get('desc', ''),
             'storage_id': storage_id or '',
         }
-        if repo_key is not None:
-            payload['repo_key'] = repo_key
         try:
             repo_id = seafile_api.create_repo_with_storage(json.dumps(payload))
         except SearpcError:
-            return api_error(status.HTTP_409_CONFLICT if repo_key is not None else
-                             status.HTTP_500_INTERNAL_SERVER_ERROR, 'Library allocation failed.')
+            # An RPC exception is not evidence of a uniqueness conflict.
+            # Inspect native Repo/Owner/RepoStorageId before retrying a lost result.
+            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                             'Library allocation result unknown; inspect before retrying.')
         if not repo_id:
             return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
                              'Failed to create library.')
 
         result = {'repo_id': repo_id}
         if automatic and not storage_id:
-            result['repo_key'] = repo_key or repo_id
-            result['storage_id'] = 'auto-local:' + result['repo_key']
+            result['storage_id'] = 'auto-local:' + repo_id
         return Response(result, status=status.HTTP_201_CREATED)

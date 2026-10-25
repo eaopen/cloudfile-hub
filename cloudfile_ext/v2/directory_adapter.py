@@ -1,7 +1,6 @@
-"""Trusted Etech Directory -> CE User/Group/GroupUser runtime; no shadow tables."""
+"""Trusted enterprise Directory -> CE User/Group/GroupUser runtime; no shadow tables."""
 from contextlib import contextmanager
 from functools import lru_cache
-from datetime import datetime, timezone
 import json
 import time
 from urllib.parse import quote, urlsplit
@@ -16,6 +15,11 @@ from django.conf import settings
 from .errors import IdentityConflict, IdentityUnavailable, SubjectNotFound
 from .identity import NativeIdentity, text
 from .memberships import GroupCatalog, Memberships, is_ready, readiness_key, validate_subject
+
+
+def _provider():
+    from .subject_adapter import provider_name
+    return provider_name(settings)
 
 
 class Directory:
@@ -80,26 +84,12 @@ class Directory:
         return value
 
     def entities(self):
-        value = self.get('/groups?view=entities')
-        try:
-            generated = datetime.fromisoformat(value['generated_at'].replace('Z', '+00:00'))
-            if (value['contract_version'] != '2.0' or value['view'] != 'entities' or
-                    generated.tzinfo is None or not -60 <= (datetime.now(timezone.utc)-generated).total_seconds() <= 60 or
-                    not isinstance(value['groups'], list) or len(value['groups']) > 16384):
-                raise ValueError()
-            result = {}
-            for item in value['groups']:
-                kind = item['subject_type']
-                namespace, external = text(item['namespace'], 128), text(item['external_id'])
-                if (kind, namespace) not in (('org', 'directory'), ('role', 'role')):
-                    raise ValueError()
-                key = (kind, namespace, external)
-                if key in result:
-                    raise ValueError()
-                result[key] = text(item['name'], 255)
-            return result
-        except (KeyError, TypeError, ValueError, IdentityConflict):
-            raise IdentityUnavailable('invalid trusted Directory entities') from None
+        # Keep the deployed enterprise Directory namespace rule while using the same
+        # provider-neutral bounded entity validator as other integrations.
+        from .provider_contract import validated_entities
+        return validated_entities(
+            self.get('/groups?view=entities'),
+            expected_namespaces={('org', 'directory'), ('role', 'role')})
 
 
 @contextmanager
@@ -127,9 +117,9 @@ def runtime():
             if account is None or not account.is_active or not account.is_staff:
                 raise IdentityUnavailable('native group service owner required')
             return ccnet_api.create_group(name, owner)
-        catalog = GroupCatalog(conn, account_schema=account_schema, provider='etech', create_group=create_group)
+        catalog = GroupCatalog(conn, account_schema=account_schema, provider=_provider(), create_group=create_group)
         cache = redis.Redis.from_url(redis_location(), socket_connect_timeout=5, socket_timeout=5)
-        memberships = Memberships(conn, cache, identity, account_schema=account_schema, provider='etech',
+        memberships = Memberships(conn, cache, identity, account_schema=account_schema, provider=_provider(),
             fetch=directory.subject, ttl=getattr(settings, 'CF_DIRECTORY_SUBJECT_TTL', 1800))
         yield directory, identity, catalog, memberships
     finally:
@@ -141,13 +131,10 @@ def runtime():
 def verified_account(directory, uid):
     """Prove UID/status; NativeIdentity validates account names on creation only."""
     subject = directory.subject(uid)
-    login, _ = validate_subject(subject, uid)
-    if subject['status'] != 'active':
-        raise IdentityUnavailable('Directory account disabled')
-    # employee_no carries Etech account_, including nonnumeric accounts.
-    # Only the trusted Directory supplies it; request aliases are not proof.
-    account = subject['attributes'].get('employee_no')
-    return login, account
+    from .provider_contract import verified_user
+    # enterprise Directory maps its account_ field into the established employee_no claim.
+    # Reuse the same UID verification as other trusted Directory providers.
+    return verified_user(subject, uid, account_field='employee_no')
 
 
 def prepare_user(uid):
@@ -176,7 +163,7 @@ def lookup_group(external):
         cursor.execute('SELECT m.subject_type,m.namespace,m.external_id,m.group_id,g.parent_group_id FROM ' +
             files + '.cf_sso_group_map m JOIN ' + accounts + '.`Group` g ON g.group_id=m.group_id '
             'WHERE m.provider=%s AND m.subject_type=%s AND m.namespace=%s AND m.external_id=%s',
-            ('etech', *key))
+            (_provider(), *key))
         rows = cursor.fetchall()
     if not rows:
         return None
@@ -225,7 +212,7 @@ def subject_ready(uid, username):
         ttl = getattr(settings, 'CF_DIRECTORY_SUBJECT_TTL', 1800)
         if not database or type(ttl) is not int or not 30 <= ttl <= 3600:
             return False
-        key = readiness_key(database, 'etech', uid, username)
+        key = readiness_key(database, _provider(), uid, username)
         if not is_ready(_shared_redis(redis_location()), key, uid, username, ttl):
             return False
         # NativeIdentity.active(): exact UID binding (user and login_id are
@@ -264,7 +251,7 @@ def ensure_subject(uid, username):
 def sync_entity_catalog():
     """PowerJob/manual entity reconciliation, without any user/member writes.
 
-    Etech remains the only organization truth. Preserve deleted/retired CE
+    enterprise Directory remains the only organization truth. Preserve deleted/retired CE
     groups until a separate reviewed cleanup: they may own libraries.
     """
     from seaserv import ccnet_api

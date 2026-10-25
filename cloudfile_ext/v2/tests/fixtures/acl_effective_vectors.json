@@ -1,0 +1,981 @@
+{
+  "schema_version": 1,
+  "policy_id": "ce-pro-track-precedence-v1",
+  "repo_id": "00000000-0000-4000-8000-000000000001",
+  "provider": "external",
+  "uid": "uid-42",
+  "groups": [
+    [
+      "org",
+      "directory",
+      "team-7"
+    ],
+    [
+      "org",
+      "directory",
+      "team-8"
+    ],
+    [
+      "role",
+      "role",
+      "editor"
+    ],
+    [
+      "role",
+      "role",
+      "guest"
+    ]
+  ],
+  "cases": [
+    {
+      "id": "base_native_read",
+      "path": "/A",
+      "native": "r",
+      "rules": [],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": false
+      }
+    },
+    {
+      "id": "base_native_write",
+      "path": "/A",
+      "native": "rw",
+      "rules": [],
+      "expected": {
+        "permission": "rw",
+        "qualified_root": "/",
+        "from_rule": false
+      }
+    },
+    {
+      "id": "no_native_no_share",
+      "path": "/A",
+      "native": null,
+      "rules": [],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": null,
+        "from_rule": false
+      }
+    },
+    {
+      "id": "library_read_directory_write",
+      "path": "/A",
+      "native": "r",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "rw",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "library_write_directory_read",
+      "path": "/A",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "r"
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "library_write_directory_invisible",
+      "path": "/A",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "invisible"
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "hard_readonly_reject_write",
+      "path": "/A",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": true
+      },
+      "hard_readonly": true
+    },
+    {
+      "id": "hard_readonly_caps_read_to_write",
+      "path": "/A",
+      "native": "r",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": true
+      },
+      "hard_readonly": true
+    },
+    {
+      "id": "hard_readonly_native_without_rule",
+      "path": "/A",
+      "native": "rw",
+      "rules": [],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": false
+      },
+      "hard_readonly": true
+    },
+    {
+      "id": "noninherit_exact_directory",
+      "path": "/A",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "r",
+          "inherit": false
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "noninherit_child_falls_back",
+      "path": "/A/B",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "r",
+          "inherit": false
+        }
+      ],
+      "expected": {
+        "permission": "rw",
+        "qualified_root": "/",
+        "from_rule": false
+      }
+    },
+    {
+      "id": "same_user_deeper_read_over_write",
+      "path": "/A/B",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "rw"
+        },
+        {
+          "path": "/A/B",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "r"
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "same_user_deeper_write_over_read",
+      "path": "/A/B",
+      "native": "r",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "r"
+        },
+        {
+          "path": "/A/B",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "rw",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "same_org_deeper_read_over_write",
+      "path": "/A/B",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "rw"
+        },
+        {
+          "path": "/A/B",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "r"
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "same_role_deeper_write_over_read",
+      "path": "/A/B",
+      "native": "r",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "role",
+          "namespace": "role",
+          "external_id": "editor",
+          "permission": "r"
+        },
+        {
+          "path": "/A/B",
+          "subject_type": "role",
+          "namespace": "role",
+          "external_id": "editor",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "rw",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "same_org_deny_beats_grant",
+      "path": "/A",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "invisible"
+        },
+        {
+          "path": "/A",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-8",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "same_org_positive_write_beats_read",
+      "path": "/A",
+      "native": "r",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "r"
+        },
+        {
+          "path": "/A",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-8",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "rw",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "same_role_deny_beats_grant",
+      "path": "/A",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "role",
+          "namespace": "role",
+          "external_id": "editor",
+          "permission": "invisible"
+        },
+        {
+          "path": "/A",
+          "subject_type": "role",
+          "namespace": "role",
+          "external_id": "guest",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "user_beats_org_at_same_path",
+      "path": "/A",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "rw"
+        },
+        {
+          "path": "/A",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "invisible"
+        }
+      ],
+      "expected": {
+        "permission": "rw",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "user_beats_role_at_same_path",
+      "path": "/A",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "r"
+        },
+        {
+          "path": "/A",
+          "subject_type": "role",
+          "namespace": "role",
+          "external_id": "editor",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "org_beats_role_at_same_path",
+      "path": "/A",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "r"
+        },
+        {
+          "path": "/A",
+          "subject_type": "role",
+          "namespace": "role",
+          "external_id": "editor",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "personal_parent_beats_deeper_org",
+      "path": "/A/B",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "r"
+        },
+        {
+          "path": "/A/B",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "org_parent_beats_deeper_role",
+      "path": "/A/B",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "r"
+        },
+        {
+          "path": "/A/B",
+          "subject_type": "role",
+          "namespace": "role",
+          "external_id": "editor",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "parent_invisible_blocks_deeper_user",
+      "path": "/A/B",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "invisible"
+        },
+        {
+          "path": "/A/B",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "parent_org_invisible_blocks_deeper_user",
+      "path": "/A/B",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "invisible"
+        },
+        {
+          "path": "/A/B",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "unmatched_user_rule_does_not_grant",
+      "path": "/A",
+      "native": "r",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "someone-else",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/",
+        "from_rule": false
+      }
+    },
+    {
+      "id": "share_root_exact",
+      "path": "/Shared",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "r",
+          "share_mode": true
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/Shared",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "share_root_inherits_child",
+      "path": "/Shared/Doc",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "rw",
+          "share_mode": true
+        }
+      ],
+      "expected": {
+        "permission": "rw",
+        "qualified_root": "/Shared",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "share_root_does_not_open_library",
+      "path": "/",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "rw",
+          "share_mode": true
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": null,
+        "from_rule": false
+      }
+    },
+    {
+      "id": "share_root_does_not_open_ancestor",
+      "path": "/Parent",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Parent/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "rw",
+          "share_mode": true
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": null,
+        "from_rule": false
+      }
+    },
+    {
+      "id": "share_root_does_not_open_sibling",
+      "path": "/Sibling",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "rw",
+          "share_mode": true
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": null,
+        "from_rule": false
+      }
+    },
+    {
+      "id": "share_mode_required_without_native",
+      "path": "/Shared",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": null,
+        "from_rule": false
+      }
+    },
+    {
+      "id": "noninherit_share_root_exact",
+      "path": "/Shared",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "r",
+          "share_mode": true,
+          "inherit": false
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/Shared",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "noninherit_share_root_child_denied",
+      "path": "/Shared/Doc",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "r",
+          "share_mode": true,
+          "inherit": false
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": null,
+        "from_rule": false
+      }
+    },
+    {
+      "id": "shared_root_user_denies_group",
+      "path": "/Shared",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "r",
+          "share_mode": true
+        },
+        {
+          "path": "/Shared",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "invisible"
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": "/Shared",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "share_root_write_refined_to_read",
+      "path": "/Shared/Doc",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "rw",
+          "share_mode": true
+        },
+        {
+          "path": "/Shared/Doc",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "r"
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/Shared",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "share_root_read_refined_to_write",
+      "path": "/Shared/Doc",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "r",
+          "share_mode": true
+        },
+        {
+          "path": "/Shared/Doc",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "rw",
+        "qualified_root": "/Shared",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "more_specific_shared_root",
+      "path": "/Shared/Sub",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "rw",
+          "share_mode": true
+        },
+        {
+          "path": "/Shared/Sub",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "r",
+          "share_mode": true
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/Shared/Sub",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "nested_share_sibling_keeps_parent_root",
+      "path": "/Shared/Other",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "rw",
+          "share_mode": true
+        },
+        {
+          "path": "/Shared/Sub",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "r",
+          "share_mode": true
+        }
+      ],
+      "expected": {
+        "permission": "rw",
+        "qualified_root": "/Shared",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "separate_shared_roots_do_not_mix",
+      "path": "/Other/Doc",
+      "native": null,
+      "rules": [
+        {
+          "path": "/Shared",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "rw",
+          "share_mode": true
+        },
+        {
+          "path": "/Other",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "r",
+          "share_mode": true
+        }
+      ],
+      "expected": {
+        "permission": "r",
+        "qualified_root": "/Other",
+        "from_rule": true
+      }
+    },
+    {
+      "id": "unready_principal_rejected",
+      "path": "/A",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "user",
+          "namespace": "user",
+          "external_id": "uid-42",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": null,
+        "from_rule": false
+      },
+      "ready": false
+    },
+    {
+      "id": "disabled_principal_rejected",
+      "path": "/A",
+      "native": "rw",
+      "rules": [],
+      "expected": {
+        "permission": "invisible",
+        "qualified_root": null,
+        "from_rule": false
+      },
+      "active": false
+    },
+    {
+      "id": "rule_noninherit_group_exact_only",
+      "path": "/A/B",
+      "native": "rw",
+      "rules": [
+        {
+          "path": "/A",
+          "subject_type": "org",
+          "namespace": "directory",
+          "external_id": "team-7",
+          "permission": "r",
+          "inherit": false
+        },
+        {
+          "path": "/A/B",
+          "subject_type": "role",
+          "namespace": "role",
+          "external_id": "editor",
+          "permission": "rw"
+        }
+      ],
+      "expected": {
+        "permission": "rw",
+        "qualified_root": "/",
+        "from_rule": true
+      }
+    }
+  ]
+}

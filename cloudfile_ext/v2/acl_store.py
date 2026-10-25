@@ -94,6 +94,123 @@ class ACLStore:
             return None
         return tuple(decode(row)[0] for row in rows)
 
+    def provider_snapshot(self, repo_id, provider, *, lock=False):
+        """Complete bounded provider view, for versioned publisher GET/PUT only.
+
+        Native browse reads still use the shared library_rules cache. For writes,
+        the current-read uses the existing repo_id PRIMARY prefix under Branch;
+        the provider predicate cannot broaden the lock into unrelated libraries.
+        """
+        uuid(repo_id)
+        if not isinstance(provider, str) or not provider or len(provider) > 32:
+            raise PolicyError('invalid ACL provider')
+        sql = ('SELECT ' + COLUMNS + ' FROM ' + self.table +
+               ' FORCE INDEX (PRIMARY) WHERE repo_id=%s AND provider=%s LIMIT 4097')
+        if lock:
+            sql += ' FOR UPDATE'
+        with self.connection.cursor() as cursor:
+            cursor.execute(sql, [repo_id, provider])
+            rows = cursor.fetchall()
+        if len(rows) > 4096:
+            raise PolicyError('provider ACL snapshot exceeds safe batch limit')
+        return tuple(decode(row) for row in rows)
+
+    def replace_owned(self, repo_id, provider, *, expected, managed, desired):
+        """One-library, one-transaction differential publication.
+
+        `managed` is the consumer publisher's explicit old+new set of natural keys,
+        never a licence to delete every provider row. A mismatching complete
+        provider snapshot fails 409 rather than applying a stale diff. Per-rule
+        API semantics and third-party provider rows are unchanged.
+        """
+        import re
+        from uuid import uuid4
+        from .acl_batch import fingerprint, key_of
+        uuid(repo_id)
+        if not isinstance(expected, str) or not re.fullmatch(r'[0-9a-f]{64}', expected):
+            raise PolicyError('invalid expected ACL fingerprint')
+        if not isinstance(managed, (list, tuple, set)) or len(managed) > 4096:
+            raise PolicyError('invalid ACL managed keys')
+        if not isinstance(desired, (list, tuple)) or len(desired) > 4096:
+            raise PolicyError('invalid desired ACL rules')
+        managed_keys = set()
+        for item in managed:
+            if not isinstance(item, tuple) or len(item) != 4:
+                raise PolicyError('invalid managed key')
+            rule = Rule(repo_id, item[0], provider, item[1], item[2],
+                        item[3], 'r', True, False)
+            validate(rule)
+            if item in managed_keys:
+                raise PolicyError('duplicate managed key')
+            managed_keys.add(item)
+        desired_map = {}
+        for rule in desired:
+            if not isinstance(rule, Rule) or rule.repo_id != repo_id or rule.provider != provider:
+                raise PolicyError('foreign desired ACL rule')
+            validate(rule)
+            key = key_of(rule)
+            if key not in managed_keys or key in desired_map:
+                raise PolicyError('unmanaged or duplicate desired ACL rule')
+            desired_map[key] = rule
+
+        changed = inserted = updated = deleted = unchanged = 0
+        with self.transfer_fence(repo_id), self.atomic():
+            with self.connection.cursor() as cursor:
+                cursor.execute('SELECT commit_id FROM ' + self.branch +
+                               " WHERE repo_id=%s AND name='master' FOR UPDATE", [repo_id])
+                if len(cursor.fetchall()) != 1:
+                    raise PolicyError('native master branch missing')
+            current = self.provider_snapshot(repo_id, provider, lock=True)
+            if fingerprint(current) != expected:
+                raise RevisionConflict()
+            state = {key_of(rule): (rule, revision) for rule, revision in current}
+            if len(state) != len(current):
+                raise StoredACLError('duplicate provider ACL natural key')
+            additions = len([key for key in desired_map if key not in state])
+            removals = len([key for key in managed_keys if key in state and key not in desired_map])
+            if len(state) + additions - removals > 4096:
+                raise PolicyError('resulting provider ACL exceeds safe batch limit')
+            where = ('repo_id=%s AND path_hash=%s AND subject_type=%s AND '
+                     'provider=%s AND namespace=%s AND external_id=%s')
+            with self.connection.cursor() as cursor:
+                for key in sorted(managed_keys):
+                    before = state.get(key)
+                    after = desired_map.get(key)
+                    # Keys are canonical (path,type,namespace,external_id).
+                    args = [repo_id, path_digest(key[0]), key[1], provider, key[2], key[3]]
+                    if after is None:
+                        if before is not None:
+                            cursor.execute('DELETE FROM ' + self.table + ' WHERE ' + where, args)
+                            if cursor.rowcount != 1:
+                                raise StoredACLError('ACL delete lost natural key')
+                            state.pop(key)
+                            deleted += 1
+                    elif before is not None and before[0] == after:
+                        unchanged += 1
+                    elif before is not None:
+                        revision = str(uuid4())
+                        cursor.execute('UPDATE ' + self.table +
+                                       ' SET permission=%s,inherit=%s,share_mode=%s,revision=%s WHERE ' + where,
+                                       [after.permission, int(after.inherit), int(after.share_mode), revision, *args])
+                        if cursor.rowcount != 1:
+                            raise StoredACLError('ACL update lost natural key')
+                        state[key] = (after, revision)
+                        updated += 1
+                    else:
+                        revision = str(uuid4())
+                        cursor.execute('INSERT INTO ' + self.table + ' (' + COLUMNS + ') VALUES (' +
+                                       ','.join(['%s'] * 11) + ')',
+                                       [repo_id, after.path, provider, after.subject_type, after.namespace,
+                                        after.external_id, after.permission, int(after.inherit),
+                                        int(after.share_mode), revision, path_digest(after.path)])
+                        state[key] = (after, revision)
+                        inserted += 1
+        changed = inserted + updated + deleted
+        if changed and self.changed is not None:
+            self.changed(repo_id)  # generation invalidation once, after COMMIT
+        return dict(fingerprint=fingerprint(state.values()), inserted=inserted,
+                    updated=updated, deleted=deleted, unchanged=unchanged)
+
     def shared(self, principal):
         selector, args = subject_filter(principal)
         return self._read(selector + ' AND share_mode=1', args)

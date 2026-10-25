@@ -14,7 +14,10 @@ from seahub.api2.utils import JWT_PRIVATE_KEY
 from .acl_policy import PolicyError, Rule, StoredACLError, narrow_to_native
 from .acl_runtime import ACLUnavailable, Authority, store
 from .acl_store import uuid, RevisionConflict
+from .acl_store import validate as validate_acl_rule
+from .acl_batch import CONTRACT as LIBRARY_BATCH_CONTRACT, fingerprint, serialize
 from .errors import SubjectNotFound
+from .subject_adapter import provider_name
 from . import tag_display
 
 logger = logging.getLogger(__name__)
@@ -143,7 +146,7 @@ class DirectoryRules(AuthenticatedACL):
             from .acl_policy import canonical_path
             canonical_path(args['path'])
             exists = bool(seafile_api.get_dir_id_by_path(args['repo_id'], args['path']))
-            rows = store().list_path(args['repo_id'], args['path'], getattr(settings, 'CF_ACL_PROVIDER', 'etech'))
+            rows = store().list_path(args['repo_id'], args['path'], provider_name(settings))
             return response({'data': [dict(**asdict(rule), revision=revision) for rule, revision in rows],
                              'directory_exists': exists})
         except Exception as error:
@@ -159,7 +162,7 @@ class DirectoryRules(AuthenticatedACL):
             require_repo_manage(request.user, data['repo_id'])
             if not isinstance(data['inherit'], bool) or not isinstance(data['share_mode'], bool):
                 raise ValueError()
-            provider = getattr(settings, 'CF_ACL_PROVIDER', 'etech')
+            provider = provider_name(settings)
             rule = Rule(data['repo_id'], data['path'], provider, data['subject_type'],
                         data['namespace'], data['external_id'], data['permission'],
                         data['inherit'], data['share_mode'])
@@ -177,6 +180,212 @@ class DirectoryRules(AuthenticatedACL):
 
     def delete(self, request):
         return self._write(request, delete=True)
+
+class LibraryGrants(AuthenticatedACL):
+    """B-mode library user/group r/rw grants on native Seafile CE shares.
+
+    Directory ACL continues to use DirectoryRules, and A-mode batch
+    publication remains separate. This is not a parallel ACL store.
+    """
+
+    @staticmethod
+    def _service(repo_id):
+        from seaserv import ccnet_api, seafile_api
+        from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
+        from .native_grants import NativeLibraryGrants
+
+        def user_exists(username):
+            user = ccnet_api.get_emailuser(username)
+            return (user is not None and getattr(user, 'email', None) == username
+                    and getattr(user, 'is_active', None) in (True, 1))
+
+        def group_exists(group_id):
+            return ccnet_api.get_group(group_id) is not None
+
+        def protected(kind, value):
+            if kind == 'user':
+                return ExtraSharePermission.objects.get_user_permission(repo_id, value) == 'admin'
+            return ExtraGroupsSharePermission.objects.get_group_permission(repo_id, value) == 'admin'
+
+        return NativeLibraryGrants(
+            seafile_api, repo_id, user_exists=user_exists,
+            group_exists=group_exists, protected_admin=protected)
+
+    @staticmethod
+    def _require_native_share_role(user):
+        # Mirror Seafile CE sharing APIs; a custom/guest role with
+        # can_share_repo=False cannot bypass its prohibition via B-mode API.
+        caps = getattr(user, 'permissions', None)
+        if caps is None or not caps.can_share_repo():
+            raise PermissionError('CE role cannot share libraries')
+
+    def get(self, request):
+        try:
+            args = request.query_params
+            if set(args) != {'repo_id'} or len(args.getlist('repo_id')) != 1:
+                raise ValueError()
+            repo_id = uuid(args['repo_id'])
+            require_repo_manage(request.user, repo_id)
+            self._require_native_share_role(request.user)
+            listing = self._service(repo_id).list()
+            # CE stores elevated library-administrator grants separately.
+            # Read both markers in two bounded queries, never once per user.
+            from seahub.share.models import ExtraSharePermission, ExtraGroupsSharePermission
+            admin_users = set(ExtraSharePermission.objects.get_admin_users_by_repo(repo_id))
+            admin_groups = {int(g) for g in
+                            ExtraGroupsSharePermission.objects.get_admin_groups_by_repo(repo_id)}
+            for entry in listing['grants']:
+                entry['is_admin'] = (entry['subject'] in
+                    (admin_users if entry['subject_type'] == 'user' else admin_groups))
+            return response(listing)
+        except Exception as error:
+            return failure(error)
+
+    def _write(self, request, *, delete=False):
+        try:
+            data = request.data
+            keys = {'repo_id', 'subject_type', 'subject', 'expected_permission'}
+            if not delete:
+                keys.add('permission')
+            if not isinstance(data, dict) or set(data) != keys:
+                raise ValueError()
+            repo_id = uuid(data['repo_id'])
+            require_repo_manage(request.user, repo_id)
+            self._require_native_share_role(request.user)
+            if not delete:
+                from .native_grants import permission as native_permission
+                native_permission(data['permission'])  # PUT null must not revoke
+            service = self._service(repo_id)
+            result = service.change(
+                data['subject_type'], data['subject'],
+                expected=data['expected_permission'],
+                desired=None if delete else data['permission'])
+            if result['changed']:
+                from seahub.utils import send_perm_audit_msg
+                try:
+                    send_perm_audit_msg(
+                        'delete-repo-perm' if delete else
+                        'add-repo-perm' if data['expected_permission'] is None
+                        else 'modify-repo-perm',
+                        request.user.username, result['subject'], repo_id,
+                        '/', result['permission'])
+                except Exception:
+                    # Native CE grant was already applied and verified.
+                    # Do not incorrectly tell the client that the write failed
+                    # and prompt it to retry a non-transactional CE RPC.
+                    logger.exception('native library grant audit emission failed')
+            return response(result)
+        except Exception as error:
+            return failure(error)
+
+    def put(self, request):
+        return self._write(request)
+
+    def delete(self, request):
+        return self._write(request, delete=True)
+
+
+class LibraryACLBatch(AuthenticatedACL):
+    """Additive library-level ACL publisher; old directory-rules stays intact.
+
+    Only declared consumer-owned natural keys can be changed. GET reads an
+    authoritative complete provider snapshot and PUT checks that fingerprint
+    under the same native Branch/transfer-fence ordering as per-rule writes.
+    """
+
+    @staticmethod
+    def _provider():
+        provider = provider_name(settings)
+        if not isinstance(provider, str) or not provider:
+            raise PolicyError('invalid ACL provider')
+        return provider
+
+    def get(self, request):
+        try:
+            args = request.query_params
+            if set(args) != {'repo_id'} or len(args.getlist('repo_id')) != 1:
+                raise ValueError()
+            repo_id = uuid(args['repo_id'])
+            require_repo_manage(request.user, repo_id)
+            rows = store().provider_snapshot(repo_id, self._provider())
+            return response(dict(contract=LIBRARY_BATCH_CONTRACT, repo_id=repo_id,
+                                 fingerprint=fingerprint(rows), rules=serialize(rows)))
+        except Exception as error:
+            return failure(error)
+
+    def post(self, request):
+        """Read-only batch preview: one HTTP trip replaces per-directory GETs."""
+        try:
+            data = request.data
+            if (not isinstance(data, dict) or set(data) != {'repo_id', 'paths'}
+                    or not isinstance(data['paths'], list)
+                    or len(data['paths']) > 4096):
+                raise ValueError()
+            repo_id = uuid(data['repo_id'])
+            require_repo_manage(request.user, repo_id)
+            from .acl_policy import canonical_path
+            from seaserv import seafile_api
+            paths = []
+            seen = set()
+            for item in data['paths']:
+                canonical_path(item)
+                if item in seen:
+                    raise PolicyError('duplicate publication path')
+                seen.add(item)
+                paths.append(item)
+            missing = []
+            for path in paths:
+                # Native directory existence is not content permission: an EAP
+                # administrator may manage ACLs without browsing file bytes.
+                if not seafile_api.get_dir_id_by_path(repo_id, path):
+                    missing.append(path)
+            rows = store().provider_snapshot(repo_id, self._provider())
+            return response(dict(contract=LIBRARY_BATCH_CONTRACT, repo_id=repo_id,
+                                 fingerprint=fingerprint(rows), rules=serialize(rows),
+                                 missing_paths=missing))
+        except Exception as error:
+            return failure(error)
+
+    def put(self, request):
+        try:
+            data = request.data
+            if (not isinstance(data, dict) or
+                    set(data) != {'repo_id', 'expected_fingerprint', 'managed', 'desired'} or
+                    not isinstance(data['managed'], list) or
+                    not isinstance(data['desired'], list) or
+                    len(data['managed']) > 4096 or len(data['desired']) > 4096):
+                raise ValueError()
+            repo_id = uuid(data['repo_id'])
+            require_repo_manage(request.user, repo_id)
+            provider = self._provider()
+            managed = []
+            for item in data['managed']:
+                if (not isinstance(item, dict) or
+                        set(item) != {'path', 'subject_type', 'namespace', 'external_id'}):
+                    raise ValueError()
+                key = (item['path'], item['subject_type'], item['namespace'], item['external_id'])
+                validate_acl_rule(Rule(repo_id, item['path'], provider, item['subject_type'],
+                                       item['namespace'], item['external_id'], 'r', True, False))
+                managed.append(key)
+            desired = []
+            for item in data['desired']:
+                if (not isinstance(item, dict) or
+                        set(item) != {'path', 'subject_type', 'namespace',
+                                      'external_id', 'permission', 'inherit', 'share_mode'} or
+                        type(item['inherit']) is not bool or type(item['share_mode']) is not bool):
+                    raise ValueError()
+                rule = Rule(repo_id, item['path'], provider, item['subject_type'],
+                            item['namespace'], item['external_id'], item['permission'],
+                            item['inherit'], item['share_mode'])
+                validate_acl_rule(rule)
+                desired.append(rule)
+            applied = store().replace_owned(
+                repo_id, provider, expected=data['expected_fingerprint'],
+                managed=managed, desired=desired)
+            return response(dict(contract=LIBRARY_BATCH_CONTRACT, repo_id=repo_id, **applied))
+        except Exception as error:
+            return failure(error)
+
 
 class NativeACLCheck(APIView):
     """Existing native internal JWT, trusted username, bounded exact paths.

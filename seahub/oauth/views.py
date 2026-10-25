@@ -238,14 +238,11 @@ def oauth_callback(request):
         if not isinstance(user_info_json, dict):
             raise ValueError('invalid userinfo')
         if protocol == 'oidc':
-            from cloudfile_ext.v2.oidc import configuration, verify_id_token
+            from cloudfile_ext.v2.oidc import configuration, verify_id_token, verified_oidc_subject
             issuer, jwks_uri = configuration(settings)
             claims = verify_id_token(token, issuer=issuer, client_id=CLIENT_ID,
                                      nonce=nonce, jwks_uri=jwks_uri)
-            if claims['sub'] != user_info_json.get('sub'):
-                raise ValueError('OIDC subject mismatch')
-            if 'userId' in claims and claims['userId'] != user_info_json.get('userId'):
-                raise ValueError('OIDC userId mismatch')
+            verified_oidc_subject(claims, user_info_json)
     except Exception:
         logger.warning('OAuth UserInfo/OIDC identity proof rejected')
         return render_error(request, _('Error, please contact administrator.'))
@@ -255,26 +252,23 @@ def oauth_callback(request):
         if attr_value:
             oauth_user_info[user_attr] = attr_value
         elif required:
-            logger.error('Required user attr not found.')
-            logger.error(user_info_json)
+            # UserInfo can contain personal data; never dump it into logs.
+            logger.warning('Required OAuth user attribute missing')
             return render_error(request, _('Error, please contact administrator.'))
 
-    uid = oauth_user_info.get('uid', '') or oauth_user_info.get('email', '')
-    if not uid:
-        logger.error('oauth user uid and email not found.')
-        logger.error('user_info_json: %s' % user_info_json)
-        return render_error(request, _('Error, please contact administrator.'))
-
-    # A specifically mapped, trusted Etech userId is the canonical login_id.
-    # Generic legacy OAuth mappings (including preferred_username as login_id)
-    # retain their native CE compatibility path; do not mistake them for UID.
+    # A specifically mapped, trusted business userId is the canonical login_id.
+    # Unmapped OAuth2 retains CE legacy compatibility; signed OIDC without
+    # that mapping MUST use its verified sub, never an unverified email as UID.
     from cloudfile_ext.v2.oauth_identity import (
         trusted_uid_mapping, bind_existing_uid)
-    # An optional claim in a trusted UID mapping is still mandatory for
-    # identity selection: its absence must not enter CE's generic signup path.
     strict_uid = trusted_uid_mapping(OAUTH_ATTRIBUTE_MAP)
+    uid = (claims['sub'] if protocol == 'oidc' and not strict_uid
+           else oauth_user_info.get('uid', '') or oauth_user_info.get('email', ''))
+    if not uid:
+        logger.warning('OAuth provider did not supply a stable user identifier')
+        return render_error(request, _('Error, please contact administrator.'))
     if getattr(settings, 'CF_DIRECTORY_URL', '') and not strict_uid:
-        # Etech Directory deployments cannot reuse a legacy employee-number
+        # enterprise Directory deployments cannot reuse a legacy employee-number
         # mapping: that would overwrite the UID after a successful login.
         logger.warning('Directory login requires userId mapped to login_id')
         return render_error(request, _('Error, please contact administrator.'))
@@ -284,12 +278,16 @@ def oauth_callback(request):
             logger.warning('Trusted OAuth UID has no matching stable provider sub')
             return render_error(request, _('Error, please contact administrator.'))
         try:
+            if protocol == 'oidc':
+                # All strict OIDC UID bindings (not only enterprise Directory) require that
+                # the business UID was asserted in the signed ID Token.
+                # Never select an existing CE UID owner from UserInfo alone.
+                from cloudfile_ext.v2.oidc import require_signed_business_uid
+                require_signed_business_uid(claims, oauth_user_info['login_id'])
             if protocol == 'oidc' and getattr(settings, 'CF_DIRECTORY_URL', ''):
-                # Creation requires the business UID in the verified ID Token
-                # as well as UserInfo; OAuth-only callbacks remain reuse-only.
-                if claims.get('userId') != oauth_user_info['login_id']:
-                    raise ValueError('signed business UID required for OIDC JIT')
-                from cloudfile_ext.v2.etech_directory import provision_oidc_user
+                # Only the trusted Directory integration can provision; pure
+                # standalone OIDC still reuses an already-bound CE UID.
+                from cloudfile_ext.v2.directory_adapter import provision_oidc_user
                 email = provision_oidc_user(uid=oauth_user_info['login_id'],
                                            provider=OAUTH_PROVIDER, subject=oauth_user_info['uid'])
             else:
@@ -300,8 +298,19 @@ def oauth_callback(request):
             logger.warning('Trusted OAuth UID cannot resolve its native account')
             return render_error(request, _('Error, please contact administrator.'))
         is_new_user = False
+    elif protocol == 'oidc':
+        # An OIDC ID Token proves issuer + sub, NOT mailbox ownership.
+        # Reuse only a provider/sub binding that an administrator or verified
+        # provisioning flow already established. Never adopt a CE account by
+        # matching the IdP's email, even if the address is verified there.
+        oauth_user = SocialAuthUser.objects.get_by_provider_and_uid(OAUTH_PROVIDER, uid)
+        if not oauth_user:
+            logger.warning('OIDC subject has no trusted native account binding')
+            return render_error(request, _('Error, new user registration is not allowed, please contact administrator.'))
+        email = oauth_user.username
+        is_new_user = False
     else:
-        # compatible with old users via email
+        # Legacy OAuth2 remains compatible with existing email-based linkage.
         old_email = oauth_user_info.get('email', '')
 
         oauth_user = SocialAuthUser.objects.get_by_provider_and_uid(OAUTH_PROVIDER, uid)
@@ -339,16 +348,16 @@ def oauth_callback(request):
     if not user:
         return render_error(request, _('Error, new user registration is not allowed, please contact administrator.'))
 
-    if strict_uid:
+    if strict_uid or protocol == 'oidc':
         if (user.username != email or type(user.is_active) not in (bool, int)
                 or user.is_active != 1):
             logger.warning('Trusted OAuth UID returned a different native user')
             return render_error(request, _('Error, please contact administrator.'))
-        # For configured Etech Directory deployments, refuse login when UID
+        # For configured enterprise Directory deployments, refuse login when UID
         # membership cannot be refreshed. Do this BEFORE issuing any session.
         if getattr(settings, 'CF_DIRECTORY_URL', ''):
             try:
-                from cloudfile_ext.v2.etech_directory import ensure_subject
+                from cloudfile_ext.v2.directory_adapter import ensure_subject
                 ensure_subject(oauth_user_info['login_id'], email)
             except Exception:
                 logger.warning('Trusted OAuth UID directory preparation failed')
@@ -398,7 +407,7 @@ def oauth_callback(request):
         # A trusted UID is authorization identity, not an optional metadata
         # sync. It was strictly bound BEFORE login and must never be rewritten.
         # Non-UID legacy OAuth keeps its previous compatibility metadata sync.
-        if login_id and not strict_uid and profile.login_id != login_id.strip():
+        if login_id and not strict_uid and protocol != 'oidc' and profile.login_id != login_id.strip():
             profile.login_id = login_id.strip()
             _save_profile_fields(profile, ['login_id'], email, 'login_id')
 

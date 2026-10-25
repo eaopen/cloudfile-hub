@@ -2,7 +2,7 @@
 
 ``seahub.views.check_folder_permission`` denies when the native permission RPC
 or the CloudFile policy runtime cannot be read. That denial is byte-identical to
-a real "no permission" at the API boundary, so a caller (Etech) showed an
+a real "no permission" at the API boundary, so a caller (enterprise Directory) showed an
 outage as "当前用户无权限". The Hub-side hook only marks the request; the
 response shape is decided here, once, so no upstream view has to change and the
 permission decision itself stays deny-on-error.

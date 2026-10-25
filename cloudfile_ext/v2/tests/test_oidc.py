@@ -8,7 +8,8 @@ from cryptography.hazmat.primitives.asymmetric import rsa
 import jwt
 
 from cloudfile_ext.v2.errors import IdentityUnavailable
-from cloudfile_ext.v2.oidc import configuration, verify_id_token
+from cloudfile_ext.v2.oidc import (configuration, require_signed_business_uid,
+                                   verify_id_token, verified_oidc_subject)
 
 
 class OIDCTest(unittest.TestCase):
@@ -31,6 +32,45 @@ class OIDCTest(unittest.TestCase):
 
     def test_valid_signed_identity(self):
         self.assertEqual(self.verify()['sub'], 'trusted-sub')
+
+    def test_signed_sub_is_the_only_oidc_binding_key(self):
+        signed = self.verify()
+        self.assertEqual(verified_oidc_subject(signed, {'sub': signed['sub'],
+            'email': 'someone-else@example.test'}), 'trusted-sub')
+        # An IdP can report a verified email, but this does not prove
+        # ownership of an existing CE account with that mailbox.
+        for userinfo in ({'sub': 'different', 'email': 'owner@example.test'},
+                         {'email': 'owner@example.test'}, {'sub': ''}):
+            with self.subTest(userinfo=userinfo), self.assertRaises(IdentityUnavailable):
+                verified_oidc_subject(signed, userinfo)
+
+    def test_signed_business_uid_must_match_userinfo_when_present(self):
+        signed = self.verify({'userId': 'business-uid-17'})
+        self.assertEqual(verified_oidc_subject(signed,
+            {'sub': signed['sub'], 'userId': 'business-uid-17'}), signed['sub'])
+        for userinfo in ({'sub': signed['sub'], 'userId': 'other'},
+                         {'sub': signed['sub']}):
+            with self.subTest(userinfo=userinfo), self.assertRaises(IdentityUnavailable):
+                verified_oidc_subject(signed, userinfo)
+        with self.assertRaises(IdentityUnavailable):
+            verified_oidc_subject(self.verify({'userId': None}),
+                {'sub': signed['sub'], 'userId': None})
+
+    def test_strict_oidc_uid_mapping_requires_signed_business_uid(self):
+        # Both enterprise Directory JIT and generic standalone UID reuse must use the
+        # verified signed claim, not a UserInfo-only business identifier.
+        signed = self.verify({'userId': 'business-uid-17'})
+        self.assertEqual(require_signed_business_uid(signed, 'business-uid-17'),
+                         'business-uid-17')
+        for claims, uid in (
+                (self.verify(), 'business-uid-17'),
+                (signed, 'other-business-uid'),
+                (self.verify({'userId': None}), 'business-uid-17'),
+                (signed, ''),
+                (signed, None),
+                (signed, ' business-uid-17 ')):
+            with self.subTest(claims=claims, uid=uid), self.assertRaises(IdentityUnavailable):
+                require_signed_business_uid(claims, uid)
 
     def test_wrong_issuer_audience_expiry_nonce_subject_and_hash_are_rejected(self):
         for claims in ({'iss': 'https://other.example.test/'}, {'aud': 'other'}, {'exp': 1},

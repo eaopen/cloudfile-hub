@@ -33,7 +33,7 @@ def test_legacy_channel_is_rejected():
         resolve_employee_token('10220942@auth.local', source(context(), 'legacy'))
 
 
-@pytest.mark.parametrize('rows', [[], [('381','one@auth.local'), ('381','two@auth.local')], [('381','cfadmin@etech.com')]])
+@pytest.mark.parametrize('rows', [[], [('381','one@auth.local'), ('381','two@auth.local')], [('381','cfadmin@external.com')]])
 def test_missing_ambiguous_or_system_account_is_rejected(rows):
     with pytest.raises(TokenIdentityError):
         resolve_employee_token('10220942@auth.local', source(context()), lambda _: rows)

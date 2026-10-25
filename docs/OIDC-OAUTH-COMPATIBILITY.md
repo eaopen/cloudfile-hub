@@ -48,7 +48,7 @@ Authentik Provider 的 issuer 模式与 subject 模式应固定，不能在迁�
 
 ## 原 dev 部署验证（2026-10-15）
 
-- 主机 `minio157`，目录 `/data/etech-infra/cloudfile-dev`。
+- 主机 `minio157`，目录 `/data/external-infra/cloudfile-dev`。
 - 镜像 `cloudfile:dual-login-dev-20261015-r2`；仅替换 app、worker、JIT 的 dev 服务。
 - 回退配置位于 `backups/dual-login-20261015/compose-before.json`，原设置也已备份。
 - 两个 begin 入口均 302 到 dev Authentik，回调地址各自独立，应用健康检查通过。

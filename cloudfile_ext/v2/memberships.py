@@ -28,16 +28,23 @@ def validate_subject(value, uid, *, now=None):
             raise ValueError()
         text(value['etag'])
         desired = set()
+        seen = set()
         for field, kind in (('organizations', 'org'), ('organization_ancestors', 'org'), ('roles', 'role')):
             items = value[field]
             if not isinstance(items, list) or len(items) > 4096:
                 raise ValueError()
             for item in items:
                 key = (kind, text(item['namespace'], 128), text(item['external_id']))
-                if key in desired:
+                if key in seen:
                     raise ValueError()
-                desired.add(key)
-        if value['status'] == 'disabled' and desired:
+                seen.add(key)
+                # orgLevel=1: a user's direct organizations and roles only.
+                # Ancestor facts remain validated input, but are NOT implied
+                # CE GroupUser grants. An explicit scoped hierarchy algorithm
+                # must be reviewed before enabling orgLevel=0 or >=2.
+                if field != 'organization_ancestors':
+                    desired.add(key)
+        if value['status'] == 'disabled' and seen:
             raise ValueError()
         return login, desired
     except (KeyError, TypeError, AttributeError, ValueError, IdentityConflict):
@@ -56,7 +63,9 @@ SUBJECT_KIND = {'org': 'org', 'role': 'role', 'dept': 'org', 'group': 'role'}
 
 
 def readiness_key(database, provider, uid, username):
-    return 'cfv2:subject:' + hashlib.sha256(json.dumps([database, provider, uid, username]).encode()).hexdigest()
+    # Invalidate readiness markers produced before direct-only Org semantics.
+    # A marker must never accept a stale ancestor GroupUser projection.
+    return 'cfv2:subject-direct-v1:' + hashlib.sha256(json.dumps([database, provider, uid, username]).encode()).hexdigest()
 
 
 def is_ready(redis, key, uid, username, ttl):
@@ -119,8 +128,8 @@ class Memberships:
                 owned = set(mappings.values())
                 if len(owned) != len(rows) or not desired <= mappings.keys():
                     raise IdentityUnavailable('required native group mapping missing')
-                # Flat native groups avoid implicit CE hierarchy grants. The
-                # trusted Directory supplies effective ancestors explicitly.
+                # Flat native groups avoid implicit CE hierarchy grants.
+                # Only scope-approved members are ever projected to GroupUser.
                 for group in sorted(owned):
                     cursor.execute('SELECT group_id,parent_group_id FROM ' + self.groups + ' WHERE group_id=%s FOR UPDATE', (group,))
                     if cursor.fetchall() != ((group, 0),):

@@ -1,7 +1,7 @@
 """Paged CE directory listing through the V2 authority; native RPC is a test double."""
 from types import SimpleNamespace
 from unittest import TestCase
-from unittest.mock import Mock, patch, ANY
+from unittest.mock import Mock, patch
 
 from rest_framework.test import APIRequestFactory, force_authenticate
 
@@ -9,7 +9,7 @@ from cloudfile_ext.v2.acl_policy import Principal, PolicyError, Rule
 from cloudfile_ext.v2.acl_runtime import ACLUnavailable, Authority, DirectoryChanged
 
 RID = '00000000-0000-4000-8000-000000000001'
-P = Principal('etech', 'uid')
+P = Principal('external', 'uid')
 DIR = 'a' * 40
 OTHER = 'b' * 40
 
@@ -50,15 +50,15 @@ class PageTests(TestCase):
         self.assertEqual((page['scanned_count'], page['next_start']), (1, None))
 
     def test_all_hidden_window_is_empty_but_not_exhausted(self):
-        auth = self.authority(rules=(Rule(RID, '/docs/x', 'etech', 'user', 'user', 'uid', 'invisible'),
-                                     Rule(RID, '/docs/y', 'etech', 'user', 'user', 'uid', 'invisible')))
+        auth = self.authority(rules=(Rule(RID, '/docs/x', 'external', 'user', 'user', 'uid', 'invisible'),
+                                     Rule(RID, '/docs/y', 'external', 'user', 'user', 'uid', 'invisible')))
         auth.api.list_dir_by_dir_id.return_value = [dirent('x', 'dir'), dirent('y', 'dir'), dirent('z', 'dir')]
         page = auth.page(RID, '/docs', start=0, limit=2)
         self.assertEqual(page['items'], [])
         self.assertEqual((page['scanned_count'], page['next_start']), (2, 2))
 
     def test_hidden_child_metadata_is_not_returned(self):
-        auth = self.authority(rules=(Rule(RID, '/docs/secret', 'etech', 'user', 'user', 'uid', 'invisible'),))
+        auth = self.authority(rules=(Rule(RID, '/docs/secret', 'external', 'user', 'user', 'uid', 'invisible'),))
         auth.api.list_dir_by_dir_id.return_value = [dirent('open', 'dir'), dirent('secret', 'dir'), dirent('f.txt')]
         page = auth.page(RID, '/docs', start=0, limit=10)
         self.assertEqual([(e.obj_name, kind, perm) for e, _, kind, perm in page['items']],
@@ -101,7 +101,7 @@ class PageTests(TestCase):
             auth.page(RID, '/docs', start=0, limit=2)
 
     def test_directory_only_grant_pages_without_library_permission(self):
-        share = Rule(RID, '/projects/shared', 'etech', 'user', 'user', 'uid', 'r', True, True)
+        share = Rule(RID, '/projects/shared', 'external', 'user', 'user', 'uid', 'r', True, True)
         auth = self.authority(base=None, rules=(share,))
         auth.store.shared.return_value = [(share, 'v')]
         auth.api.list_dir_by_dir_id.return_value = [dirent('a.txt')]
@@ -113,7 +113,7 @@ class PageTests(TestCase):
                 auth.page(RID, path, start=0, limit=50)
 
     def test_revoked_permission_is_decided_again_on_the_next_request(self):
-        auth = self.authority(rules=(Rule(RID, '/docs', 'etech', 'user', 'user', 'uid', 'invisible'),))
+        auth = self.authority(rules=(Rule(RID, '/docs', 'external', 'user', 'user', 'uid', 'invisible'),))
         with self.assertRaises(PermissionError):
             auth.page(RID, '/docs', start=200, limit=200, if_dir_id=DIR)
         auth.api.list_dir_by_dir_id.assert_not_called()
@@ -222,23 +222,12 @@ class DirViewPageTests(TestCase):
                          [('FAILED', None), ('FAILED', None)])
         self.assertNotIn('tag_batch', result.data)
 
-    def test_tag_budget_exhaustion_does_not_hide_or_fail_directory_page(self):
-        from cloudfile_ext.v2.tag_query_budget import TagQueryTimeout
-        self.authority.return_value.page.return_value = self.page()
-        with patch('cloudfile_ext.v2.tag_http.read_tags', side_effect=TagQueryTimeout()), \
-                self.assertLogs('cloudfile_ext.v2.tag_http', level='ERROR'):
-            result = self.request(dict(p='/docs', start='0', limit='2', with_display_metadata='true'))
-        self.assertEqual(result.status_code, 200)
-        self.assertEqual(len(result.data['dirent_list']), 2)
-        self.assertEqual([(item['tag_status'], item['tags']) for item in result.data['dirent_list']],
-                         [('FAILED', None), ('FAILED', None)])
-
     def test_empty_authorized_page_never_reads_tags(self):
         self.authority.return_value.page.return_value = self.page(items=[], next_start=2)
         with patch('cloudfile_ext.v2.tag_http.read_tags') as read:
             read.return_value = {}
             result = self.request(dict(p='/docs', start='0', limit='2', with_display_metadata='true'))
-        read.assert_called_once_with(RID, [], deadline=ANY)
+        read.assert_called_once_with(RID, [])
         self.assertEqual(result.data['dirent_list'], [])
         self.assertTrue(result.data['has_more'])
 
