@@ -20,7 +20,7 @@ class BatchPureContract(TestCase):
 
     def test_same_library_rules_for_reads_and_writes(self):
         source = (Path(__file__).resolve().parents[1] / 'acl_runtime.py').read_text()
-        self.assertIn('rows = library_rules(self.store, repo_id, cache_ttl())', source)
+        self.assertIn('rows = library_rules(self.store, repo_id, cache_ttl() if self.cache_rules else 0)', source)
         self.assertIn('self._rule_paths[repo_id] = buckets', source)
         self.assertIn('return [rule for path in ancestors(directory)', source)
         policy = (Path(__file__).resolve().parents[1] / 'acl_http.py').read_text()
