@@ -111,6 +111,64 @@ class Indexer:
                     break
         self.publish(documents)
 
+    def scan_slice(self, repo, progress, max_pages=10):
+        """Index at most max_pages native directory windows from one fixed HEAD.
+
+        The caller checkpoints the resulting stack only after Meili confirms
+        every upsert. Replaying a batch after a crash is safe: doc IDs are
+        deterministic. No whole-library traversal in one background tick.
+        """
+        head, pending = progress.get('head'), progress.get('pending')
+        if (not isinstance(head, str) or len(head) != 40 or
+                any(c not in '0123456789abcdef' for c in head) or
+                not isinstance(pending, list) or len(pending) > 10000 or
+                type(max_pages) is not int or not 1 <= max_pages <= 100):
+            raise SearchUnavailable('invalid initial index checkpoint')
+        scanned = 0
+        while pending and scanned < max_pages:
+            frame = pending[-1]
+            if not isinstance(frame, dict) or set(frame) != {'path', 'offset'}:
+                raise SearchUnavailable('invalid initial index frame')
+            parent, offset = normalize_path(frame['path']), frame['offset']
+            if type(offset) is not int or not 0 <= offset <= 2147483447:
+                raise SearchUnavailable('invalid initial index offset')
+            entries = self.native.list_dir_by_commit_and_path(repo.id, head, parent, offset, 200)
+            if entries is None or len(entries) > 200:
+                raise SearchUnavailable('native directory snapshot unavailable')
+            documents, subdirs, seen = [], [], set()
+            refs = []
+            for entry in entries:
+                name = getattr(entry, 'obj_name', None)
+                if (not isinstance(name, str) or not name or name in ('.', '..') or
+                        '/' in name or '\\' in name):
+                    raise SearchUnavailable('invalid native directory name')
+                if name in seen:
+                    raise SearchUnavailable('duplicate native entry name')
+                seen.add(name)
+                child = normalize_path(posixpath.join(parent, name))
+                if stat.S_ISDIR(entry.mode):
+                    subdirs.append(child)
+                    kind = 'dir'
+                elif stat.S_ISREG(entry.mode):
+                    kind = 'file'
+                else:
+                    raise SearchUnavailable('unsupported native object')
+                refs.append((child, kind))
+            tags = tag_labels(repo.id, refs)
+            for entry, (child, _) in zip(entries, refs):
+                documents.append(self.upsert(repo, child, entry, {child: [None, tags[child]]}))
+            self.publish(documents)
+            # Mutate the stack only after the async Meilisearch task is
+            # confirmed. On failure the next run can safely repeat the page.
+            pending.pop()
+            if len(entries) == 200:
+                pending.append(dict(path=parent, offset=offset + 200))
+            pending.extend(dict(path=child, offset=0) for child in reversed(subdirs))
+            if len(pending) > 10000:
+                raise SearchUnavailable('initial index traversal too wide')
+            scanned += 1
+        return not pending
+
     def refresh(self, repo, path, subtree=True):
         entry = self.native.get_dirent_by_path(repo.id, path)
         if entry is None:
@@ -206,12 +264,28 @@ class Indexer:
         return dict(head=repo.head_cmmt_id, tag_cursor=cursor)
 
 
-def tick(client, native, checkpoint, bootstrap_before=0):
+def tick(client, native, checkpoint, bootstrap_before=0, pages_per_repo=10):
+    """One bounded pass across repos, with a durable initial-scan cursor.
+
+    Existing libraries retain the commit-diff/tag-sweep mechanism. New large
+    libraries get at most pages_per_repo directory windows per round, resuming
+    at the exact pinned commit even after a worker restart.
+    """
     from django.db import close_old_connections
     close_old_connections()
+    if type(pages_per_repo) is not int or not 1 <= pages_per_repo <= 100:
+        raise SearchUnavailable('invalid indexing page budget')
     path = Path(checkpoint)
     state = json.loads(path.read_text()) if path.exists() else {}
+    if not isinstance(state, dict):
+        raise SearchUnavailable('invalid search checkpoint')
     indexer, offset, present = Indexer(client, native), 0, set()
+
+    def persist():
+        temporary = path.with_suffix('.tmp')
+        temporary.write_text(json.dumps(state, ensure_ascii=False))
+        temporary.replace(path)
+
     while True:
         repos = native.get_repo_list(offset, 100)
         if repos is None:
@@ -221,22 +295,40 @@ def tick(client, native, checkpoint, bootstrap_before=0):
             if repo.is_virtual or repo.encrypted:
                 continue
             try:
-                state[repo.id] = indexer.reconcile(repo, state.get(repo.id), bootstrap_before)
-                temporary = path.with_suffix('.tmp')
-                temporary.write_text(json.dumps(state, ensure_ascii=False))
-                temporary.replace(path)
+                saved = state.get(repo.id)
+                if saved is not None and not isinstance(saved, dict):
+                    raise SearchUnavailable('invalid per-library index checkpoint')
+                if not saved or (not saved.get('head') and 'initial' not in saved):
+                    old_head = indexer.baseline(repo, bootstrap_before)
+                    if old_head is None:
+                        saved = {'initial': {'head': repo.head_cmmt_id,
+                                             'pending': [{'path': '/', 'offset': 0}]}}
+                        state[repo.id] = saved
+                        persist()  # Must survive a crash before the first page.
+                    else:
+                        saved = {'head': old_head, 'tag_cursor': ''}
+                if 'initial' in saved:
+                    initial = saved['initial']
+                    complete = indexer.scan_slice(repo, initial, pages_per_repo)
+                    if complete:
+                        # The scan used this fixed historic commit. If HEAD
+                        # advanced during it, next tick catches up by diff.
+                        state[repo.id] = dict(head=initial['head'], tag_cursor='')
+                    persist()
+                    continue
+                state[repo.id] = indexer.reconcile(repo, saved, bootstrap_before)
+                persist()
             except Exception:
                 logger.exception('Search index catch-up failed for library %s; checkpoint retained', repo.id)
         offset += len(repos)
         if len(repos) < 100:
             break
-    # Removal only follows a complete successful native library enumeration.
+    # Only a complete native library enumeration can certify deletion.
     for repo_id in state.keys() - present:
         indexer.remove(repo_id, '/')
         del state[repo_id]
-    temporary = path.with_suffix('.tmp')
-    temporary.write_text(json.dumps(state, ensure_ascii=False))
-    temporary.replace(path)
+    persist()
+
 
 
 def main():
@@ -251,16 +343,25 @@ def main():
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO)
     os.umask(0o077)
+    from django.conf import settings
+    interval = max(15, int(getattr(settings, 'CF_SEARCH_INDEX_INTERVAL', 60)))
+    pages = int(os.environ.get('CF_SEARCH_BOOTSTRAP_PAGES_PER_TICK', '10'))
+    if not 1 <= pages <= 100:
+        raise ValueError('CF_SEARCH_BOOTSTRAP_PAGES_PER_TICK must be 1..100')
     with open(args.checkpoint + '.lock', 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         while True:
+            started = time.monotonic()
             try:
-                tick(configured_client(), seafile_api, args.checkpoint, args.bootstrap_before)
+                tick(configured_client(), seafile_api, args.checkpoint,
+                     args.bootstrap_before, pages_per_repo=pages)
+                logger.info('CF_SEARCH_INDEX status=OK duration_ms=%d',
+                            int((time.monotonic() - started) * 1000))
             except Exception:
-                logger.exception('Search index worker unavailable; file services remain independent')
+                logger.exception('CF_SEARCH_INDEX status=FAILED; file services remain independent')
             if args.once:
                 break
-            time.sleep(60)
+            time.sleep(interval)
 
 
 if __name__ == '__main__':
