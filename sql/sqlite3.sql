@@ -84,6 +84,11 @@ INSERT INTO "django_migrations" VALUES(80,'wiki','0001_initial','2019-11-25 16:2
 INSERT INTO "django_migrations" VALUES(81,'wiki','0002_auto_20180326_0548','2019-11-25 16:21:38.446838');
 INSERT INTO "django_migrations" VALUES(82,'wiki','0003_auto_20180428_0619','2019-11-25 16:21:38.487146');
 INSERT INTO "django_migrations" VALUES(83,'wiki','0004_auto_20191125_1555','2019-11-25 16:21:38.520346');
+INSERT INTO "django_migrations" VALUES(84,'base','0005_userstarredfiles_obj_id','2026-10-24 22:30:00.000000');
+INSERT INTO "django_migrations" VALUES(85,'repo_tags','0002_repotags_is_system','2026-10-24 22:30:00.000000');
+INSERT INTO "django_migrations" VALUES(86,'share','0003_unique_library_administrators','2026-10-24 22:30:00.000000');
+INSERT INTO "django_migrations" VALUES(87,'share','0004_library_admin_auto_read','2026-10-24 22:30:00.000000');
+INSERT INTO "django_migrations" VALUES(88,'share','0005_library_admin_auto_rw','2026-10-24 22:30:00.000000');
 CREATE TABLE "admin_log_adminlog" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "email" varchar(254) NOT NULL, "operation" varchar(255) NOT NULL, "detail" text NOT NULL, "datetime" datetime NOT NULL);
 CREATE TABLE "api2_token" ("key" varchar(40) NOT NULL PRIMARY KEY, "user" varchar(255) NOT NULL UNIQUE, "created" datetime NOT NULL);
 CREATE TABLE "api2_tokenv2" ("key" varchar(40) NOT NULL PRIMARY KEY, "user" varchar(255) NOT NULL, "platform" varchar(32) NOT NULL, "device_id" varchar(40) NOT NULL, "device_name" varchar(40) NOT NULL, "platform_version" varchar(16) NOT NULL, "client_version" varchar(16) NOT NULL, "last_accessed" datetime NOT NULL, "last_login_ip" char(39) NULL, "created_at" datetime NOT NULL, "wiped_at" datetime NULL);
@@ -394,7 +399,7 @@ CREATE TABLE "base_clientlogintoken" ("token" varchar(32) NOT NULL PRIMARY KEY, 
 CREATE TABLE "base_commandslastcheck" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "command_type" varchar(100) NOT NULL, "last_check" datetime NOT NULL);
 CREATE TABLE "base_devicetoken" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "token" varchar(80) NOT NULL, "user" varchar(255) NOT NULL, "platform" varchar(32) NOT NULL, "version" varchar(16) NOT NULL, "pversion" varchar(16) NOT NULL);
 CREATE TABLE "base_userlastlogin" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "username" varchar(255) NOT NULL, "last_login" datetime NOT NULL);
-CREATE TABLE "base_userstarredfiles" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "email" varchar(254) NOT NULL, "org_id" integer NOT NULL, "repo_id" varchar(36) NOT NULL, "path" text NOT NULL, "is_dir" bool NOT NULL);
+CREATE TABLE "base_userstarredfiles" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "email" varchar(254) NOT NULL, "org_id" integer NOT NULL, "repo_id" varchar(36) NOT NULL, "path" text NOT NULL, "is_dir" bool NOT NULL, "obj_id" varchar(64) NULL);
 CREATE TABLE "base_reposecretkey" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "repo_id" varchar(36) NOT NULL UNIQUE, "secret_key" varchar(44) NOT NULL);
 CREATE TABLE "base_filecomment" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "author" varchar(255) NOT NULL, "comment" text NOT NULL, "created_at" datetime NOT NULL, "updated_at" datetime NOT NULL, "uuid_id" char(32) NOT NULL REFERENCES "tags_fileuuidmap" ("uuid"), "detail" text NOT NULL, "resolved" bool NOT NULL);
 CREATE TABLE "social_auth_usersocialauth" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "username" varchar(255) NOT NULL, "provider" varchar(32) NOT NULL, "uid" varchar(255) NOT NULL, "extra_data" text NULL);
@@ -406,7 +411,7 @@ CREATE TABLE "django_cas_ng_proxygrantingticket" ("id" integer NOT NULL PRIMARY 
 CREATE TABLE "drafts_draft" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "created_at" datetime NOT NULL, "updated_at" datetime NOT NULL, "username" varchar(255) NOT NULL, "origin_file_version" varchar(100) NOT NULL, "draft_file_path" varchar(1024) NOT NULL, "origin_file_uuid" char(32) NOT NULL UNIQUE, "publish_file_version" varchar(100) NULL, "status" varchar(20) NOT NULL, "origin_repo_id" varchar(36) NOT NULL);
 CREATE TABLE "drafts_draftreviewer" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "reviewer" varchar(255) NOT NULL, "draft_id" integer NOT NULL REFERENCES "drafts_draft" ("id"));
 CREATE TABLE "file_participants_fileparticipant" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "username" varchar(255) NOT NULL, "uuid_id" char(32) NOT NULL REFERENCES "tags_fileuuidmap" ("uuid"));
-CREATE TABLE "repo_tags_repotags" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "repo_id" varchar(36) NOT NULL, "name" varchar(255) NOT NULL, "color" varchar(255) NOT NULL);
+CREATE TABLE "repo_tags_repotags" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "repo_id" varchar(36) NOT NULL, "name" varchar(255) NOT NULL, "color" varchar(255) NOT NULL, "is_system" bool NOT NULL);
 CREATE TABLE "file_tags_filetags" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "file_uuid_id" char(32) NOT NULL REFERENCES "tags_fileuuidmap" ("uuid"), "repo_tag_id" integer NOT NULL REFERENCES "repo_tags_repotags" ("id"));
 CREATE TABLE "institutions_institution" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "name" varchar(200) NOT NULL, "create_time" datetime NOT NULL);
 CREATE TABLE "institutions_institutionquota" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "quota" bigint NOT NULL, "institution_id" integer NOT NULL REFERENCES "institutions_institution" ("id"));
@@ -433,8 +438,8 @@ CREATE TABLE "revision_tag_revisiontags" ("id" integer NOT NULL PRIMARY KEY AUTO
 CREATE TABLE "role_permissions_adminrole" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "email" varchar(254) NOT NULL UNIQUE, "role" varchar(255) NOT NULL);
 CREATE TABLE "django_session" ("session_key" varchar(40) NOT NULL PRIMARY KEY, "session_data" text NOT NULL, "expire_date" datetime NOT NULL);
 CREATE TABLE "share_anonymousshare" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "repo_owner" varchar(255) NOT NULL, "repo_id" varchar(36) NOT NULL, "anonymous_email" varchar(255) NOT NULL, "token" varchar(25) NOT NULL UNIQUE);
-CREATE TABLE "share_extragroupssharepermission" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "repo_id" varchar(36) NOT NULL, "group_id" integer NOT NULL, "permission" varchar(30) NOT NULL);
-CREATE TABLE "share_extrasharepermission" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "repo_id" varchar(36) NOT NULL, "share_to" varchar(255) NOT NULL, "permission" varchar(30) NOT NULL);
+CREATE TABLE "share_extragroupssharepermission" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "repo_id" varchar(36) NOT NULL, "group_id" integer NOT NULL, "permission" varchar(30) NOT NULL, "auto_granted_access" bool NOT NULL, "auto_granted_permission" varchar(15) NOT NULL, "auto_grant_previous_permission" varchar(15) NOT NULL);
+CREATE TABLE "share_extrasharepermission" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "repo_id" varchar(36) NOT NULL, "share_to" varchar(255) NOT NULL, "permission" varchar(30) NOT NULL, "auto_granted_access" bool NOT NULL, "auto_granted_permission" varchar(15) NOT NULL, "auto_grant_previous_permission" varchar(15) NOT NULL);
 CREATE TABLE "share_fileshare" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "username" varchar(255) NOT NULL, "repo_id" varchar(36) NOT NULL, "path" text NOT NULL, "token" varchar(100) NOT NULL UNIQUE, "ctime" datetime NOT NULL, "view_cnt" integer NOT NULL, "s_type" varchar(2) NOT NULL, "password" varchar(128) NULL, "expire_date" datetime NULL, "permission" varchar(50) NOT NULL);
 CREATE TABLE "share_orgfileshare" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "org_id" integer NOT NULL, "file_share_id" integer NOT NULL UNIQUE REFERENCES "share_fileshare" ("id"));
 CREATE TABLE "share_privatefiledirshare" ("id" integer NOT NULL PRIMARY KEY AUTOINCREMENT, "from_user" varchar(255) NOT NULL, "to_user" varchar(255) NOT NULL, "repo_id" varchar(36) NOT NULL, "path" text NOT NULL, "token" varchar(10) NOT NULL UNIQUE, "permission" varchar(5) NOT NULL, "s_type" varchar(5) NOT NULL);
@@ -647,4 +652,8 @@ CREATE INDEX IF NOT EXISTS "base_clientssotoken_username_651ec6b5" ON "base_clie
 CREATE INDEX IF NOT EXISTS "base_clientssotoken_created_at_d185d3e0" ON "base_clientssotoken" ("created_at");
 CREATE INDEX IF NOT EXISTS "base_clientssotoken_updated_at_591fc2cd" ON "base_clientssotoken" ("updated_at");
 CREATE INDEX IF NOT EXISTS "base_clientssotoken_accessed_at_cdc66bf3" ON "base_clientssotoken" ("accessed_at");
+CREATE UNIQUE INDEX IF NOT EXISTS "unique_library_user_admin" ON "share_extrasharepermission" ("repo_id", "share_to");
+CREATE UNIQUE INDEX IF NOT EXISTS "unique_library_group_admin" ON "share_extragroupssharepermission" ("repo_id", "group_id");
+CREATE INDEX IF NOT EXISTS "base_userstarredfiles_obj_id" ON "base_userstarredfiles" ("obj_id");
+CREATE INDEX IF NOT EXISTS "repo_tags_repotags_is_system" ON "repo_tags_repotags" ("is_system");
 COMMIT;
