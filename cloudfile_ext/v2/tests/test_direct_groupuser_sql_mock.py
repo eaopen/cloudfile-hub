@@ -107,6 +107,18 @@ class DirectGroupUserProjectionTests(unittest.TestCase):
         self.assertEqual(conn.members, {10: 0, 12: 0, 99: 0})
         self.assertEqual(conn.commits, 2)
 
+    def test_new_user_memberships_are_added_and_verified(self):
+        # The old readback checked only groups already owned before INSERT,
+        # rejecting a perfectly valid first login with new Org/Role rows.
+        for original in ({99: 0}, {10: 0, 99: 0}):
+            with self.subTest(original=original):
+                conn = Connection(original)
+                projector, identity = self.projector(conn)
+                projector._project(UID, USERNAME, {DIRECT, ROLE})
+                self.assertEqual(conn.members, {10: 0, 12: 0, 99: 0})
+                self.assertEqual((conn.commits, conn.rollbacks), (1, 0))
+                identity.active.assert_called_once_with(USERNAME, UID, locked=True)
+
     def test_failure_rolls_back_ancestor_revocation(self):
         conn = Connection({10: 0, 11: 0, 12: 0, 99: 0}, fail_delete=True)
         projector, _ = self.projector(conn)
