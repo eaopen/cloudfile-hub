@@ -27,6 +27,12 @@ class DirectoryRuntimeTests(TestCase):
         self.directory.entities.return_value={('org','directory','o1'):'Department'}
         self.identity.prepare.return_value='opaque@auth.local'
         self.catalog.ensure.return_value=42
+        self.catalog.provider = 'external'
+        self.catalog.groups = 'ccnet.\`Group\`'
+        reader = self.catalog.connection.cursor.return_value
+        reader.__enter__ = Mock(return_value=reader)
+        reader.__exit__ = Mock(return_value=False)
+        reader.fetchall.return_value = []
         yield self.directory, self.identity, self.catalog, self.memberships
 
     def test_preparation_proves_directory_uid_and_preserves_native_name(self):
