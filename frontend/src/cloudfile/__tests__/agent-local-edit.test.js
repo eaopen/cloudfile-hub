@@ -81,3 +81,20 @@ test('legacy device pairing helpers are no longer exported', () => {
   expect(agentLocalEdit.ensurePairedLocalAgent).toBeUndefined();
   expect(agentLocalEdit.pairRequest).toBeUndefined();
 });
+
+test.each(['local-view', 'optimistic-edit', 'exclusive-edit'])('V2 forwards %s unchanged', async mode => {
+  cloudFileAPI.req.post.mockResolvedValueOnce({ data: { mode, open_uri: URI } });
+  window.chrome.runtime.sendMessage.mockImplementation((_id, _msg, done) => done({ ok: true }));
+  await openV2LocalFile({ repoID: 'repo-id', path: '/a.docx', mode });
+  expect(cloudFileAPI.req.post).toHaveBeenCalledWith(
+    '/api/v2.1/cloudfile/edit/v1/open/', { repo_id: 'repo-id', path: '/a.docx', mode });
+  expect(window.chrome.runtime.sendMessage).toHaveBeenCalledTimes(1);
+});
+
+test.each([403, 409, 503])('V2 HTTP %s never launches or falls back', async status => {
+  cloudFileAPI.req.post.mockRejectedValueOnce({ response: { status } });
+  await expect(openV2LocalFile({ repoID: 'repo-id', path: '/a.docx', mode: 'exclusive-edit' }))
+    .rejects.toEqual({ response: { status } });
+  expect(cloudFileAPI.req.post).toHaveBeenCalledTimes(1);
+  expect(window.chrome.runtime.sendMessage).not.toHaveBeenCalled();
+});

@@ -13571,3 +13571,59 @@ msgstr "Enable sharing to allow access without library membership. Permissions a
 
 msgid "Allow access without library membership"
 msgstr "Allow access without library membership"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Access denied. Refresh the page to check your permissions."
+msgstr "Access denied. Refresh the page to check your permissions."
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Exclusive editing is unavailable. You can choose ordinary editing."
+msgstr "Exclusive editing is unavailable. You can choose ordinary editing."
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Local operation was not confirmed. Check the Agent2 task center before trying again."
+msgstr "Local operation was not confirmed. Check the Agent2 task center before trying again."
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Local file operations"
+msgstr "Local file operations"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "View locally"
+msgstr "View locally"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Edit locally"
+msgstr "Edit locally"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Edit exclusively"
+msgstr "Edit exclusively"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Local viewing never uploads changes. Ordinary editing publishes saved changes automatically. Exclusive editing requires Commit or Checkin in Agent2 to publish; saving locally does not confirm a cloud version."
+msgstr "Local viewing never uploads changes. Ordinary editing publishes saved changes automatically. Exclusive editing requires Commit or Checkin in Agent2 to publish; saving locally does not confirm a cloud version."
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Editing requires write permission and a writable library."
+msgstr "Editing requires write permission and a writable library."
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "This file is checked out by another user. Use the existing Agent2 task to continue; local viewing remains available."
+msgstr "This file is checked out by another user. Use the existing Agent2 task to continue; local viewing remains available."
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "You have checked out this file. Resume the existing Agent2 task to continue; local viewing remains available."
+msgstr "You have checked out this file. Resume the existing Agent2 task to continue; local viewing remains available."
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "The lock state could not be confirmed. Editing is disabled until the service is restored; local viewing remains available."
+msgstr "The lock state could not be confirmed. Editing is disabled until the service is restored; local viewing remains available."
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Resume exclusive editing"
+msgstr "Resume exclusive editing"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Checkout is unavailable or has not been confirmed. Ordinary editing remains available."
+msgstr "Checkout is unavailable or has not been confirmed. Ordinary editing remains available."

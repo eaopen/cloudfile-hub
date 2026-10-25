@@ -11,7 +11,7 @@ import Cookies from 'js-cookie';
 import PropTypes from 'prop-types';
 import metadataAPI from '@/api/metadata-api';
 import { seafileAPI } from '@/api/seafile-api';
-import { launchPairedAgent } from '@/cloudfile/agent-local-edit';
+import { openV2LocalFile } from '@/cloudfile/agent-local-edit';
 import { cloudFileAPI } from '@/cloudfile/cloudfile-api';
 import { loadFeatures } from '@/cloudfile/features';
 import CopyMoveDirentProgressDialog from '@/components/dialog/copy-move-dirent-progress-dialog';
@@ -691,31 +691,8 @@ class LibContentView extends React.Component {
     window.history.pushState({ url: url, path: path }, path, url);
   };
 
-  onCloudFileLocalEdit = async (filePath, selectedBaseFileID) => {
-    // v0.7 explicitly selected ONE existing file. It is not v0.8's
-    // resident TaskManager and does not upload upon a filesystem save.
-    if (this.localEditLaunching) return;
-    this.localEditLaunching = true;
-    try {
-      // 修改逻辑（2026-10-21）：CloudFile V2 用一次性 edit/v1/open 票据取代设备配对与会话；
-      // 修改原因：local-edit devices/sessions 路由已移除，旧配对流程不再可用。
-      const response = await cloudFileAPI.openLocalFile(
-        this.props.repoID, filePath, 'optimistic-edit');
-      const opened = response && response.data;
-      if (!opened || opened.mode !== 'optimistic-edit' || typeof opened.open_uri !== 'string')
-        throw new Error(gettext('服务未返回有效的 V2 本地编辑票据'));
-      await launchPairedAgent(opened.open_uri);
-      const originalBase = opened.file_id || selectedBaseFileID;
-      if (/^[a-f0-9]{40}$/.test(originalBase || '')) {
-        this.cloudLocalEditOriginals = this.cloudLocalEditOriginals || {};
-        this.cloudLocalEditOriginals[filePath] = originalBase;
-      }
-      toaster.success(gettext('Local Agent opening request accepted'));
-    } catch (error) {
-      toaster.danger(error.message || Utils.getErrorMsg(error));
-    } finally {
-      this.localEditLaunching = false;
-    }
+  onCloudFileLocalEdit = (filePath, mode) => {
+    return openV2LocalFile({ repoID: this.props.repoID, path: filePath, mode });
   };
 
   showFile = (filePath, noRedirection) => {
