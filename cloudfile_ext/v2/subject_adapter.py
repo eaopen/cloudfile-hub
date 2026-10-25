@@ -10,7 +10,10 @@ No UID format is an authentication or authorization signal.
 """
 
 
-from functools import lru_cache
+import threading
+import time
+
+from .errors import IdentityUnavailable
 
 
 DEFAULT_PROVIDER = 'external'
@@ -38,14 +41,46 @@ def _namespace_from_entities(facts):
     return declared
 
 
-@lru_cache(maxsize=8)
-def _trusted_directory_namespace(url, key_id, secret, issuer, audience):
-    """One authenticated catalog read per worker/config; no per-ACL Directory RPC."""
-    from .directory_adapter import Directory
+# Process-local namespace is stable for the lifetime of a Hub worker.
+# A failed first fetch must not trigger a 5-second HTTP request for every ACL.
+# Retry failed fetches after a fixed, small cool-down; no external cache/scheduler.
+_NAMESPACE_UNSET = object()
+_NAMESPACE_LOCK = threading.Lock()
+_NAMESPACE_RESOLVED = {}
+_NAMESPACE_RETRY_AFTER = {}
 
-    # Directory.get sends the existing scoped machine JWT, refuses redirects and
-    # bounds the response. Only a current, valid entities response is trusted.
-    return _namespace_from_entities(Directory().get('/groups?view=entities'))
+
+def _fetch_trusted_entities():
+    from .directory_adapter import Directory
+    return Directory().get('/groups?view=entities')
+
+
+def _trusted_directory_namespace(url, key_id, secret, issuer, audience):
+    """Read once from the trusted Directory, throttling only unavailable results."""
+    key = (url, key_id, secret, issuer, audience)
+    resolved = _NAMESPACE_RESOLVED.get(key, _NAMESPACE_UNSET)
+    if resolved is not _NAMESPACE_UNSET:
+        return resolved
+
+    if time.monotonic() < _NAMESPACE_RETRY_AFTER.get(key, 0):
+        raise IdentityUnavailable('trusted Directory namespace temporarily unavailable')
+
+    # A single cold request fetches the catalog. Concurrent requests reuse
+    # its result (or return a bounded 503), not a burst of Directory HTTP.
+    with _NAMESPACE_LOCK:
+        resolved = _NAMESPACE_RESOLVED.get(key, _NAMESPACE_UNSET)
+        if resolved is not _NAMESPACE_UNSET:
+            return resolved
+        if time.monotonic() < _NAMESPACE_RETRY_AFTER.get(key, 0):
+            raise IdentityUnavailable('trusted Directory namespace temporarily unavailable')
+        try:
+            resolved = _namespace_from_entities(_fetch_trusted_entities())
+        except (IdentityUnavailable, InvalidSubjectAdapter):
+            _NAMESPACE_RETRY_AFTER[key] = time.monotonic() + 30
+            raise
+        _NAMESPACE_RESOLVED[key] = resolved
+        _NAMESPACE_RETRY_AFTER.pop(key, None)
+        return resolved
 
 
 def provider_name(config, default=DEFAULT_PROVIDER):

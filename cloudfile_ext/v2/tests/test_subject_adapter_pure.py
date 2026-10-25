@@ -2,6 +2,9 @@
 from types import SimpleNamespace
 from datetime import datetime, timedelta, timezone
 from unittest.mock import patch
+from concurrent.futures import ThreadPoolExecutor
+import importlib
+import time
 import unittest
 
 from cloudfile_ext.v2.subject_adapter import (InvalidSubjectAdapter, selected_adapter,
@@ -101,6 +104,63 @@ class SubjectAdapterPureTests(unittest.TestCase):
         ):
             with self.subTest(facts=facts), self.assertRaises(IdentityUnavailable):
                 _namespace_from_entities(facts)
+
+    def test_directory_namespace_cold_fetch_is_one_shot_and_stable(self):
+        module = importlib.import_module('cloudfile_ext.v2.subject_adapter')
+        module._NAMESPACE_RESOLVED.clear()
+        module._NAMESPACE_RETRY_AFTER.clear()
+        self.addCleanup(module._NAMESPACE_RESOLVED.clear)
+        self.addCleanup(module._NAMESPACE_RETRY_AFTER.clear)
+        key = ('https://directory.example.test', 'kid', 'x' * 32, 'issuer', 'aud')
+        facts = dict(contract_version='2.0', view='entities', provider='etech',
+                     generated_at=datetime.now(timezone.utc).isoformat(), groups=[])
+
+        def fetch():
+            time.sleep(0.02)
+            return facts
+
+        with patch.object(module, '_fetch_trusted_entities', side_effect=fetch) as call:
+            with ThreadPoolExecutor(max_workers=6) as pool:
+                resolved = list(pool.map(lambda _: module._trusted_directory_namespace(*key),
+                                         range(6)))
+            self.assertEqual(resolved, ['etech'] * 6)
+            call.assert_called_once()
+            self.assertEqual(module._trusted_directory_namespace(*key), 'etech')
+            call.assert_called_once()
+
+    def test_directory_namespace_failures_have_short_retry_cooldown(self):
+        module = importlib.import_module('cloudfile_ext.v2.subject_adapter')
+        module._NAMESPACE_RESOLVED.clear()
+        module._NAMESPACE_RETRY_AFTER.clear()
+        self.addCleanup(module._NAMESPACE_RESOLVED.clear)
+        self.addCleanup(module._NAMESPACE_RETRY_AFTER.clear)
+        key = ('https://directory-down.example.test', 'kid', 'x' * 32, 'issuer', 'aud')
+        facts = dict(contract_version='2.0', view='entities', provider='etech',
+                     generated_at=datetime.now(timezone.utc).isoformat(), groups=[])
+        with patch.object(module, '_fetch_trusted_entities',
+                          side_effect=[IdentityUnavailable('down'), facts]) as call, \
+             patch.object(module.time, 'monotonic', side_effect=[100.0, 100.0, 100.0, 100.0, 131.0, 131.0]):
+            with self.assertRaises(IdentityUnavailable):
+                module._trusted_directory_namespace(*key)
+            with self.assertRaises(IdentityUnavailable):
+                module._trusted_directory_namespace(*key)
+            call.assert_called_once()
+            self.assertEqual(module._trusted_directory_namespace(*key), 'etech')
+            self.assertEqual(call.call_count, 2)
+
+    def test_old_directory_without_namespace_uses_stable_generic_fallback(self):
+        module = importlib.import_module('cloudfile_ext.v2.subject_adapter')
+        module._NAMESPACE_RESOLVED.clear()
+        module._NAMESPACE_RETRY_AFTER.clear()
+        self.addCleanup(module._NAMESPACE_RESOLVED.clear)
+        self.addCleanup(module._NAMESPACE_RETRY_AFTER.clear)
+        key = ('https://legacy-directory.example.test', 'kid', 'x' * 32, 'issuer', 'aud')
+        old = dict(contract_version='2.0', view='entities',
+                   generated_at=datetime.now(timezone.utc).isoformat(), groups=[])
+        with patch.object(module, '_fetch_trusted_entities', return_value=old) as call:
+            self.assertIsNone(module._trusted_directory_namespace(*key))
+            self.assertIsNone(module._trusted_directory_namespace(*key))
+            call.assert_called_once()  # Upgrade EAP before Hub; restart Hub to re-resolve.
 
     def test_builtin_admin_bypass_requires_exact_account_and_uid(self):
         for username in ('cfadmin@auth.local',):
