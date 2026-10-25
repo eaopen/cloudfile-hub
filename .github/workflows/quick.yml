@@ -41,6 +41,9 @@ jobs:
         run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_publisher_scope_mock -v
 
 
+      - name: Validate standalone and enterprise provider selection (pure Python)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_subject_adapter_pure
+
       - name: Validate direct Org scope and group-kind contract (pure Python)
         run: python3 -m unittest cloudfile_ext.v2.tests.test_group_kind_contract
       - name: Verify native GroupUser direct projection rollback (mock SQL)
