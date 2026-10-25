@@ -32,7 +32,11 @@ opt their chosen libraries into OPTIONAL without modifying normal repositories.
    Branch-diff/locking logic entirely. Existing ACL/CAS remain authoritative.
 3. On OPTIONAL libraries, the native Guard remains authoritative, including
    ordinary upload and other unscoped write paths. A missing or invalid Guard
-   schema fails closed **only for affected libraries**.
+   schema fails closed **only for affected libraries**. Hub returns HTTP 503
+   `GUARD_UNAVAILABLE` instead of `checkout_supported=false`, and refuses new
+   ordinary/exclusive edit tickets; only local-view remains usable.
+   The web dialog also waits for a complete lock-info response before enabling
+   writes. The OFF policy alone returns `checkout_supported=false`.
 4. Agent Rust uses its existing work copy, durable Journal, proof/generation,
    status and explicit Commit/Checkin; it does not implement a parallel policy.
 5. Hub PR #50 must query capability only for relevant local actions and allow
