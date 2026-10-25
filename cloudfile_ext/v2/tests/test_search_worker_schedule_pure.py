@@ -101,7 +101,7 @@ class WorkerRegistrationSourceTests(unittest.TestCase):
         self.assertNotIn('_register_directory_catalog', source)
 
     def test_external_admin_api_keeps_entity_sync(self):
-        source = (Path(__file__).resolve().parents[2] / 'http.py').read_text()
+        source = (Path(__file__).resolve().parents[1] / 'http.py').read_text()
         self.assertIn('class CatalogSync(', source)
         self.assertIn('result = sync_entity_catalog()', source)
 
