@@ -67,9 +67,11 @@ adapter, without inventing a framework or adding cf_* tables.
 
 ## Runtime organization/role synchronization (2026-10-25)
 
-- Configured enterprise Directory: existing `cf_worker` registers
-  `directory-entities` every `CF_DIRECTORY_SYNC_INTERVAL_SECONDS` seconds,
-  default 600 (10 minutes, supported 60–86400). The worker must be running.
+- With `CF_ENABLE_SSO=true` **and** a trusted `CF_DIRECTORY_URL`, the
+  existing `cf_worker` registers `directory-entities` every
+  `CF_DIRECTORY_SYNC_INTERVAL_SECONDS` seconds, default 600 (10 minutes,
+  supported 60–86400). A URL configured solely for the startup administrator
+  roster does **not** register periodic polling. The worker must be running.
 - Periodic sync reconciles organization/role mappings and names, not users
   or individual GroupUser memberships. Unchanged groups are read in one
   snapshot rather than each acquiring a lock and native RPC.
