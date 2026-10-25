@@ -52,6 +52,7 @@ from cloudfile_ext.settings_defaults import *
 | `CF_PROVIDER_SEARCH` | `''` | 空值走 CE SeaSearch/Elasticsearch；可注册 `meilisearch`，以及内置的 `db-tags`（无需外部索引，按标签表查询） |
 | `CF_PROVIDER_ACL_RULE_SOURCE` | `''` | 未选时 ACL 使用本地数据库；可显式选 `local-db`；`external-service` 未实现 |
 | `CF_PROVIDER_SSO_DIRECTORY` | `''` | 空值不做组映射；可选 `static`、`external-service` |
+| `CF_DIRECTORY_PROVIDER` | 未显式设置 | 企业命名空间：显式配置优先，随后可信 Directory `groups?view=entities` 声明，最后通用默认 `external`；已有 `CF_ACL_PROVIDER` 兼容别名仍可用，Etech 默认不必填写。详见 [Directory 契约](ENTERPRISE-DIRECTORY-CONTRACT.md)。 |
 
 非空但未注册的名称在第一次使用时抛出 `UnknownProvider`，不会自动降级。
 
