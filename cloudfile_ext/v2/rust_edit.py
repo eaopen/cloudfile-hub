@@ -54,11 +54,22 @@ def checkout_available():
     return path_checkout_available(connection, schema)
 
 
-def checkout_for_repo(repo_id):
-    """In-memory repository opt-in. OFF libraries never inspect Guard schema."""
+def checkout_selected(repo_id):
+    """Only explicit Repo UUIDs are OPTIONAL; OFF requires no Guard discovery."""
     selected = getattr(settings, 'CF_CHECKOUT_REPOS', ())
     return (isinstance(selected, (tuple, list, set, frozenset)) and
-            repo_id in selected and checkout_available())
+            repo_id in selected)
+
+
+def checkout_for_repo(repo_id):
+    return checkout_selected(repo_id) and checkout_available()
+
+
+def checkout_unavailable(repo_id):
+    """A selected OPTIONAL repo with a missing Guard is NOT an OFF repo."""
+    from cloudfile_ext.features import is_enabled
+    return (checkout_selected(repo_id) and
+            is_enabled('CF_ENABLE_CHECKOUT') and not checkout_available())
 
 
 def issue_ticket(*, username, uid, repo_id, path, mode, file_id, now, secret):
@@ -104,6 +115,10 @@ class RustLocalEditOpen(APIView):
             mode = request.data["mode"]
             if mode not in ("local-view", "optimistic-edit", "exclusive-edit"):
                 return Response({"code": "BAD_EDIT_REQUEST"}, status=400)
+            # Do not hand out write tickets that the native OPTIONAL repository
+            # cannot publish. OFF repositories never need Guard discovery.
+            if mode != "local-view" and checkout_unavailable(repo_id):
+                return Response({"code": "GUARD_UNAVAILABLE"}, status=503)
             if mode == "exclusive-edit" and not checkout_for_repo(repo_id):
                 return Response({"code": "CHECKOUT_UNSUPPORTED"}, status=409)
             user = request.user.username
@@ -169,6 +184,9 @@ class RustCheckoutInfo(APIView):
             repo_id, path = args["repo_id"], args["path"]
             UUID(repo_id)
             if not checkout_for_repo(repo_id):
+                if checkout_unavailable(repo_id):
+                    # OPTIONAL with an unusable Guard is unknown, not unlocked.
+                    return Response({"code": "GUARD_UNAVAILABLE"}, status=503)
                 # OFF: no Guard SQL or schema discovery; ordinary edits remain available.
                 return Response({"checkout_supported": False, "checked_out": False})
             if (not path.startswith("/") or path == "/" or "\\" in path or
