@@ -65,6 +65,9 @@ jobs:
       - name: Check CE and UUID V2 route diagnostics (pure Python)
         run: python3 -m unittest cloudfile_ext.v2.tests.test_native_discovery -v
 
+      - name: Verify bounded search indexing and single-worker source contract
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_search_worker_schedule_pure -v
+
       - name: Validate only changed source
         shell: bash
         run: |
