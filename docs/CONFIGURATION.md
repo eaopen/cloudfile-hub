@@ -18,7 +18,7 @@ from cloudfile_ext.settings_defaults import *
 ## 功能开关
 
 修改说明（2026-09-22 产品决策）：不再“全部默认 `False`”。不依赖第三方/外部服务的已验收能力默认 `True`
-（DIR_ACL、AUDIT、METADATA、TAGS、FILE_PREVIEW、FILE_LOCK、CHECKOUT、FAVORITES_ID、WATCH、FILEOPS、SHARE_RESTRICT），
+（DIR_ACL、AUDIT、METADATA、TAGS、FILE_PREVIEW、FAVORITES_ID、WATCH、FILEOPS、SHARE_RESTRICT），
 其余默认 `False`；**新增开关仍默认 `False`**。只有严格的布尔值 `True` 才算开启。
 默认值以 `cloudfile_ext/settings_defaults.py` 为准，部署由 compose `.env` 覆盖。
 
@@ -32,10 +32,10 @@ from cloudfile_ext.settings_defaults import *
 | `CF_ENABLE_SEARCH` | `False` | 验证中 |
 | `CF_ENABLE_FILE_PREVIEW` | `True` | 部分完成 |
 | `CF_ENABLE_ONLYOFFICE` | `False` | CE 复用；CloudFile 回调未注册 |
-| `CF_ENABLE_FILE_LOCK` | `True` | 验证中 |
+| `CF_ENABLE_FILE_LOCK` | `False` | 旧锁功能默认不启用；独占编辑按库配置见 Checkout 契约 |
 | `CF_ENABLE_WATCH` | `True` | 验证中；复用 CE monitored-repos API 并放开非 Pro gate |
 | `CF_ENABLE_CONVERT_EXPORT` | `False` | 规划 |
-| `CF_ENABLE_CHECKOUT` | `True` | 验证中 |
+| `CF_ENABLE_CHECKOUT` | `False` | 普通库默认 OFF，仅指定 Repo UUID 的 OPTIONAL 库启用；参见 [Checkout 契约](checkout-per-repo-policy.md) |
 | `CF_ENABLE_FAVORITES_ID` | `True` | 验证中；路径关系与辅助内容 ID；修改原因：内容 ID 不能唯一标识资源，失效路径不再通过树扫描自动重绑 |
 | `CF_ENABLE_LOCAL_APP` | `False` | 部分完成 |
 | `CF_ENABLE_S3_STORAGE` | `False` | Hub 仅有维护脚本边界 |
