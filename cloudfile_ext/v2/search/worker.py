@@ -345,16 +345,13 @@ def main():
     os.umask(0o077)
     from django.conf import settings
     interval = max(15, int(getattr(settings, 'CF_SEARCH_INDEX_INTERVAL', 60)))
-    pages = int(os.environ.get('CF_SEARCH_BOOTSTRAP_PAGES_PER_TICK', '10'))
-    if not 1 <= pages <= 100:
-        raise ValueError('CF_SEARCH_BOOTSTRAP_PAGES_PER_TICK must be 1..100')
     with open(args.checkpoint + '.lock', 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         while True:
             started = time.monotonic()
             try:
                 tick(configured_client(), seafile_api, args.checkpoint,
-                     args.bootstrap_before, pages_per_repo=pages)
+                     args.bootstrap_before, pages_per_repo=10)
                 logger.info('CF_SEARCH_INDEX status=OK duration_ms=%d',
                             int((time.monotonic() - started) * 1000))
             except Exception:
