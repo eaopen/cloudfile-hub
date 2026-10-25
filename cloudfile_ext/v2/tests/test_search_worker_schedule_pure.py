@@ -94,17 +94,21 @@ class InitialIndexTests(unittest.TestCase):
 
 
 class WorkerRegistrationSourceTests(unittest.TestCase):
-    def test_directory_is_not_registered_for_admin_only_startup(self):
+    def test_directory_catalog_has_no_cloudfile_scheduler(self):
         source = (Path(__file__).resolve().parents[2] / 'apps.py').read_text()
-        self.assertIn("getattr(settings, 'CF_ENABLE_SSO', False)", source)
-        self.assertIn("getattr(settings, 'CF_DIRECTORY_URL', '')", source)
+        self.assertNotIn('directory-entities', source)
+        self.assertNotIn('register_periodic_task', source)
+        self.assertNotIn('_register_directory_catalog', source)
 
-    def test_scheduler_has_one_lock_and_aggregate_logs(self):
-        source = (Path(__file__).resolve().parents[2] /
-                  'management/commands/cf_worker.py').read_text()
-        self.assertIn('CF_WORKER_LOCK_FILE', source)
-        self.assertIn('fcntl.LOCK_EX | fcntl.LOCK_NB', source)
-        self.assertIn('CF_TASK name=%s status=OK duration_ms=%d', source)
+    def test_external_admin_api_keeps_entity_sync(self):
+        source = (Path(__file__).resolve().parents[2] / 'http.py').read_text()
+        self.assertIn('class CatalogSync(', source)
+        self.assertIn('result = sync_entity_catalog()', source)
+
+    def test_v2_search_stays_independent(self):
+        source = (Path(__file__).resolve().parents[1] / 'search/worker.py').read_text()
+        self.assertIn('def scan_slice(', source)
+        self.assertIn('time.sleep(interval)', source)
 
 
 if __name__ == '__main__':
