@@ -22,7 +22,7 @@ class ViewScopeTests(unittest.TestCase):
         req = APIRequestFactory().post(
             "/api/v2.1/cloudfile/edit/v1/open/",
             {"repo_id": RID, "path": FILE, "mode": mode}, format="json")
-        force_authenticate(req, SimpleNamespace(username="reader@auth.local",
+        force_authenticate(req, SimpleNamespace(id=1, username="reader@auth.local",
                                                  is_authenticated=True, is_active=True))
         policy = SimpleNamespace(can_read=read, can_write=write)
         repo = SimpleNamespace(is_virtual=False, encrypted=False, version=1)
@@ -107,7 +107,7 @@ class CheckoutCapabilityTests(unittest.TestCase):
     def test_off_repo_lock_info_never_queries_guard(self):
         req = APIRequestFactory().get('/api/v2.1/cloudfile/edit/v1/lock-info/',
                                       {'repo_id': RID, 'path': FILE})
-        force_authenticate(req, SimpleNamespace(username='reader@auth.local',
+        force_authenticate(req, SimpleNamespace(id=1, username='reader@auth.local',
                                                  is_authenticated=True, is_active=True))
         # Exercise the real helper: an empty allowlist must short-circuit before
         # checkout_available()/schema discovery, without any Guard SQL.
