@@ -50,10 +50,13 @@ _NAMESPACE_RESOLVED = {}
 _NAMESPACE_RETRY_AFTER = {}
 
 
+def _fetch_trusted_entities():
+    from .directory_adapter import Directory
+    return Directory().get('/groups?view=entities')
+
+
 def _trusted_directory_namespace(url, key_id, secret, issuer, audience):
     """Read once from the trusted Directory, throttling only unavailable results."""
-    from .directory_adapter import Directory
-
     key = (url, key_id, secret, issuer, audience)
     resolved = _NAMESPACE_RESOLVED.get(key, _NAMESPACE_UNSET)
     if resolved is not _NAMESPACE_UNSET:
@@ -71,7 +74,7 @@ def _trusted_directory_namespace(url, key_id, secret, issuer, audience):
         if time.monotonic() < _NAMESPACE_RETRY_AFTER.get(key, 0):
             raise IdentityUnavailable('trusted Directory namespace temporarily unavailable')
         try:
-            resolved = _namespace_from_entities(Directory().get('/groups?view=entities'))
+            resolved = _namespace_from_entities(_fetch_trusted_entities())
         except (IdentityUnavailable, InvalidSubjectAdapter):
             _NAMESPACE_RETRY_AFTER[key] = time.monotonic() + 30
             raise
