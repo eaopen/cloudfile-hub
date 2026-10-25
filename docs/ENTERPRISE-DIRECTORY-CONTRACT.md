@@ -70,10 +70,14 @@ adapter, without inventing a framework or adding cf_* tables.
 - **Stable provider namespace for existing permissions.** A machine-authenticated
   `/groups?view=entities` response may include `provider` (Etech uses `etech`).
   CloudFile uses an explicit `CF_DIRECTORY_PROVIDER` / `CF_ACL_PROVIDER` first,
-  otherwise one validated, cached Directory declaration per Hub worker,
-  otherwise the generic `external` default. No DB/ACL migration, new setting
-  or repeated Directory lookup on warm ACL requests. An invalid declaration
-  fails closed. Already configured provider namespaces are never overridden.
+  otherwise one validated Directory declaration per Hub worker,
+  otherwise the generic `external` default. The first lookup is one bounded
+  machine-authenticated request; concurrent cold calls share the result. On
+  failure, return unavailable (503) and retry after a fixed 30-second in-process
+  cooldown instead of hammering EAP. Valid declarations and old responses with
+  no declaration are pinned for the worker lifetime. Upgrade EAP first, then
+  restart Hub to pick up a newly declared namespace. Explicitly configured
+  namespaces never change, and no ACL/group rows are migrated.
 - **Etech owns the business Directory and schedules catalog updates.** Its existing
   PowerJob `cloudDirectorySync` calls the CloudFile administrator endpoint
   `POST /api/v2.1/admin/cloudfile/directory/entities/sync/`. Other enterprise
@@ -89,10 +93,11 @@ adapter, without inventing a framework or adding cf_* tables.
   Missing role/org mapping refuses the refresh. Neither login nor an
   ACL check automatically creates a missing group; external application
   catalog synchronization owns creation and retry.
-- File permission checks use only existing CE User/Profile/GroupUser and
-  `cf_sso_group_map` facts. No external HTTP Directory fetch, automatic
-  user/group provisioning or membership mutation occurs on these checks.
-  A missing native user is denied.
+- Warm file permission checks use only existing CE User/Profile/GroupUser and
+  `cf_sso_group_map` facts. Namespace discovery can make **one initial** trusted
+  Directory request per Hub worker when there is no explicit namespace; after
+  that, ACL checks do no external HTTP, user/group provisioning or membership
+  mutation. A missing native user is denied.
 - A user's changed membership is refreshed at their next authenticated login
   or explicit administrative user-sync event, **not** at every ACL request.
   The external catalog schedule does not guarantee prompt revocation of
