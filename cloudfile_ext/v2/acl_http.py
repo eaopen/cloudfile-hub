@@ -391,7 +391,9 @@ class NativeACLCheck(APIView):
     """Existing native internal JWT, trusted username, bounded exact paths.
 
     This is a permission check, never a bearer grant. Native code invokes it
-    anew at reads and under Branch(master) at final commit.
+    anew at reads and once in a pre-lock preflight for writes; the final
+    Branch(master) transaction only re-reads the bounded ACL row/revision
+    proof, so no Hub HTTP runs while the Branch row is locked.
     """
     authentication_classes = ()
     permission_classes = (AllowAny,)
