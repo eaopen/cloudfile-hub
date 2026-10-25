@@ -16,6 +16,24 @@ class SubjectAdapterPureTests(unittest.TestCase):
             CF_DIRECTORY_URL='https://directory.example.test')),
             ('external', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
 
+    def test_preferred_provider_setting_names_the_builtin_namespace(self):
+        self.assertEqual(selected_adapter(SimpleNamespace(
+            CF_DIRECTORY_URL='https://directory.example.test',
+            CF_DIRECTORY_PROVIDER='acme')),
+            ('acme', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
+
+    def test_legacy_provider_setting_remains_supported(self):
+        self.assertEqual(selected_adapter(SimpleNamespace(
+            CF_DIRECTORY_URL='https://directory.example.test',
+            CF_ACL_PROVIDER='legacy')),
+            ('legacy', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
+
+    def test_preferred_provider_wins_when_both_are_set(self):
+        self.assertEqual(selected_adapter(SimpleNamespace(
+            CF_DIRECTORY_URL='https://directory.example.test',
+            CF_DIRECTORY_PROVIDER='acme', CF_ACL_PROVIDER='legacy')),
+            ('acme', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
+
     def test_custom_enterprise_directory_may_have_no_external_url(self):
         self.assertEqual(selected_adapter(SimpleNamespace(
             CF_ACL_PROVIDER='acme', CF_ACL_SUBJECT_ENSURE='acme.directory.refresh')),

@@ -1,5 +1,6 @@
 from types import SimpleNamespace
-from cloudfile_ext.identity import unique_identity, AmbiguousSubject, provisioning_provider, provisioning_enabled
+from cloudfile_ext.identity import (unique_identity, AmbiguousSubject, provisioning_provider,
+    provisioning_enabled, is_directory_identity_source)
 
 
 def test_provisioning_gate_preserves_legacy_and_requires_native_admin_opt_in():
@@ -13,7 +14,14 @@ def test_provisioning_gate_preserves_legacy_and_requires_native_admin_opt_in():
 
 
 def test_directory_provisioning_does_not_reuse_oauth_namespace():
+    # 'directory' is canonical; 'enterprise-directory' stays accepted for callers.
+    assert provisioning_provider('directory', 'authentik:dev') == 'directory:external'
     assert provisioning_provider('enterprise-directory', 'authentik:dev') == 'directory:external'
+    assert is_directory_identity_source('directory')
+    assert is_directory_identity_source('enterprise-directory')
+    assert not is_directory_identity_source(None)
+    assert not is_directory_identity_source('')
+    assert not is_directory_identity_source('oauth')
     assert provisioning_provider(None, 'authentik:dev') == 'authentik:dev'
     assert provisioning_provider('', 'authentik:dev') == 'authentik:dev'
     try:

@@ -71,7 +71,7 @@ can edit files. enterprise Directory business login and management scopes stay i
 
 POST/PUT/DELETE accept a strict rule record:
 `repo_id,path,subject_type,namespace,external_id,permission,inherit,share_mode,expected,revision`.
-Provider comes only from trusted `CF_ACL_PROVIDER`; a caller cannot override it.
+Provider comes only from trusted `CF_DIRECTORY_PROVIDER` (legacy alias `CF_ACL_PROVIDER`); a caller cannot override it.
 The only configurable directory permissions are **r/rw/invisible**, never
 `none`. `revision` uses the existing branch-serialized ACLStore CAS.
 
@@ -296,7 +296,7 @@ Subject selection is configuration only, never UID syntax (`login_id.isdigit()`
 is not a security boundary). The built-in enterprise Directory provider is selected when
 `CF_DIRECTORY_URL` is set and neither override below is configured; it defaults
 to `external` / `cloudfile_ext.v2.directory_adapter.ensure_subject`.
-`CF_ACL_PROVIDER` and the server-configured dotted callable
+`CF_DIRECTORY_PROVIDER` (legacy `CF_ACL_PROVIDER`) and the server-configured dotted callable
 `CF_ACL_SUBJECT_ENSURE(uid, username)` are the subject integration seam; setting
 either one requires both, and a partial, whitespace, overlong or reserved
 (`native-local`) configuration is refused as 503 rather than silently falling

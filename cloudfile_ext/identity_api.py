@@ -16,7 +16,7 @@ from seahub.api2.authentication import TokenAuthentication
 from seahub.api2.throttling import UserRateThrottle
 from seahub.api2.utils import api_error
 
-from cloudfile_ext.identity import unique_identity, AmbiguousSubject, provisioning_provider
+from cloudfile_ext.identity import is_directory_identity_source, unique_identity, AmbiguousSubject, provisioning_provider
 
 
 class AdminExternalIdentityView(APIView):
@@ -67,7 +67,7 @@ class AdminExternalIdentityView(APIView):
         # enterprise Directory has exactly one administrator provisioning authority, even
         # when a legacy extension registration is still enabled.
         if (getattr(settings, 'CF_DIRECTORY_URL', '')
-                or request.data.get('identity_source') == 'enterprise-directory'):
+                or is_directory_identity_source(request.data.get('identity_source'))):
             from cloudfile_ext.v2.http import IdentityResolve
             return IdentityResolve().post(request)
 
