@@ -1,15 +1,18 @@
 """Minimal, configuration-only selector for enterprise identity adapters.
 
 A CE-only installation requires no enterprise Directory. A configured
-enterprise Directory uses the built-in generic adapter; its namespace is
-CF_ACL_PROVIDER (default ``external``), so consumers keep their own provider
-identifier. Custom adapters must explicitly provide BOTH their namespace and
-trusted subject refresh callback. No UID format is an authentication or
-authorization signal.
+enterprise Directory uses the built-in generic adapter; its tenant namespace
+comes from CF_DIRECTORY_PROVIDER (default ``external``). CF_ACL_PROVIDER is
+accepted as a compatibility alias for existing deployments; when both are set
+the preferred CF_DIRECTORY_PROVIDER wins. Custom adapters must explicitly
+provide BOTH their namespace and trusted subject refresh callback.
+No UID format is an authentication or authorization signal.
 """
 
 
 DEFAULT_PROVIDER = 'external'
+PREFERRED_PROVIDER_SETTING = 'CF_DIRECTORY_PROVIDER'
+LEGACY_PROVIDER_SETTING = 'CF_ACL_PROVIDER'
 BUILTIN_ENSURE = 'cloudfile_ext.v2.directory_adapter.ensure_subject'
 
 
@@ -18,9 +21,17 @@ class InvalidSubjectAdapter(ValueError):
 
 
 def provider_name(config, default=DEFAULT_PROVIDER):
-    """Namespace identifier for rules, group maps and identity keys."""
-    value = getattr(config, 'CF_ACL_PROVIDER', None)
-    return default if value is None else value
+    """Tenant namespace for rules, group maps and identity keys.
+
+    CF_DIRECTORY_PROVIDER is the preferred setting; CF_ACL_PROVIDER remains a
+    compatibility alias. The value is persisted, so deployments must keep the
+    same namespace string across upgrades.
+    """
+    for setting in (PREFERRED_PROVIDER_SETTING, LEGACY_PROVIDER_SETTING):
+        value = getattr(config, setting, None)
+        if value is not None:
+            return value
+    return default
 
 
 def _checked_provider(provider):
@@ -32,7 +43,9 @@ def _checked_provider(provider):
 
 def selected_adapter(config):
     directory = getattr(config, 'CF_DIRECTORY_URL', '')
-    provider = getattr(config, 'CF_ACL_PROVIDER', None)
+    provider = getattr(config, PREFERRED_PROVIDER_SETTING, None)
+    if provider is None:
+        provider = getattr(config, LEGACY_PROVIDER_SETTING, None)
     ensure = getattr(config, 'CF_ACL_SUBJECT_ENSURE', None)
     if ensure is None:
         if not directory:

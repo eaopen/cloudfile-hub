@@ -98,6 +98,18 @@ from cloudfile_ext.settings_defaults import *
 
 外部目录服务使用动态设置 `CF_SERVICE_SSO_DIRECTORY_{URL,SECRET,TIMEOUT,RETRIES,ON_FAILURE}`。URL 未设置时 external-service provider 拒绝工作；secret 同时用于出站 token 和 webhook 验证。生产值由部署密钥管理提供，不在仓库中定义。
 
+
+### 身份与目录命名（词汇表）
+
+| 名称 | 含义 | 配置/约定 |
+| --- | --- | --- |
+| **EAP** | 通用企业平台协议（服务集合） | 保留 `eap_oauth`、`CF_SSO_EAP_*`、`eap-fileview`；机器认证 JWT audience 默认 `eap-directory`，可用 `CF_DIRECTORY_AUDIENCE` 覆盖 |
+| **enterprise Directory（企业目录）** | 通用外部身份目录服务，具体实现由消费方提供 | `CF_DIRECTORY_URL/SECRET/KEY_ID/ISSUER/AUDIENCE`；内置适配器为 `cloudfile_ext.v2.directory_adapter` |
+| **Directory provider namespace** | 租户命名空间；持久化于 `cf_dir_acl.provider`、`cf_sso_group_map.provider` 和身份键 `directory:<namespace>` | `CF_DIRECTORY_PROVIDER`（首选），`CF_ACL_PROVIDER`（兼容别名，仍受支持）；默认 `external`。升级时不要改已持久化的命名空间值 |
+| **`identity_source`** | 身份来源类别（API 请求字段） | 规范值 `directory`；兼容旧值 `enterprise-directory`；省略时沿用原 OAuth Provider 来源，不按目录身份处理 |
+
+四层各司其职：`eap-directory` 只表示 EAP 机器认证 audience，不作为 provider 命名空间；`enterprise-directory` 只表示身份来源类别，不写数据库命名空间。
+
 Enterprise Directory machine auth v2: set CF_SERVICE_SSO_DIRECTORY_AUTH_MODE=v2 and configure CF_SERVICE_SSO_DIRECTORY_KEY_ID, CF_SERVICE_SSO_DIRECTORY_SECRET (32+ UTF-8 bytes) and optionally CF_SERVICE_SSO_DIRECTORY_SERVICE_ID (default cloudfile). Both sides must agree on kid/secret/service-id, iss=cloudfile-sso and the configured CF_DIRECTORY_AUDIENCE (default eap-directory). Uses 5-minute scoped Bearer HS256 JWT. Legacy Token remains an opt-in migration mode and v2 never silently falls back.
 
 ## 搜索与外部源

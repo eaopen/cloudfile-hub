@@ -66,9 +66,21 @@ def provisioning_enabled(settings):
                 and getattr(settings, 'CLOUDFILE_ADMIN_POLICY_ENABLED', False) is True))
 
 
+DIRECTORY_IDENTITY_SOURCES = frozenset(('directory', 'enterprise-directory'))
+
+
+def is_directory_identity_source(value):
+    return isinstance(value, str) and value in DIRECTORY_IDENTITY_SOURCES
+
+
 def provisioning_provider(identity_source, oauth_provider):
-    """Keep directory UIDs separate from OAuth subjects without rebinding login."""
-    if identity_source == 'enterprise-directory':
+    """Keep directory UIDs separate from OAuth subjects without rebinding login.
+
+    ``directory`` is the canonical identity_source value; ``enterprise-directory``
+    stays accepted for existing callers. Omitting the field keeps the legacy
+    OAuth-provider behaviour unchanged.
+    """
+    if is_directory_identity_source(identity_source):
         from django.conf import settings
         from cloudfile_ext.v2.subject_adapter import provider_name
         return 'directory:' + provider_name(settings)

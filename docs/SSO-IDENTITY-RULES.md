@@ -20,6 +20,9 @@ OAuth2/OIDC 的 `provider + sub` 是 **外部认证凭证的标识**，不是业
 
 ## 2. 支持的登录入口
 
+身份来源字段 `identity_source` 的规范值为 `directory`（企业 Directory 来源）；旧值 `enterprise-directory` 继续兼容。省略该字段表示沿用原有 OAuth Provider 来源，不会按目录身份处理。
+
+
 1. **enterprise Directory 认证 / 内部调用**：enterprise Directory 的受信目录和服务凭证负责传递 业务 UID；CloudFile 查找已存在且启用的原生账号，或按既有 enterprise Directory 预创建流程建号。enterprise Directory 门户的自身会话不能直接替代 CloudFile 登录证明。
 2. **旧 OAuth2（含旧 ssoauth/Authentik 配置）**：保留 `/oauth/login/`、`/oauth/callback/` 和现有 Provider。只有管理员将可信 UserInfo `userId` 显式映射为 `login_id` 且该 claim 存在时，才强制从精确 UID 选已有原生账号，并验证 `sub` 与原生绑定；冲突、账号不存在或无效时拒绝登录。未映射可信 `userId` 的通用旧 OAuth 保留原生兼容流程，不将员工号或邮箱误当成 业务 UID。
 3. **enterprise Directory 集成**：最新 V2 `dev` 已隔离历史 `cloudfile_ext/sso/eap_oauth.py` 模块，若启用 `CF_SSO_EAP_PROFILE_IDENTITY=true` 则明确拒绝，不恢复旧分支。enterprise Directory 采用可信 `userId` 映射的 OAuth、原生 V2 OIDC 与目录接口，不以工号归并账号。
