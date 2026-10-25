@@ -50,6 +50,9 @@ CF_ENABLE_TAGS = True
 CF_ENABLE_FILE_PREVIEW = True
 CF_ENABLE_FILE_LOCK = False
 CF_ENABLE_CHECKOUT = False
+# Only the selected Repo UUIDs support OPTIONAL Checkout. Empty = all OFF.
+# Generated together with native seafile.conf; no per-request database lookup.
+CF_CHECKOUT_REPOS = ()
 CF_ENABLE_FAVORITES_ID = True
 CF_ENABLE_WATCH = True
 CF_ENABLE_FILEOPS = True
