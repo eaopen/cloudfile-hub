@@ -1,4 +1,4 @@
-"""Trusted Etech Directory -> CE User/Group/GroupUser runtime; no shadow tables."""
+"""Trusted enterprise Directory -> CE User/Group/GroupUser runtime; no shadow tables."""
 from contextlib import contextmanager
 from functools import lru_cache
 import json
@@ -17,6 +17,11 @@ from .identity import NativeIdentity, text
 from .memberships import GroupCatalog, Memberships, is_ready, readiness_key, validate_subject
 
 
+def _provider():
+    from .subject_adapter import provider_name
+    return provider_name(settings)
+
+
 class Directory:
     def __init__(self):
         self.base = getattr(settings, 'CF_DIRECTORY_URL', '').rstrip('/')
@@ -31,7 +36,7 @@ class Directory:
     def get(self, path):
         now = int(time.time())
         token = jwt.encode(dict(iss=getattr(settings, 'CF_DIRECTORY_ISSUER', 'cloudfile-sso'),
-            aud=getattr(settings, 'CF_DIRECTORY_AUDIENCE', 'eap-directory'), sub='cloudfile',
+            aud=getattr(settings, 'CF_DIRECTORY_AUDIENCE', 'cloudfile-directory'), sub='cloudfile',
             iat=now, exp=now+60, jti=str(uuid4()), scope='directory.read'), self.secret,
             algorithm='HS256', headers={'kid': self.key_id, 'typ': 'JWT'})
         try:
@@ -79,7 +84,7 @@ class Directory:
         return value
 
     def entities(self):
-        # Keep the deployed Etech namespace rule while using the same
+        # Keep the deployed enterprise Directory namespace rule while using the same
         # provider-neutral bounded entity validator as other integrations.
         from .provider_contract import validated_entities
         return validated_entities(
@@ -112,9 +117,9 @@ def runtime():
             if account is None or not account.is_active or not account.is_staff:
                 raise IdentityUnavailable('native group service owner required')
             return ccnet_api.create_group(name, owner)
-        catalog = GroupCatalog(conn, account_schema=account_schema, provider='etech', create_group=create_group)
+        catalog = GroupCatalog(conn, account_schema=account_schema, provider=_provider(), create_group=create_group)
         cache = redis.Redis.from_url(redis_location(), socket_connect_timeout=5, socket_timeout=5)
-        memberships = Memberships(conn, cache, identity, account_schema=account_schema, provider='etech',
+        memberships = Memberships(conn, cache, identity, account_schema=account_schema, provider=_provider(),
             fetch=directory.subject, ttl=getattr(settings, 'CF_DIRECTORY_SUBJECT_TTL', 1800))
         yield directory, identity, catalog, memberships
     finally:
@@ -127,7 +132,7 @@ def verified_account(directory, uid):
     """Prove UID/status; NativeIdentity validates account names on creation only."""
     subject = directory.subject(uid)
     from .provider_contract import verified_user
-    # Etech maps its account_ field into the established employee_no claim.
+    # enterprise Directory maps its account_ field into the established employee_no claim.
     # Reuse the same UID verification as other trusted Directory providers.
     return verified_user(subject, uid, account_field='employee_no')
 
@@ -158,7 +163,7 @@ def lookup_group(external):
         cursor.execute('SELECT m.subject_type,m.namespace,m.external_id,m.group_id,g.parent_group_id FROM ' +
             files + '.cf_sso_group_map m JOIN ' + accounts + '.`Group` g ON g.group_id=m.group_id '
             'WHERE m.provider=%s AND m.subject_type=%s AND m.namespace=%s AND m.external_id=%s',
-            ('etech', *key))
+            (_provider(), *key))
         rows = cursor.fetchall()
     if not rows:
         return None
@@ -207,7 +212,7 @@ def subject_ready(uid, username):
         ttl = getattr(settings, 'CF_DIRECTORY_SUBJECT_TTL', 1800)
         if not database or type(ttl) is not int or not 30 <= ttl <= 3600:
             return False
-        key = readiness_key(database, 'etech', uid, username)
+        key = readiness_key(database, _provider(), uid, username)
         if not is_ready(_shared_redis(redis_location()), key, uid, username, ttl):
             return False
         # NativeIdentity.active(): exact UID binding (user and login_id are
@@ -246,7 +251,7 @@ def ensure_subject(uid, username):
 def sync_entity_catalog():
     """PowerJob/manual entity reconciliation, without any user/member writes.
 
-    Etech remains the only organization truth. Preserve deleted/retired CE
+    enterprise Directory remains the only organization truth. Preserve deleted/retired CE
     groups until a separate reviewed cleanup: they may own libraries.
     """
     from seaserv import ccnet_api

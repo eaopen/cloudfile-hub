@@ -17,6 +17,7 @@ from .acl_store import uuid, RevisionConflict
 from .acl_store import validate as validate_acl_rule
 from .acl_batch import CONTRACT as LIBRARY_BATCH_CONTRACT, fingerprint, serialize
 from .errors import SubjectNotFound
+from .subject_adapter import provider_name
 from . import tag_display
 
 logger = logging.getLogger(__name__)
@@ -145,7 +146,7 @@ class DirectoryRules(AuthenticatedACL):
             from .acl_policy import canonical_path
             canonical_path(args['path'])
             exists = bool(seafile_api.get_dir_id_by_path(args['repo_id'], args['path']))
-            rows = store().list_path(args['repo_id'], args['path'], getattr(settings, 'CF_ACL_PROVIDER', 'etech'))
+            rows = store().list_path(args['repo_id'], args['path'], provider_name(settings))
             return response({'data': [dict(**asdict(rule), revision=revision) for rule, revision in rows],
                              'directory_exists': exists})
         except Exception as error:
@@ -161,7 +162,7 @@ class DirectoryRules(AuthenticatedACL):
             require_repo_manage(request.user, data['repo_id'])
             if not isinstance(data['inherit'], bool) or not isinstance(data['share_mode'], bool):
                 raise ValueError()
-            provider = getattr(settings, 'CF_ACL_PROVIDER', 'etech')
+            provider = provider_name(settings)
             rule = Rule(data['repo_id'], data['path'], provider, data['subject_type'],
                         data['namespace'], data['external_id'], data['permission'],
                         data['inherit'], data['share_mode'])
@@ -287,14 +288,14 @@ class LibraryGrants(AuthenticatedACL):
 class LibraryACLBatch(AuthenticatedACL):
     """Additive library-level ACL publisher; old directory-rules stays intact.
 
-    Only declared Etech-owned natural keys can be changed. GET reads an
+    Only declared consumer-owned natural keys can be changed. GET reads an
     authoritative complete provider snapshot and PUT checks that fingerprint
     under the same native Branch/transfer-fence ordering as per-rule writes.
     """
 
     @staticmethod
     def _provider():
-        provider = getattr(settings, 'CF_ACL_PROVIDER', 'etech')
+        provider = provider_name(settings)
         if not isinstance(provider, str) or not provider:
             raise PolicyError('invalid ACL provider')
         return provider

@@ -120,7 +120,7 @@ results.
 - CE-only user/group library grant lifecycle, owner/admin vs ordinary `rw`,
   protected `admin` share, unknown subjects, stale `expected`, readback
   failure and idempotent retry.
-- Etech (optional Directory), native CE group sharing and directory ACL
+- enterprise Directory (optional Directory), native CE group sharing and directory ACL
   `r/rw/invisible`, `inherit`, shared root, permission reduction.
 - CE read/write, file download and Commit finalization must match Hub #56
   and Server #31; do not rely only on GET response or mock CI.
@@ -129,5 +129,5 @@ results.
 - No UI, no new database tables, no implicit A/B enforcement service.
 
 The lightweight GitHub tests verify the pure native CE RPC adapter with mocks.
-Real CE 14 + MariaDB + Etech DEV authorization remains to be verified before
+Real CE 14 + MariaDB + enterprise Directory DEV authorization remains to be verified before
 merging/enabling the feature in a release.

@@ -1,4 +1,4 @@
-"""Authenticated bounded search used by the existing Etech file browser."""
+"""Authenticated bounded search used by the existing enterprise Directory file browser."""
 import logging
 from uuid import UUID
 

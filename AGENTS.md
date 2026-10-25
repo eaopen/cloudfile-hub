@@ -38,11 +38,11 @@
 - 目录 ACL、原生 Tag、Checkout 等已成为 V2 内置能力时，不要重新添加旧 `CF_ENABLE_*` / `v2_acl_enabled` 开关。外部 Meilisearch、OIDC 等保留必要连接配置与真实可用性判断，不另造功能启用体系。
 - 不依靠隐藏按钮或“返回 HTTP 200”代表授权；目录展示和实际读取/上传/提交必须使用相应的 V2 权限校验与 Server 终判。受保护的入口出现错误时不得退回宽松的旧路径。
 - 新增功能优先放 CloudFile 独立目录；修改上游 Seahub 文件须证明必要性，并核对 Docker 仓的 [上游改动清单](https://github.com/eaopen/cloudfile-docker/tree/dev/docs/upstream-patches)。
-- Etech 等业务定制属于消费者，不把客户专用业务逻辑固化在通用 Hub。未经确认不要顺手增加表、API、兼容层或扩大开发范围。
+- 客户项目等业务定制属于消费者，不把客户专用业务逻辑固化在通用 Hub。未经确认不要顺手增加表、API、兼容层或扩大开发范围。
 
 ## 只做必要验证
 
-**纯文档修改无需编译、运行测试或构建镜像。** 普通代码修改根据本次受影响的模块进行定向检查；不要求每次都跑全量 `pytest`、Seahub 构建、三仓镜像或 E2E。影响登录、权限、读写字节与跨仓契约时选择相应专项验证；完整编译/联验留给确有必要的集成和发布节点。没有实测过的 DEV/Etech 流程不得宣称已通过。
+**纯文档修改无需编译、运行测试或构建镜像。** 普通代码修改根据本次受影响的模块进行定向检查；不要求每次都跑全量 `pytest`、Seahub 构建、三仓镜像或 E2E。影响登录、权限、读写字节与跨仓契约时选择相应专项验证；完整编译/联验留给确有必要的集成和发布节点。没有实测过的 DEV/客户环境流程不得宣称已通过。
 
 检查与具体 API 契约以当前 V2 代码为准；参考 [docs/README.md](docs/README.md) 及 Docker 当前分支和源码组合规则。上游 `frontend/AGENTS.md`、`seahub/AGENTS.md` 的代码风格要求仍适用于相应目录，但不能覆盖本文件的产品版本与分支规则。
 
@@ -53,7 +53,7 @@
 ## 当前数据库（未正式发布 V2）
 
 - 唯一扩展表为 `cf_library_storage`、`cf_dir_acl`、`cf_sso_group_map`、`cf_edit_guard`、`cf_audit_event`；新装一次创建全部五表，已有卷只校验。
-- 不迁移或追溯开发期旧数据。存储绑定从 Seafile 的 Repo/RepoStorageId 重新识别，ACL/共享和组织/角色从 Etech 重新同步，Guard/审计从空表开始；旧 `cf_tag`、Resource、Intent、Session、Outbox 不恢复。
+- 不迁移或追溯开发期旧数据。存储绑定从 Seafile 的 Repo/RepoStorageId 重新识别，ACL/共享和组织/角色从客户 Provider 重新同步，Guard/审计从空表开始；旧 `cf_tag`、Resource、Intent、Session、Outbox 不恢复。
 - 绝不清除 CE 原生 Repo、Branch、文件内容、版本或原生 Tag，也不因为缺表自动建立旧扩展 DDL、迁移服务或产品级升级框架。
 
 ## 本地查看/编辑（V2 运行合同）

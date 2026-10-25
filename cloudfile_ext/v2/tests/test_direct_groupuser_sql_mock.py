@@ -87,7 +87,7 @@ class DirectGroupUserProjectionTests(unittest.TestCase):
     def projector(self, conn):
         identity = Mock()
         instance = Memberships(conn, Mock(), identity, account_schema='ccnet',
-                               provider='etech', fetch=lambda _: subject())
+                               provider='external', fetch=lambda _: subject())
         return instance, identity
 
     def test_ancestor_is_revoked_direct_role_and_manual_group_preserved(self):

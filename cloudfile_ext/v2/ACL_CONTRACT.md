@@ -67,7 +67,7 @@ A full system administrator with native `can_manage_library` may also manage
 ACL rules, without acquiring file bytes. No global `IsAdminUser` requirement
 blocks a delegated repository administrator. Ordinary r/rw file editors are
 **not** repo administrators and cannot delegate ACL rules merely because they
-can edit files. Etech business login and management scopes stay in Etech.
+can edit files. enterprise Directory business login and management scopes stay in enterprise Directory.
 
 POST/PUT/DELETE accept a strict rule record:
 `repo_id,path,subject_type,namespace,external_id,permission,inherit,share_mode,expected,revision`.
@@ -81,13 +81,13 @@ Each write still requires current native repository administrator authority,
 valid `r/rw/invisible` input, revision CAS and authoritative SQL; failures
 deny or reject the write. Native C/Go checks are likewise built in and
 must be deployed from matching source pins, with current subject, final-byte
-and Etech Publisher readback acceptance before promoting a shared instance.
+and enterprise Directory Publisher readback acceptance before promoting a shared instance.
 Do not treat a Hub-only code update as a safe deployment.
 
 ## Additive whole-library ACL publication
 
 Existing `directory-rules/` GET/POST/PUT/DELETE remains **unchanged** for old
-Etech clients. New Etech publishers may use:
+enterprise Directory clients. New consumer publishers may use:
 
 `/api/v2.1/cloudfile/authorization/v1/library-acl-batch/`
 
@@ -293,9 +293,9 @@ access. A valid bounded cached policy decision is allowed; an old access ticket
 alone is not a policy decision. The native client bounds response size and time.
 
 Subject selection is configuration only, never UID syntax (`login_id.isdigit()`
-is not a security boundary). The built-in Etech provider is selected when
+is not a security boundary). The built-in enterprise Directory provider is selected when
 `CF_DIRECTORY_URL` is set and neither override below is configured; it defaults
-to `etech` / `cloudfile_ext.v2.etech_directory.ensure_subject`.
+to `external` / `cloudfile_ext.v2.directory_adapter.ensure_subject`.
 `CF_ACL_PROVIDER` and the server-configured dotted callable
 `CF_ACL_SUBJECT_ENSURE(uid, username)` are the subject integration seam; setting
 either one requires both, and a partial, whitespace, overlong or reserved
@@ -376,10 +376,10 @@ revocation under cache failures. Cache misses read authoritative SQL; SQL errors
 never grant access. Tags bypass shared cache entirely and read only authorized
 page/search references.
 
-## Built-In Etech Subject Wiring
+## Built-In enterprise Directory Subject Wiring
 
 The default `CF_ACL_SUBJECT_ENSURE` is
-`cloudfile_ext.v2.etech_directory.ensure_subject`. It uses the existing EAP
+`cloudfile_ext.v2.directory_adapter.ensure_subject`. It uses the existing EAP
 `/eap/cloudDrive/directory/users/{uid}/context` and `/groups?view=entities`
 contracts, a short-lived `directory.read` machine JWT, a dedicated autocommit
 SQL connection and native shared Redis. No client-supplied member list is trusted.
@@ -395,8 +395,8 @@ binding, an inactive account or any check error takes the locked path, which
 behaves as before. Readiness lifetime and revocation timing are unchanged.
 
 Staff identity resolution pre-creates a native CE User/Profile only after a fresh
-active Directory UID proof. New Etech users require the trusted Directory account
-(`employee_no`, currently Etech `account_`) and use `account@auth.local`. Numeric
+active Directory UID proof. New enterprise Directory users require the trusted Directory account
+(`employee_no`, currently enterprise Directory `account_`) and use `account@auth.local`. Numeric
 and named accounts, including `admin`, are ordinary non-staff users. New native
 names follow Seafile RPC lowercase normalization; UIDs remain byte-exact; `cfadmin`,
 missing/invalid accounts and native name collisions reject creation. Existing

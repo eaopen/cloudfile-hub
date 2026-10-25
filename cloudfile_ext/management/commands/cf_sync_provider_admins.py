@@ -55,7 +55,7 @@ def read_provider_roster():
         return import_string(source)()
     # Default adapter uses the same short-lived, machine JWT-authenticated
     # Directory channel already configured for enterprise GroupUser.
-    from cloudfile_ext.v2.etech_directory import Directory
+    from cloudfile_ext.v2.directory_adapter import Directory
     return Directory().get('/administrators')
 
 

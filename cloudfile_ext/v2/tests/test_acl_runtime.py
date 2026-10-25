@@ -6,7 +6,7 @@ from cloudfile_ext.v2.acl_policy import Principal, Rule, resolve
 from cloudfile_ext.v2.acl_runtime import Authority
 
 RID = '00000000-0000-4000-8000-000000000001'
-P = Principal('etech', 'uid')
+P = Principal('external', 'uid')
 
 
 class RuntimeTests(TestCase):
@@ -17,7 +17,7 @@ class RuntimeTests(TestCase):
         self.addCleanup(ttl.stop)
 
     def authority(self, base=None, share=True, permission='rw', inherit=True):
-        rule = Rule(RID, '/projects/shared', 'etech', 'user', 'user', 'uid', permission, inherit, share)
+        rule = Rule(RID, '/projects/shared', 'external', 'user', 'user', 'uid', permission, inherit, share)
         rules = Mock()
         rules.candidates.side_effect = lambda repo, path, principal: [(rule, 'v')] if path.startswith(rule.path) else []
         # Whole-library rows include other subjects/providers; Authority filters them.
@@ -69,21 +69,21 @@ class RuntimeTests(TestCase):
 
     def test_stale_or_inactive_principal_denied(self):
         auth = self.authority()
-        auth.principal = Principal('etech', 'uid', ready=False)
+        auth.principal = Principal('external', 'uid', ready=False)
         self.assertFalse(auth.effective(RID, '/projects/shared').can_read)
-        auth.principal = Principal('etech', 'uid', active=False)
+        auth.principal = Principal('external', 'uid', active=False)
         self.assertFalse(auth.effective(RID, '/projects/shared').can_write)
 
     def test_subject_share_does_not_grant_everyone(self):
         auth = self.authority()
-        auth.principal = Principal('etech', 'another-user')
+        auth.principal = Principal('external', 'another-user')
         self.assertFalse(auth.effective(RID, '/projects/shared').can_read)
         self.assertEqual(auth.shared_roots(), [])
 
     def test_listing_hides_denied_child_with_one_library_read(self):
         auth = self.authority()
         allow = auth.store.shared.return_value[0][0]
-        denied = Rule(RID, '/projects/shared/secret', 'etech', 'user', 'user', 'uid', 'invisible')
+        denied = Rule(RID, '/projects/shared/secret', 'external', 'user', 'user', 'uid', 'invisible')
         auth.store.library.return_value = (allow, denied)
         auth.api.list_dir_by_dir_id.return_value = [SimpleNamespace(obj_name=name, mode=0o040755)
                                                     for name in ('a', 'b', 'secret')]
@@ -121,7 +121,7 @@ class LibraryCacheTests(TestCase):
         self.ttl_override = patch('cloudfile_ext.v2.acl_runtime.cache_ttl', return_value=180)
         self.ttl_override.start()
         self.addCleanup(self.ttl_override.stop)
-        self.denied = Rule(RID, '/projects/shared', 'etech', 'user', 'user', 'uid', 'invisible')
+        self.denied = Rule(RID, '/projects/shared', 'external', 'user', 'user', 'uid', 'invisible')
 
     def tearDown(self):
         self.override.disable()
@@ -178,7 +178,7 @@ class LibraryCacheTests(TestCase):
         from django.core.cache import cache
         from cloudfile_ext.v2 import acl_runtime
         rules = Mock()
-        first = (Rule(RID, '/projects', 'etech', 'user', 'user', 'uid', 'rw'),)
+        first = (Rule(RID, '/projects', 'external', 'user', 'user', 'uid', 'rw'),)
         second = (self.denied,)
         def slow_read(_repo):
             # Simulate a writer committing after this reader chose generation 0,
@@ -198,7 +198,7 @@ class LibraryCacheTests(TestCase):
         from django.core.cache import cache
         from cloudfile_ext.v2 import acl_runtime
         rules = Mock()
-        first = (Rule(RID, '/projects', 'etech', 'user', 'user', 'uid', 'rw'),)
+        first = (Rule(RID, '/projects', 'external', 'user', 'user', 'uid', 'rw'),)
         rules.library.return_value = first
         self.assertEqual(acl_runtime.library_rules(rules, RID, 180), first)
         original_set = cache.set
@@ -236,7 +236,7 @@ class LibraryCacheTests(TestCase):
     def test_virtual_repository_checks_its_origin(self):
         origin = '00000000-0000-4000-8000-000000000002'
         repo = SimpleNamespace(is_virtual=True, origin_repo_id=origin)
-        rule = Rule(origin, '/x', 'etech', 'user', 'user', 'uid', 'invisible')
+        rule = Rule(origin, '/x', 'external', 'user', 'user', 'uid', 'invisible')
         self.assertTrue(self.protected({origin: (rule,)}, repo)[0])
         from cloudfile_ext.v2.acl_runtime import protected
         with self.assertRaises(Exception):

@@ -65,7 +65,7 @@ class SchemaContractTests(TestCase):
         return ACLStore(self.conn, self.schema, atomic)
 
     def insert(self, path='/shared', subject=('user', 'user', 'uid'), permission='r', inherit=1,
-               share=0, provider='etech', repo_id=RID, revision=REV):
+               share=0, provider='external', repo_id=RID, revision=REV):
         # subject is (subject_type, namespace, external_id); provider is separate.
         with self.conn.cursor() as c:
             c.execute(INSERT, [repo_id, path, path.encode(), subject[0], provider, subject[1], subject[2],
@@ -119,7 +119,7 @@ class SchemaContractTests(TestCase):
         for statement, args in (
                 ('SELECT * FROM cf_dir_acl WHERE repo_id=%s AND path_hash IN (%s,%s)', [RID, digest, digest.hex()]),
                 ('SELECT * FROM cf_dir_acl WHERE repo_id=%s', [RID]),
-                ('SELECT * FROM cf_dir_acl WHERE provider=%s AND share_mode=1', ['etech'])):
+                ('SELECT * FROM cf_dir_acl WHERE provider=%s AND share_mode=1', ['external'])):
             with self.conn.cursor() as c:
                 c.execute('EXPLAIN ' + statement, args if '%s' in statement else None)
                 plan = c.fetchone()
@@ -131,13 +131,13 @@ class SchemaContractTests(TestCase):
         self.insert(path='/shared/team', subject=('role', 'role', 'r1'), permission='r', share=1)
         self.insert(path='/shared/team/secret', subject=('user', 'user', 'uid'), permission='invisible')
         store = self.store()
-        member = Principal('etech', 'uid', frozenset({('role', 'role', 'r1')}))
+        member = Principal('external', 'uid', frozenset({('role', 'role', 'r1')}))
         self.assertEqual(sorted(r.path for r in store.library(RID)),
                          ['/shared', '/shared/team', '/shared/team/secret'])
         self.assertEqual(len(store.candidates(RID, '/shared/team/file', member)), 2)
         granted = (r.path for r, _ in store.shared(member))
         self.assertEqual(list(granted), ['/shared/team'])
-        self.assertEqual(store.list_path(RID, '/shared', 'etech')[0][0].permission, 'rw')
+        self.assertEqual(store.list_path(RID, '/shared', 'external')[0][0].permission, 'rw')
         self.assertEqual([r.path for r, _ in store.list_path(RID, '/shared', 'native-local')], [])
 
         # Decisions on the stored rows. A user rule outranks a group rule at any
@@ -146,11 +146,11 @@ class SchemaContractTests(TestCase):
         self.assertEqual(resolve(RID, '/shared', member, 'rw', store.library(RID)).permission, 'rw')
         self.assertEqual(resolve(RID, '/shared/team/x', member, 'rw', store.library(RID)).permission, 'rw')
         self.assertFalse(resolve(RID, '/shared/team/secret/a', member, 'rw', store.library(RID)).can_read)
-        role_only = Principal('etech', 'uid2', frozenset({('role', 'role', 'r1')}))
+        role_only = Principal('external', 'uid2', frozenset({('role', 'role', 'r1')}))
         self.assertEqual(resolve(RID, '/shared/team/x', role_only, None, store.library(RID)).permission, 'r')
         self.assertFalse(resolve(RID, '/shared', role_only, None, store.library(RID)).can_read)
         # A non-member qualifies only at the shared root, never in its library.
-        outsider = Principal('etech', 'other', frozenset({('role', 'role', 'r1')}))
+        outsider = Principal('external', 'other', frozenset({('role', 'role', 'r1')}))
         self.assertTrue(resolve(RID, '/shared/team', outsider, None, store.library(RID)).can_read)
         self.assertFalse(resolve(RID, '/shared', outsider, None, store.library(RID)).can_read)
 
@@ -161,9 +161,9 @@ class SchemaContractTests(TestCase):
         self.insert(path=long_path)
         self.insert(path='/目录/😀')
         store = self.store()
-        self.assertEqual(store.list_path(RID, long_path, 'etech')[0][0].path, long_path)
-        self.assertEqual(store.list_path(RID, '/目录/😀', 'etech')[0][0].path, '/目录/😀')
+        self.assertEqual(store.list_path(RID, long_path, 'external')[0][0].path, long_path)
+        self.assertEqual(store.list_path(RID, '/目录/😀', 'external')[0][0].path, '/目录/😀')
         too_long = '/' + 'a' * 4096
         with self.assertRaises(PolicyError):
-            Rule(RID, too_long, 'etech', 'user', 'user', 'uid', 'r')  # rejected before SQL
+            Rule(RID, too_long, 'external', 'user', 'user', 'uid', 'r')  # rejected before SQL
         self.assertTrue(sha256(long_path.encode()).digest())

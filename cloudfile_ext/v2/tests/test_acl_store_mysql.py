@@ -55,8 +55,8 @@ class ACLSQLTests(TestCase):
     def setUp(self):
         with self.conn.cursor() as c:
             c.execute('DELETE FROM cf_dir_acl')
-        self.rule = Rule(RID, '/shared', 'etech', 'user', 'user', 'uid', 'rw', True, True)
-        self.principal = Principal('etech', 'uid')
+        self.rule = Rule(RID, '/shared', 'external', 'user', 'user', 'uid', 'rw', True, True)
+        self.principal = Principal('external', 'uid')
         self.revision = str(uuid4())
 
     def test_create_cas_replay_delete_and_conflict(self):
@@ -74,7 +74,7 @@ class ACLSQLTests(TestCase):
         store = self.store()
         store.mutate(self.rule, expected=None, revision=self.revision)
         self.assertEqual(store.candidates(RID, '/shared-sibling', self.principal), [])
-        self.assertEqual(store.shared(Principal('etech', 'other')), [])
+        self.assertEqual(store.shared(Principal('external', 'other')), [])
         self.assertEqual(store.shared(Principal('other-provider', 'uid')), [])
 
     def test_library_read_and_committed_write_notification(self):
@@ -84,7 +84,7 @@ class ACLSQLTests(TestCase):
         self.assertEqual(store.library(RID), ())
         store.mutate(self.rule, expected=None, revision=self.revision)
         store.mutate(self.rule, expected=None, revision=self.revision)  # replay: no change
-        other = Rule(RID, '/other', 'etech', 'role', 'role', 'r1', 'invisible')
+        other = Rule(RID, '/other', 'external', 'role', 'role', 'r1', 'invisible')
         store.mutate(other, expected=None, revision=str(uuid4()))
         self.assertEqual(changed, [RID, RID])
         self.assertEqual(sorted(store.library(RID), key=lambda r: r.path), [other, self.rule])
@@ -109,7 +109,7 @@ class ACLSQLTests(TestCase):
         store = self.store()
         changed = []
         store.changed = changed.append
-        other = Rule(RID, '/external', 'etech', 'role', 'role', 'external',
+        other = Rule(RID, '/external', 'external', 'role', 'role', 'external',
                      'r', True, False)
         unrelated = Rule(RID, '/other-provider', 'other', 'user', 'user', 'uid',
                          'r', True, False)
@@ -117,25 +117,25 @@ class ACLSQLTests(TestCase):
         store.mutate(other, expected=None, revision=str(uuid4()))
         store.mutate(unrelated, expected=None, revision=str(uuid4()))
         changed.clear()
-        old = store.provider_snapshot(RID, 'etech')
+        old = store.provider_snapshot(RID, 'external')
         managed = [('/shared', 'user', 'user', 'uid'),
                    ('/new', 'user', 'user', 'uid')]
-        new = Rule(RID, '/new', 'etech', 'user', 'user', 'uid', 'r', True, True)
-        report = store.replace_owned(RID, 'etech', expected=fingerprint(old),
+        new = Rule(RID, '/new', 'external', 'user', 'user', 'uid', 'r', True, True)
+        report = store.replace_owned(RID, 'external', expected=fingerprint(old),
                                      managed=managed, desired=[new])
         self.assertEqual((report['inserted'], report['deleted'], report['updated']), (1, 1, 0))
         self.assertEqual(changed, [RID])
         self.assertEqual([r.path for r, _ in store.shared(self.principal)], ['/new'])
-        self.assertEqual({r.path for r, _ in store.provider_snapshot(RID, 'etech')},
+        self.assertEqual({r.path for r, _ in store.provider_snapshot(RID, 'external')},
                          {'/new', '/external'})
         self.assertEqual(store.provider_snapshot(RID, 'other')[0][0], unrelated)
-        self.assertEqual(report['fingerprint'], fingerprint(store.provider_snapshot(RID, 'etech')))
-        replay = store.replace_owned(RID, 'etech', expected=report['fingerprint'],
+        self.assertEqual(report['fingerprint'], fingerprint(store.provider_snapshot(RID, 'external')))
+        replay = store.replace_owned(RID, 'external', expected=report['fingerprint'],
                                      managed=managed, desired=[new])
         self.assertEqual((replay['inserted'], replay['updated'], replay['deleted']), (0, 0, 0))
         self.assertEqual(changed, [RID])
         with self.assertRaises(RevisionConflict):
-            store.replace_owned(RID, 'etech', expected=fingerprint(old),
+            store.replace_owned(RID, 'external', expected=fingerprint(old),
                                 managed=managed, desired=[new])
         self.assertEqual(changed, [RID])
 

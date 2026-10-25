@@ -36,7 +36,7 @@ def test_changed_uid_or_disagreement_never_merges_accounts(profile, uid_rows):
 
 def test_cfadmin_is_never_reused_by_employee_identity():
     with pytest.raises(IdentityConflict):
-        choose_native('123', '1022', 'cfadmin@etech.com', ('cfadmin@etech.com', '123'), [])
+        choose_native('123', '1022', 'cfadmin@external.com', ('cfadmin@external.com', '123'), [])
 
 
 @pytest.fixture

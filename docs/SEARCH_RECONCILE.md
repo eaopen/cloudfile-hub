@@ -3,7 +3,7 @@
 `cf_search_reconcile` 是 `cf_search_backfill_directories` 的**只读**对照命令。
 补索引回答“我写了多少文档”，本命令回答“现在这个资料库到底有多少原生条目在索引里有对应文档”。
 
-背景：2026-10-06 对资料库 `etech01`（`4f09f8a8-40c0-4ded-bec9-6c42691034f5`）做过一次全量补索引，
+背景：2026-10-06 对资料库 `external01`（`4f09f8a8-40c0-4ded-bec9-6c42691034f5`）做过一次全量补索引，
 当时记录 862,177 个原生文件对应 862,233 条文件文档、899,804 条总文档，但那是**一次性抽样**，
 没有可重复的复核手段。本命令把“覆盖率”变成一个可重复、可加门槛的标准动作。
 
@@ -23,7 +23,7 @@ S=/opt/seafile/seafile-server-latest
 cd $S/seahub
 python3 manage.py cf_search_reconcile \
   --repo-id 4f09f8a8-40c0-4ded-bec9-6c42691034f5 \
-  --checkpoint /shared/seafile/search-file-repair/reconcile-etech01.json \
+  --checkpoint /shared/seafile/search-file-repair/reconcile-external01.json \
   --max-pages 100
 ```
 

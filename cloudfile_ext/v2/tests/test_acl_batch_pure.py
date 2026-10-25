@@ -10,8 +10,8 @@ RID = '00000000-0000-4000-8000-000000000001'
 
 class BatchPureContract(TestCase):
     def test_snapshot_order_version_and_provider(self):
-        a = Rule(RID, '/a', 'etech', 'user', 'user', 'uid', 'r')
-        b = Rule(RID, '/b', 'etech', 'role', 'role', 'group', 'invisible')
+        a = Rule(RID, '/a', 'external', 'user', 'user', 'uid', 'r')
+        b = Rule(RID, '/b', 'external', 'role', 'role', 'group', 'invisible')
         rows = ((a, 'r1'), (b, 'r2'))
         self.assertEqual(fingerprint(rows), fingerprint(reversed(rows)))
         self.assertNotEqual(fingerprint(rows), fingerprint(((a, 'r3'), (b, 'r2'))))

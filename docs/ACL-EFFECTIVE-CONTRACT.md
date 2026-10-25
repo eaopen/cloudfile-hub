@@ -55,7 +55,7 @@ and write overrides, inheritance on/off, User/Org/Role same depth and crossed
 depths, same-tier deny/positive merging, inaccessible parents, hard read-only,
 principal freshness, publisher A/B-neutral effective decisions and invalid
 stored rows. **Passing pure tests is not proof of Server C/Go file read,
-download, upload, commit, WebDAV, local editing or Etech runtime permissions.**
+download, upload, commit, WebDAV, local editing or enterprise Directory runtime permissions.**
 
 ## Roadmap to A/B configuration — Hub #57
 
@@ -74,6 +74,6 @@ reconciliation framework.
 
 ## Release gate
 
-The rule matrix must be reviewed with Etech real library/directory samples
+The rule matrix must be reviewed with enterprise Directory real library/directory samples
 and matched by Server native final read/write/commit checks. Do not merge
 behavior-changing ACL code merely because the pure contract CI is green.

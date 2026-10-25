@@ -57,7 +57,7 @@ class OIDCTest(unittest.TestCase):
                 {'sub': signed['sub'], 'userId': None})
 
     def test_strict_oidc_uid_mapping_requires_signed_business_uid(self):
-        # Both Etech JIT and generic standalone UID reuse must use the
+        # Both enterprise Directory JIT and generic standalone UID reuse must use the
         # verified signed claim, not a UserInfo-only business identifier.
         signed = self.verify({'userId': 'business-uid-17'})
         self.assertEqual(require_signed_business_uid(signed, 'business-uid-17'),

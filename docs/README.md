@@ -16,7 +16,7 @@
 | [Hub 配置](CONFIGURATION.md) | 本仓读取的功能开关、provider 与运行参数 | 已完成 |
 | [测试与证据](TESTING.md) | 测试命令、覆盖边界、CI 与本次验证结果 | 已完成 |
 | [本地专业软件](local-professional-software.md) | `.cloudfile` 会话、本地查看/编辑和签出边界 | 部分完成 |
-| [SSO 统一身份规则](SSO-IDENTITY-RULES.md) | Etech UID、OAuth/OIDC/Authentik 多身份归一与冲突处理 | 实现待 DEV 联验 |
+| [SSO 统一身份规则](SSO-IDENTITY-RULES.md) | 业务 UID、OAuth/OIDC/Authentik 多身份归一与冲突处理 | 实现待 DEV 联验 |
 
 ## 跨仓权威文档
 

@@ -19,7 +19,7 @@ from cloudfile_ext.v2.search import acl_filter
 from cloudfile_ext.v2.search.documents import ancestor_paths
 
 RID = '00000000-0000-4000-8000-000000000001'
-P = Principal('etech', 'uid', frozenset({('org', 'directory', 'o1'), ('role', 'role', 'r1')}))
+P = Principal('external', 'uid', frozenset({('org', 'directory', 'o1'), ('role', 'role', 'r1')}))
 SUBJECTS = (('user', 'user', 'uid'), ('user', 'user', 'other'), ('org', 'directory', 'o1'),
             ('org', 'directory', 'o2'), ('role', 'role', 'r1'))
 TOKEN = re.compile(r'\s*(\(|\)|\[|\]|,|=|"(?:[^"\\]|\\.)*"|[A-Za-z_]+)')
@@ -173,23 +173,23 @@ class FilterConsistencyTests(TestCase):
                 keys.add((path,) + subject)
                 permission = rng.choice(('r', 'rw', 'invisible'))
                 share = permission != 'invisible' and path != '/' and rng.random() < 0.4
-                rules.append(Rule(RID, path, 'etech', *subject, permission, rng.random() < 0.7, share))
+                rules.append(Rule(RID, path, 'external', *subject, permission, rng.random() < 0.7, share))
             self.check(rules, rng.choice((None, 'r', 'rw')), directories)
 
     def test_rule_at_library_root_no_longer_disables_search(self):
-        rules = [Rule(RID, '/', 'etech', 'org', 'directory', 'o1', 'r'),
-                 Rule(RID, '/a', 'etech', 'user', 'user', 'uid', 'invisible')]
+        rules = [Rule(RID, '/', 'external', 'org', 'directory', 'o1', 'r'),
+                 Rule(RID, '/a', 'external', 'user', 'user', 'uid', 'invisible')]
         expression = self.check(rules, 'rw', tree(['a', 'b'], 3))
         self.assertEqual(expression, '(NOT dirs IN ["/a"])')
 
     def test_directory_only_share_is_confined_to_its_root(self):
-        rules = [Rule(RID, '/a/b', 'etech', 'user', 'user', 'uid', 'r', True, True)]
+        rules = [Rule(RID, '/a/b', 'external', 'user', 'user', 'uid', 'r', True, True)]
         expression = self.check(rules, None, tree(['a', 'b'], 3))
         self.assertEqual(expression, '(dirs IN ["/a/b"] OR path IN ["/a/b"])')
 
     def test_no_rules_or_no_access(self):
         self.assertIsNone(self.check([], 'r', tree(['a'], 2)))
-        rules = [Rule(RID, '/', 'etech', 'user', 'user', 'uid', 'invisible')]
+        rules = [Rule(RID, '/', 'external', 'user', 'user', 'uid', 'invisible')]
         self.assertIs(self.check(rules, 'rw', tree(['a'], 2)), acl_filter.NOTHING)
 
     def test_values_are_quoted_and_budgeted(self):

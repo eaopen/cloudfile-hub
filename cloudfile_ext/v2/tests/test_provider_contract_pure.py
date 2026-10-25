@@ -81,7 +81,7 @@ class GenericDirectoryUserTests(unittest.TestCase):
 
 
 class GenericDirectoryEntityTests(unittest.TestCase):
-    def test_generic_namespace_and_etech_compatibility(self):
+    def test_generic_namespace_and_external_compatibility(self):
         entries = [
             {'subject_type': 'org', 'namespace': 'hr', 'external_id': 'dept-1',
              'name': 'Engineering', 'parent_external_id': 'dept-0'},
