@@ -107,7 +107,10 @@ def current_principal(username):
     # A configured Directory owns *all* other external UIDs, including strings
     # with letters. Missing subjects and expired memberships fail closed; never
     # treat a non-numeric UID as a native user with broader CE access.
-    import_string(ensure)(uid, username)
+    if ensure is not None:
+        # Explicit custom adapters must be read-only; builtin CE projection is
+        # populated on login and never refreshed on an authorization request.
+        import_string(ensure)(uid, username)
     schema = identifier(SeafileDB().db_name)
     accounts = identifier(get_ccnet_db_name())
     with connection.cursor() as cursor:
@@ -121,7 +124,7 @@ def current_principal(username):
 
 
 class Authority:
-    def __init__(self, username, *, principal=None, rules=None, api=None):
+    def __init__(self, username, *, principal=None, rules=None, api=None, cache_rules=True):
         self.username = username
         self.principal = current_principal(username) if principal is None else principal
         self.store = store() if rules is None else rules
@@ -129,6 +132,7 @@ class Authority:
             from seaserv import seafile_api
             api = seafile_api
         self.api = api
+        self.cache_rules = cache_rules
         self._repos = {}
         self._virtual = {}
         self._versions = {}
@@ -139,7 +143,7 @@ class Authority:
 
     def _rules(self, repo_id, directory):
         if repo_id not in self._library:
-            rows = library_rules(self.store, repo_id, cache_ttl())
+            rows = library_rules(self.store, repo_id, cache_ttl() if self.cache_rules else 0)
             # One shared library snapshot for both read and write checks.
             # Per-request path buckets avoid rescanning every rule per child
             # of a large directory page; these are NOT another Redis cache.

@@ -120,26 +120,55 @@ class Memberships:
         try:
             self.identity.active(username, uid, locked=True)
             with self.connection.cursor() as cursor:
-                cursor.execute('SELECT subject_type,namespace,external_id,group_id FROM cf_sso_group_map WHERE provider=%s ORDER BY group_id FOR UPDATE', (self.provider,))
-                rows = cursor.fetchall()
-                if len(rows) > 16384:
-                    raise IdentityUnavailable('group catalog too large')
-                mappings = {(SUBJECT_KIND.get(row[0], row[0]), row[1], row[2]): row[3] for row in rows}
-                owned = set(mappings.values())
-                if len(owned) != len(rows) or not desired <= mappings.keys():
-                    raise IdentityUnavailable('required native group mapping missing')
-                # Flat native groups avoid implicit CE hierarchy grants.
-                # Only scope-approved members are ever projected to GroupUser.
-                for group in sorted(owned):
-                    cursor.execute('SELECT group_id,parent_group_id FROM ' + self.groups + ' WHERE group_id=%s FOR UPDATE', (group,))
-                    if cursor.fetchall() != ((group, 0),):
-                        raise IdentityUnavailable('native mapped group changed')
-                cursor.execute('SELECT group_id,is_staff FROM ' + self.members + ' WHERE user_name=%s ORDER BY group_id FOR UPDATE', (username,))
+                # Read just this user's current groups, not every group owned by
+                # the enterprise Provider. GroupUser rows are the only mutable
+                # membership facts, and the provider advisory lock prevents the
+                # scheduled catalog writer from changing mappings mid-refresh.
+                cursor.execute('SELECT group_id,is_staff FROM ' + self.members +
+                               ' WHERE user_name=%s ORDER BY group_id FOR UPDATE', (username,))
                 members = cursor.fetchall()
+                existing = {group for group, _ in members}
+                if len(existing) != len(members):
+                    raise IdentityUnavailable('duplicate native membership')
+                owned = set()
+                if existing:
+                    sql = ('SELECT group_id FROM cf_sso_group_map WHERE provider=%s '
+                           'AND group_id IN (' + ','.join(['%s'] * len(existing)) + ')')
+                    cursor.execute(sql, [self.provider, *sorted(existing)])
+                    rows = cursor.fetchall()
+                    owned = {row[0] for row in rows}
+                    if len(owned) != len(rows):
+                        raise IdentityUnavailable('duplicate provider group mapping')
+
+                required = set()
+                if desired:
+                    subjects = sorted(desired)
+                    sql = ('SELECT subject_type,namespace,external_id,group_id '
+                           'FROM cf_sso_group_map WHERE provider=%s AND '
+                           '(subject_type,namespace,external_id) IN (' +
+                           ','.join(['(%s,%s,%s)'] * len(subjects)) + ')')
+                    cursor.execute(sql, [self.provider, *(v for key in subjects for v in key)])
+                    mappings = {(SUBJECT_KIND.get(t, t), ns, ext): gid
+                                for t, ns, ext, gid in cursor.fetchall()}
+                    if len(mappings) != len(subjects) or any(key not in mappings for key in subjects):
+                        # Never attempt on-demand catalog sync or create a user
+                        # from an ACL or login membership lookup.
+                        raise IdentityUnavailable('required native group mapping missing')
+                    required = set(mappings.values())
+                    if len(required) != len(subjects):
+                        raise IdentityUnavailable('duplicate native group mapping')
+
+                relevant = owned | required
+                if relevant:
+                    cursor.execute('SELECT group_id,parent_group_id FROM ' + self.groups +
+                                   ' WHERE group_id IN (' + ','.join(['%s'] * len(relevant)) +
+                                   ') FOR UPDATE', sorted(relevant))
+                    group_rows = cursor.fetchall()
+                    if (len(group_rows) != len(relevant) or
+                            any(group not in relevant or parent != 0 for group, parent in group_rows)):
+                        raise IdentityUnavailable('native mapped group changed')
                 if any(group in owned and staff != 0 for group, staff in members):
                     raise IdentityConflict('native group administrator requires review')
-                existing = {group for group, _ in members}
-                required = {mappings[item] for item in desired}
                 for group in sorted((existing & owned) - required):
                     cursor.execute('DELETE FROM ' + self.members + ' WHERE group_id=%s AND user_name=%s AND is_staff=0', (group, username))
                 for group in sorted(required - existing):

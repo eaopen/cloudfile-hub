@@ -16,7 +16,7 @@ class SubjectAdapterSelectionTests(TestCase):
     def test_existing_directory_url_keeps_external_defaults(self):
         self.assertEqual(
             subject_adapter(SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test')),
-            ('external', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
+            ('external', None))
 
     def test_explicit_custom_provider_supports_its_own_directory_contract(self):
         self.assertEqual(subject_adapter(SimpleNamespace(
@@ -75,15 +75,15 @@ class CurrentPrincipalSelectionTests(TestCase):
             groups=[('org', 'directory', 'dept-1')])
         self.assertEqual((result.provider, result.uid), ('external', '10280993'))
         self.assertIn(('org', 'directory', 'dept-1'), result.groups)
-        imported.assert_called_once_with('cloudfile_ext.v2.directory_adapter.ensure_subject')
-        loader.assert_called_once_with('10280993', USER)
+        imported.assert_not_called()
+        loader.assert_not_called()
         connection.assert_called_once()
 
     def test_enterprise_alphanumeric_uid_is_not_treated_as_native(self):
         config = SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test')
         result, imported, loader, connection = self.principal('employee-A', config)
         self.assertEqual((result.provider, result.uid), ('external', 'employee-A'))
-        loader.assert_called_once_with('employee-A', USER)
+        loader.assert_not_called()
         connection.assert_called_once()
 
     def test_explicit_custom_provider_works_without_directory_adapter_url(self):
@@ -102,7 +102,7 @@ class CurrentPrincipalSelectionTests(TestCase):
         result, imported, loader, connection = self.principal(
             '9', config, username='admin@auth.local')
         self.assertEqual((result.provider, result.uid), ('external', '9'))
-        loader.assert_called_once_with('9', 'admin@auth.local')
+        loader.assert_not_called()
         connection.assert_called_once()
 
     def test_builtin_system_identity_keeps_native_admin_path(self):

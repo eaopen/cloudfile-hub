@@ -6,15 +6,11 @@ source scans, audit archiving, metadata upkeep. It is not a separate service --
 the cf-worker container runs this command from the same image as the
 application.
 
-Registration happens in ``CloudFileConfig.ready()``. The V2 runtime registers
-no periodic task today: the SSO/search/external-source modules that used to own
-one are retired, and their tables are not part of the V2 schema (SSO directory
-sync is the push trigger at
-``/api/v2.1/admin/cloudfile/directory/entities/sync/``, and the Meilisearch
-indexer is the isolated ``cloudfile_ext.v2.search.worker`` process rather than
-a registry task). With no enabled task the command exits 0 immediately, so a
-deployment must not restart the container on a clean exit -- only a real
-failure is worth retrying.
+Registration happens in ``CloudFileConfig.ready()``. Enterprise Directory
+org/role catalog synchronization uses this worker at a default 600-second
+interval. It never provisions users or GroupUser during permission checks.
+Login remains the existing user membership synchronization point. With no
+enabled periodic task this command exits 0 immediately.
 """
 
 import logging

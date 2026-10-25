@@ -14,25 +14,32 @@ class SubjectAdapterPureTests(unittest.TestCase):
     def test_existing_external_url_uses_the_same_directory_callback(self):
         self.assertEqual(selected_adapter(SimpleNamespace(
             CF_DIRECTORY_URL='https://directory.example.test')),
-            ('external', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
+            ('external', None))
 
     def test_preferred_provider_setting_names_the_builtin_namespace(self):
         self.assertEqual(selected_adapter(SimpleNamespace(
             CF_DIRECTORY_URL='https://directory.example.test',
             CF_DIRECTORY_PROVIDER='acme')),
-            ('acme', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
+            ('acme', None))
 
     def test_legacy_provider_setting_remains_supported(self):
         self.assertEqual(selected_adapter(SimpleNamespace(
             CF_DIRECTORY_URL='https://directory.example.test',
             CF_ACL_PROVIDER='legacy')),
-            ('legacy', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
+            ('legacy', None))
 
     def test_preferred_provider_wins_when_both_are_set(self):
         self.assertEqual(selected_adapter(SimpleNamespace(
             CF_DIRECTORY_URL='https://directory.example.test',
             CF_DIRECTORY_PROVIDER='acme', CF_ACL_PROVIDER='legacy')),
-            ('acme', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
+            ('acme', None))
+
+    def test_explicit_legacy_ensure_must_not_sync_during_acl_reads(self):
+        self.assertEqual(selected_adapter(SimpleNamespace(
+            CF_DIRECTORY_URL='https://directory.example.test',
+            CF_ACL_PROVIDER='external',
+            CF_ACL_SUBJECT_ENSURE='cloudfile_ext.v2.directory_adapter.ensure_subject')),
+            ('external', None))
 
     def test_custom_enterprise_directory_may_have_no_external_url(self):
         self.assertEqual(selected_adapter(SimpleNamespace(
@@ -69,7 +76,7 @@ class SubjectAdapterPureTests(unittest.TestCase):
         self.assertEqual(selected_adapter(SimpleNamespace(
             CF_DIRECTORY_URL='https://directory.example.test',
             CF_ACL_PROVIDER='acme')),
-            ('acme', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
+            ('acme', None))
 
     def test_half_configured_provider_never_downgrades_to_ce(self):
         for config in (

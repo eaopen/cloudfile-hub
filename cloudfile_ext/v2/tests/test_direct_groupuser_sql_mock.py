@@ -40,14 +40,18 @@ class Cursor:
         return self.rows
     def execute(self, sql, args=()):
         self.rows = ()
-        if sql.startswith('SELECT subject_type,namespace,external_id,group_id FROM cf_sso_group_map'):
-            self.rows = (('org', 'directory', 'leaf', 10),
-                         ('org', 'directory', 'parent', 11),
-                         ('role', 'role', 'reviewer', 12))
-        elif sql.startswith('SELECT group_id,parent_group_id FROM '):
-            self.rows = ((args[0], 0),)
-        elif sql.startswith('SELECT group_id,is_staff FROM '):
+        maps = {('org', 'directory', 'leaf'): 10,
+                ('org', 'directory', 'parent'): 11,
+                ('role', 'role', 'reviewer'): 12}
+        if sql.startswith('SELECT group_id,is_staff FROM '):
             self.rows = tuple(sorted(self.conn.members.items()))
+        elif sql.startswith('SELECT group_id FROM cf_sso_group_map'):
+            self.rows = tuple((gid,) for gid in maps.values() if gid in args[1:])
+        elif sql.startswith('SELECT subject_type,namespace,external_id,group_id FROM cf_sso_group_map'):
+            needed = {tuple(args[i:i + 3]) for i in range(1, len(args), 3)}
+            self.rows = tuple((*key, gid) for key, gid in maps.items() if key in needed)
+        elif sql.startswith('SELECT group_id,parent_group_id FROM '):
+            self.rows = tuple((gid, 0) for gid in args)
         elif sql.startswith('DELETE FROM '):
             if self.conn.fail_delete and args[0] == 11:
                 raise RuntimeError('simulated SQL failure')

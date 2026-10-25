@@ -27,6 +27,12 @@ class DirectoryRuntimeTests(TestCase):
         self.directory.entities.return_value={('org','directory','o1'):'Department'}
         self.identity.prepare.return_value='opaque@auth.local'
         self.catalog.ensure.return_value=42
+        self.catalog.provider = 'external'
+        self.catalog.groups = 'ccnet.\`Group\`'
+        reader = self.catalog.connection.cursor.return_value
+        reader.__enter__ = Mock(return_value=reader)
+        reader.__exit__ = Mock(return_value=False)
+        reader.fetchall.return_value = []
         yield self.directory, self.identity, self.catalog, self.memberships
 
     def test_preparation_proves_directory_uid_and_preserves_native_name(self):
@@ -96,10 +102,11 @@ class DirectoryRuntimeTests(TestCase):
         with patch('cloudfile_ext.v2.directory_adapter.runtime',self.runtime):
             ensure_subject('uid','opaque@auth.local')
         self.memberships.ensure.assert_called_once_with('uid','opaque@auth.local')
-        self.assertEqual(self.memberships.fetch('uid')['userId'],'uid')
-        self.catalog.ensure.assert_called_once_with('org','directory','o1','Department')
-        self.directory.entities.side_effect=IdentityUnavailable()
-        with self.assertRaises(IdentityUnavailable):self.memberships.fetch('uid')
+        # Only an explicit login refreshes current user membership. Missing
+        # roles/groups remain unavailable until the scheduled catalog sync.
+        self.directory.entities.assert_not_called()
+        self.catalog.ensure.assert_not_called()
+        self.memberships.fetch.assert_not_called()
 
     def test_connection_requires_scoped_service_credential(self):
         with override_settings(CF_DIRECTORY_URL='https://directory.test/eap/cloudDrive/directory',
@@ -128,6 +135,21 @@ class DirectoryRuntimeTests(TestCase):
             response.status_code=302
             with self.assertRaises(IdentityUnavailable):Directory().get('/groups?view=entities')
 
+
+    def test_directory_catalog_is_registered_at_ten_minutes_without_requests(self):
+        from cloudfile_ext.apps import CloudFileConfig
+        scheduled = Mock()
+        with override_settings(CF_DIRECTORY_URL='https://directory.test',
+                               CF_DIRECTORY_SYNC_INTERVAL_SECONDS=600):
+            CloudFileConfig._register_directory_catalog(scheduled)
+        scheduled.register_periodic_task.assert_called_once()
+        name, interval, fn = scheduled.register_periodic_task.call_args.args
+        self.assertEqual((name, interval), ('directory-entities', 600))
+        self.assertEqual(fn.__name__, 'sync_entity_catalog')
+        scheduled.reset_mock()
+        with override_settings(CF_DIRECTORY_URL=''):
+            CloudFileConfig._register_directory_catalog(scheduled)
+        scheduled.register_periodic_task.assert_not_called()
 
     def test_periodic_entity_sync_updates_only_native_catalog(self):
         from cloudfile_ext.v2.directory_adapter import sync_entity_catalog

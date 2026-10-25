@@ -229,49 +229,62 @@ def subject_ready(uid, username):
 
 
 def ensure_subject(uid, username):
+    """Login-only refresh for an already authenticated/created native account.
+
+    Never create missing groups as a side effect of user login or ACL lookup.
+    The periodic catalog synchronizer owns organization/role creation; a
+    missing mapped entity refuses membership projection until the next sync.
+    """
     if subject_ready(uid, username):
         return
     with runtime() as (directory, identity, catalog, memberships):
-        # Entity synchronization never expands users. Catalog is consulted only
-        # after the subject TTL expires, including newly assigned departments.
-        def fetch(current_uid):
-            subject = directory.subject(current_uid)
-            _, desired = validate_subject(subject, current_uid)
-            if desired:
-                entities = directory.entities()
-                if not desired <= entities.keys():
-                    raise IdentityUnavailable('Directory membership entity missing')
-                for key in sorted(desired):
-                    catalog.ensure(*key, entities[key])
-            return subject
-        memberships.fetch = fetch
         memberships.ensure(uid, username)
 
 
 def sync_entity_catalog():
-    """PowerJob/manual entity reconciliation, without any user/member writes.
+    """Scheduled/manual org+role reconciliation; no user or GroupUser writes.
 
-    enterprise Directory remains the only organization truth. Preserve deleted/retired CE
-    groups until a separate reviewed cleanup: they may own libraries.
+    Read current native mappings once. Unchanged thousands of groups must not
+    each acquire a provider lock, query CE and call ccnet RPC every ten minutes.
+    Missing/deleted users are deliberately outside this task.
     """
     from seaserv import ccnet_api
     with runtime() as (directory, identity, catalog, memberships):
-        entities = directory.entities()  # Already validated /groups?view=entities.
+        entities = directory.entities()
         if not entities:
             raise IdentityUnavailable('empty entity catalog cannot be treated as a successful sync')
-        renamed = unchanged = 0
+
+        with catalog.connection.cursor() as cursor:
+            cursor.execute(
+                'SELECT m.subject_type,m.namespace,m.external_id,m.group_id,'
+                'g.group_name,g.parent_group_id FROM cf_sso_group_map m '
+                'LEFT JOIN ' + catalog.groups + ' g ON g.group_id=m.group_id '
+                'WHERE m.provider=%s', (catalog.provider,))
+            rows = cursor.fetchall()
+        if len(rows) > 16384:
+            raise IdentityUnavailable('native group catalog too large')
+        mapped = {}
+        for kind, namespace, external_id, gid, label, parent in rows:
+            key = (kind, namespace, external_id)
+            if (kind not in ('org', 'role') or key in mapped or
+                    not isinstance(gid, int) or not isinstance(label, str) or parent != 0):
+                raise IdentityUnavailable('invalid mapped native organization/role')
+            mapped[key] = (gid, label)
+
+        created = renamed = unchanged = 0
         for key, name in sorted(entities.items()):
-            group_id = catalog.ensure(*key, name)
-            group = ccnet_api.get_group(group_id)
-            if group is None:
-                raise IdentityUnavailable('mapped native group missing')
-            if group.group_name != name:
-                ccnet_api.set_group_name(group_id, name)
-                actual = ccnet_api.get_group(group_id)
-                if actual is None or actual.group_name != name:
-                    raise IdentityUnavailable('native group rename not confirmed')
-                renamed += 1
-            else:
+            if key not in mapped:
+                catalog.ensure(*key, name)
+                created += 1
+                continue
+            group_id, current_name = mapped[key]
+            if current_name == name:
                 unchanged += 1
-        return dict(status='OK', entities=len(entities), renamed=renamed,
-                    unchanged=unchanged, membership_writes=0)
+                continue
+            ccnet_api.set_group_name(group_id, name)
+            actual = ccnet_api.get_group(group_id)
+            if actual is None or actual.group_name != name:
+                raise IdentityUnavailable('native group rename not confirmed')
+            renamed += 1
+        return dict(status='OK', entities=len(entities), created=created,
+                    renamed=renamed, unchanged=unchanged, membership_writes=0)
