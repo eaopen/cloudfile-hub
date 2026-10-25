@@ -140,14 +140,19 @@ class DirectoryRuntimeTests(TestCase):
         from cloudfile_ext.apps import CloudFileConfig
         scheduled = Mock()
         with override_settings(CF_DIRECTORY_URL='https://directory.test',
-                               CF_DIRECTORY_SYNC_INTERVAL_SECONDS=600):
+                               CF_ENABLE_SSO=True, CF_DIRECTORY_SYNC_INTERVAL_SECONDS=600):
             CloudFileConfig._register_directory_catalog(scheduled)
         scheduled.register_periodic_task.assert_called_once()
         name, interval, fn = scheduled.register_periodic_task.call_args.args
         self.assertEqual((name, interval), ('directory-entities', 600))
         self.assertEqual(fn.__name__, 'sync_entity_catalog')
         scheduled.reset_mock()
-        with override_settings(CF_DIRECTORY_URL=''):
+        # Startup-only enterprise admin integration may expose Directory credentials
+        # with SSO capability disabled. No periodic entity polling in that case.
+        with override_settings(CF_DIRECTORY_URL='https://directory.test', CF_ENABLE_SSO=False):
+            CloudFileConfig._register_directory_catalog(scheduled)
+        scheduled.register_periodic_task.assert_not_called()
+        with override_settings(CF_DIRECTORY_URL='', CF_ENABLE_SSO=True):
             CloudFileConfig._register_directory_catalog(scheduled)
         scheduled.register_periodic_task.assert_not_called()
 
