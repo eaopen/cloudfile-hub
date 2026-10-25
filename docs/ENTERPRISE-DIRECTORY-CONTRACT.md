@@ -65,33 +65,37 @@ described in #61. This PR does **not** create generic network routing.
 Aim: a provider-neutral, tiny contract compatible with the existing enterprise Directory
 adapter, without inventing a framework or adding cf_* tables.
 
-## Runtime organization/role synchronization (2026-10-25)
+## External organization/role synchronization (2026-10-25)
 
-- With `CF_ENABLE_SSO=true` **and** a trusted `CF_DIRECTORY_URL`, the
-  existing `cf_worker` registers `directory-entities` every
-  `CF_DIRECTORY_SYNC_INTERVAL_SECONDS` seconds, default 600 (10 minutes,
-  supported 60–86400). A URL configured solely for the startup administrator
-  roster does **not** register periodic polling. The worker must be running.
-- Periodic sync reconciles organization/role mappings and names, not users
-  or individual GroupUser memberships. Unchanged groups are read in one
-  snapshot rather than each acquiring a lock and native RPC.
-- OAuth login refreshes the authenticated existing user's memberships.
+- **Etech owns the business Directory and schedules catalog updates.** Its existing
+  PowerJob `cloudDirectorySync` calls the CloudFile administrator endpoint
+  `POST /api/v2.1/admin/cloudfile/directory/entities/sync/`. Other enterprise
+  integrations may use their own scheduler. CloudFile never schedules recurring
+  org/role fetches by itself; there is no interval/mode parameter.
+- The Hub endpoint fetches `GET /groups?view=entities` from the trusted
+  enterprise Directory using the existing machine JWT, validates the snapshot
+  and reconciles only organization/role mappings and native Group names.
+  It does **not** bulk-create users or write GroupUser memberships.
+- A standalone CE/CloudFile installation without an external Directory needs
+  no organizational synchronization or CloudFile background scheduler.
+- OAuth login refreshes only the authenticated existing user's memberships.
   Missing role/org mapping refuses the refresh. Neither login nor an
-  ACL check automatically creates a missing group; scheduled or explicit
-  directory synchronization owns catalog creation.
-- On file permission checks the built-in principal reads only existing
-  CE User/Profile/GroupUser/cf_sso_group_map facts. No external HTTP
-  Directory fetch, JIT user provision, group creation or membership mutation.
+  ACL check automatically creates a missing group; external application
+  catalog synchronization owns creation and retry.
+- File permission checks use only existing CE User/Profile/GroupUser and
+  `cf_sso_group_map` facts. No external HTTP Directory fetch, automatic
+  user/group provisioning or membership mutation occurs on these checks.
   A missing native user is denied.
-- A user's changed membership is refreshed at the next authenticated login
-  or explicit administrative user-sync event, **not** on each ACL request.
-  The ten-minute org/role catalog cadence is not a guarantee of ten-minute
-  active-user membership revocation.
-- Internal native **write** permission checks load current ACL rows without
-  cross-request TTL caching while reusing results within the request;
-  read/list permission checks keep bounded shared library caching.
-- Custom `CF_ACL_SUBJECT_ENSURE` adapters must be read-only. The old
-  built-in value `cloudfile_ext.v2.directory_adapter.ensure_subject`
-  remains accepted but no longer triggers synchronization in ACL reads.
+- A user's changed membership is refreshed at their next authenticated login
+  or explicit administrative user-sync event, **not** at every ACL request.
+  The external catalog schedule does not guarantee prompt revocation of
+  active-user memberships.
+- Internal native **write** permission checks load current ACL rules without
+  cross-request TTL caching while reusing results within one request; reads
+  retain bounded shared caching.
+- Custom `CF_ACL_SUBJECT_ENSURE` adapters must be read-only. The built-in
+  `cloudfile_ext.v2.directory_adapter.ensure_subject` value remains
+  recognized but does not trigger synchronization in ACL reads.
 
-No new CloudFile tables, queue, permission database or scheduler service.
+CloudFile owns native mapping and authorization; Etech owns the source facts
+and the trigger. No new task tables, schedule modes, or polling services.
