@@ -43,7 +43,7 @@ def choose_native(uid, employee, social_username, social_profile, uid_profiles):
         if native and native != social_username:
             raise IdentityConflict('sub and UID disagree')
         native = social_username
-    if native and native.lower() in ('cfadmin@etech.com', 'cfadmin@auth.local'):
+    if native and native.lower() in ('cfadmin@auth.local',):
         raise IdentityConflict('system administrator is not an employee')
     return native
 

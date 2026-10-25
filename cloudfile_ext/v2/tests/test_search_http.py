@@ -84,7 +84,7 @@ class SearchHttpTests(TestCase):
         client.page.assert_not_called()
 
 
-P = Principal('etech', 'uid')
+P = Principal('external', 'uid')
 
 
 class SearchAuthorityTests(TestCase):
@@ -101,8 +101,8 @@ class SearchAuthorityTests(TestCase):
         tags = patch('cloudfile_ext.v2.search.runtime.native_tags', side_effect=lambda repo, refs: {r['path']: [] for r in refs})
         tags.start()
         self.addCleanup(tags.stop)
-        self.rules = [Rule(RID, '/', 'etech', 'user', 'user', 'uid', 'r'),
-                      Rule(RID, '/S', 'etech', 'user', 'user', 'uid', 'invisible')]
+        self.rules = [Rule(RID, '/', 'external', 'user', 'user', 'uid', 'r'),
+                      Rule(RID, '/S', 'external', 'user', 'user', 'uid', 'invisible')]
         self.base = 'rw'
         self.current_principal = P
         self.authorities = []
@@ -173,7 +173,7 @@ class SearchAuthorityTests(TestCase):
 
     def test_principal_group_change_and_account_disable_are_rechecked(self):
         search = SearchAuthority('user', RID, '/')
-        self.current_principal = Principal('etech', 'uid', frozenset({('role', 'role', 'new')}))
+        self.current_principal = Principal('external', 'uid', frozenset({('role', 'role', 'new')}))
         with self.assertRaises(SearchUnavailable):
             search.assert_current([])
         with patch('cloudfile_ext.v2.search.runtime.Authority',
@@ -183,7 +183,7 @@ class SearchAuthorityTests(TestCase):
 
     def test_directory_only_share_searches_inside_its_root(self):
         self.base = None
-        self.rules = [Rule(RID, '/team', 'etech', 'user', 'user', 'uid', 'r', True, True)]
+        self.rules = [Rule(RID, '/team', 'external', 'user', 'user', 'uid', 'r', True, True)]
         with self.assertRaises(AccessDenied):
             SearchAuthority('user', RID, '/')
         search = SearchAuthority('user', RID, '/team')
@@ -203,7 +203,7 @@ class SearchAuthorityTests(TestCase):
         search.assert_current(items)
         self.assertEqual(self.native.get_dirent_by_path.call_count, calls)
         self.assertIs(self.authorities[-1].principal, search.authority.principal)
-        self.rules = self.rules + [Rule(RID, '/A', 'etech', 'user', 'user', 'uid', 'invisible')]
+        self.rules = self.rules + [Rule(RID, '/A', 'external', 'user', 'user', 'uid', 'invisible')]
         with self.assertRaises(SearchUnavailable):
             search.assert_current(items)
         self.rules = self.rules[:2]
@@ -215,7 +215,7 @@ class SearchAuthorityTests(TestCase):
             search.assert_current(items)
 
     def test_over_budget_library_falls_back_to_per_hit_decisions(self):
-        self.rules, self.over_budget = None, [Rule(RID, '/S', 'etech', 'user', 'user', 'uid', 'invisible')]
+        self.rules, self.over_budget = None, [Rule(RID, '/S', 'external', 'user', 'user', 'uid', 'invisible')]
         search = SearchAuthority('user', RID, '/')
         self.assertIsNone(search.filter)
         refs = [dict(ITEM, path='/A/file.txt'), dict(ITEM, path='/S/file.txt')]

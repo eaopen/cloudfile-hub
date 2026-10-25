@@ -13,7 +13,7 @@ def test_provisioning_gate_preserves_legacy_and_requires_native_admin_opt_in():
 
 
 def test_directory_provisioning_does_not_reuse_oauth_namespace():
-    assert provisioning_provider('etech-directory', 'authentik:dev') == 'directory:etech'
+    assert provisioning_provider('enterprise-directory', 'authentik:dev') == 'directory:external'
     assert provisioning_provider(None, 'authentik:dev') == 'authentik:dev'
     assert provisioning_provider('', 'authentik:dev') == 'authentik:dev'
     try:

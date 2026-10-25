@@ -9,7 +9,7 @@ from cloudfile_ext.v2.acl_policy import Principal, PolicyError, Rule
 from cloudfile_ext.v2.acl_runtime import ACLUnavailable, Authority, DirectoryChanged
 
 RID = '00000000-0000-4000-8000-000000000001'
-P = Principal('etech', 'uid')
+P = Principal('external', 'uid')
 DIR = 'a' * 40
 OTHER = 'b' * 40
 
@@ -50,15 +50,15 @@ class PageTests(TestCase):
         self.assertEqual((page['scanned_count'], page['next_start']), (1, None))
 
     def test_all_hidden_window_is_empty_but_not_exhausted(self):
-        auth = self.authority(rules=(Rule(RID, '/docs/x', 'etech', 'user', 'user', 'uid', 'invisible'),
-                                     Rule(RID, '/docs/y', 'etech', 'user', 'user', 'uid', 'invisible')))
+        auth = self.authority(rules=(Rule(RID, '/docs/x', 'external', 'user', 'user', 'uid', 'invisible'),
+                                     Rule(RID, '/docs/y', 'external', 'user', 'user', 'uid', 'invisible')))
         auth.api.list_dir_by_dir_id.return_value = [dirent('x', 'dir'), dirent('y', 'dir'), dirent('z', 'dir')]
         page = auth.page(RID, '/docs', start=0, limit=2)
         self.assertEqual(page['items'], [])
         self.assertEqual((page['scanned_count'], page['next_start']), (2, 2))
 
     def test_hidden_child_metadata_is_not_returned(self):
-        auth = self.authority(rules=(Rule(RID, '/docs/secret', 'etech', 'user', 'user', 'uid', 'invisible'),))
+        auth = self.authority(rules=(Rule(RID, '/docs/secret', 'external', 'user', 'user', 'uid', 'invisible'),))
         auth.api.list_dir_by_dir_id.return_value = [dirent('open', 'dir'), dirent('secret', 'dir'), dirent('f.txt')]
         page = auth.page(RID, '/docs', start=0, limit=10)
         self.assertEqual([(e.obj_name, kind, perm) for e, _, kind, perm in page['items']],
@@ -101,7 +101,7 @@ class PageTests(TestCase):
             auth.page(RID, '/docs', start=0, limit=2)
 
     def test_directory_only_grant_pages_without_library_permission(self):
-        share = Rule(RID, '/projects/shared', 'etech', 'user', 'user', 'uid', 'r', True, True)
+        share = Rule(RID, '/projects/shared', 'external', 'user', 'user', 'uid', 'r', True, True)
         auth = self.authority(base=None, rules=(share,))
         auth.store.shared.return_value = [(share, 'v')]
         auth.api.list_dir_by_dir_id.return_value = [dirent('a.txt')]
@@ -113,7 +113,7 @@ class PageTests(TestCase):
                 auth.page(RID, path, start=0, limit=50)
 
     def test_revoked_permission_is_decided_again_on_the_next_request(self):
-        auth = self.authority(rules=(Rule(RID, '/docs', 'etech', 'user', 'user', 'uid', 'invisible'),))
+        auth = self.authority(rules=(Rule(RID, '/docs', 'external', 'user', 'user', 'uid', 'invisible'),))
         with self.assertRaises(PermissionError):
             auth.page(RID, '/docs', start=200, limit=200, if_dir_id=DIR)
         auth.api.list_dir_by_dir_id.assert_not_called()

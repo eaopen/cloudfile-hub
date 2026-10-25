@@ -17,7 +17,7 @@ class SQLJITProvisioner:
         self.directory, self.identity = directory, identity
 
     def ensure(self, *, uid, provider, subject):
-        from .etech_directory import verified_account
+        from .directory_adapter import verified_account
         uid, provider, subject = text(uid), text(provider, 32), text(subject, 255)
         identity, connection = self.identity, self.identity.connection
         # Serialize the provider subject before any account creation. A subject

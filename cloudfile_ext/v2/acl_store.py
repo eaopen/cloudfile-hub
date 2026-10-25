@@ -118,7 +118,7 @@ class ACLStore:
     def replace_owned(self, repo_id, provider, *, expected, managed, desired):
         """One-library, one-transaction differential publication.
 
-        `managed` is the Etech publisher's explicit old+new set of natural keys,
+        `managed` is the consumer publisher's explicit old+new set of natural keys,
         never a licence to delete every provider row. A mismatching complete
         provider snapshot fails 409 rather than applying a stale diff. Per-rule
         API semantics and third-party provider rows are unchanged.

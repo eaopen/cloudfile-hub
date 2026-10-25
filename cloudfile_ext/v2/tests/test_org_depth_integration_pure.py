@@ -41,7 +41,7 @@ class TrustedDepthIntegrationTests(unittest.TestCase):
             context(), catalog(), 'user-9', org_level=level,
             expected_namespaces={('org', 'directory'), ('role', 'role')}, **kwargs)
 
-    def test_etech_default_direct_only_and_parent_depths(self):
+    def test_external_default_direct_only_and_parent_depths(self):
         direct = self.chosen(1)
         self.assertEqual(direct, frozenset({
             ('org', 'directory', 'leaf'), ('role', 'role', 'reviewer')}))

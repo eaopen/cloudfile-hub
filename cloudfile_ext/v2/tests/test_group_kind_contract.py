@@ -52,7 +52,7 @@ class DirectOrgMembershipTests(unittest.TestCase):
             validate_subject(value, 'user-A')
 
     def test_changed_scope_version_invalidates_preexisting_readiness_marker(self):
-        key = readiness_key('native-db', 'etech', 'user-A', 'user@auth.local')
+        key = readiness_key('native-db', 'external', 'user-A', 'user@auth.local')
         self.assertTrue(key.startswith('cfv2:subject-direct-v1:'))
         self.assertNotEqual(key, 'cfv2:subject:' + key.split(':')[-1])
 

@@ -1,4 +1,4 @@
-"""V2 legacy-OAuth adapter: attach a trusted Etech UID to its native CE account.
+"""V2 legacy-OAuth adapter: attach a trusted enterprise UID to its native CE account.
 
 The existing OAuth protocol stays upstream. This adapter is only used when
 the configured IdP maps a trusted userId claim to Profile.login_id. Unmapped
@@ -34,7 +34,7 @@ def choose_uid_owner(uid, profiles, bindings, *, provider, subject):
         raise UIDBindingError("missing or ambiguous canonical UID")
     username, stored_uid = profiles[0]
     if (not isinstance(username, str) or not username or stored_uid != uid
-            or username.lower() in ("cfadmin@auth.local", "cfadmin@etech.com")):
+            or username.lower() in ("cfadmin@auth.local",)):
         raise UIDBindingError("canonical UID mismatch")
     if len(bindings) > 1:
         raise UIDBindingError("ambiguous provider subject")
@@ -47,7 +47,7 @@ def bind_existing_uid(*, uid, provider, subject):
     """Use the existing UID owner and add only a missing provider/sub mapping.
 
     OAuth state and UserInfo must be verified by the caller, and userId must be
-    provisioned by a trusted Etech/IdP source. Never create/migrate native users.
+    provisioned by a trusted enterprise IdP source. Never create/migrate native users.
     """
     uid, provider, subject = (_text(uid, 225), _text(provider, 32),
                               _text(subject, 255))

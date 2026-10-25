@@ -124,7 +124,7 @@ def test_employee_profile_does_not_override_exact_uid_binding():
 
 @pytest.mark.parametrize('employee,native', [
     ('cfadmin', 'native-admin'), ('CFADMIN', 'native-admin'),
-    ('emp-1', 'cfadmin@etech.com'), ('emp-1', 'cfadmin@auth.local')])
+    ('emp-1', 'cfadmin@external.com'), ('emp-1', 'cfadmin@auth.local')])
 def test_system_admin_is_excluded_from_employee_projection(employee, native):
     # System administration remains independent even if a bad feed includes it.
     assert resolve_eap_pairs([{'user_id': 'uid-1', 'employee_no': employee}],
@@ -220,7 +220,7 @@ def test_login_refresh_uses_uid_context_and_keeps_refusals_retryable(monkeypatch
     monkeypatch.setattr(identity, 'login_of', lambda native: 'uid-42')
     monkeypatch.setattr(directory_service.directory, 'active', lambda registry: source)
     monkeypatch.setattr(directory_service, 'resolve_user', lambda username: 'original-native@auth.local')
-    monkeypatch.setattr(directory_service, 'group_owner', lambda: 'cfadmin@etech.com')
+    monkeypatch.setattr(directory_service, 'group_owner', lambda: 'cfadmin@external.com')
     delta = Mock(return_value=result)
     monkeypatch.setattr(directory_service, 'sync_user_id', delta)
     registry = object()

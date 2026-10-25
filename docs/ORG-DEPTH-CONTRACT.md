@@ -9,7 +9,7 @@ CE parent/child groups, rewrite ACLs or grant permissions.
 `org_parent_map(catalog_groups)` validates the complete Org parent graph
 without a database: each Org has one parent at most, parent belongs to the
 same provider/namespace, all non-root parents exist, and no cycle is allowed.
-The Etech upstream adapter already sends only active-chain Org entities
+The enterprise Directory upstream adapter already sends only active-chain Org entities
 with `parent_external_id`. Use this helper **after** trusted snapshot
 freshness / entity validation (#54 / Draft #73); this helper is not another
 HTTP authenticator.
@@ -28,14 +28,14 @@ set of flat org memberships. A user's direct role memberships are unchanged:
 rule-specific depth**. Such a global projection would grant additional
 unrelated library/dir ACLs. Only a single consciously configured,
 provider-wide depth can safely use a shared GroupUser projection; per-rule
-depth needs a separate reviewed execution contract. Current Etech default
+depth needs a separate reviewed execution contract. Current enterprise Directory default
 remains direct member (`orgLevel=1`) *once* #63 is separately approved.
 
 This PR **does not** change existing `validate_subject`, ready markers,
 `Memberships.ensure`, CE users, native groups, ACLs or cache. It is a
 standalone verified algorithm with five-level / multi-membership / malformed
 parent-graph unit tests. Integration requires coherent snapshots from #54,
-#63 rollout compatibility check, and Etech DEV evidence before any effective
+#63 rollout compatibility check, and enterprise Directory DEV evidence before any effective
 permission changes.
 
 No new tables, background refresh, migration, network path or recursive
@@ -55,10 +55,10 @@ CE GroupUser, admin roles, caches or file ACLs.
 The catalog must contain the *complete active Org ancestry* for the subject.
 The two snapshots can be read at different times; in the case of a change or
 inconsistency, reject the computation and retry through normal bounded
-Directory refresh rather than guessing parent membership. Etech keeps the
+Directory refresh rather than guessing parent membership. enterprise Directory keeps the
 existing namespace filter `(org,directory)/(role,role)`. Generic providers
 may use other namespace values.
 
 When #73 lands in `dev`, this stacked PR can be reviewed and merged as the
 small dependent algorithm/integration slice. Release use remains gated on
-#63 and Etech DEV permission regression.
+#63 and enterprise Directory DEV permission regression.

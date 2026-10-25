@@ -17,7 +17,7 @@ def verified_user(value, uid, *, account_field='account'):
 
     Existing accounts are always reused by exact CE Profile.login_id. A
     missing account field does not authorize creating a new anonymous user.
-    Etech uses account_field='employee_no' for its existing payload.
+    enterprise Directory uses account_field='employee_no' for its existing payload.
     """
     login, _ = validate_subject(value, uid)
     if value['status'] != 'active':
@@ -57,7 +57,7 @@ def validated_entities(snapshot, *, expected_namespaces=None, now=None):
 
     Parent IDs are accepted as trusted *facts* but deliberately do not change
     CE GroupUser membership: orgLevel/ancestor authorization belongs to #55.
-    A consuming Etech adapter can retain its existing namespace restrictions.
+    A consuming enterprise Directory adapter can retain its existing namespace restrictions.
     """
     now = datetime.now(timezone.utc) if now is None else now
     try:

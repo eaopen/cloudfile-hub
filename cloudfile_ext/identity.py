@@ -68,8 +68,10 @@ def provisioning_enabled(settings):
 
 def provisioning_provider(identity_source, oauth_provider):
     """Keep directory UIDs separate from OAuth subjects without rebinding login."""
-    if identity_source == 'etech-directory':
-        return 'directory:etech'
+    if identity_source == 'enterprise-directory':
+        from django.conf import settings
+        from cloudfile_ext.v2.subject_adapter import provider_name
+        return 'directory:' + provider_name(settings)
     if identity_source:
         raise ValueError('Unknown identity source.')
     return oauth_provider
@@ -80,7 +82,7 @@ def _default_map_login(subject):
 
     2026-10-14 收紧：不再借用 Seahub 的 ``convert_login_str_to_username``。后者先查
     ``Profile.login_id``、**再查 ``Profile.contact_email``**，于是「收信地址」变成了
-    身份寻址键；而 eTech 目录里同一邮箱被多个账号持有时（实测生产 7 组），
+    身份寻址键；而 企业 Directory里同一邮箱被多个账号持有时（实测生产 7 组），
     「按邮箱授权」就会落到另一个账号上——测试环境已经发生过（一条库管理员标记
     挂到了 name=admin 的账号）。contact_email 是联系资料、不是身份（上游注释原文：
     "Contact email is used to receive emails."），身份只认 login_id / 账号名。

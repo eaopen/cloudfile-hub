@@ -35,7 +35,7 @@ def register(registry):
     # to its explicitly enabled administrator control plane.
     from cloudfile_ext.identity import provisioning_enabled
     if provisioning_enabled(settings):
-        # Both registrations must reach the same Etech UID authority. Keep
+        # Both registrations must reach the same enterprise UID authority. Keep
         # the generic CE extension's provider behavior outside this deployment.
         if getattr(settings, 'CF_DIRECTORY_URL', ''):
             from cloudfile_ext.v2.http import IdentityResolve as identity_view

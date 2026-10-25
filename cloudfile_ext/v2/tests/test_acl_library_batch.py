@@ -12,7 +12,7 @@ from cloudfile_ext.v2.acl_policy import Rule
 from cloudfile_ext.v2.acl_store import RevisionConflict
 
 RID = '00000000-0000-4000-8000-000000000001'
-RULE = Rule(RID, '/shared', 'etech', 'user', 'user', 'uid', 'rw', True, True)
+RULE = Rule(RID, '/shared', 'external', 'user', 'user', 'uid', 'rw', True, True)
 REVISION = '00000000-0000-4000-8000-000000000010'
 
 
@@ -35,7 +35,7 @@ class LibraryBatchHTTPTests(TestCase):
         with patch('cloudfile_ext.v2.acl_http.require_repo_manage') as auth, \
              patch('cloudfile_ext.v2.acl_http.store') as rules, \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
-            settings.CF_ACL_PROVIDER = 'etech'
+            settings.CF_ACL_PROVIDER = 'external'
             rules.return_value.provider_snapshot.return_value = ((RULE, REVISION),)
             result = self.request('get', {'repo_id': RID})
             self.assertEqual(result.status_code, 200)
@@ -43,32 +43,32 @@ class LibraryBatchHTTPTests(TestCase):
             self.assertEqual(result.data['fingerprint'], fingerprint(((RULE, REVISION),)))
             self.assertEqual(result.data['rules'][0]['revision'], REVISION)
             auth.assert_called_once()
-            rules.return_value.provider_snapshot.assert_called_once_with(RID, 'etech')
+            rules.return_value.provider_snapshot.assert_called_once_with(RID, 'external')
             self.assertEqual(self.request('get', {'repo_id': RID, 'path': '/'}).status_code, 400)
 
     def test_batch_put_uses_server_provider_and_one_atomic_store_call(self):
         with patch('cloudfile_ext.v2.acl_http.require_repo_manage'), \
              patch('cloudfile_ext.v2.acl_http.store') as rules, \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
-            settings.CF_ACL_PROVIDER = 'etech'
+            settings.CF_ACL_PROVIDER = 'external'
             rules.return_value.replace_owned.return_value = dict(
                 fingerprint='a' * 64, inserted=0, updated=1, deleted=0, unchanged=0)
             result = self.request('put', self.payload())
             self.assertEqual(result.status_code, 200)
             self.assertEqual(result.data['updated'], 1)
             request = rules.return_value.replace_owned.call_args
-            self.assertEqual(request.args, (RID, 'etech'))
+            self.assertEqual(request.args, (RID, 'external'))
             self.assertEqual(request.kwargs['managed'],
                              [('/shared', 'user', 'user', 'uid')])
             self.assertEqual(request.kwargs['desired'][0].permission, 'r')
-            self.assertEqual(request.kwargs['desired'][0].provider, 'etech')
+            self.assertEqual(request.kwargs['desired'][0].provider, 'external')
 
     def test_batch_resource_preview_reuses_one_snapshot_and_checks_every_directory(self):
         with patch('cloudfile_ext.v2.acl_http.require_repo_manage'), \
              patch('cloudfile_ext.v2.acl_http.store') as rules, \
              patch('seaserv.seafile_api.get_dir_id_by_path') as exists, \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
-            settings.CF_ACL_PROVIDER = 'etech'
+            settings.CF_ACL_PROVIDER = 'external'
             exists.side_effect = lambda repo, path: 'd' * 40 if path == '/shared' else None
             rules.return_value.provider_snapshot.return_value = ((RULE, REVISION),)
             result = self.request('post', dict(repo_id=RID, paths=['/shared', '/missing']))
@@ -106,7 +106,7 @@ class LibraryBatchHTTPTests(TestCase):
             self.assertEqual(self.request('put', self.payload()).status_code, 409)
 
     def test_fingerprint_includes_revision_but_ignores_row_order(self):
-        a = Rule(RID, '/a', 'etech', 'org', 'directory', 'dept1', 'invisible')
+        a = Rule(RID, '/a', 'external', 'org', 'directory', 'dept1', 'invisible')
         rev = '00000000-0000-4000-8000-000000000011'
         self.assertEqual(fingerprint(((RULE, REVISION), (a, rev))),
                          fingerprint(((a, rev), (RULE, REVISION))))

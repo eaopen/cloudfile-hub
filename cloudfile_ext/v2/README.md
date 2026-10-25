@@ -30,13 +30,13 @@ external proof and compare the exact UID against the trusted Directory first.
 A second verified binding reuses the native account and its native grants;
 case-folded UID aliases and inactive accounts are rejected.
 
-The built-in Etech Directory adapter now connects staff UID pre-creation,
+The built-in enterprise Directory adapter now connects staff UID pre-creation,
 exact organization/role Group mapping and current-user Memberships TTL refresh.
 It uses CE User/Profile/Group/GroupUser and the existing group map; no additional
 identity tables or feature switches are introduced. See
-[ACL_CONTRACT.md](ACL_CONTRACT.md#built-in-etech-subject-wiring) for the existing
+[ACL_CONTRACT.md](ACL_CONTRACT.md#built-in-external-subject-wiring) for the existing
 EAP contracts and required connection inputs. A first OAuth/OIDC login reuses a
 pre-created UID account without inventing an OAuth sub.
 
 Isolated SQL/Redis, HTTP contract and native C/Go tests do not certify a real
-Etech DEV installation, its machine credentials, SSO provider or UI workflows.
+enterprise Directory DEV installation, its machine credentials, SSO provider or UI workflows.

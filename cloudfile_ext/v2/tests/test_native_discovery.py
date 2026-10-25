@@ -84,7 +84,7 @@ class NativeDiscoveryContractTest(unittest.TestCase):
 
     def test_native_marker_requires_exact_canonical_uuid(self):
         self.assertIsNone(native_key(self.repo_id.upper()))
-        self.assertIsNone(native_key('etech01'))
+        self.assertIsNone(native_key('external01'))
         self.assertEqual(self.marker, 'native-' + self.repo_id)
 
     def test_two_way_registry_diagnostic_codes(self):

@@ -11,7 +11,7 @@ from cloudfile_ext.v2.acl_store import decode, path_digest
 
 RID = '00000000-0000-4000-8000-000000000001'
 REV = '00000000-0000-4000-8000-000000000010'
-RULE = Rule(RID, '/shared', 'etech', 'user', 'user', 'uid', 'rw', True, True)
+RULE = Rule(RID, '/shared', 'external', 'user', 'user', 'uid', 'rw', True, True)
 DIGEST = path_digest('/shared')
 
 
@@ -41,7 +41,7 @@ class DecodeTests(TestCase):
                        row(hash_value=DIGEST[:16]),
                        row(hash_value=None),
                        row(revision='not-a-uuid'),
-                       row(rule=Rule(RID, '/', 'etech', 'user', 'user', 'uid', 'r'))[:10],
+                       row(rule=Rule(RID, '/', 'external', 'user', 'user', 'uid', 'r'))[:10],
                        (RULE.repo_id, RULE.path, RULE.provider, RULE.subject_type, RULE.namespace,
                         RULE.external_id, RULE.permission, 2, 0, REV, DIGEST)):
             with self.assertRaises(StoredACLError):

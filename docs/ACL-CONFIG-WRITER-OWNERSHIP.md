@@ -23,7 +23,7 @@ it may keep its expected configuration and publish it through trusted
 `authorization/v1/library-acl-batch` (GET/preview/PUT). The
 `ACLStore.replace_owned` implementation takes a complete provider snapshot,
 fingerprint/CAS and the declared `managed` natural-key operation scope. It
-changes only declared keys; other keys/providers remain untouched. Etech may
+changes only declared keys; other keys/providers remain untouched. enterprise Directory may
 select A for its business-owned libraries. A never replaces CloudFile's ACL
 executor or makes external systems mandatory for standalone deployments.
 

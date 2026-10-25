@@ -11,12 +11,12 @@ class SubjectAdapterPureTests(unittest.TestCase):
         self.assertIsNone(selected_adapter(SimpleNamespace()))
         self.assertIsNone(selected_adapter(SimpleNamespace(CF_DIRECTORY_URL='')))
 
-    def test_existing_etech_url_uses_the_same_directory_callback(self):
+    def test_existing_external_url_uses_the_same_directory_callback(self):
         self.assertEqual(selected_adapter(SimpleNamespace(
             CF_DIRECTORY_URL='https://directory.example.test')),
-            ('etech', 'cloudfile_ext.v2.etech_directory.ensure_subject'))
+            ('external', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
 
-    def test_custom_enterprise_directory_may_have_no_etech_url(self):
+    def test_custom_enterprise_directory_may_have_no_external_url(self):
         self.assertEqual(selected_adapter(SimpleNamespace(
             CF_ACL_PROVIDER='acme', CF_ACL_SUBJECT_ENSURE='acme.directory.refresh')),
             ('acme', 'acme.directory.refresh'))
@@ -34,23 +34,27 @@ class SubjectAdapterPureTests(unittest.TestCase):
                     CF_ACL_PROVIDER=provider, CF_ACL_SUBJECT_ENSURE=ensure))
 
     def test_builtin_admin_bypass_requires_exact_account_and_uid(self):
-        for username in ('cfadmin@auth.local', 'cfadmin@etech.com'):
+        for username in ('cfadmin@auth.local',):
             self.assertTrue(native_admin_identity('cfadmin', username))
             self.assertFalse(reserved_identity_conflict('cfadmin', username))
         for uid, username in (
                 ('cfadmin', 'employee@auth.local'),
                 ('9', 'cfadmin@auth.local'),
                 ('cfadmin', 'admin@auth.local'),
-                ('', 'cfadmin@etech.com')):
+                ('cfadmin', 'cfadmin@example.com')):
             with self.subTest(uid=uid, username=username):
                 self.assertFalse(native_admin_identity(uid, username))
                 self.assertTrue(reserved_identity_conflict(uid, username))
         self.assertFalse(reserved_identity_conflict('9', 'admin@auth.local'))
 
+    def test_namespace_override_keeps_builtin_adapter(self):
+        self.assertEqual(selected_adapter(SimpleNamespace(
+            CF_DIRECTORY_URL='https://directory.example.test',
+            CF_ACL_PROVIDER='acme')),
+            ('acme', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
+
     def test_half_configured_provider_never_downgrades_to_ce(self):
         for config in (
-                SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test',
-                                CF_ACL_PROVIDER='custom'),
                 SimpleNamespace(CF_ACL_SUBJECT_ENSURE='custom.directory.ensure'),
                 SimpleNamespace(CF_ACL_PROVIDER='native-local',
                                 CF_ACL_SUBJECT_ENSURE='custom.directory.ensure'),

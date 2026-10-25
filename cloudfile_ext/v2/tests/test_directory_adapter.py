@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 
 from django.test import override_settings
 
-from cloudfile_ext.v2.etech_directory import Directory, prepare_user, prepare_group, ensure_subject
+from cloudfile_ext.v2.directory_adapter import Directory, prepare_user, prepare_group, ensure_subject
 from cloudfile_ext.v2.errors import IdentityUnavailable, IdentityConflict
 from cloudfile_ext.v2.identity import NativeIdentity
 from cloudfile_ext.v2.tests.native_identity_facts import NativeFacts
@@ -30,7 +30,7 @@ class DirectoryRuntimeTests(TestCase):
         yield self.directory, self.identity, self.catalog, self.memberships
 
     def test_preparation_proves_directory_uid_and_preserves_native_name(self):
-        with patch('cloudfile_ext.v2.etech_directory.runtime',self.runtime):
+        with patch('cloudfile_ext.v2.directory_adapter.runtime',self.runtime):
             self.assertEqual(prepare_user('uid'),'opaque@auth.local')
         self.directory.subject.assert_called_once_with('uid')
         self.identity.prepare.assert_called_once_with(uid='uid',login_name='E001',account='E001')
@@ -43,7 +43,7 @@ class DirectoryRuntimeTests(TestCase):
                 with self.runtime() as parts:
                     self.directory.subject.return_value=value
                     yield parts
-            with patch('cloudfile_ext.v2.etech_directory.runtime',runtime):
+            with patch('cloudfile_ext.v2.directory_adapter.runtime',runtime):
                 with self.assertRaises(IdentityUnavailable):prepare_user('uid')
             self.identity.prepare.assert_not_called()
 
@@ -59,7 +59,7 @@ class DirectoryRuntimeTests(TestCase):
                     value['attributes'] = {'login_name': 'display-only'} if account is None else {'employee_no': account}
                     self.directory.subject.return_value = value
                     yield self.directory, native, self.catalog, self.memberships
-            with patch('cloudfile_ext.v2.etech_directory.runtime', runtime), \
+            with patch('cloudfile_ext.v2.directory_adapter.runtime', runtime), \
                     patch('cloudfile_ext.v2.identity.database_lock', side_effect=lambda *args: nullcontext()), \
                     self.assertRaises((IdentityUnavailable, IdentityConflict)):
                 prepare_user('uid')
@@ -79,21 +79,21 @@ class DirectoryRuntimeTests(TestCase):
                     self.directory.subject.return_value = value
                     yield self.directory, native, self.catalog, self.memberships
             with self.subTest(account=account), \
-                    patch('cloudfile_ext.v2.etech_directory.runtime', runtime), \
+                    patch('cloudfile_ext.v2.directory_adapter.runtime', runtime), \
                     patch('cloudfile_ext.v2.identity.database_lock', side_effect=lambda *args: nullcontext()):
                 self.assertEqual(prepare_user('uid'), 'historical@auth.local')
                 self.assertEqual(facts.created, [])
 
     def test_group_mapping_uses_exact_type_namespace_and_external_id(self):
-        with patch('cloudfile_ext.v2.etech_directory.runtime',self.runtime):
+        with patch('cloudfile_ext.v2.directory_adapter.runtime',self.runtime):
             self.assertEqual(prepare_group('o1'),42)
         self.catalog.ensure.assert_called_once_with('org','directory','o1','Department')
-        with patch('cloudfile_ext.v2.etech_directory.runtime',self.runtime):
+        with patch('cloudfile_ext.v2.directory_adapter.runtime',self.runtime):
             with self.assertRaises(IdentityUnavailable):prepare_group('role:o1')
         self.catalog.ensure.assert_not_called()
 
     def test_default_projector_refreshes_only_current_uid_and_proves_entities(self):
-        with patch('cloudfile_ext.v2.etech_directory.runtime',self.runtime):
+        with patch('cloudfile_ext.v2.directory_adapter.runtime',self.runtime):
             ensure_subject('uid','opaque@auth.local')
         self.memberships.ensure.assert_called_once_with('uid','opaque@auth.local')
         self.assertEqual(self.memberships.fetch('uid')['userId'],'uid')
@@ -116,7 +116,7 @@ class DirectoryRuntimeTests(TestCase):
         response.iter_content.return_value=[b'{"groups":[]}']
         with override_settings(CF_DIRECTORY_URL='https://directory.test/eap/cloudDrive/directory',
                                CF_DIRECTORY_SECRET=secret,CF_DIRECTORY_KEY_ID='key'), \
-                patch('cloudfile_ext.v2.etech_directory.requests.get',return_value=response) as get:
+                patch('cloudfile_ext.v2.directory_adapter.requests.get',return_value=response) as get:
             self.assertEqual(Directory().get('/groups?view=entities'),{'groups':[]})
             kwargs=get.call_args.kwargs
             self.assertFalse(kwargs['allow_redirects'])
@@ -130,10 +130,10 @@ class DirectoryRuntimeTests(TestCase):
 
 
     def test_periodic_entity_sync_updates_only_native_catalog(self):
-        from cloudfile_ext.v2.etech_directory import sync_entity_catalog
+        from cloudfile_ext.v2.directory_adapter import sync_entity_catalog
         def fake_native(group_id):
             return SimpleNamespace(group_name='Department')
-        with patch('cloudfile_ext.v2.etech_directory.runtime', self.runtime), \
+        with patch('cloudfile_ext.v2.directory_adapter.runtime', self.runtime), \
              patch('seaserv.ccnet_api.get_group', side_effect=fake_native), \
              patch('seaserv.ccnet_api.set_group_name') as rename:
             result = sync_entity_catalog()
@@ -144,13 +144,13 @@ class DirectoryRuntimeTests(TestCase):
         rename.assert_not_called()
 
     def test_empty_catalog_cannot_report_full_success(self):
-        from cloudfile_ext.v2.etech_directory import sync_entity_catalog
+        from cloudfile_ext.v2.directory_adapter import sync_entity_catalog
         @contextmanager
         def empty_runtime():
             with self.runtime() as parts:
                 self.directory.entities.return_value = {}
                 yield parts
-        with patch('cloudfile_ext.v2.etech_directory.runtime', empty_runtime), \
+        with patch('cloudfile_ext.v2.directory_adapter.runtime', empty_runtime), \
              self.assertRaises(IdentityUnavailable):
             sync_entity_catalog()
         self.catalog.ensure.assert_not_called()
@@ -170,8 +170,8 @@ class SubjectReadyTests(TestCase):
         self.account = SimpleNamespace(email=self.USER, is_active=True)
         profiles = Mock()
         profiles.filter.return_value.values_list.side_effect = lambda *fields: list(self.binding)
-        for target in (patch('cloudfile_ext.v2.etech_directory._shared_redis', return_value=self.redis),
-                       patch('cloudfile_ext.v2.etech_directory.redis_location', return_value='redis://cache:6379'),
+        for target in (patch('cloudfile_ext.v2.directory_adapter._shared_redis', return_value=self.redis),
+                       patch('cloudfile_ext.v2.directory_adapter.redis_location', return_value='redis://cache:6379'),
                        patch('seahub.utils.db_api.SeafileDB', return_value=SimpleNamespace(db_name='seafile_db')),
                        patch.object(Profile, 'objects', profiles),
                        patch.object(ccnet_api, 'get_emailuser', side_effect=lambda user: self.account)):
@@ -180,7 +180,7 @@ class SubjectReadyTests(TestCase):
         self.runtime = Mock(side_effect=AssertionError('locked path must not run'))
 
     def ensure(self):
-        with patch('cloudfile_ext.v2.etech_directory.runtime', self.runtime):
+        with patch('cloudfile_ext.v2.directory_adapter.runtime', self.runtime):
             ensure_subject(self.UID, self.USER)
 
     def assert_locked_path(self):
@@ -198,7 +198,7 @@ class SubjectReadyTests(TestCase):
         from cloudfile_ext.v2.memberships import readiness_key
         self.ensure()
         self.runtime.assert_not_called()
-        self.assertEqual(self.redis.eval.call_args[0][2], readiness_key('seafile_db', 'etech', self.UID, self.USER))
+        self.assertEqual(self.redis.eval.call_args[0][2], readiness_key('seafile_db', 'external', self.UID, self.USER))
 
     def test_fast_and_locked_paths_use_the_same_marker(self):
         from cloudfile_ext.v2.memberships import Memberships, readiness_key
@@ -207,8 +207,8 @@ class SubjectReadyTests(TestCase):
         connection.cursor.return_value.__enter__ = Mock(return_value=connection.cursor.return_value)
         connection.cursor.return_value.__exit__ = Mock(return_value=False)
         connection.cursor.return_value.fetchone.return_value = ('seafile_db',)
-        memberships = Memberships(connection, Mock(), Mock(), account_schema='ccnet_db', provider='etech', fetch=Mock())
-        self.assertEqual(memberships._key(self.UID, self.USER), readiness_key('seafile_db', 'etech', self.UID, self.USER))
+        memberships = Memberships(connection, Mock(), Mock(), account_schema='ccnet_db', provider='external', fetch=Mock())
+        self.assertEqual(memberships._key(self.UID, self.USER), readiness_key('seafile_db', 'external', self.UID, self.USER))
 
     def test_missing_foreign_or_expired_marker_takes_the_locked_path(self):
         import json

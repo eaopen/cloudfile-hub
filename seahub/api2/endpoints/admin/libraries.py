@@ -266,7 +266,7 @@ class AdminLibraries(APIView):
         repo = seafile_api.get_repo(repo_id)
         repo_info = get_repo_info(repo)
         # Native AdminLibraries POST must leave a newly created original Repo
-        # discoverable in V2 storage metadata even outside Etech.
+        # discoverable in V2 storage metadata even outside enterprise Directory.
         try:
             from cloudfile_ext.v2.native_discovery import reconcile_from_hub
             reconcile_from_hub(repo_id)

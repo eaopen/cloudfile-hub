@@ -33,7 +33,7 @@ class CookieNativeRouteTests(TestCase):
     def call(self, *, staff=False, manager=False, error=None):
         user = SimpleNamespace(username='member', is_staff=staff,
             admin_permissions=SimpleNamespace(can_manage_library=lambda: staff))
-        authority = Authority('member', principal=Principal('etech', 'uid'),
+        authority = Authority('member', principal=Principal('external', 'uid'),
                               rules=self.rules, api=self.api)
         with patch('cloudfile_ext.v2.acl_runtime.Authority', return_value=authority,
                    side_effect=error), \
@@ -53,7 +53,7 @@ class CookieNativeRouteTests(TestCase):
     def test_native_readonly_and_v2_deny_are_not_widened(self):
         self.api.check_permission.return_value = 'r'
         self.assertEqual(self.call().data['permission'], 'r')
-        self.rules.library.return_value = [Rule(RID, '/', 'etech', 'user', 'user', 'uid', 'invisible')]
+        self.rules.library.return_value = [Rule(RID, '/', 'external', 'user', 'user', 'uid', 'invisible')]
         self.assertEqual(self.call(staff=True).status_code, 403)
 
     def test_native_denial_and_outage_never_become_access(self):

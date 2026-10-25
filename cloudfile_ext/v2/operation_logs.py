@@ -1,7 +1,7 @@
-"""Bounded, user-authorized file/dir operation log for Etech.
+"""Bounded, user-authorized file/dir operation log for enterprise Directory.
 
 Seafile CE Activity owns content/tree changes. The single CloudFile sidecar
-owns tag and Checkout/Checkin transitions; Etech owns permission audit.
+owns tag and Checkout/Checkin transitions; enterprise Directory owns permission audit.
 No history index, cursor table, Outbox, full-repo scan or Pro-only endpoint.
 """
 import datetime

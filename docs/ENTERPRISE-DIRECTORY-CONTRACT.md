@@ -41,8 +41,8 @@ installed plugin. It supplies two kinds of data:
    the entire response. Namespaces are provider facts and do not merge on
    display name.
 
-Existing Etech wiring continues to use the machine-authenticated
-`/users/{uid}/context` and `/groups?view=entities` endpoints. Etech maps
+Existing enterprise Directory wiring continues to use the machine-authenticated
+`/users/{uid}/context` and `/groups?view=entities` endpoints. enterprise Directory maps
 `attributes.employee_no` to its account, keeps namespace pairs
 `(org,directory)` and `(role,role)`, and uses its existing
 `cf_sso_group_map` / user TTL projection. A generic provider can use other
@@ -59,8 +59,8 @@ described in #61. This PR does **not** create generic network routing.
   alone changes the currently deployed ancestor behavior.
 - The full hierarchy validation and depth rules (0/1/N) belong to #55.
 - Admin startup roster synchronization remains isolated under #64.
-- Runtime CE/Etech login, GroupUser refresh and MariaDB validation remain a
+- Runtime CE/enterprise Directory login, GroupUser refresh and MariaDB validation remain a
   separate DEV acceptance gate. Fast Python tests prove only parsing logic.
 
-Aim: a provider-neutral, tiny contract compatible with the existing Etech
+Aim: a provider-neutral, tiny contract compatible with the existing enterprise Directory
 adapter, without inventing a framework or adding cf_* tables.

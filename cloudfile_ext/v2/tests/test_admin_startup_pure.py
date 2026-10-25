@@ -24,7 +24,7 @@ class ProviderAdminRosterTests(unittest.TestCase):
         self.assertEqual(validated_roster(self.roster(multiple)),
                          (('u1', 'admin'), ('u2', 'operator')))
 
-    def test_optional_etech_admin_compatibility_needs_verified_roster(self):
+    def test_optional_external_admin_compatibility_needs_verified_roster(self):
         self.assertEqual(validated_roster(self.roster(), required_account='admin'),
                          (('external-9', 'admin'),))
         with self.assertRaises(IdentityUnavailable):

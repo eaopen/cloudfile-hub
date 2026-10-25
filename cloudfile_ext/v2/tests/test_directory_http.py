@@ -1,4 +1,4 @@
-"""Etech MVP identity seams reuse native accounts and reject mismatched bindings."""
+"""enterprise Directory MVP identity seams reuse native accounts and reject mismatched bindings."""
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
@@ -8,7 +8,7 @@ from cloudfile_ext.v2.http import IdentityResolve
 from seahub.oauth import views
 
 
-class EtechIdentityLookupTests(TestCase):
+class EnterpriseDirectoryIdentityLookupTests(TestCase):
     def request(self, data, staff=True):
         request = APIRequestFactory().post('/identities/resolve/', data, format='json')
         force_authenticate(request, SimpleNamespace(is_staff=staff, is_authenticated=True))
@@ -34,7 +34,7 @@ class EtechIdentityLookupTests(TestCase):
     def test_unknown_uid_requires_trusted_directory_preparation(self):
         from cloudfile_ext.v2.errors import IdentityUnavailable
         with patch('cloudfile_ext.v2.http.Profile.objects.filter', return_value=Mock(values_list=Mock(return_value=[]))), \
-                patch('cloudfile_ext.v2.etech_directory.prepare_user', side_effect=IdentityUnavailable()) as prepare, \
+                patch('cloudfile_ext.v2.directory_adapter.prepare_user', side_effect=IdentityUnavailable()) as prepare, \
                 patch('cloudfile_ext.v2.http.User.objects.get') as user:
             self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'uid'}).status_code, 503)
             prepare.assert_called_once_with('uid')
@@ -42,7 +42,7 @@ class EtechIdentityLookupTests(TestCase):
 
     def test_prepared_user_is_read_back_and_uid_alias_is_rejected(self):
         with patch('cloudfile_ext.v2.http.Profile.objects.filter', return_value=Mock(values_list=Mock(return_value=[]))), \
-                patch('cloudfile_ext.v2.etech_directory.prepare_user', return_value='new@auth.local'), \
+                patch('cloudfile_ext.v2.directory_adapter.prepare_user', return_value='new@auth.local'), \
                 patch('cloudfile_ext.v2.http.Profile.objects.get_profile_by_user', return_value=SimpleNamespace(login_id='uid')) as profile, \
                 patch('cloudfile_ext.v2.http.User.objects.get', return_value=SimpleNamespace(username='new@auth.local', is_active=True)):
             self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'uid'}).status_code, 200)
@@ -52,7 +52,7 @@ class EtechIdentityLookupTests(TestCase):
     def test_ambiguous_or_case_aliased_uid_cannot_prepare_or_select_a_user(self):
         for rows in ([('a@auth.local', 'uid'), ('b@auth.local', 'uid')], [('a@auth.local', 'UID')]):
             with patch('cloudfile_ext.v2.http.Profile.objects.filter', return_value=Mock(values_list=Mock(return_value=rows))), \
-                    patch('cloudfile_ext.v2.etech_directory.prepare_user') as prepare:
+                    patch('cloudfile_ext.v2.directory_adapter.prepare_user') as prepare:
                 self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'uid'}).status_code, 409)
                 prepare.assert_not_called()
 
@@ -68,12 +68,12 @@ class EtechIdentityLookupTests(TestCase):
     def test_request_alias_is_ignored(self):
         from cloudfile_ext.v2.errors import IdentityConflict
         with patch('cloudfile_ext.v2.http.Profile.objects.filter', return_value=Mock(values_list=Mock(return_value=[]))), \
-                patch('cloudfile_ext.v2.etech_directory.prepare_user', side_effect=IdentityConflict()) as prepare:
+                patch('cloudfile_ext.v2.directory_adapter.prepare_user', side_effect=IdentityConflict()) as prepare:
             self.assertEqual(self.request({'external_user_id': 'uid', 'login_id': 'uid', 'login_email': 'attacker@auth.local'}).status_code, 409)
             prepare.assert_called_once_with('uid')
 
 
-class EtechOAuthBindingTests(TestCase):
+class EnterpriseDirectoryOAuthBindingTests(TestCase):
     def test_oidc_login_adds_nonce_and_native_oauth_clears_oidc_mode(self):
         from cloudfile_ext.v2.oidc import oidc_login
         request = APIRequestFactory().get('/cfile/oidc/login/')
@@ -137,7 +137,7 @@ class EtechOAuthBindingTests(TestCase):
         from cloudfile_ext.v2.errors import IdentityUnavailable
         with patch.object(views.settings, 'CF_DIRECTORY_URL',
                           'https://directory.example.test/directory', create=True), \
-             patch('cloudfile_ext.v2.etech_directory.ensure_subject',
+             patch('cloudfile_ext.v2.directory_adapter.ensure_subject',
                    side_effect=IdentityUnavailable('offline')), \
              patch.object(views.auth, 'logout') as logout:
             response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid')
@@ -199,8 +199,8 @@ class EtechOAuthBindingTests(TestCase):
 
     def test_signed_oidc_identity_uses_v2_jit_and_oauth_remains_reuse_only(self):
         with patch.object(views.settings, 'CF_DIRECTORY_URL', 'https://directory.test', create=True), \
-                patch('cloudfile_ext.v2.etech_directory.provision_oidc_user', return_value='existing@auth.local') as provision, \
-                patch('cloudfile_ext.v2.etech_directory.ensure_subject'):
+                patch('cloudfile_ext.v2.directory_adapter.provision_oidc_user', return_value='existing@auth.local') as provision, \
+                patch('cloudfile_ext.v2.directory_adapter.ensure_subject'):
             response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True)
         self.assertEqual(response.status_code, 302)
         provision.assert_called_once_with(uid='business-uid', provider=views.OAUTH_PROVIDER, subject='trusted-sub')
@@ -208,7 +208,7 @@ class EtechOAuthBindingTests(TestCase):
 
     def test_missing_signed_business_uid_cannot_provision_even_with_userinfo_uid(self):
         with patch.object(views.settings, 'CF_DIRECTORY_URL', 'https://directory.test', create=True), \
-                patch('cloudfile_ext.v2.etech_directory.provision_oidc_user') as provision:
+                patch('cloudfile_ext.v2.directory_adapter.provision_oidc_user') as provision:
             response, authenticate, bind = self.callback(None, 'existing@auth.local', 'business-uid', oidc=True, id_uid=None)
         self.assertEqual(response, 'binding-error')
         provision.assert_not_called()
@@ -225,9 +225,9 @@ class EtechOAuthBindingTests(TestCase):
             session.assert_not_called()
 
 
-class EtechGroupPreparationTests(TestCase):
+class EnterpriseDirectoryGroupPreparationTests(TestCase):
     def setUp(self):
-        lookup = patch('cloudfile_ext.v2.etech_directory.lookup_group', return_value=None)
+        lookup = patch('cloudfile_ext.v2.directory_adapter.lookup_group', return_value=None)
         self.lookup = lookup.start()
         self.addCleanup(lookup.stop)
 
@@ -238,19 +238,19 @@ class EtechGroupPreparationTests(TestCase):
         return GroupResolve.as_view()(request)
 
     def test_group_is_proved_by_trusted_catalog_and_not_name(self):
-        with patch('cloudfile_ext.v2.etech_directory.prepare_group', return_value=42) as prepare:
+        with patch('cloudfile_ext.v2.directory_adapter.prepare_group', return_value=42) as prepare:
             self.assertEqual(self.request('role:r1').data, {'group_id': 42})
             prepare.assert_called_once_with('role:r1')
             self.assertEqual(self.request('role:r1', staff=False).status_code, 403)
 
     def test_catalog_failure_and_conflicting_identity_deny(self):
         from cloudfile_ext.v2.errors import IdentityUnavailable, IdentityConflict
-        with patch('cloudfile_ext.v2.etech_directory.prepare_group', side_effect=IdentityUnavailable()):
+        with patch('cloudfile_ext.v2.directory_adapter.prepare_group', side_effect=IdentityUnavailable()):
             self.assertEqual(self.request('org1').status_code, 503)
-        with patch('cloudfile_ext.v2.etech_directory.prepare_group', side_effect=IdentityConflict()):
+        with patch('cloudfile_ext.v2.directory_adapter.prepare_group', side_effect=IdentityConflict()):
             self.assertEqual(self.request('org1').status_code, 409)
 
     def test_existing_mapping_allows_revocation_when_directory_entity_is_gone(self):
         self.lookup.return_value=42
-        with patch('cloudfile_ext.v2.etech_directory.prepare_group',side_effect=AssertionError('must not reprovision')):
+        with patch('cloudfile_ext.v2.directory_adapter.prepare_group',side_effect=AssertionError('must not reprovision')):
             self.assertEqual(self.request('role:r1').data,{'group_id':42})

@@ -99,11 +99,11 @@ class OIDCProvisioningTests(unittest.TestCase):
         with self.assertRaises(IdentityUnavailable): self.login()
         self.assertEqual(len(self.facts.social), 1)
 
-    def test_generic_preparation_retains_opaque_naming_but_missing_etech_account_cannot_request_it(self):
+    def test_generic_preparation_retains_opaque_naming_but_missing_external_account_cannot_request_it(self):
         username = self.native.prepare(uid='generic', login_name='Generic user')
         self.assertRegex(username, r'^[a-f0-9]{32}@auth\.local$')
         with self.assertRaises(IdentityConflict):
-            self.native.prepare(uid='etech', login_name='Etech user', account=None)
+            self.native.prepare(uid='external', login_name='enterprise Directory user', account=None)
         self.assertEqual(self.facts.created, [username])
 
     def test_provider_subject_conflict_is_rejected_before_any_new_account(self):

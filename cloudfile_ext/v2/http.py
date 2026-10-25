@@ -29,8 +29,8 @@ class IdentityResolve(APIView):
         username = rows[0][0] if rows else None
         if username is None:
             # A staff request is not identity proof: independently read the
-            # scoped Etech Directory before creating any native account.
-            from .etech_directory import prepare_user
+            # scoped enterprise Directory before creating any native account.
+            from .directory_adapter import prepare_user
             from .errors import IdentityConflict, IdentityUnavailable
             try:
                 username = prepare_user(uid)
@@ -40,7 +40,7 @@ class IdentityResolve(APIView):
                 return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Trusted user preparation unavailable; sign in through SSO or restore Directory.')
         profile = Profile.objects.get_profile_by_user(username)
         if (profile is None or profile.login_id != uid
-                or username.lower() in ('cfadmin@auth.local', 'cfadmin@etech.com')):
+                or username.lower() in ('cfadmin@auth.local',)):
             return api_error(status.HTTP_409_CONFLICT, 'Native UID binding conflict.')
         try:
             user = User.objects.get(email=username)
@@ -53,7 +53,7 @@ class IdentityResolve(APIView):
 
 
 class GroupResolve(APIView):
-    """Prepare an exact trusted Etech entity as a native CE Group."""
+    """Prepare an exact trusted enterprise Directory entity as a native CE Group."""
     authentication_classes = (TokenAuthentication, SessionAuthentication)
     permission_classes = (IsAdminUser,)
 
@@ -62,7 +62,7 @@ class GroupResolve(APIView):
         if (not isinstance(external, str) or not external or external != external.strip()
                 or external == 'role:' or len(external) > 225):
             return api_error(status.HTTP_400_BAD_REQUEST, 'External group ID required.')
-        from .etech_directory import prepare_group, lookup_group
+        from .directory_adapter import prepare_group, lookup_group
         from .errors import IdentityConflict
         try:
             # Catalog verifies type/namespace/exact ID and native flat Group;
@@ -76,7 +76,7 @@ class GroupResolve(APIView):
 
 
 class CatalogSync(APIView):
-    """Etech PowerJob trigger; CloudFile reads only trusted entity catalog."""
+    """enterprise Provider trigger; CloudFile reads only trusted entity catalog."""
     authentication_classes = (TokenAuthentication, SessionAuthentication)
     permission_classes = (IsAdminUser,)
 
@@ -85,7 +85,7 @@ class CatalogSync(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, 'Catalog trigger accepts no user-supplied snapshot.')
         if not request.user.admin_permissions.can_manage_group():
             return api_error(status.HTTP_403_FORBIDDEN, 'Native group management denied.')
-        from .etech_directory import sync_entity_catalog
+        from .directory_adapter import sync_entity_catalog
         try:
             result = sync_entity_catalog()
         except Exception:

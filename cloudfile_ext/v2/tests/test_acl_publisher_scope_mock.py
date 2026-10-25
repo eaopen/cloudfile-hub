@@ -16,7 +16,7 @@ from cloudfile_ext.v2.acl_store import ACLStore, RevisionConflict, path_digest
 REPO = "00000000-0000-4000-8000-000000000001"
 
 
-def rule(path, permission="r", provider="etech"):
+def rule(path, permission="r", provider="external"):
     return Rule(REPO, path, provider, "user", "user", "uid-42", permission)
 
 
@@ -123,9 +123,9 @@ class ACLPublisherScopeTests(unittest.TestCase):
 
     def publish(self, store, db, *, managed, desired, expected=None):
         if expected is None:
-            expected = fingerprint(db.snapshot(REPO, "etech"))
+            expected = fingerprint(db.snapshot(REPO, "external"))
         with patch.object(store, "transfer_fence", return_value=nullcontext()):
-            return store.replace_owned(REPO, "etech", expected=expected,
+            return store.replace_owned(REPO, "external", expected=expected,
                                        managed=managed, desired=desired)
 
     def test_only_listed_natural_keys_are_changed(self):
@@ -134,8 +134,8 @@ class ACLPublisherScopeTests(unittest.TestCase):
         outcome = self.publish(store, db, managed=[key_of(own)], desired=[new])
         self.assertEqual((outcome["updated"], outcome["deleted"], outcome["unchanged"]),
                          (1, 0, 0))
-        self.assertEqual(db.rules[("etech", key_of(own))][0], new)
-        self.assertEqual(db.rules[("etech", key_of(manual))], (manual, "r2"))
+        self.assertEqual(db.rules[("external", key_of(own))][0], new)
+        self.assertEqual(db.rules[("external", key_of(manual))], (manual, "r2"))
         self.assertEqual(db.rules[("another", key_of(other))], (other, "r3"))
         self.assertEqual((db.commits, db.invalidations), (1, 1))
 
@@ -145,14 +145,14 @@ class ACLPublisherScopeTests(unittest.TestCase):
             self.publish(store, db, managed=[key_of(own)],
                          desired=[rule("/Manual", "rw")])
         self.assertEqual((db.writes, db.commits), (0, 0))
-        self.assertEqual(db.rules[("etech", key_of(manual))][0], manual)
+        self.assertEqual(db.rules[("external", key_of(manual))][0], manual)
 
     def test_delete_only_explicitly_managed_key(self):
         store, db, own, manual, _ = self.new_store()
         outcome = self.publish(store, db, managed=[key_of(own)], desired=[])
         self.assertEqual(outcome["deleted"], 1)
-        self.assertNotIn(("etech", key_of(own)), db.rules)
-        self.assertIn(("etech", key_of(manual)), db.rules)
+        self.assertNotIn(("external", key_of(own)), db.rules)
+        self.assertIn(("external", key_of(manual)), db.rules)
 
     def test_stale_cas_refuses_batch_without_writes(self):
         store, db, own, manual, _ = self.new_store()
@@ -160,7 +160,7 @@ class ACLPublisherScopeTests(unittest.TestCase):
             self.publish(store, db, expected="0" * 64,
                          managed=[key_of(own)], desired=[rule("/Managed", "rw")])
         self.assertEqual((db.writes, db.commits), (0, 0))
-        self.assertEqual(db.rules[("etech", key_of(own))], (own, "r1"))
+        self.assertEqual(db.rules[("external", key_of(own))], (own, "r1"))
 
     def test_retry_with_current_fingerprint_is_idempotent(self):
         store, db, own, _, _ = self.new_store()

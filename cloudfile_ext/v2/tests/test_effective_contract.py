@@ -28,8 +28,8 @@ class EffectiveContractTests(unittest.TestCase):
         self.api.check_permission.return_value = 'r'
         self.rules = Mock()
         self.rules.library.return_value = (
-            Rule(RID, '/writable', 'etech', 'user', 'user', 'uid', 'rw'),)
-        self.principal = Principal('etech', 'uid')
+            Rule(RID, '/writable', 'external', 'user', 'user', 'uid', 'rw'),)
+        self.principal = Principal('external', 'uid')
         ttl = patch('cloudfile_ext.v2.acl_runtime.cache_ttl', return_value=0)
         ttl.start()
         self.addCleanup(ttl.stop)
@@ -56,7 +56,7 @@ class EffectiveContractTests(unittest.TestCase):
     def test_file_uses_exact_native_resource_and_shared_scope_stays_bounded(self):
         self.api.check_permission.return_value = None
         self.rules.library.return_value = (
-            Rule(RID, '/writable', 'etech', 'user', 'user', 'uid', 'rw', True, True),)
+            Rule(RID, '/writable', 'external', 'user', 'user', 'uid', 'rw', True, True),)
         result, _ = self.request('/writable/proof.txt', kind='file')
         self.assertEqual(result.status_code, 200)
         self.assertTrue(result.data['write'])
@@ -75,7 +75,7 @@ class EffectiveContractTests(unittest.TestCase):
 
     def test_unqualified_user_gets_403(self):
         self.api.check_permission.return_value = None
-        self.principal = Principal('etech', 'other-user')
+        self.principal = Principal('external', 'other-user')
         result, _ = self.request()
         self.assertEqual(result.status_code, 403)
         self.assertEqual(result.data, {'code': 'ACL_DENIED'})
@@ -86,7 +86,7 @@ class EffectiveContractTests(unittest.TestCase):
         self.assertEqual(result.status_code, 200)
         self.assertFalse(result.data['write'])
         self.api.check_permission.return_value = None
-        self.principal = Principal('etech', 'other-user')
+        self.principal = Principal('external', 'other-user')
         result, _ = self.request('/', staff=True)
         self.assertEqual(result.status_code, 403)
 

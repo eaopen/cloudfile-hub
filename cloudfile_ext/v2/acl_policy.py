@@ -160,7 +160,7 @@ def resolve(repo_id, path, principal, native_permission, rules, *, hard_readonly
     """Evaluate canonical dir path; final callers still require C/Go enforcement.
 
     native_permission is current CE r/rw or None; admin is normalized to rw
-    for content, not for Etech management authority. A non-library member only
+    for content, not for enterprise Directory management authority. A non-library member only
     qualifies at a positive share_mode=1 directory root, never by an ACL row
     alone. Ancestor invisibility/denial prevents traversal. A separately shared
     subtree is a new navigation root and reveals no parent directories.

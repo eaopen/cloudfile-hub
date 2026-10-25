@@ -113,11 +113,11 @@ class FreshDatabaseTest(unittest.TestCase):
 
     def projector(self, fetch):
         result = Memberships(self.connection, self.redis, self.identity, account_schema=self.names['account'],
-                             provider='etech', fetch=fetch, ttl=30)
+                             provider='external', fetch=fetch, ttl=30)
         self.key = result._key('uid-1', self.username)
         return result
 
-    def group(self, kind='role', external_id='r1', provider='etech'):
+    def group(self, kind='role', external_id='r1', provider='external'):
         def create(name):
             with self.admin.cursor() as cursor:
                 cursor.execute('INSERT INTO ' + self.names['account'] + '.`Group`(group_name,creator_name,timestamp,parent_group_id) VALUES(%s,%s,0,0)', (name, 'native-admin'))
@@ -127,7 +127,7 @@ class FreshDatabaseTest(unittest.TestCase):
 
     def test_existing_group_lookup_uses_exact_namespace_and_native_flat_group(self):
         from types import SimpleNamespace
-        from cloudfile_ext.v2.etech_directory import lookup_group
+        from cloudfile_ext.v2.directory_adapter import lookup_group
         group = self.group()
         self.query("UPDATE cf_sso_group_map SET namespace='role' WHERE group_id=%s", (group,))
         with patch('django.db.connection', self.connection), \
@@ -178,7 +178,7 @@ class FreshDatabaseTest(unittest.TestCase):
         for permission, path, shared in (('none', '/project', 0), ('invisible', '/project', 1), ('r', '/', 1)):
             with self.assertRaises(pymysql.MySQLError):
                 self.query('INSERT INTO cf_dir_acl VALUES(%s,%s,%s,%s,%s,%s,%s,%s,1,%s,%s)',
-                           (str(uuid4()), b'x' * 32, path, 'user', 'etech', 'user', 'uid-1', permission, shared, str(uuid4())))
+                           (str(uuid4()), b'x' * 32, path, 'user', 'external', 'user', 'uid-1', permission, shared, str(uuid4())))
 
     def test_renamed_login_keeps_account_and_uid_cannot_change(self):
         self.assertEqual(self.identity.bind(subject='subject-one', uid='uid-1', login_name='E999'), self.username)

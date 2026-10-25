@@ -13,10 +13,10 @@ class SubjectAdapterSelectionTests(TestCase):
         self.assertIsNone(subject_adapter(SimpleNamespace()))
         self.assertIsNone(subject_adapter(SimpleNamespace(CF_DIRECTORY_URL='')))
 
-    def test_existing_directory_url_keeps_etech_defaults(self):
+    def test_existing_directory_url_keeps_external_defaults(self):
         self.assertEqual(
             subject_adapter(SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test')),
-            ('etech', 'cloudfile_ext.v2.etech_directory.ensure_subject'))
+            ('external', 'cloudfile_ext.v2.directory_adapter.ensure_subject'))
 
     def test_explicit_custom_provider_supports_its_own_directory_contract(self):
         self.assertEqual(subject_adapter(SimpleNamespace(
@@ -61,7 +61,7 @@ class CurrentPrincipalSelectionTests(TestCase):
             result = current_principal(username)
             return result, imported, loader, connection
 
-    def test_standalone_numeric_uid_does_not_contact_etech(self):
+    def test_standalone_numeric_uid_does_not_contact_external(self):
         result, imported, loader, connection = self.principal(
             '10280993', SimpleNamespace(CF_DIRECTORY_URL=''))
         self.assertEqual((result.provider, result.uid), ('native-local', USER))
@@ -69,24 +69,24 @@ class CurrentPrincipalSelectionTests(TestCase):
         loader.assert_not_called()
         connection.assert_not_called()
 
-    def test_existing_etech_directory_is_selected_for_numeric_uid(self):
+    def test_existing_directory_adapter_is_selected_for_numeric_uid(self):
         result, imported, loader, connection = self.principal(
             '10280993', SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test'),
             groups=[('org', 'directory', 'dept-1')])
-        self.assertEqual((result.provider, result.uid), ('etech', '10280993'))
+        self.assertEqual((result.provider, result.uid), ('external', '10280993'))
         self.assertIn(('org', 'directory', 'dept-1'), result.groups)
-        imported.assert_called_once_with('cloudfile_ext.v2.etech_directory.ensure_subject')
+        imported.assert_called_once_with('cloudfile_ext.v2.directory_adapter.ensure_subject')
         loader.assert_called_once_with('10280993', USER)
         connection.assert_called_once()
 
     def test_enterprise_alphanumeric_uid_is_not_treated_as_native(self):
         config = SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test')
         result, imported, loader, connection = self.principal('employee-A', config)
-        self.assertEqual((result.provider, result.uid), ('etech', 'employee-A'))
+        self.assertEqual((result.provider, result.uid), ('external', 'employee-A'))
         loader.assert_called_once_with('employee-A', USER)
         connection.assert_called_once()
 
-    def test_explicit_custom_provider_works_without_etech_directory_url(self):
+    def test_explicit_custom_provider_works_without_directory_adapter_url(self):
         config = SimpleNamespace(CF_ACL_PROVIDER='corp',
                                  CF_ACL_SUBJECT_ENSURE='package.directory.refresh')
         result, imported, loader, connection = self.principal(
@@ -97,11 +97,11 @@ class CurrentPrincipalSelectionTests(TestCase):
         loader.assert_called_once_with('A-38', USER)
         connection.assert_called_once()
 
-    def test_etech_business_admin_uses_trusted_directory_not_native(self):
+    def test_external_business_admin_uses_trusted_directory_not_native(self):
         config = SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test')
         result, imported, loader, connection = self.principal(
             '9', config, username='admin@auth.local')
-        self.assertEqual((result.provider, result.uid), ('etech', '9'))
+        self.assertEqual((result.provider, result.uid), ('external', '9'))
         loader.assert_called_once_with('9', 'admin@auth.local')
         connection.assert_called_once()
 

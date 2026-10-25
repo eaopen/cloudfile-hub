@@ -2,7 +2,7 @@
 
 JSON contains input/expected result only and can also be consumed by Server
 C/Go contract tests. These prove the pure policy, not native file-byte checks
-or the real Etech integration.
+or the real enterprise integration.
 """
 import json
 from pathlib import Path

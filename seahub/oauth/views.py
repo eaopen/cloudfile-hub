@@ -268,7 +268,7 @@ def oauth_callback(request):
         logger.warning('OAuth provider did not supply a stable user identifier')
         return render_error(request, _('Error, please contact administrator.'))
     if getattr(settings, 'CF_DIRECTORY_URL', '') and not strict_uid:
-        # Etech Directory deployments cannot reuse a legacy employee-number
+        # enterprise Directory deployments cannot reuse a legacy employee-number
         # mapping: that would overwrite the UID after a successful login.
         logger.warning('Directory login requires userId mapped to login_id')
         return render_error(request, _('Error, please contact administrator.'))
@@ -279,7 +279,7 @@ def oauth_callback(request):
             return render_error(request, _('Error, please contact administrator.'))
         try:
             if protocol == 'oidc':
-                # All strict OIDC UID bindings (not only Etech) require that
+                # All strict OIDC UID bindings (not only enterprise Directory) require that
                 # the business UID was asserted in the signed ID Token.
                 # Never select an existing CE UID owner from UserInfo alone.
                 from cloudfile_ext.v2.oidc import require_signed_business_uid
@@ -287,7 +287,7 @@ def oauth_callback(request):
             if protocol == 'oidc' and getattr(settings, 'CF_DIRECTORY_URL', ''):
                 # Only the trusted Directory integration can provision; pure
                 # standalone OIDC still reuses an already-bound CE UID.
-                from cloudfile_ext.v2.etech_directory import provision_oidc_user
+                from cloudfile_ext.v2.directory_adapter import provision_oidc_user
                 email = provision_oidc_user(uid=oauth_user_info['login_id'],
                                            provider=OAUTH_PROVIDER, subject=oauth_user_info['uid'])
             else:
@@ -353,11 +353,11 @@ def oauth_callback(request):
                 or user.is_active != 1):
             logger.warning('Trusted OAuth UID returned a different native user')
             return render_error(request, _('Error, please contact administrator.'))
-        # For configured Etech Directory deployments, refuse login when UID
+        # For configured enterprise Directory deployments, refuse login when UID
         # membership cannot be refreshed. Do this BEFORE issuing any session.
         if getattr(settings, 'CF_DIRECTORY_URL', ''):
             try:
-                from cloudfile_ext.v2.etech_directory import ensure_subject
+                from cloudfile_ext.v2.directory_adapter import ensure_subject
                 ensure_subject(oauth_user_info['login_id'], email)
             except Exception:
                 logger.warning('Trusted OAuth UID directory preparation failed')

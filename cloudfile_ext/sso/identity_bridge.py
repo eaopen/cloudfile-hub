@@ -69,7 +69,7 @@ def resolve_eap_pairs(pairs, fetch=None, batch_size=256):
         native = existing.get(uid)
         # The system owner is independent of EAP employees and is never synced.
         if (employee and employee.lower() == 'cfadmin') or (
-                native and native.lower() in ('cfadmin@etech.com', 'cfadmin@auth.local')):
+                native and native.lower() in ('cfadmin@auth.local',)):
             continue
         if native:
             if native in native_to_uid and native_to_uid[native] != uid:
