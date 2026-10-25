@@ -26,6 +26,12 @@ jobs:
       - name: Validate additive ACL batch and shared cache contracts
         run: python3 -m unittest cloudfile_ext.v2.tests.test_acl_batch_pure
 
+      - name: Validate startup-only enterprise administrator roster (pure Python)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_admin_startup_pure -v
+
+      - name: Verify one-shot administrator SQL transaction control flow (mocked)
+        run: python3 -m unittest cloudfile_ext.v2.tests.test_admin_startup_sql_mock -v
+
       - name: Validate fresh-install SQL dumps mirror fork migrations
         run: python3 -m unittest cloudfile_ext.v2.tests.test_fresh_schema
 
