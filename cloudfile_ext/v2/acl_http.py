@@ -421,11 +421,18 @@ class NativeACLCheck(APIView):
             checks = data['checks']
             if not isinstance(checks, list) or not 1 <= len(checks) <= 4096:
                 raise ValueError()
-            authority = Authority(data['username'])
+            # One authorization authority per call. Writes must read current
+            # ACL rows, not a cross-request TTL cache; per-request decisions
+            # still reuse the same library/native permission snapshot.
+            for check in checks:
+                if (not isinstance(check, dict) or set(check) != {'path', 'kind', 'action'}
+                        or check['action'] not in ('read', 'write')):
+                    raise ValueError()
+            only_write = not partial and all(check['action'] == 'write' for check in checks)
+            authority = Authority(data['username'], cache_rules=not any(
+                check['action'] == 'write' for check in checks))
             permissions = []
             for check in checks:
-                if set(check) != {'path', 'kind', 'action'} or check['action'] not in ('read', 'write'):
-                    raise ValueError()
                 decision = authority.effective(data['repo_id'], check['path'], check['kind'])
                 if not (decision.can_read if check['action'] == 'read' else decision.can_write):
                     if not partial:
@@ -438,8 +445,13 @@ class NativeACLCheck(APIView):
             # when it has no library grant at all, and it needs to know whether
             # the qualified share root is r or rw: probing again with
             # action=write would double the round trip for every write.
-            return response({'allowed': True, 'contract': 'cf-acl-v1',
-                             'permissions': permissions})
+            # Final-commit callers need an all-or-deny verdict, not 4096
+            # repeated 'rw' strings. Omit levels for write-only batches so the
+            # existing 4 KB native HTTP reply limit never rejects a valid batch.
+            result = {'allowed': True, 'contract': 'cf-acl-v1'}
+            if not only_write:
+                result['permissions'] = permissions
+            return response(result)
         except Exception as error:
             return failure(error)
 
