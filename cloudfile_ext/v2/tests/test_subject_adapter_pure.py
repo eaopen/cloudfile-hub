@@ -1,9 +1,13 @@
 """Fast dependency-free tests for standalone and enterprise selection."""
 from types import SimpleNamespace
+from datetime import datetime, timedelta, timezone
+from unittest.mock import patch
 import unittest
 
 from cloudfile_ext.v2.subject_adapter import (InvalidSubjectAdapter, selected_adapter,
-    native_admin_identity, reserved_identity_conflict)
+    native_admin_identity, reserved_identity_conflict, provider_name,
+    _namespace_from_entities)
+from cloudfile_ext.v2.errors import IdentityUnavailable
 
 
 class SubjectAdapterPureTests(unittest.TestCase):
@@ -57,6 +61,46 @@ class SubjectAdapterPureTests(unittest.TestCase):
             with self.subTest(provider=provider, ensure=ensure), self.assertRaises(InvalidSubjectAdapter):
                 selected_adapter(SimpleNamespace(
                     CF_ACL_PROVIDER=provider, CF_ACL_SUBJECT_ENSURE=ensure))
+
+    def test_trusted_directory_provider_precedence_and_generic_fallback(self):
+        config = SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test',
+                                 CF_DIRECTORY_KEY_ID='key', CF_DIRECTORY_SECRET='x' * 32)
+        with patch('cloudfile_ext.v2.subject_adapter._trusted_directory_namespace',
+                   return_value='etech') as loader:
+            self.assertEqual(provider_name(config), 'etech')
+            self.assertEqual(selected_adapter(config), ('etech', None))
+            self.assertEqual(loader.call_count, 2)
+        with patch('cloudfile_ext.v2.subject_adapter._trusted_directory_namespace',
+                   return_value='etech') as loader:
+            explicit = SimpleNamespace(**vars(config), CF_DIRECTORY_PROVIDER='manual')
+            self.assertEqual(selected_adapter(explicit), ('manual', None))
+            loader.assert_not_called()
+        with patch('cloudfile_ext.v2.subject_adapter._trusted_directory_namespace',
+                   return_value=None):
+            self.assertEqual(selected_adapter(config), ('external', None))
+
+    def test_declared_provider_requires_fresh_verified_entities_snapshot(self):
+        def snapshot(**extra):
+            data = dict(contract_version='2.0', view='entities',
+                        generated_at=datetime.now(timezone.utc).isoformat(),
+                        groups=[dict(subject_type='org', namespace='directory',
+                                     external_id='1', name='Engineering')])
+            data.update(extra)
+            return data
+
+        self.assertEqual(_namespace_from_entities(snapshot(provider='etech')), 'etech')
+        self.assertIsNone(_namespace_from_entities(snapshot()))
+        for value in ('', ' etech', 'etech ', 'native-local', 'x' * 33):
+            with self.subTest(value=value), self.assertRaises(InvalidSubjectAdapter):
+                _namespace_from_entities(snapshot(provider=value))
+        for facts in (
+            snapshot(contract_version='1.0', provider='etech'),
+            snapshot(provider='etech', generated_at=(
+                datetime.now(timezone.utc) - timedelta(minutes=10)).isoformat()),
+            snapshot(provider='etech', groups=[dict(subject_type='bad')]),
+        ):
+            with self.subTest(facts=facts), self.assertRaises(IdentityUnavailable):
+                _namespace_from_entities(facts)
 
     def test_builtin_admin_bypass_requires_exact_account_and_uid(self):
         for username in ('cfadmin@auth.local',):
