@@ -6,11 +6,11 @@ source scans, audit archiving, metadata upkeep. It is not a separate service --
 the cf-worker container runs this command from the same image as the
 application.
 
-Registration happens in ``CloudFileConfig.ready()``. Enterprise Directory
-org/role catalog synchronization uses this worker at a default 600-second
-interval. It never provisions users or GroupUser during permission checks.
-Login remains the existing user membership synchronization point. With no
-enabled periodic task this command exits 0 immediately.
+Registration happens in ``CloudFileConfig.ready()`` for optional features.
+Enterprise organization/role synchronization is NOT scheduled here: the external
+source application explicitly invokes the existing administrator catalog API.
+With no registered periodic tasks this command exits 0 immediately and Docker
+does not start it as part of the default stack.
 """
 
 import logging

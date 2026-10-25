@@ -2,6 +2,7 @@
 from contextlib import contextmanager, nullcontext
 from datetime import datetime, timezone
 from types import SimpleNamespace
+from pathlib import Path
 from unittest import TestCase
 from unittest.mock import Mock, patch
 
@@ -136,22 +137,15 @@ class DirectoryRuntimeTests(TestCase):
             with self.assertRaises(IdentityUnavailable):Directory().get('/groups?view=entities')
 
 
-    def test_directory_catalog_is_registered_at_ten_minutes_without_requests(self):
-        from cloudfile_ext.apps import CloudFileConfig
-        scheduled = Mock()
-        with override_settings(CF_DIRECTORY_URL='https://directory.test',
-                               CF_DIRECTORY_SYNC_INTERVAL_SECONDS=600):
-            CloudFileConfig._register_directory_catalog(scheduled)
-        scheduled.register_periodic_task.assert_called_once()
-        name, interval, fn = scheduled.register_periodic_task.call_args.args
-        self.assertEqual((name, interval), ('directory-entities', 600))
-        self.assertEqual(fn.__name__, 'sync_entity_catalog')
-        scheduled.reset_mock()
-        with override_settings(CF_DIRECTORY_URL=''):
-            CloudFileConfig._register_directory_catalog(scheduled)
-        scheduled.register_periodic_task.assert_not_called()
+    def test_external_catalog_sync_remains_available_without_scheduler(self):
+        # Nothing in CloudFile's Django AppConfig creates an org/role polling job.
+        # Etech PowerJob and other integrations call CatalogSync explicitly.
+        from pathlib import Path
+        source = (Path(__file__).resolve().parents[2] / 'apps.py').read_text()
+        self.assertNotIn('register_periodic_task', source)
+        self.assertNotIn('_register_directory_catalog', source)
 
-    def test_periodic_entity_sync_updates_only_native_catalog(self):
+    def test_externally_triggered_entity_sync_updates_only_native_catalog(self):
         from cloudfile_ext.v2.directory_adapter import sync_entity_catalog
         def fake_native(group_id):
             return SimpleNamespace(group_name='Department')
