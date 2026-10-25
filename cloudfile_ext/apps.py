@@ -59,7 +59,10 @@ class CloudFileConfig(AppConfig):
         """
         from django.conf import settings
 
-        if not getattr(settings, 'CF_DIRECTORY_URL', ''):
+        # A Directory URL can also be present for startup-only admin roster
+        # synchronization. That configuration must not create a recurring job.
+        if (not getattr(settings, 'CF_ENABLE_SSO', False) or
+                not getattr(settings, 'CF_DIRECTORY_URL', '')):
             return
         interval = getattr(settings, 'CF_DIRECTORY_SYNC_INTERVAL_SECONDS', 600)
         if type(interval) is not int or not 60 <= interval <= 86400:
