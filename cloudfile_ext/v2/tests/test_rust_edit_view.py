@@ -109,7 +109,10 @@ class CheckoutCapabilityTests(unittest.TestCase):
                                       {'repo_id': RID, 'path': FILE})
         force_authenticate(req, SimpleNamespace(username='reader@auth.local',
                                                  is_authenticated=True, is_active=True))
-        with patch('cloudfile_ext.v2.rust_edit.checkout_for_repo', return_value=False), \
+        # Exercise the real helper: an empty allowlist must short-circuit before
+        # checkout_available()/schema discovery, without any Guard SQL.
+        with patch('cloudfile_ext.v2.rust_edit.settings',
+                   SimpleNamespace(CF_CHECKOUT_REPOS=())), \
              patch('cloudfile_ext.v2.rust_edit.connection') as database:
             response = RustCheckoutInfo.as_view()(req)
             self.assertEqual(response.status_code, 200)
