@@ -12715,8 +12715,20 @@ msgid "Editing requires write permission and a writable library."
 msgstr "编辑需要写权限，且资料库必须可写。"
 
 #: frontend/src/components/local-file-dialog/index.js
-msgid "This file is checked out. Use the existing Agent2 task to continue; local viewing remains available."
-msgstr "此文件已签出。请在已有的 Agent2 任务中继续；仍可本地查看。"
+msgid "This file is checked out by another user. Use the existing Agent2 task to continue; local viewing remains available."
+msgstr "此文件已被其他用户签出。请在已有的 Agent2 任务中继续；仍可本地查看。"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "You have checked out this file. Resume the existing Agent2 task to continue; local viewing remains available."
+msgstr "你已签出此文件。请通过“继续独占编辑”恢复已有的 Agent2 任务；仍可本地查看。"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "The lock state could not be confirmed. Editing is disabled until the service is restored; local viewing remains available."
+msgstr "无法确认锁状态。恢复服务前将禁用编辑；仍可本地查看。"
+
+#: frontend/src/components/local-file-dialog/index.js
+msgid "Resume exclusive editing"
+msgstr "继续独占编辑"
 
 #: frontend/src/components/local-file-dialog/index.js
 msgid "Checkout is unavailable or has not been confirmed. Ordinary editing remains available."

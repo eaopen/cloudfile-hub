@@ -65,19 +65,44 @@ test.each([null, { checkout_supported: false, checked_out: false }])('unconfirme
   expect(buttons().map(b => b.disabled)).toEqual([false, false, true]);
 });
 
-test('Guard lookup failure keeps ordinary editing usable', async () => {
+test('an unconfirmed lock state blocks new write tasks, not local viewing', async () => {
   cloudFileAPI.getLocalCheckoutInfo.mockRejectedValue(new Error('offline'));
   await render();
-  expect(buttons().map(b => b.disabled)).toEqual([false, false, true]);
+  expect(buttons().map(b => b.disabled)).toEqual([false, true, true]);
+  expect(container.textContent).toContain('lock state could not be confirmed');
   await click(1);
-  expect(onOpen).toHaveBeenCalledWith(expect.objectContaining({ mode: 'optimistic-edit' }));
+  await click(2);
+  expect(onOpen).not.toHaveBeenCalled();
 });
 
-test('an active Guard blocks new write tasks, including for its owner', async () => {
-  cloudFileAPI.getLocalCheckoutInfo.mockResolvedValue({ data: { ...supported, checked_out: true } });
+test('a 503 lock-info response is unknown, not "not checked out"', async () => {
+  cloudFileAPI.getLocalCheckoutInfo.mockRejectedValue({ response: { status: 503, data: { code: 'EDIT_UNAVAILABLE' } } });
   await render();
   expect(buttons().map(b => b.disabled)).toEqual([false, true, true]);
+  await click(1);
+  expect(onOpen).not.toHaveBeenCalled();
+});
+
+test("another user's active Guard blocks new write tasks", async () => {
+  cloudFileAPI.getLocalCheckoutInfo.mockResolvedValue({
+    data: { ...supported, checked_out: true, checked_out_by_me: false },
+  });
+  await render();
+  expect(buttons().map(b => b.disabled)).toEqual([false, true, true]);
+  expect(container.textContent).toContain('checked out by another user');
   expect(container.textContent).toContain('existing Agent2 task');
+});
+
+test('the Guard owner can resume the existing exclusive task', async () => {
+  cloudFileAPI.getLocalCheckoutInfo.mockResolvedValue({
+    data: { ...supported, checked_out: true, checked_out_by_me: true },
+  });
+  await render();
+  expect(buttons().map(b => b.disabled)).toEqual([false, true, false]);
+  expect(buttons()[2].textContent).toBe('Resume exclusive editing');
+  expect(container.textContent).toContain('Resume the existing Agent2 task');
+  await click(2);
+  expect(onOpen).toHaveBeenCalledWith({ repoID: 'repo', path: '/file.docx', mode: 'exclusive-edit' });
 });
 
 test.each([
