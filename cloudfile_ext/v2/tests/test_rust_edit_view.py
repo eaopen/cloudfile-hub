@@ -8,7 +8,8 @@ from urllib.parse import urlsplit, parse_qs
 import jwt
 from rest_framework.test import APIRequestFactory, force_authenticate
 
-from cloudfile_ext.v2.rust_edit import RustLocalEditOpen, issue_ticket, checkout_available
+from cloudfile_ext.v2.rust_edit import (RustLocalEditOpen, RustCheckoutInfo,
+                                        issue_ticket, checkout_available, checkout_for_repo)
 
 
 RID = "11111111-1111-4111-8111-111111111111"
@@ -21,7 +22,7 @@ class ViewScopeTests(unittest.TestCase):
         req = APIRequestFactory().post(
             "/api/v2.1/cloudfile/edit/v1/open/",
             {"repo_id": RID, "path": FILE, "mode": mode}, format="json")
-        force_authenticate(req, SimpleNamespace(username="reader@auth.local",
+        force_authenticate(req, SimpleNamespace(id=1, username="reader@auth.local",
                                                  is_authenticated=True, is_active=True))
         policy = SimpleNamespace(can_read=read, can_write=write)
         repo = SimpleNamespace(is_virtual=False, encrypted=False, version=1)
@@ -30,7 +31,7 @@ class ViewScopeTests(unittest.TestCase):
         file_entry = SimpleNamespace(mode=stat.S_IFREG | 0o644, obj_id=FILE_ID)
         # Scope denial is tested with Checkout installed; schema discovery has
         # its own tests and must not turn this authorization case into HTTP 503.
-        with patch("cloudfile_ext.v2.rust_edit.checkout_available", return_value=True), \
+        with patch("cloudfile_ext.v2.rust_edit.checkout_for_repo", return_value=True), \
              patch("cloudfile_ext.v2.rust_edit.Profile.objects.get",
                    return_value=SimpleNamespace(login_id="stable-uid")), \
              patch("cloudfile_ext.v2.rust_edit.Authority") as auth, \
@@ -76,6 +77,49 @@ class ViewScopeTests(unittest.TestCase):
 
 
 class CheckoutCapabilityTests(unittest.TestCase):
+    def test_checkout_is_off_without_explicit_repo_selection(self):
+        with patch('cloudfile_ext.v2.rust_edit.settings',
+                   SimpleNamespace(CF_CHECKOUT_REPOS=())), \
+             patch('cloudfile_ext.v2.rust_edit.checkout_available') as available:
+            self.assertFalse(checkout_for_repo(RID))
+            available.assert_not_called()
+
+    def test_checkout_only_for_selected_repo(self):
+        with patch('cloudfile_ext.v2.rust_edit.settings',
+                   SimpleNamespace(CF_CHECKOUT_REPOS=(RID,))), \
+             patch('cloudfile_ext.v2.rust_edit.checkout_available', return_value=True):
+            self.assertTrue(checkout_for_repo(RID))
+            self.assertFalse(checkout_for_repo('22222222-2222-4222-8222-222222222222'))
+
+    def test_selected_repo_is_still_off_when_global_capability_is_disabled(self):
+        with patch('cloudfile_ext.v2.rust_edit.settings',
+                   SimpleNamespace(CF_CHECKOUT_REPOS=(RID,))), \
+             patch('cloudfile_ext.v2.rust_edit.checkout_available', return_value=False):
+            self.assertFalse(checkout_for_repo(RID))
+
+    def test_malformed_selection_type_fails_safe_to_off(self):
+        with patch('cloudfile_ext.v2.rust_edit.settings',
+                   SimpleNamespace(CF_CHECKOUT_REPOS=RID)), \
+             patch('cloudfile_ext.v2.rust_edit.checkout_available') as available:
+            self.assertFalse(checkout_for_repo(RID))
+            available.assert_not_called()
+
+    def test_off_repo_lock_info_never_queries_guard(self):
+        req = APIRequestFactory().get('/api/v2.1/cloudfile/edit/v1/lock-info/',
+                                      {'repo_id': RID, 'path': FILE})
+        force_authenticate(req, SimpleNamespace(id=1, username='reader@auth.local',
+                                                 is_authenticated=True, is_active=True))
+        # Exercise the real helper: an empty allowlist must short-circuit before
+        # checkout_available()/schema discovery, without any Guard SQL.
+        with patch('cloudfile_ext.v2.rust_edit.settings',
+                   SimpleNamespace(CF_CHECKOUT_REPOS=())), \
+             patch('cloudfile_ext.v2.rust_edit.connection') as database:
+            response = RustCheckoutInfo.as_view()(req)
+            self.assertEqual(response.status_code, 200)
+            self.assertEqual(response.data['checkout_supported'], False)
+            database.cursor.assert_not_called()
+
+
     def test_disabled_checkout_never_discovers_schema(self):
         checkout_available.cache_clear()
         try:

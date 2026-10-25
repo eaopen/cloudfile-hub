@@ -54,6 +54,13 @@ def checkout_available():
     return path_checkout_available(connection, schema)
 
 
+def checkout_for_repo(repo_id):
+    """In-memory repository opt-in. OFF libraries never inspect Guard schema."""
+    selected = getattr(settings, 'CF_CHECKOUT_REPOS', ())
+    return (isinstance(selected, (tuple, list, set, frozenset)) and
+            repo_id in selected and checkout_available())
+
+
 def issue_ticket(*, username, uid, repo_id, path, mode, file_id, now, secret):
     """Stateless, path-scoped Agent permit. Never accept a caller-supplied actor."""
     if not isinstance(username, str) or not username or len(username) > 255:
@@ -97,7 +104,7 @@ class RustLocalEditOpen(APIView):
             mode = request.data["mode"]
             if mode not in ("local-view", "optimistic-edit", "exclusive-edit"):
                 return Response({"code": "BAD_EDIT_REQUEST"}, status=400)
-            if mode == "exclusive-edit" and not checkout_available():
+            if mode == "exclusive-edit" and not checkout_for_repo(repo_id):
                 return Response({"code": "CHECKOUT_UNSUPPORTED"}, status=409)
             user = request.user.username
             uid = Profile.objects.get(user=user).login_id
@@ -155,15 +162,15 @@ class RustCheckoutInfo(APIView):
     throttle_classes = (UserRateThrottle,)
 
     def get(self, request):
-        if not checkout_available():
-            # Read-only capability information must not disable ordinary edits.
-            return Response({"checkout_supported": False, "checked_out": False})
         try:
             args = request.query_params
             if set(args) != {"repo_id", "path"} or any(len(args.getlist(k)) != 1 for k in args):
                 raise ValueError()
             repo_id, path = args["repo_id"], args["path"]
             UUID(repo_id)
+            if not checkout_for_repo(repo_id):
+                # OFF: no Guard SQL or schema discovery; ordinary edits remain available.
+                return Response({"checkout_supported": False, "checked_out": False})
             if (not path.startswith("/") or path == "/" or "\\" in path or
                     "//" in path or len(path.encode("utf-8")) > 4096 or
                     any(x in (".", "..") for x in path.split("/"))):
@@ -193,7 +200,8 @@ class RustCheckoutInfo(APIView):
             if expires is None or expires <= timezone.now().replace(tzinfo=None):
                 return Response({"checkout_supported": True, "checked_out": False})
             current_uid = Profile.objects.get(user=viewer).login_id
-            privileged = owner_uid == current_uid or bool(request.user.is_staff)
+            owned_by_me = owner_uid == current_uid
+            privileged = owned_by_me or bool(request.user.is_staff)
             details = {
                 "checkout_supported": True,
                 "checked_out": True,
@@ -202,6 +210,9 @@ class RustCheckoutInfo(APIView):
                 "checked_out_at": started.isoformat() + "Z",
                 "last_activity_at": active.isoformat() + "Z",
                 "expires_at": expires.isoformat() + "Z",
+                # The dialog may offer resume only to the Guard owner; the Rust
+                # Agent still verifies the original Guard proof before resuming.
+                "checked_out_by_me": owned_by_me,
             }
             if privileged:
                 details.update(terminal_type=terminal, terminal_name=name,
