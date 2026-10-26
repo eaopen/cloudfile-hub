@@ -33,7 +33,7 @@ def test_legacy_channel_is_rejected():
         resolve_employee_token('10220942@auth.local', source(context(), 'legacy'))
 
 
-@pytest.mark.parametrize('rows', [[], [('381','one@auth.local'), ('381','two@auth.local')], [('381','cfadmin@external.com')]])
+@pytest.mark.parametrize('rows', [[], [('381','one@auth.local'), ('381','two@auth.local')], [('381','cfadmin@auth.local')]])
 def test_missing_ambiguous_or_system_account_is_rejected(rows):
     with pytest.raises(TokenIdentityError):
         resolve_employee_token('10220942@auth.local', source(context()), lambda _: rows)
@@ -46,3 +46,9 @@ def test_employee_recycling_cannot_reuse_old_uid():
     # fail rather than inherit that user's token or library permissions.
     with pytest.raises(IdentityBridgeError):
         resolve_employee_token('10220942@auth.local', source(changed), lambda _: [('381','old@auth.local')])
+
+
+def test_external_admin_name_is_not_the_reserved_native_account():
+    # Match the exact built-in account; unrelated customer domains remain valid.
+    assert resolve_employee_token('10220942@auth.local', source(context()),
+                                  lambda _: [('381', 'cfadmin@external.com')]) == 'cfadmin@external.com'

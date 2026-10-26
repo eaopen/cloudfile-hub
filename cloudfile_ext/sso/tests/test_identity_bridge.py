@@ -124,11 +124,18 @@ def test_employee_profile_does_not_override_exact_uid_binding():
 
 @pytest.mark.parametrize('employee,native', [
     ('cfadmin', 'native-admin'), ('CFADMIN', 'native-admin'),
-    ('emp-1', 'cfadmin@external.com'), ('emp-1', 'cfadmin@auth.local')])
+    ('emp-1', 'cfadmin@auth.local')])
 def test_system_admin_is_excluded_from_employee_projection(employee, native):
     # System administration remains independent even if a bad feed includes it.
     assert resolve_eap_pairs([{'user_id': 'uid-1', 'employee_no': employee}],
                              fetch=lambda keys: [('uid-1', native)]) == {}
+
+
+def test_external_admin_name_is_not_the_reserved_native_account():
+    # Email prefix alone does not identify the built-in CE administrator.
+    assert resolve_eap_pairs([{'user_id': 'uid-1', 'employee_no': 'emp-1'}],
+                            fetch=lambda keys: [('uid-1', 'cfadmin@external.com')]) == {
+                                'uid-1': 'cfadmin@external.com'}
 
 
 def test_employee_reused_for_different_uid_never_merges_native_accounts():

@@ -39,6 +39,8 @@ class HTTPTests(TestCase):
              patch('cloudfile_ext.v2.acl_http.store') as rules, \
              patch('seaserv.seafile_api.get_dir_id_by_path', return_value='d' * 40), \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
+            # Explicit preferred setting avoids auto-created Mock namespace values.
+            settings.CF_DIRECTORY_PROVIDER = 'external'
             settings.CF_ACL_PROVIDER = 'external'
             rules.return_value.list_path.return_value = []
             result = self.request(DirectoryRules, dict(repo_id=RID, path='/folder'))
@@ -97,6 +99,8 @@ class HTTPTests(TestCase):
         with patch('cloudfile_ext.v2.acl_http.require_repo_manage'), \
              patch('cloudfile_ext.v2.acl_http.store') as rules, \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
+            # Explicit preferred setting avoids auto-created Mock namespace values.
+            settings.CF_DIRECTORY_PROVIDER = 'external'
             settings.CF_ACL_PROVIDER = 'external'
             rules.return_value.mutate.return_value = request['revision']
             result = self.request(DirectoryRules, request, method='post')
