@@ -1,8 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
-import PropTypes from 'prop-types';
 import { Modal, ModalHeader, ModalBody, Button } from 'reactstrap';
-import { cloudFileAPI } from '@/cloudfile/cloudfile-api';
+import PropTypes from 'prop-types';
 import { openV2LocalFile } from '@/cloudfile/agent-local-edit';
+import { cloudFileAPI } from '@/cloudfile/cloudfile-api';
 import { gettext } from '@/utils/constants';
 
 // Shared by the library selection toolbar and the file preview toolbar.

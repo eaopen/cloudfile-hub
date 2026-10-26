@@ -1,10 +1,10 @@
 import React from 'react';
 import PropTypes from 'prop-types';
-import LocalFileDialog from '@/components/local-file-dialog';
 import { getDirentItemMenuList, getBatchMenuList } from '@/components/dirent-operation-menu/contextMenuUtils';
 import { menuHandlers } from '@/components/dirent-operation-menu/menuHandlers';
 import CustomDropdown from '@/components/dropdown';
 import Icon from '@/components/icon';
+import LocalFileDialog from '@/components/local-file-dialog';
 import OpElement from '@/components/op-element';
 import OpIcon from '@/components/op-icon';
 import Tooltip from '@/components/tooltip';
