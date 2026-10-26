@@ -35,6 +35,8 @@ class LibraryBatchHTTPTests(TestCase):
         with patch('cloudfile_ext.v2.acl_http.require_repo_manage') as auth, \
              patch('cloudfile_ext.v2.acl_http.store') as rules, \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
+            # Explicit preferred setting avoids auto-created Mock namespace values.
+            settings.CF_DIRECTORY_PROVIDER = 'external'
             settings.CF_ACL_PROVIDER = 'external'
             rules.return_value.provider_snapshot.return_value = ((RULE, REVISION),)
             result = self.request('get', {'repo_id': RID})
@@ -50,6 +52,8 @@ class LibraryBatchHTTPTests(TestCase):
         with patch('cloudfile_ext.v2.acl_http.require_repo_manage'), \
              patch('cloudfile_ext.v2.acl_http.store') as rules, \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
+            # Explicit preferred setting avoids auto-created Mock namespace values.
+            settings.CF_DIRECTORY_PROVIDER = 'external'
             settings.CF_ACL_PROVIDER = 'external'
             rules.return_value.replace_owned.return_value = dict(
                 fingerprint='a' * 64, inserted=0, updated=1, deleted=0, unchanged=0)
@@ -68,6 +72,8 @@ class LibraryBatchHTTPTests(TestCase):
              patch('cloudfile_ext.v2.acl_http.store') as rules, \
              patch('seaserv.seafile_api.get_dir_id_by_path') as exists, \
              patch('cloudfile_ext.v2.acl_http.settings') as settings:
+            # Explicit preferred setting avoids auto-created Mock namespace values.
+            settings.CF_DIRECTORY_PROVIDER = 'external'
             settings.CF_ACL_PROVIDER = 'external'
             exists.side_effect = lambda repo, path: 'd' * 40 if path == '/shared' else None
             rules.return_value.provider_snapshot.return_value = ((RULE, REVISION),)

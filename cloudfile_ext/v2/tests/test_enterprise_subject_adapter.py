@@ -23,9 +23,15 @@ class SubjectAdapterSelectionTests(TestCase):
             CF_ACL_PROVIDER='corp', CF_ACL_SUBJECT_ENSURE='package.directory.refresh')),
             ('corp', 'package.directory.refresh'))
 
+    def test_directory_accepts_explicit_namespace_without_custom_loader(self):
+        # The built-in Directory adapter needs no custom refresh callback.
+        self.assertEqual(subject_adapter(SimpleNamespace(
+            CF_DIRECTORY_URL='https://directory.example.test', CF_ACL_PROVIDER='corp')),
+            ('corp', None))
+
     def test_half_configured_external_provider_never_downgrades_to_ce(self):
         for config in (
-                SimpleNamespace(CF_DIRECTORY_URL='https://directory.example.test', CF_ACL_PROVIDER='corp'),
+                SimpleNamespace(CF_ACL_PROVIDER='corp'),
                 SimpleNamespace(CF_ACL_SUBJECT_ENSURE='package.directory.refresh'),
                 SimpleNamespace(CF_ACL_PROVIDER='native-local',
                                 CF_ACL_SUBJECT_ENSURE='package.directory.refresh'),
