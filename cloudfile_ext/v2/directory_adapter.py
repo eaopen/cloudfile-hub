@@ -228,17 +228,19 @@ def subject_ready(uid, username):
         return False
 
 
-def ensure_subject(uid, username):
+def ensure_subject(uid, username, *, force=False):
     """Login-only refresh for an already authenticated/created native account.
 
     Never create missing groups as a side effect of user login or ACL lookup.
     External admin-triggered catalog synchronization owns organization/role creation; a
-    missing mapped entity refuses membership projection until the next sync.
+    missing entity grants no membership until catalog sync and a later login.
     """
-    if subject_ready(uid, username):
+    if not force and subject_ready(uid, username):
         return
     with runtime() as (directory, identity, catalog, memberships):
-        memberships.ensure(uid, username)
+        # Explicit SSO login must observe entities synced since the previous
+        # login, even while its bounded readiness marker is still valid.
+        memberships.ensure(uid, username, force=force)
 
 
 def sync_entity_catalog():

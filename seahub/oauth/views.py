@@ -352,7 +352,9 @@ def oauth_callback(request):
         if getattr(settings, 'CF_DIRECTORY_URL', ''):
             try:
                 from cloudfile_ext.v2.directory_adapter import ensure_subject
-                ensure_subject(oauth_user_info['login_id'], email)
+                # A new SSO login must consume newly synced catalog entries
+                # even when a previous partial projection is still cached.
+                ensure_subject(oauth_user_info['login_id'], email, force=True)
             except Exception:
                 logger.warning('Trusted OAuth UID directory preparation failed')
                 return render_error(request, _('Error, please contact administrator.'))
