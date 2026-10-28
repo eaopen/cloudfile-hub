@@ -102,12 +102,20 @@ class DirectoryRuntimeTests(TestCase):
     def test_default_projector_refreshes_only_current_uid_and_proves_entities(self):
         with patch('cloudfile_ext.v2.directory_adapter.runtime',self.runtime):
             ensure_subject('uid','opaque@auth.local')
-        self.memberships.ensure.assert_called_once_with('uid','opaque@auth.local')
+        self.memberships.ensure.assert_called_once_with('uid','opaque@auth.local', force=False)
         # Only an explicit login refreshes current user membership. Missing
         # roles/groups remain unavailable until the scheduled catalog sync.
         self.directory.entities.assert_not_called()
         self.catalog.ensure.assert_not_called()
         self.memberships.fetch.assert_not_called()
+
+    def test_explicit_login_refreshes_even_with_valid_readiness(self):
+        # A partial projection must not hide a subsequently synchronized role.
+        with patch('cloudfile_ext.v2.directory_adapter.subject_ready', return_value=True) as ready, \
+             patch('cloudfile_ext.v2.directory_adapter.runtime', self.runtime):
+            ensure_subject('uid', 'opaque@auth.local', force=True)
+        ready.assert_not_called()
+        self.memberships.ensure.assert_called_once_with('uid', 'opaque@auth.local', force=True)
 
     def test_connection_requires_scoped_service_credential(self):
         with override_settings(CF_DIRECTORY_URL='https://directory.test/eap/cloudDrive/directory',
@@ -205,7 +213,7 @@ class SubjectReadyTests(TestCase):
         def runtime():
             parts = tuple(Mock() for _ in range(4))
             yield parts
-            parts[3].ensure.assert_called_once_with(self.UID, self.USER)
+            parts[3].ensure.assert_called_once_with(self.UID, self.USER, force=False)
         self.runtime.side_effect = runtime
         self.ensure()
         self.runtime.assert_called_once()

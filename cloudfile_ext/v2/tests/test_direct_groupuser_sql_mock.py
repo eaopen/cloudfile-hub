@@ -4,10 +4,13 @@ Models native CE rows and transactional behavior; no real MariaDB or
 Seafile process. Proves the reviewed _project() removes old ancestor grants,
 preserves direct Org/Role and unrelated manual groups, and rolls back on error.
 """
+import ast
+from pathlib import Path
+from contextlib import nullcontext
 from copy import deepcopy
 from datetime import datetime, timezone
 import unittest
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 
 from cloudfile_ext.v2.memberships import Memberships, validate_subject
 
@@ -40,9 +43,7 @@ class Cursor:
         return self.rows
     def execute(self, sql, args=()):
         self.rows = ()
-        maps = {('org', 'directory', 'leaf'): 10,
-                ('org', 'directory', 'parent'): 11,
-                ('role', 'role', 'reviewer'): 12}
+        maps = self.conn.maps
         if sql.startswith('SELECT group_id,is_staff FROM '):
             self.rows = tuple(sorted(self.conn.members.items()))
         elif sql.startswith('SELECT group_id FROM cf_sso_group_map'):
@@ -67,6 +68,7 @@ class Cursor:
 
 class Connection:
     def __init__(self, initial, *, fail_delete=False):
+        self.maps = {DIRECT: 10, PARENT: 11, ROLE: 12}
         self.members = dict(initial)
         self.snapshot = None
         self.fail_delete = fail_delete
@@ -118,6 +120,97 @@ class DirectGroupUserProjectionTests(unittest.TestCase):
                 self.assertEqual(conn.members, {10: 0, 12: 0, 99: 0})
                 self.assertEqual((conn.commits, conn.rollbacks), (1, 0))
                 identity.active.assert_called_once_with(USERNAME, UID, locked=True)
+
+    def test_missing_role_or_org_does_not_block_known_grants_or_revocations(self):
+        # Catalog lag must neither grant an unknown group nor preserve a
+        # revoked ancestor; unrelated native/manual memberships stay intact.
+        for missing in (('role', 'role', 'new-role'), ('org', 'directory', 'new-org')):
+            with self.subTest(missing=missing):
+                conn = Connection({10: 0, 11: 0, 99: 0})
+                projector, _ = self.projector(conn)
+                with self.assertLogs('cloudfile_ext.v2.memberships', level='WARNING') as logs:
+                    projector._project(UID, USERNAME, {DIRECT, ROLE, missing})
+                self.assertEqual(conn.members, {10: 0, 12: 0, 99: 0})
+                self.assertIn('missing_count=1', logs.output[0])
+                self.assertIn('retry=next_sso_login', logs.output[0])
+                self.assertNotIn(USERNAME, logs.output[0])
+                self.assertEqual(conn.commits, 1)
+
+    def test_next_login_force_refreshes_newly_synchronized_role_inside_ttl(self):
+        conn = Connection({99: 0})
+        del conn.maps[ROLE]
+        projector, identity = self.projector(conn)
+        projector._key = Mock(return_value='subject-key')
+        with patch('cloudfile_ext.v2.memberships.database_lock', side_effect=lambda *args: nullcontext()), \
+             patch('cloudfile_ext.v2.memberships.is_ready', return_value=True):
+            with self.assertLogs('cloudfile_ext.v2.memberships', level='WARNING'):
+                projector.ensure(UID, USERNAME, force=True)
+            self.assertEqual(conn.members, {10: 0, 99: 0})
+            projector.redis.set.assert_called_once()
+            # Catalog sync alone changes no user membership. The login boundary
+            # consumes the new mapping even while the old marker is valid.
+            conn.maps[ROLE] = 12
+            projector.ensure(UID, USERNAME)
+            self.assertEqual(conn.members, {10: 0, 99: 0})
+            projector.ensure(UID, USERNAME, force=True)
+            self.assertEqual(conn.members, {10: 0, 12: 0, 99: 0})
+            self.assertEqual(conn.commits, 2)
+
+    def test_sso_callback_forces_adapter_and_membership_refresh(self):
+        # Execute the actual adapter function without importing the CE/Django
+        # service graph; also verify the real OAuth call opts into that path.
+        root = Path(__file__).resolve().parents[3]
+        tree = ast.parse((root / 'seahub/oauth/views.py').read_text())
+        calls = [n for n in ast.walk(tree) if isinstance(n, ast.Call)
+                 and isinstance(n.func, ast.Name) and n.func.id == 'ensure_subject']
+        self.assertEqual(len(calls), 1)
+        self.assertTrue(any(k.arg == 'force' and isinstance(k.value, ast.Constant)
+                            and k.value.value is True for k in calls[0].keywords))
+        tree = ast.parse((root / 'cloudfile_ext/v2/directory_adapter.py').read_text())
+        function = next(n for n in tree.body if isinstance(n, ast.FunctionDef)
+                        and n.name == 'ensure_subject')
+        memberships = Mock()
+        ready = Mock(return_value=True)
+        runtime = Mock(side_effect=lambda: nullcontext((None, None, None, memberships)))
+        namespace = dict(subject_ready=ready, runtime=runtime)
+        exec(compile(ast.Module(body=[function], type_ignores=[]), '<adapter>', 'exec'), namespace)
+        namespace['ensure_subject'](UID, USERNAME, force=True)
+        ready.assert_not_called()
+        memberships.ensure.assert_called_once_with(UID, USERNAME, force=True)
+
+    def test_all_missing_grants_allow_no_implicit_access(self):
+        conn = Connection({10: 0, 12: 0, 99: 0})
+        projector, _ = self.projector(conn)
+        with self.assertLogs('cloudfile_ext.v2.memberships', level='WARNING'):
+            projector._project(UID, USERNAME, {('role', 'role', 'unsynced')})
+        self.assertEqual(conn.members, {99: 0})
+
+    def test_catalog_lag_does_not_hide_native_admin_conflict(self):
+        from cloudfile_ext.v2.errors import IdentityConflict
+        conn = Connection({10: 1, 99: 0})
+        projector, _ = self.projector(conn)
+        with self.assertLogs('cloudfile_ext.v2.memberships', level='WARNING'), \
+             self.assertRaises(IdentityConflict):
+            projector._project(UID, USERNAME, {DIRECT, ('role', 'role', 'unsynced')})
+        self.assertEqual(conn.members, {10: 1, 99: 0})
+        self.assertEqual(conn.commits, 0)
+
+    def test_disabled_subject_and_directory_failure_still_refuse_login(self):
+        from cloudfile_ext.v2.errors import IdentityUnavailable
+        conn = Connection({10: 0, 12: 0, 99: 0})
+        projector, _ = self.projector(conn)
+        projector._key = Mock(return_value='subject-key')
+        disabled = subject()
+        disabled.update(status='disabled', organizations=[], organization_ancestors=[], roles=[])
+        with patch('cloudfile_ext.v2.memberships.database_lock', side_effect=lambda *args: nullcontext()):
+            with self.assertRaisesRegex(IdentityUnavailable, 'disabled'):
+                projector.ensure(UID, USERNAME, force=True, subject=disabled)
+            self.assertEqual(conn.members, {99: 0})
+            projector.redis.set.assert_not_called()
+            projector.fetch = Mock(side_effect=TimeoutError())
+            with self.assertRaises(IdentityUnavailable):
+                projector.ensure(UID, USERNAME, force=True)
+            projector.redis.set.assert_not_called()
 
     def test_failure_rolls_back_ancestor_revocation(self):
         conn = Connection({10: 0, 11: 0, 12: 0, 99: 0}, fail_delete=True)

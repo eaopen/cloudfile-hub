@@ -244,14 +244,15 @@ class FreshDatabaseTest(unittest.TestCase):
         self.assertIsNone(self.redis.get(self.key))
         self.assertEqual(self.query('SELECT group_id FROM ' + self.names['account'] + '.GroupUser'), ((role,),))
 
-    def test_missing_map_and_changed_native_hierarchy_cannot_publish_readiness(self):
+    def test_missing_map_allows_login_but_changed_native_hierarchy_is_rejected(self):
         projector = self.projector(lambda uid: self.subject(roles=[{'namespace': 'business', 'external_id': 'r1'}]))
-        with self.assertRaises(IdentityUnavailable):
+        with self.assertLogs('cloudfile_ext.v2.memberships', level='WARNING'):
             projector.ensure('uid-1', self.username)
+        self.assertIsNotNone(self.redis.get(self.key))
         role = self.group()
         self.query('UPDATE ' + self.names['account'] + '.`Group` SET parent_group_id=-1 WHERE group_id=%s', (role,))
         with self.assertRaises(IdentityUnavailable):
-            projector.ensure('uid-1', self.username)
+            projector.ensure('uid-1', self.username, force=True)
         self.assertIsNone(self.redis.get(self.key))
 
     def test_disabled_subject_clears_owned_members_only_and_is_not_ready(self):

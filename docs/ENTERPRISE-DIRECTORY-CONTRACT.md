@@ -90,9 +90,14 @@ adapter, without inventing a framework or adding cf_* tables.
 - A standalone CE/CloudFile installation without an external Directory needs
   no organizational synchronization or CloudFile background scheduler.
 - OAuth login refreshes only the authenticated existing user's memberships.
-  Missing role/org mapping refuses the refresh. Neither login nor an
-  ACL check automatically creates a missing group; external application
-  catalog synchronization owns creation and retry.
+  组织/角色映射尚未同步时，记录 WARNING，并仅用已同步映射按既有逻辑计算
+  GroupUser（含正常撤权）；未同步项不授予权限，不阻断其他有效权限。
+  日志包含 provider、用户 UID 摘要、缺失数量及最多 10 个缺失项，不记录凭据。
+  每次完成新的 SSO 登录均强制重算，即使上次 readiness 缓存仍有效；仅刷新
+  页面或目录、复用现有会话不会触发重算。实体同步本身不修改用户成员关系。
+  登录和 ACL 查询均不会自动创建缺失组；组织/角色创建仍由外部实体同步负责。
+  此容错只覆盖不存在的映射；账号停用、身份冲突、映射异常、目录源或数据库
+  故障仍拒绝登录，不回退到旧权限快照。
 - Warm file permission checks use only existing CE User/Profile/GroupUser and
   `cf_sso_group_map` facts. Namespace discovery can make **one initial** trusted
   Directory request per Hub worker when there is no explicit namespace; after

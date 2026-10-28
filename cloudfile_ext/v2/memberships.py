@@ -2,10 +2,14 @@
 from datetime import datetime, timezone
 import hashlib
 import json
+import logging
 
 from .errors import IdentityConflict, IdentityUnavailable
 from .identity import text
 from .schema import database_lock, identifier
+
+
+logger = logging.getLogger(__name__)
 
 
 def validate_subject(value, uid, *, now=None):
@@ -148,14 +152,27 @@ class Memberships:
                            '(subject_type,namespace,external_id) IN (' +
                            ','.join(['(%s,%s,%s)'] * len(subjects)) + ')')
                     cursor.execute(sql, [self.provider, *(v for key in subjects for v in key)])
+                    rows = cursor.fetchall()
                     mappings = {(SUBJECT_KIND.get(t, t), ns, ext): gid
-                                for t, ns, ext, gid in cursor.fetchall()}
-                    if len(mappings) != len(subjects) or any(key not in mappings for key in subjects):
-                        # Never attempt on-demand catalog sync or create a user
-                        # from an ACL or login membership lookup.
-                        raise IdentityUnavailable('required native group mapping missing')
+                                for t, ns, ext, gid in rows}
+                    # Only absent catalog entries are tolerated. Ambiguous or
+                    # aliased mappings still cannot prove a native grant.
+                    if len(mappings) != len(rows) or set(mappings) - desired:
+                        raise IdentityUnavailable('invalid native group mapping')
+                    missing = desired - set(mappings)
+                    if missing:
+                        # Catalog synchronization can lag behind Directory.
+                        # Project known grants normally (including revocations),
+                        # never invent a grant for an unsynchronized entity.
+                        # The next explicit SSO login forces a fresh projection.
+                        logger.warning(
+                            'Directory catalog incomplete; projecting mapped memberships only '
+                            'provider=%s subject=%s missing_count=%s missing_sample=%r '
+                            'retry=next_sso_login',
+                            self.provider, hashlib.sha256(uid.encode()).hexdigest()[:16],
+                            len(missing), sorted(missing)[:10])
                     required = set(mappings.values())
-                    if len(required) != len(subjects):
+                    if len(required) != len(mappings):
                         raise IdentityUnavailable('duplicate native group mapping')
 
                 relevant = owned | required
