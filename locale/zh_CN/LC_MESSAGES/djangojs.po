@@ -324,6 +324,14 @@ msgstr "按名称升序排列"
 msgid "Descending by name"
 msgstr "按名称降序排列"
 
+#: frontend/src/components/sort-menu.js:26
+msgid "Ascending by type"
+msgstr "按类型升序排列"
+
+#: frontend/src/components/sort-menu.js:27
+msgid "Descending by type"
+msgstr "按类型降序排列"
+
 #: frontend/src/components/admin/departments/department.js:48
 msgid "Ascending by role"
 msgstr "按角色升序排列"

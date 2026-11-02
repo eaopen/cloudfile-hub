@@ -819,6 +819,22 @@ export const Utils = {
     return withoutDot ? parts.pop() : '.' + parts.pop();
   },
 
+  // Extension used as the "type" sort key, mirroring Windows PathFindExtension:
+  // take the segment after the last dot, lowercased.
+  //   'archive.tar.gz' -> 'gz'
+  //   '.gitignore'     -> 'gitignore'
+  //   'a.gitignore'    -> 'gitignore'
+  //   'README'         -> ''
+  //   'x.'             -> ''
+  // Unlike getFileExtension above, a name without a dot yields '' rather than
+  // the whole name, so extension-less files group together at the top.
+  getSortExtension: function (fileName) {
+    if (!fileName) return '';
+    const dotIndex = fileName.lastIndexOf('.');
+    if (dotIndex === -1 || dotIndex === fileName.length - 1) return '';
+    return fileName.slice(dotIndex + 1).toLowerCase();
+  },
+
   getDirentOperationList: function (isRepoOwner, currentRepoInfo, dirent, isContextmenu) {
     const operationListGetter = dirent.type === 'dir' ? Utils.getFolderOperationList : Utils.getFileOperationList;
     return operationListGetter(isRepoOwner, currentRepoInfo, dirent, isContextmenu);
@@ -1366,59 +1382,75 @@ export const Utils = {
     return repos;
   },
 
+  /**
+   * Sort dirents for the list views.
+   *
+   * The result must be a total order, in three segments:
+   *   1. directories first (direction fixed, never flipped by sortOrder)
+   *   2. the primary key
+   *   3. file name as tie-breaker
+   * Without segment 3, entries sharing a primary key value keep whatever order
+   * the directory object happened to be serialized in, which is not stable
+   * across renames and breaks paginated reads.
+   */
   sortDirents: function (items, sortBy, sortOrder) {
     const _this = this;
-    let comparator;
+    const desc = sortOrder === 'desc';
 
-    switch (`${sortBy}-${sortOrder}`) {
-      case 'name-asc':
+    let comparator;
+    switch (sortBy) {
+      case 'name':
         comparator = function (a, b) {
-          var result = _this.compareTwoWord(a.name, b.name);
-          return result;
+          return _this.compareTwoWord(a.name, b.name);
         };
         break;
-      case 'name-desc':
+      case 'time':
         comparator = function (a, b) {
-          var result = _this.compareTwoWord(a.name, b.name);
-          return -result;
-        };
-        break;
-      case 'time-asc':
-        comparator = function (a, b) {
+          // mtime has second precision, so a bulk upload produces many equal
+          // values. Returning 0 on equality is required: a comparator that
+          // never returns 0 violates antisymmetry, which makes the resulting
+          // order depend on the input sequence.
+          if (a.mtime === b.mtime) return 0;
           return a.mtime < b.mtime ? -1 : 1;
         };
         break;
-      case 'time-desc':
+      case 'size':
         comparator = function (a, b) {
-          return a.mtime < b.mtime ? 1 : -1;
+          // size_original holds the raw byte count; `size` is a formatted
+          // string such as '1.2 MB' and must not be compared directly.
+          const sizeA = typeof a.size_original === 'number' ? a.size_original : 0;
+          const sizeB = typeof b.size_original === 'number' ? b.size_original : 0;
+          if (sizeA === sizeB) return 0;
+          return sizeA < sizeB ? -1 : 1;
         };
         break;
-      case 'size-asc':
+      case 'ext':
         comparator = function (a, b) {
-          if (a.type == 'dir' && b.type == 'dir') {
-            return 0;
-          }
-          return a.size_original < b.size_original ? -1 : 1;
+          // Sorts by extension, not by any business file-type grouping.
+          // Both sides come from getSortExtension, so names without an
+          // extension collapse to '' and group together at the top.
+          const extA = _this.getSortExtension(a.name);
+          const extB = _this.getSortExtension(b.name);
+          if (extA === extB) return 0;
+          return extA < extB ? -1 : 1;
         };
         break;
-      case 'size-desc':
-        comparator = function (a, b) {
-          if (a.type == 'dir' && b.type == 'dir') {
-            return 0;
-          }
-          return a.size_original < b.size_original ? 1 : -1;
-        };
-        break;
+      default:
+        comparator = function () { return 0; };
     }
 
     items.sort((a, b) => {
-      if (a.type == 'dir' && b.type == 'file') {
-        return -1;
-      } else if (a.type == 'file' && b.type == 'dir') {
-        return 1;
-      } else {
-        return comparator(a, b);
-      }
+      // Directories always come first, and this does not flip on descending
+      // order -- same behaviour as Windows Explorer.
+      const isDirA = a.type === 'dir';
+      const isDirB = b.type === 'dir';
+      if (isDirA !== isDirB) return isDirA ? -1 : 1;
+
+      const primary = comparator(a, b);
+      if (primary !== 0) return desc ? -primary : primary;
+
+      const byName = _this.compareTwoWord(a.name, b.name);
+      return desc ? -byName : byName;
     });
     return items;
   },

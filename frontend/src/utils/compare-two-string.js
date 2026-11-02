@@ -1,3 +1,10 @@
+// Locale used for every name comparison in the list views.
+// This must stay in sync with the server side: cloudfile-server sorts with
+// g_utf8_collate_key_for_filename() under an en_US.UTF-8 process locale.
+// If the two disagree, the unpaged list and the paged list would order the
+// same directory differently.
+const SORT_LOCALE = 'en-US';
+
 const isLetterOrNumberReg = (str) => {
   return /^[0-9a-zA-Z]+$/.test(str);
 };
@@ -29,12 +36,12 @@ const splitStringByNumber = (str, sortByNumericalSize = false) => {
 const compareTwoString = (a, b, sortByNumericalSize = true) => {
   // all the string is number or letter
   if (isLetterOrNumberReg(a) && isLetterOrNumberReg(b)) {
-    return a.localeCompare(b, 'zh-Hans-CN', { numeric: true });
+    return a.localeCompare(b, SORT_LOCALE, { numeric: true });
   }
 
   // all the string is chinese string
   if (isAllChineseStr(a) && isAllChineseStr(b)) {
-    return a.localeCompare(b, 'zh-Hans-CN', { numeric: true });
+    return a.localeCompare(b, SORT_LOCALE, { numeric: true });
   }
 
   const arrA = splitStringByNumber(a, sortByNumericalSize);
@@ -57,10 +64,10 @@ const compareTwoString = (a, b, sortByNumericalSize = true) => {
 
     // charA and charB all chinese
     if (isAllChineseStr(charA) && isAllChineseStr(charB)) {
-      result = charA.localeCompare(charB, 'zh-Hans-CN');
+      result = charA.localeCompare(charB, SORT_LOCALE);
     } else {
       // charA and charB all not chinese
-      result = charA.localeCompare(charB, 'zh-Hans-CN', { numeric: true });
+      result = charA.localeCompare(charB, SORT_LOCALE, { numeric: true });
     }
 
     if (result !== 0) {
