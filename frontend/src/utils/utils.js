@@ -2,7 +2,7 @@ import React from 'react';
 import { isEnabled as cloudfileIsEnabled } from '@/cloudfile/features';
 import toaster from '@/components/toast';
 import { PRIVATE_FILE_TYPE } from '@/constants';
-import { compareTwoString } from './compare-two-string';
+import { compareTwoString, DIRENT_SORT_LOCALE } from './compare-two-string';
 import { mediaUrl, gettext, serviceURL, siteRoot, isPro, fileAuditEnabled, canGenerateShareLink, canGenerateUploadLink, shareLinkPasswordMinLength, username, folderPermEnabled, cloudFileLockEnabled, onlyofficeConverterExtensions, enableSeadoc, enableRepoSnapshotLabel,
   enableResetEncryptedRepoPassword, isEmailConfigured, isSystemStaff,
   enableOnlyoffice, onlyofficeEditFileExtension,
@@ -1274,12 +1274,15 @@ export const Utils = {
     return path;
   },
 
-  compareTwoWord: function (wordA, wordB) {
+  compareTwoWord: function (wordA, wordB, locale) {
     // compare wordA and wordB at lower case
     // if wordA >= wordB, return 1
     // if wordA < wordB, return -1
+    // `locale` is optional: callers that omit it keep the default collation.
+    // Directory listings pass DIRENT_SORT_LOCALE so their order matches the
+    // server-side collation used for paged reads.
 
-    return compareTwoString(wordA, wordB);
+    return compareTwoString(wordA, wordB, true, locale);
   },
 
   // compare two strings which may have digits in them
@@ -1401,7 +1404,7 @@ export const Utils = {
     switch (sortBy) {
       case 'name':
         comparator = function (a, b) {
-          return _this.compareTwoWord(a.name, b.name);
+          return _this.compareTwoWord(a.name, b.name, DIRENT_SORT_LOCALE);
         };
         break;
       case 'time':
@@ -1449,7 +1452,7 @@ export const Utils = {
       const primary = comparator(a, b);
       if (primary !== 0) return desc ? -primary : primary;
 
-      const byName = _this.compareTwoWord(a.name, b.name);
+      const byName = _this.compareTwoWord(a.name, b.name, DIRENT_SORT_LOCALE);
       return desc ? -byName : byName;
     });
     return items;
@@ -1475,11 +1478,13 @@ export const Utils = {
         break;
       case 'time-asc':
         comparator = function (a, b) {
+          if (a.mtime === b.mtime) return 0;
           return a.mtime < b.mtime ? -1 : 1;
         };
         break;
       case 'time-desc':
         comparator = function (a, b) {
+          if (a.mtime === b.mtime) return 0;
           return a.mtime < b.mtime ? 1 : -1;
         };
         break;
@@ -1508,69 +1513,57 @@ export const Utils = {
   // sort dirents in shared folder
   sortDirentsInSharedDir: function (items, sortBy, sortOrder) {
     const _this = this;
-    let comparator;
+    const desc = sortOrder === 'desc';
 
-    switch (`${sortBy}-${sortOrder}`) {
-      case 'name-asc':
+    // Shared-folder items use a different shape from the library listing:
+    // is_dir, folder_name / file_name, last_modified, size (raw bytes).
+    const nameOf = (item) => (item.is_dir ? item.folder_name : item.file_name);
+
+    let comparator;
+    switch (sortBy) {
+      case 'name':
         comparator = function (a, b) {
-          let result;
-          if (a.is_dir) {
-            result = _this.compareTwoWord(a.folder_name, b.folder_name);
-          } else {
-            result = _this.compareTwoWord(a.file_name, b.file_name);
-          }
-          return result;
+          return _this.compareTwoWord(nameOf(a), nameOf(b), DIRENT_SORT_LOCALE);
         };
         break;
-      case 'name-desc':
+      case 'time':
         comparator = function (a, b) {
-          let result;
-          if (a.is_dir) {
-            result = _this.compareTwoWord(a.folder_name, b.folder_name);
-          } else {
-            result = _this.compareTwoWord(a.file_name, b.file_name);
-          }
-          return -result;
-        };
-        break;
-      case 'time-asc':
-        comparator = function (a, b) {
+          // Same reason as sortDirents: equal values must compare as 0,
+          // otherwise the comparator violates antisymmetry.
+          if (a.last_modified === b.last_modified) return 0;
           return a.last_modified < b.last_modified ? -1 : 1;
         };
         break;
-      case 'time-desc':
+      case 'size':
         comparator = function (a, b) {
-          return a.last_modified < b.last_modified ? 1 : -1;
+          const sizeA = typeof a.size === 'number' ? a.size : 0;
+          const sizeB = typeof b.size === 'number' ? b.size : 0;
+          if (sizeA === sizeB) return 0;
+          return sizeA < sizeB ? -1 : 1;
         };
         break;
-      case 'size-asc':
+      case 'ext':
         comparator = function (a, b) {
-          if (a.is_dir) {
-            return 0;
-          } else {
-            return a.size < b.size ? -1 : 1;
-          }
+          const extA = _this.getSortExtension(nameOf(a));
+          const extB = _this.getSortExtension(nameOf(b));
+          if (extA === extB) return 0;
+          return extA < extB ? -1 : 1;
         };
         break;
-      case 'size-desc':
-        comparator = function (a, b) {
-          if (a.is_dir) {
-            return 0;
-          } else {
-            return a.size < b.size ? 1 : -1;
-          }
-        };
-        break;
+      default:
+        comparator = function () { return 0; };
     }
 
     items.sort((a, b) => {
-      if (a.is_dir && !b.is_dir) {
-        return -1;
-      } else if (!a.is_dir && b.is_dir) {
-        return 1;
-      } else {
-        return comparator(a, b);
-      }
+      // Directories always come first, and this does not flip on descending
+      // order -- same behaviour as the library listing.
+      if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
+
+      const primary = comparator(a, b);
+      if (primary !== 0) return desc ? -primary : primary;
+
+      const byName = _this.compareTwoWord(nameOf(a), nameOf(b), DIRENT_SORT_LOCALE);
+      return desc ? -byName : byName;
     });
     return items;
   },

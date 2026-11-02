@@ -35,6 +35,12 @@ const file = (name, extra = {}) => ({ type: 'file', name, mtime: 100, size_origi
 const dir = (name, extra = {}) => ({ type: 'dir', name, mtime: 100, ...extra });
 const names = (items) => items.map((item) => item.name);
 
+// Shared-folder items use a different shape: is_dir, folder_name / file_name,
+// last_modified, size.
+const sharedFile = (name, extra = {}) => ({ is_dir: false, file_name: name, last_modified: '2024-01-01T00:00:00Z', size: 0, ...extra });
+const sharedDir = (name, extra = {}) => ({ is_dir: true, folder_name: name, last_modified: '2024-01-01T00:00:00Z', ...extra });
+const sharedNames = (items) => items.map((item) => (item.is_dir ? item.folder_name : item.file_name));
+
 describe('getSortExtension follows the Windows PathFindExtension rule', () => {
   test.each([
     ['archive.tar.gz', 'gz'],
@@ -133,5 +139,71 @@ describe('sortDirents with time and size keys', () => {
     const items = [file('b.txt'), file('a.txt')];
 
     expect(names(Utils.sortDirents(items, 'something-else', 'asc'))).toEqual(['a.txt', 'b.txt']);
+  });
+});
+
+describe('sortDirentsInSharedDir matches the library listing behaviour', () => {
+  test('orders by extension with directories first', () => {
+    const items = [
+      sharedFile('b.zip'),
+      sharedFile('README'),
+      sharedDir('folder-z'),
+      sharedFile('a.txt'),
+      sharedDir('folder-a'),
+    ];
+
+    expect(sharedNames(Utils.sortDirentsInSharedDir(items, 'ext', 'asc'))).toEqual([
+      'folder-a', 'folder-z', 'README', 'a.txt', 'b.zip',
+    ]);
+  });
+
+  test('equal timestamps fall back to name, not input order', () => {
+    const base = { last_modified: '2024-05-05T00:00:00Z' };
+    const items = [
+      sharedFile('c.txt', base),
+      sharedDir('folder-b', base),
+      sharedFile('a.txt', base),
+      sharedDir('folder-a', base),
+      sharedFile('b.txt', base),
+    ];
+
+    expect(sharedNames(Utils.sortDirentsInSharedDir(items, 'time', 'asc'))).toEqual([
+      'folder-a', 'folder-b', 'a.txt', 'b.txt', 'c.txt',
+    ]);
+  });
+
+  test('descending order flips files but keeps directories first', () => {
+    const items = [sharedFile('a.txt'), sharedDir('folder'), sharedFile('b.zip')];
+
+    expect(sharedNames(Utils.sortDirentsInSharedDir(items, 'ext', 'desc'))).toEqual(['folder', 'b.zip', 'a.txt']);
+  });
+
+  test('compares raw size numbers', () => {
+    const items = [sharedFile('big.txt', { size: 2048 }), sharedFile('small.txt', { size: 9 }), sharedDir('folder')];
+
+    expect(sharedNames(Utils.sortDirentsInSharedDir(items, 'size', 'asc'))).toEqual(['folder', 'small.txt', 'big.txt']);
+  });
+});
+
+describe('collation scope is limited to directory listings', () => {
+  // en-US compares by code point: 张 (U+5F20) sorts before 李 (U+674E).
+  // zh-Hans-CN compares by pinyin: li sorts before zhang.
+  const ZHANG = '张三.txt';
+  const LI = '李四.txt';
+
+  test('directory listing uses en-US collation', () => {
+    const items = [file(LI), file(ZHANG)];
+
+    expect(names(Utils.sortDirents(items, 'name', 'asc'))).toEqual([ZHANG, LI]);
+  });
+
+  test('shared directory listing uses en-US collation too', () => {
+    const items = [sharedFile(LI), sharedFile(ZHANG)];
+
+    expect(sharedNames(Utils.sortDirentsInSharedDir(items, 'name', 'asc'))).toEqual([ZHANG, LI]);
+  });
+
+  test('other lists keep the default zh-Hans-CN collation', () => {
+    expect(Utils.compareTwoWord(ZHANG, LI)).toBeGreaterThan(0);
   });
 });
