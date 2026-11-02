@@ -147,9 +147,20 @@ def activity_where(spec):
 
 
 def _iso(value):
-    if isinstance(value, datetime.datetime):
-        return value.strftime('%Y-%m-%dT%H:%M:%S')
-    return value
+    """Serialize a stored timestamp as an explicit **UTC** instant.
+
+    Both sources store naive UTC (``models._utcnow()`` and seafevents' Activity
+    ``timestamp``). Emitting a bare ``2026-08-15T10:00:00`` left the zone
+    implicit, and browsers parse an offset-less date-time as *local* time, so
+    every reader in UTC+8 saw the operation log 8 hours early (2026-11-02).
+    The ``Z`` designator is the contract now: clients convert to their own zone
+    and the CSV export is unambiguous too.
+    """
+    if not isinstance(value, datetime.datetime):
+        return value
+    if value.tzinfo is not None:
+        value = value.astimezone(datetime.timezone.utc).replace(tzinfo=None)
+    return value.strftime('%Y-%m-%dT%H:%M:%SZ')
 
 
 def serialize_activity(row):

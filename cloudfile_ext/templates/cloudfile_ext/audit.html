@@ -21,8 +21,10 @@
 <script>
 (() => { const form=document.querySelector('#audit-filters'), body=document.querySelector('#audit-events'), exportBtn=document.querySelector('#audit-export');
   const esc=(s)=>String(s==null?'':s).replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+  // 接口返回的是带 Z 的 UTC 时刻；表格按浏览器本地时区显示，原始值留在 title 里便于对账。
+  const fmtTime=(v)=>{const d=new Date(v); return isNaN(d.getTime()) ? String(v==null?'':v) : d.toLocaleString();};
   const qs=()=>new URLSearchParams(new FormData(form));
-  const load=async()=>{const r=await fetch('{{ SITE_ROOT }}api/v2.1/cloudfile/audit/?'+qs(),{credentials:'same-origin'}); const d=await r.json(); body.innerHTML=(d.events||[]).map(e=>{const p=e.old_path?esc(e.old_path)+' → ':''; return `<tr><td>${esc(e.time)}</td><td>${esc(e.user)}</td><td>${esc(e.operation)}</td><td>${esc(e.object_type)}</td><td>${esc(e.source)}</td><td>${esc(e.result)}</td><td>${esc(e.repo_id)}</td><td>${p}${esc(e.path)}</td></tr>`;}).join('');};
+  const load=async()=>{const r=await fetch('{{ SITE_ROOT }}api/v2.1/cloudfile/audit/?'+qs(),{credentials:'same-origin'}); const d=await r.json(); body.innerHTML=(d.events||[]).map(e=>{const p=e.old_path?esc(e.old_path)+' → ':''; return `<tr><td title="${esc(e.time)}">${esc(fmtTime(e.time))}</td><td>${esc(e.user)}</td><td>${esc(e.operation)}</td><td>${esc(e.object_type)}</td><td>${esc(e.source)}</td><td>${esc(e.result)}</td><td>${esc(e.repo_id)}</td><td>${p}${esc(e.path)}</td></tr>`;}).join('');};
   form.addEventListener('submit',e=>{e.preventDefault();load();});
   exportBtn.addEventListener('click',e=>{e.preventDefault();window.location='{{ SITE_ROOT }}api/v2.1/cloudfile/audit/export/?'+qs();});
   load(); })();

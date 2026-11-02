@@ -97,6 +97,21 @@ class AuditSerializationTests(TestCase):
             json.dumps([{'old_path': '/old-a'}, {'old_path': '/old-b'}])))
         self.assertEqual(batch['old_path'], '/old-a')
 
+    def test_serialized_time_carries_explicit_utc(self):
+        # 2026-11-02: a bare "…T10:00:00" was parsed as *local* by browsers, so
+        # UTC+8 readers saw the operation log 8 hours early. The serialized
+        # instant must say which zone it is in.
+        activity = serialize_activity((
+            1, 'create', 'file', 'u@example.com', _dt('2026-08-15T10:00:00'),
+            'repo', 'commit', '/a', '{}'))
+        self.assertEqual(activity['time'], '2026-08-15T10:00:00Z')
+        # A tz-aware value is normalized to UTC before the designator is added.
+        aware = datetime.datetime(2026, 8, 15, 18, 0, 0, tzinfo=datetime.timezone(
+            datetime.timedelta(hours=8)))
+        normalized = serialize_activity((
+            2, 'create', 'file', 'u@example.com', aware, 'repo', 'commit', '/a', '{}'))
+        self.assertEqual(normalized['time'], '2026-08-15T10:00:00Z')
+
     def test_serialize_audit_event_carries_before_after(self):
         row = (
             7, 'repo', 'tag', '12', 'update', 'admin@example.com', 'api',
