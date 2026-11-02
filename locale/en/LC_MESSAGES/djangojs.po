@@ -13627,3 +13627,11 @@ msgstr "Resume exclusive editing"
 #: frontend/src/components/local-file-dialog/index.js
 msgid "Checkout is unavailable or has not been confirmed. Ordinary editing remains available."
 msgstr "Checkout is unavailable or has not been confirmed. Ordinary editing remains available."
+
+#: frontend/src/components/sort-menu.js
+msgid "Ascending by type"
+msgstr "Ascending by type"
+
+#: frontend/src/components/sort-menu.js
+msgid "Descending by type"
+msgstr "Descending by type"

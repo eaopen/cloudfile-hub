@@ -1450,7 +1450,10 @@ export const Utils = {
       const isDirB = b.type === 'dir';
       if (isDirA !== isDirB) return isDirA ? -1 : 1;
 
-      const primary = comparator(a, b);
+      // Folders have no file extension: under "type" keep the folder segment
+      // name-ordered instead of grouping folders by any dot-suffix in their
+      // own name (Windows Explorer also keeps folders name-sorted by Type).
+      const primary = sortBy === 'ext' && isDirA ? 0 : comparator(a, b);
       if (primary !== 0) return desc ? -primary : primary;
 
       const byName = _this.compareDirentName(a.name, b.name);
@@ -1560,7 +1563,9 @@ export const Utils = {
       // order -- same behaviour as the library listing.
       if (a.is_dir !== b.is_dir) return a.is_dir ? -1 : 1;
 
-      const primary = comparator(a, b);
+      // Folders have no file extension: keep the folder segment name-ordered
+      // under "type", exactly like the library listing.
+      const primary = sortBy === 'ext' && a.is_dir ? 0 : comparator(a, b);
       if (primary !== 0) return desc ? -primary : primary;
 
       const byName = _this.compareDirentName(nameOf(a), nameOf(b));

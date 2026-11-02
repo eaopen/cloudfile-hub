@@ -30,6 +30,9 @@ const propTypes = {
   sortBy: PropTypes.string,
   sortOrder: PropTypes.string,
   sortItems: PropTypes.func,
+  // The complete directory listing is required for extension sorting; a
+  // paged listing must pass false (see components/sort-menu.js).
+  isCompleteList: PropTypes.bool,
   viewId: PropTypes.string,
   onToggleDetail: PropTypes.func,
   onCloseDetail: PropTypes.func,
@@ -145,7 +148,14 @@ class DirTool extends React.Component {
       <div className="dir-tool d-flex">
         <ViewModes currentViewMode={currentMode} switchViewMode={this.props.switchViewMode} isSupportTable={true} />
         <div className="dir-tool-divider" />
-        <SortMenu className="ml-2" sortBy={sortBy} sortOrder={sortOrder} sortOptions={DIRECTORY_SORT_OPTIONS} onSelectSortOption={this.onSelectSortOption} />
+        <SortMenu
+          className="ml-2"
+          sortBy={sortBy}
+          sortOrder={sortOrder}
+          sortOptions={DIRECTORY_SORT_OPTIONS}
+          isCompleteList={this.props.isCompleteList}
+          onSelectSortOption={this.onSelectSortOption}
+        />
 
         {(currentMode === LIST_MODE || currentMode === TABLE_MODE) && (
           <HideColumnSetter

@@ -86,6 +86,19 @@ describe('sortDirents with ext key', () => {
     // 'z.tar.gz' keys on 'gz', so it sorts next to 'm.gz' rather than under 't'.
     expect(names(Utils.sortDirents(items, 'ext', 'asc'))).toEqual(['m.gz', 'z.tar.gz', 'a.txt']);
   });
+
+  test('keeps dotted folder names in name order under type sorting', () => {
+    const items = [dir('v10.1'), file('b.zip'), dir('v2.0'), file('a.txt'), dir('v1.2')];
+
+    // Folders have no extension: "type" must not group them by the dot-suffix
+    // of their own name (v1.2 / v2.0 / v10.1 must stay in name order).
+    expect(names(Utils.sortDirents(items, 'ext', 'asc'))).toEqual([
+      'v1.2', 'v2.0', 'v10.1', 'a.txt', 'b.zip',
+    ]);
+    expect(names(Utils.sortDirents(items, 'ext', 'desc'))).toEqual([
+      'v10.1', 'v2.0', 'v1.2', 'b.zip', 'a.txt',
+    ]);
+  });
 });
 
 describe('sortDirents is a total order', () => {
@@ -182,6 +195,14 @@ describe('sortDirentsInSharedDir matches the library listing behaviour', () => {
     const items = [sharedFile('big.txt', { size: 2048 }), sharedFile('small.txt', { size: 9 }), sharedDir('folder')];
 
     expect(sharedNames(Utils.sortDirentsInSharedDir(items, 'size', 'asc'))).toEqual(['folder', 'small.txt', 'big.txt']);
+  });
+
+  test('keeps dotted folder names in name order under type sorting', () => {
+    const items = [sharedDir('v10.1'), sharedFile('b.zip'), sharedDir('v2.0'), sharedFile('a.txt'), sharedDir('v1.2')];
+
+    expect(sharedNames(Utils.sortDirentsInSharedDir(items, 'ext', 'asc'))).toEqual([
+      'v1.2', 'v2.0', 'v10.1', 'a.txt', 'b.zip',
+    ]);
   });
 });
 

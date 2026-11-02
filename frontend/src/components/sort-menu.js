@@ -10,6 +10,10 @@ const propTypes = {
   sortBy: PropTypes.string,
   sortOrder: PropTypes.string,
   sortOptions: PropTypes.array,
+  // Whether the list behind this menu is the complete listing for the folder.
+  // Only a complete client-side list may be sorted by keys that have no
+  // server-side ordering (see `requiresCompleteList` below).
+  isCompleteList: PropTypes.bool,
   onSelectSortOption: PropTypes.func.isRequired
 };
 
@@ -24,11 +28,21 @@ const DEFAULT_SORT_OPTIONS = [
 
 // Extension sorting is available only for fully loaded directory lists.
 // Other consumers (tag files, administration, etc.) keep their own sort options.
+// The ext keys have no server-side counterpart, so a server-paged directory
+// must never offer them: sorting one native page in the browser would present
+// a page-local order as the folder's global order.
 export const DIRECTORY_SORT_OPTIONS = [
   ...DEFAULT_SORT_OPTIONS,
-  { value: 'ext-asc', text: gettext('Ascending by type') },
-  { value: 'ext-desc', text: gettext('Descending by type') }
+  { value: 'ext-asc', text: gettext('Ascending by type'), requiresCompleteList: true },
+  { value: 'ext-desc', text: gettext('Descending by type'), requiresCompleteList: true }
 ];
+
+// Filter at render time, not in the constructor: a caller may flip
+// `isCompleteList` after mount (for example once paging reaches the end), and
+// the constructor caches `sortOptions` on the instance.
+export const filterSortOptions = (sortOptions, isCompleteList) => {
+  return sortOptions.filter((option) => isCompleteList || !option.requiresCompleteList);
+};
 
 class SortMenu extends React.Component {
   constructor(props) {
@@ -37,7 +51,7 @@ class SortMenu extends React.Component {
   }
 
   buildSortMenuItems = ({ sortOptions, sortBy, sortOrder }) => {
-    return sortOptions.map((item) => ({
+    return filterSortOptions(sortOptions, this.props.isCompleteList).map((item) => ({
       key: item.value,
       label: item.text,
       checked: item.value === `${sortBy}-${sortOrder}`,
@@ -76,5 +90,11 @@ class SortMenu extends React.Component {
 }
 
 SortMenu.propTypes = propTypes;
+
+// Fail closed: a caller that does not declare a complete listing must not get
+// options that only make sense for one.
+SortMenu.defaultProps = {
+  isCompleteList: false
+};
 
 export default SortMenu;

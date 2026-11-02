@@ -939,7 +939,17 @@ class SharedDirView extends React.Component {
                 {isDesktop && (
                   <div className="cur-view-path-right ml-4">
                     <ViewModes currentViewMode={mode} switchViewMode={this.switchMode} />
-                    <SortMenu className="ml-2" sortBy={sortBy} sortOrder={sortOrder} sortOptions={DIRECTORY_SORT_OPTIONS} onSelectSortOption={this.onSelectSortOption} />
+                    {/* ShareLinkDirents returns the whole folder in one response, so
+                        client-side sorting is global here. A paged listing must pass
+                        false and must not client-sort a single page. */}
+                    <SortMenu
+                      className="ml-2"
+                      sortBy={sortBy}
+                      sortOrder={sortOrder}
+                      sortOptions={DIRECTORY_SORT_OPTIONS}
+                      isCompleteList={true}
+                      onSelectSortOption={this.onSelectSortOption}
+                    />
                   </div>
                 )}
               </div>
