@@ -19,10 +19,13 @@ const DEFAULT_SORT_OPTIONS = [
   { value: 'size-asc', text: gettext('Ascending by size') },
   { value: 'size-desc', text: gettext('Descending by size') },
   { value: 'time-asc', text: gettext('Ascending by time') },
-  { value: 'time-desc', text: gettext('Descending by time') },
-  // 'type' orders by file extension, following the Windows PathFindExtension
-  // rule. It does not use any business file-type grouping: that belongs to
-  // the consumer (EAP), not to the generic hub.
+  { value: 'time-desc', text: gettext('Descending by time') }
+];
+
+// Extension sorting is available only for fully loaded directory lists.
+// Other consumers (tag files, administration, etc.) keep their own sort options.
+export const DIRECTORY_SORT_OPTIONS = [
+  ...DEFAULT_SORT_OPTIONS,
   { value: 'ext-asc', text: gettext('Ascending by type') },
   { value: 'ext-desc', text: gettext('Descending by type') }
 ];

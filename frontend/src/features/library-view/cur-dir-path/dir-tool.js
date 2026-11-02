@@ -2,7 +2,7 @@ import React from 'react';
 import PropTypes from 'prop-types';
 import OpIcon from '@/components/op-icon';
 import SetRowHeight from '@/components/set-row-height';
-import SortMenu from '@/components/sort-menu';
+import SortMenu, { DIRECTORY_SORT_OPTIONS } from '@/components/sort-menu';
 import ChatToolbar from '@/components/toolbar/chat-toolbar';
 import ViewModes from '@/components/view-modes';
 import { PRIVATE_FILE_TYPE } from '@/constants';
@@ -145,7 +145,7 @@ class DirTool extends React.Component {
       <div className="dir-tool d-flex">
         <ViewModes currentViewMode={currentMode} switchViewMode={this.props.switchViewMode} isSupportTable={true} />
         <div className="dir-tool-divider" />
-        <SortMenu className="ml-2" sortBy={sortBy} sortOrder={sortOrder} onSelectSortOption={this.onSelectSortOption} />
+        <SortMenu className="ml-2" sortBy={sortBy} sortOrder={sortOrder} sortOptions={DIRECTORY_SORT_OPTIONS} onSelectSortOption={this.onSelectSortOption} />
 
         {(currentMode === LIST_MODE || currentMode === TABLE_MODE) && (
           <HideColumnSetter

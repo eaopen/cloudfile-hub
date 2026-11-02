@@ -185,25 +185,32 @@ describe('sortDirentsInSharedDir matches the library listing behaviour', () => {
   });
 });
 
-describe('name collation is en-US everywhere', () => {
-  // en-US compares by code point: 张 (U+5F20) sorts before 李 (U+674E).
-  // The previous zh-Hans-CN collation sorted by pinyin: li before zhang.
+describe('Chinese-friendly natural name sorting', () => {
   const ZHANG = '张三.txt';
   const LI = '李四.txt';
 
-  test('directory listing uses en-US collation', () => {
-    const items = [file(LI), file(ZHANG)];
-
-    expect(names(Utils.sortDirents(items, 'name', 'asc'))).toEqual([ZHANG, LI]);
+  test('preserves the existing zh-Hans-CN ordering in directory lists', () => {
+    expect(names(Utils.sortDirents([file(ZHANG), file(LI)], 'name', 'asc'))).toEqual([LI, ZHANG]);
+    expect(sharedNames(Utils.sortDirentsInSharedDir([sharedFile(ZHANG), sharedFile(LI)], 'name', 'asc'))).toEqual([LI, ZHANG]);
+    expect(Utils.compareTwoWord(ZHANG, LI)).toBeGreaterThan(0);
   });
 
-  test('shared directory listing uses the same collation', () => {
-    const items = [sharedFile(LI), sharedFile(ZHANG)];
-
-    expect(sharedNames(Utils.sortDirentsInSharedDir(items, 'name', 'asc'))).toEqual([ZHANG, LI]);
+  test('sorts dotted section numbers as natural numeric segments (not decimals)', () => {
+    const input = ['1.12', '1.2', '1.11', '1.1'].map((name) => file(name));
+    expect(names(Utils.sortDirents([...input], 'name', 'asc'))).toEqual(['1.1', '1.2', '1.11', '1.12']);
+    expect(names(Utils.sortDirents([...input], 'name', 'desc'))).toEqual(['1.12', '1.11', '1.2', '1.1']);
+    const shared = input.map(({ name }) => sharedFile(name));
+    expect(sharedNames(Utils.sortDirentsInSharedDir(shared, 'name', 'asc'))).toEqual(['1.1', '1.2', '1.11', '1.12']);
   });
 
-  test('compareTwoWord, which other lists share, uses it too', () => {
-    expect(Utils.compareTwoWord(ZHANG, LI)).toBeLessThan(0);
+  test('breaks natural numeric ties by raw name for repeatable ordering', () => {
+    const a = file('file1.txt');
+    const b = file('file01.txt');
+    expect(Utils.compareTwoWord(a.name, b.name)).toBe(0);
+    expect(names(Utils.sortDirents([a, b], 'name', 'asc'))).toEqual(['file01.txt', 'file1.txt']);
+    expect(names(Utils.sortDirents([b, a], 'name', 'asc'))).toEqual(['file01.txt', 'file1.txt']);
+    expect(names(Utils.sortDirents([a, b], 'time', 'asc'))).toEqual(['file01.txt', 'file1.txt']);
+    expect(names(Utils.sortDirents([a, b], 'name', 'desc'))).toEqual(['file1.txt', 'file01.txt']);
+    expect(Utils.compareDirentName(a.name, a.name)).toBe(0);
   });
 });

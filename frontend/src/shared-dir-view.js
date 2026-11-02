@@ -25,7 +25,7 @@ import {
 } from '@/components/resize-bar/constants';
 import { TreeHelper, TreeNode, TreeView } from '@/components/shared-dir-tree-view';
 import FileUploader from '@/components/shared-link-file-uploader/file-uploader';
-import SortMenu from '@/components/sort-menu';
+import SortMenu, { DIRECTORY_SORT_OPTIONS } from '@/components/sort-menu';
 import toaster from '@/components/toast';
 import ViewModes from '@/components/view-modes';
 import { LIST_MODE } from '@/constants/view-mode';
@@ -939,7 +939,7 @@ class SharedDirView extends React.Component {
                 {isDesktop && (
                   <div className="cur-view-path-right ml-4">
                     <ViewModes currentViewMode={mode} switchViewMode={this.switchMode} />
-                    <SortMenu className="ml-2" sortBy={sortBy} sortOrder={sortOrder} onSelectSortOption={this.onSelectSortOption} />
+                    <SortMenu className="ml-2" sortBy={sortBy} sortOrder={sortOrder} sortOptions={DIRECTORY_SORT_OPTIONS} onSelectSortOption={this.onSelectSortOption} />
                   </div>
                 )}
               </div>

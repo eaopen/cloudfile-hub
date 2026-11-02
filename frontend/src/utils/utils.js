@@ -1382,16 +1382,20 @@ export const Utils = {
     return repos;
   },
 
+  // Natural, Chinese-friendly file names can compare equal (file1/file01).
+  // Use the exact original name only as a final deterministic tie-breaker.
+  // This applies to a complete client-side list, not to server-side pagination.
+  compareDirentName: function (a, b) {
+    const natural = this.compareTwoWord(a, b);
+    if (natural !== 0) return natural;
+    if (a === b) return 0;
+    return a < b ? -1 : 1;
+  },
+
   /**
-   * Sort dirents for the list views.
-   *
-   * The result must be a total order, in three segments:
-   *   1. directories first (direction fixed, never flipped by sortOrder)
-   *   2. the primary key
-   *   3. file name as tie-breaker
-   * Without segment 3, entries sharing a primary key value keep whatever order
-   * the directory object happened to be serialized in, which is not stable
-   * across renames and breaks paginated reads.
+   * Sort a complete directory list in the UI: directories first, primary
+   * sort key, then deterministic natural-name ordering.
+   * Server-paged directories must NOT be re-sorted one page at a time.
    */
   sortDirents: function (items, sortBy, sortOrder) {
     const _this = this;
@@ -1401,7 +1405,7 @@ export const Utils = {
     switch (sortBy) {
       case 'name':
         comparator = function (a, b) {
-          return _this.compareTwoWord(a.name, b.name);
+          return _this.compareDirentName(a.name, b.name);
         };
         break;
       case 'time':
@@ -1449,7 +1453,7 @@ export const Utils = {
       const primary = comparator(a, b);
       if (primary !== 0) return desc ? -primary : primary;
 
-      const byName = _this.compareTwoWord(a.name, b.name);
+      const byName = _this.compareDirentName(a.name, b.name);
       return desc ? -byName : byName;
     });
     return items;
@@ -1520,7 +1524,7 @@ export const Utils = {
     switch (sortBy) {
       case 'name':
         comparator = function (a, b) {
-          return _this.compareTwoWord(nameOf(a), nameOf(b));
+          return _this.compareDirentName(nameOf(a), nameOf(b));
         };
         break;
       case 'time':
@@ -1559,7 +1563,7 @@ export const Utils = {
       const primary = comparator(a, b);
       if (primary !== 0) return desc ? -primary : primary;
 
-      const byName = _this.compareTwoWord(nameOf(a), nameOf(b));
+      const byName = _this.compareDirentName(nameOf(a), nameOf(b));
       return desc ? -byName : byName;
     });
     return items;
