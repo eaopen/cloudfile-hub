@@ -3249,6 +3249,9 @@ class LibContentView extends React.Component {
                       </div>
                       {isDesktop &&
                         <div className="cur-view-path-right py-1">
+                          {/* loadDirentList uses the unpaged listDir API, so state.direntList
+                              is the complete folder listing. A view that starts paging must
+                              pass false and must not client-sort a single page. */}
                           <DirTool
                             repoID={this.props.repoID}
                             currentRepoInfo={this.state.currentRepoInfo}
@@ -3261,6 +3264,7 @@ class LibContentView extends React.Component {
                             sortBy={this.state.sortBy}
                             sortOrder={this.state.sortOrder}
                             sortItems={this.sortItems}
+                            isCompleteList={true}
                             viewId={this.state.viewId}
                             viewType={this.props.viewType}
                             onToggleDetail={this.toggleDirentDetail}
