@@ -2,7 +2,7 @@ import React from 'react';
 import { isEnabled as cloudfileIsEnabled } from '@/cloudfile/features';
 import toaster from '@/components/toast';
 import { PRIVATE_FILE_TYPE } from '@/constants';
-import { compareTwoString, DIRENT_SORT_LOCALE } from './compare-two-string';
+import { compareTwoString } from './compare-two-string';
 import { mediaUrl, gettext, serviceURL, siteRoot, isPro, fileAuditEnabled, canGenerateShareLink, canGenerateUploadLink, shareLinkPasswordMinLength, username, folderPermEnabled, cloudFileLockEnabled, onlyofficeConverterExtensions, enableSeadoc, enableRepoSnapshotLabel,
   enableResetEncryptedRepoPassword, isEmailConfigured, isSystemStaff,
   enableOnlyoffice, onlyofficeEditFileExtension,
@@ -1274,15 +1274,12 @@ export const Utils = {
     return path;
   },
 
-  compareTwoWord: function (wordA, wordB, locale) {
+  compareTwoWord: function (wordA, wordB) {
     // compare wordA and wordB at lower case
     // if wordA >= wordB, return 1
     // if wordA < wordB, return -1
-    // `locale` is optional: callers that omit it keep the default collation.
-    // Directory listings pass DIRENT_SORT_LOCALE so their order matches the
-    // server-side collation used for paged reads.
 
-    return compareTwoString(wordA, wordB, true, locale);
+    return compareTwoString(wordA, wordB);
   },
 
   // compare two strings which may have digits in them
@@ -1404,7 +1401,7 @@ export const Utils = {
     switch (sortBy) {
       case 'name':
         comparator = function (a, b) {
-          return _this.compareTwoWord(a.name, b.name, DIRENT_SORT_LOCALE);
+          return _this.compareTwoWord(a.name, b.name);
         };
         break;
       case 'time':
@@ -1452,7 +1449,7 @@ export const Utils = {
       const primary = comparator(a, b);
       if (primary !== 0) return desc ? -primary : primary;
 
-      const byName = _this.compareTwoWord(a.name, b.name, DIRENT_SORT_LOCALE);
+      const byName = _this.compareTwoWord(a.name, b.name);
       return desc ? -byName : byName;
     });
     return items;
@@ -1523,7 +1520,7 @@ export const Utils = {
     switch (sortBy) {
       case 'name':
         comparator = function (a, b) {
-          return _this.compareTwoWord(nameOf(a), nameOf(b), DIRENT_SORT_LOCALE);
+          return _this.compareTwoWord(nameOf(a), nameOf(b));
         };
         break;
       case 'time':
@@ -1562,7 +1559,7 @@ export const Utils = {
       const primary = comparator(a, b);
       if (primary !== 0) return desc ? -primary : primary;
 
-      const byName = _this.compareTwoWord(nameOf(a), nameOf(b), DIRENT_SORT_LOCALE);
+      const byName = _this.compareTwoWord(nameOf(a), nameOf(b));
       return desc ? -byName : byName;
     });
     return items;

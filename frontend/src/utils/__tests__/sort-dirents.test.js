@@ -185,9 +185,9 @@ describe('sortDirentsInSharedDir matches the library listing behaviour', () => {
   });
 });
 
-describe('collation scope is limited to directory listings', () => {
+describe('name collation is en-US everywhere', () => {
   // en-US compares by code point: 张 (U+5F20) sorts before 李 (U+674E).
-  // zh-Hans-CN compares by pinyin: li sorts before zhang.
+  // The previous zh-Hans-CN collation sorted by pinyin: li before zhang.
   const ZHANG = '张三.txt';
   const LI = '李四.txt';
 
@@ -197,13 +197,13 @@ describe('collation scope is limited to directory listings', () => {
     expect(names(Utils.sortDirents(items, 'name', 'asc'))).toEqual([ZHANG, LI]);
   });
 
-  test('shared directory listing uses en-US collation too', () => {
+  test('shared directory listing uses the same collation', () => {
     const items = [sharedFile(LI), sharedFile(ZHANG)];
 
     expect(sharedNames(Utils.sortDirentsInSharedDir(items, 'name', 'asc'))).toEqual([ZHANG, LI]);
   });
 
-  test('other lists keep the default zh-Hans-CN collation', () => {
-    expect(Utils.compareTwoWord(ZHANG, LI)).toBeGreaterThan(0);
+  test('compareTwoWord, which other lists share, uses it too', () => {
+    expect(Utils.compareTwoWord(ZHANG, LI)).toBeLessThan(0);
   });
 });

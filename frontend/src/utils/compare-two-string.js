@@ -1,12 +1,9 @@
-// Default collation, used by every caller that does not ask for something else
-// (repository lists, group lists, favorites, ...).
-const DEFAULT_LOCALE = 'zh-Hans-CN';
-
-// Collation for directory contents only. It must stay in sync with the server
-// side: cloudfile-server sorts with g_utf8_collate_key_for_filename() under an
-// en_US.UTF-8 process locale. If the two disagree, the unpaged list and the
-// paged list would order the same directory differently.
-const DIRENT_SORT_LOCALE = 'en-US';
+// Locale used for every name comparison in the list views.
+// This must stay in sync with the server side: cloudfile-server sorts with
+// g_utf8_collate_key_for_filename() under an en_US.UTF-8 process locale.
+// If the two disagree, the unpaged list and the paged list would order the
+// same directory differently.
+const SORT_LOCALE = 'en-US';
 
 const isLetterOrNumberReg = (str) => {
   return /^[0-9a-zA-Z]+$/.test(str);
@@ -36,15 +33,15 @@ const splitStringByNumber = (str, sortByNumericalSize = false) => {
   return strArr;
 };
 
-const compareTwoString = (a, b, sortByNumericalSize = true, locale = DEFAULT_LOCALE) => {
+const compareTwoString = (a, b, sortByNumericalSize = true) => {
   // all the string is number or letter
   if (isLetterOrNumberReg(a) && isLetterOrNumberReg(b)) {
-    return a.localeCompare(b, locale, { numeric: true });
+    return a.localeCompare(b, SORT_LOCALE, { numeric: true });
   }
 
   // all the string is chinese string
   if (isAllChineseStr(a) && isAllChineseStr(b)) {
-    return a.localeCompare(b, locale, { numeric: true });
+    return a.localeCompare(b, SORT_LOCALE, { numeric: true });
   }
 
   const arrA = splitStringByNumber(a, sortByNumericalSize);
@@ -67,10 +64,10 @@ const compareTwoString = (a, b, sortByNumericalSize = true, locale = DEFAULT_LOC
 
     // charA and charB all chinese
     if (isAllChineseStr(charA) && isAllChineseStr(charB)) {
-      result = charA.localeCompare(charB, locale);
+      result = charA.localeCompare(charB, SORT_LOCALE);
     } else {
       // charA and charB all not chinese
-      result = charA.localeCompare(charB, locale, { numeric: true });
+      result = charA.localeCompare(charB, SORT_LOCALE, { numeric: true });
     }
 
     if (result !== 0) {
@@ -85,6 +82,5 @@ const compareTwoString = (a, b, sortByNumericalSize = true, locale = DEFAULT_LOC
 };
 
 export {
-  compareTwoString,
-  DIRENT_SORT_LOCALE
+  compareTwoString
 };
