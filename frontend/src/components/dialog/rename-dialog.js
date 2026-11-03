@@ -3,7 +3,7 @@ import { Button, Modal, Input, ModalBody, ModalFooter, Alert, Label } from 'reac
 import PropTypes from 'prop-types';
 import SeahubModalHeader from '@/components/seahub-modal-header';
 import { gettext } from '@/utils/constants';
-import { validateNewFileName } from '@/utils/new-file-name';
+import { normalizeNewFileNameInput, validateNewFileName } from '@/utils/new-file-name';
 import { Utils, validateName } from '@/utils/utils';
 
 const propTypes = {
@@ -48,7 +48,17 @@ class Rename extends React.Component {
   };
 
   handleSubmit = () => {
-    let newName = this.state.newName;
+    const original = this.props.dirent.name;
+    // The unchanged stored name is a no-op, even if it is a legacy oddity.
+    if (this.state.newName === original) {
+      this.toggle();
+      return;
+    }
+    let newName = normalizeNewFileNameInput(this.state.newName);
+    if (newName === original) {
+      this.toggle();
+      return;
+    }
     const policy = validateNewFileName(newName);
     const { isValid, errMessage } = policy.isValid ? validateName(newName) : policy;
     if (!isValid) {

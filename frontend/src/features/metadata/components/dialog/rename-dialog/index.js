@@ -4,7 +4,7 @@ import PropTypes from 'prop-types';
 import SeahubModalHeader from '@/components/seahub-modal-header';
 import { gettext } from '@/utils/constants';
 import { isEnter } from '@/utils/hotkey';
-import { validateNewFileName } from '@/utils/new-file-name';
+import { normalizeNewFileNameInput, validateNewFileName } from '@/utils/new-file-name';
 import { validateName } from '@/utils/utils';
 
 const RenameDialog = ({ isDir, oldName, onSubmit, onCancel }) => {
@@ -16,18 +16,28 @@ const RenameDialog = ({ isDir, oldName, onSubmit, onCancel }) => {
   const handleChange = (e) => {
     const value = e.target.value;
     setNewName(value);
-    setIsSubmitBtnActive(!!value);
+    setIsSubmitBtnActive(!!value.trim());
   };
 
   const handleSubmit = () => {
-    const policy = validateNewFileName(newName);
-    const { isValid, errMessage } = policy.isValid ? validateName(newName) : policy;
+    // Keep an unedited legacy filename unchanged; only new input is normalized.
+    if (newName === oldName) {
+      onCancel();
+      return;
+    }
+    const submittedName = normalizeNewFileNameInput(newName);
+    if (submittedName === oldName) {
+      onCancel();
+      return;
+    }
+    const policy = validateNewFileName(submittedName);
+    const { isValid, errMessage } = policy.isValid ? validateName(submittedName) : policy;
     if (!isValid) {
       setErrMessage(errMessage);
       return;
     }
 
-    onSubmit(newName);
+    onSubmit(submittedName);
   };
 
   const handleKeyDown = (e) => {

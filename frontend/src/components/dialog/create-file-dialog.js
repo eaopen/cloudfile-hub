@@ -3,7 +3,7 @@ import { Button, Modal, Input, ModalBody, ModalFooter, Form, FormGroup, Label, A
 import PropTypes from 'prop-types';
 import SeahubModalHeader from '@/components/seahub-modal-header';
 import { gettext } from '@/utils/constants';
-import { validateNewFileName } from '@/utils/new-file-name';
+import { normalizeNewFileNameInput, validateNewFileName } from '@/utils/new-file-name';
 import { Utils, validateName } from '@/utils/utils';
 
 const propTypes = {
@@ -56,7 +56,7 @@ class CreateFile extends React.Component {
     if (!this.state.isSubmitBtnActive) {
       return;
     }
-    let newName = this.state.childName;
+    let newName = normalizeNewFileNameInput(this.state.childName);
     const policy = validateNewFileName(newName);
     const { isValid, errMessage } = policy.isValid ? validateName(newName) : policy;
     if (!isValid) {

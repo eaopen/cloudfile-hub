@@ -10,7 +10,7 @@ import { useCollaborators } from '@/hooks/collaborators';
 import { Dirent } from '@/models';
 import { gettext } from '@/utils/constants';
 import EventBus from '@/utils/event-bus';
-import { validateNewFileName } from '@/utils/new-file-name';
+import { normalizeNewFileNameInput, validateNewFileName } from '@/utils/new-file-name';
 import { Utils, validateName } from '@/utils/utils';
 import {
   CellType,
@@ -173,13 +173,18 @@ export const MetadataViewProvider = ({
 
   const modifyRecords = useCallback((rowIds, idRowUpdates, idOriginalRowUpdates, idOldRowData, idOriginalOldRowData, isCopyPaste = false, { success_callback, fail_callback } = {}) => {
     const isRename = storeRef.current.checkIsRenameFileOperator(rowIds, idOriginalRowUpdates);
+    let submittedRowUpdates = idRowUpdates;
+    let submittedOriginalUpdates = idOriginalRowUpdates;
     let newName = null;
     if (isRename) {
       const rowId = rowIds[0];
       const row = getRowById(metadata, rowId);
       const rowUpdates = idOriginalRowUpdates[rowId];
       const { _parent_dir, _name } = row;
-      newName = getFileNameFromRecord(rowUpdates);
+      const rawNewName = getFileNameFromRecord(rowUpdates);
+      // Never convert an untouched stored legacy filename into a new one.
+      if (rawNewName === _name) return;
+      newName = normalizeNewFileNameInput(rawNewName);
       const policy = validateNewFileName(newName);
       const { isValid, errMessage } = policy.isValid ? validateName(newName) : policy;
       if (!isValid) {
@@ -195,9 +200,19 @@ export const MetadataViewProvider = ({
         toaster.danger(errMessage);
         return;
       }
+      // Normalize the actual operation payload, not just the preliminary
+      // validation, so metadata, file operation and undo see the same name.
+      if (newName !== rawNewName) {
+        submittedRowUpdates = { ...idRowUpdates, [rowId]: {
+          ...(idRowUpdates[rowId] || {}), [PRIVATE_COLUMN_KEY.FILE_NAME]: newName,
+        } };
+        submittedOriginalUpdates = { ...idOriginalRowUpdates, [rowId]: {
+          ...rowUpdates, [PRIVATE_COLUMN_KEY.FILE_NAME]: newName,
+        } };
+      }
     }
 
-    storeRef.current.modifyRecords(rowIds, idRowUpdates, idOriginalRowUpdates, idOldRowData, idOriginalOldRowData, isCopyPaste, isRename, {
+    storeRef.current.modifyRecords(rowIds, submittedRowUpdates, submittedOriginalUpdates, idOldRowData, idOriginalOldRowData, isCopyPaste, isRename, {
       fail_callback: (error) => {
         fail_callback && fail_callback(error);
         error && toaster.danger(error);
