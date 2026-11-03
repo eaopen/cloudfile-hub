@@ -4,6 +4,7 @@ import PropTypes from 'prop-types';
 import SeahubModalHeader from '@/components/seahub-modal-header';
 import { gettext } from '@/utils/constants';
 import { isEnter } from '@/utils/hotkey';
+import { validateNewFileName } from '@/utils/new-file-name';
 import { validateName } from '@/utils/utils';
 
 const RenameDialog = ({ isDir, oldName, onSubmit, onCancel }) => {
@@ -13,13 +14,14 @@ const RenameDialog = ({ isDir, oldName, onSubmit, onCancel }) => {
   const newInput = useRef(null);
 
   const handleChange = (e) => {
-    const value = e.target.value.trim();
+    const value = e.target.value;
     setNewName(value);
     setIsSubmitBtnActive(!!value);
   };
 
   const handleSubmit = () => {
-    const { isValid, errMessage } = validateName(newName);
+    const policy = validateNewFileName(newName);
+    const { isValid, errMessage } = policy.isValid ? validateName(newName) : policy;
     if (!isValid) {
       setErrMessage(errMessage);
       return;

@@ -3,6 +3,7 @@ import { Button, Modal, Input, ModalBody, ModalFooter, Alert, Label } from 'reac
 import PropTypes from 'prop-types';
 import SeahubModalHeader from '@/components/seahub-modal-header';
 import { gettext } from '@/utils/constants';
+import { validateNewFileName } from '@/utils/new-file-name';
 import { Utils, validateName } from '@/utils/utils';
 
 const propTypes = {
@@ -47,8 +48,9 @@ class Rename extends React.Component {
   };
 
   handleSubmit = () => {
-    let newName = this.state.newName.trim();
-    let { isValid, errMessage } = validateName(newName);
+    let newName = this.state.newName;
+    const policy = validateNewFileName(newName);
+    const { isValid, errMessage } = policy.isValid ? validateName(newName) : policy;
     if (!isValid) {
       this.setState({ errMessage });
       return;

@@ -10,6 +10,7 @@ import { useCollaborators } from '@/hooks/collaborators';
 import { Dirent } from '@/models';
 import { gettext } from '@/utils/constants';
 import EventBus from '@/utils/event-bus';
+import { validateNewFileName } from '@/utils/new-file-name';
 import { Utils, validateName } from '@/utils/utils';
 import {
   CellType,
@@ -179,7 +180,8 @@ export const MetadataViewProvider = ({
       const rowUpdates = idOriginalRowUpdates[rowId];
       const { _parent_dir, _name } = row;
       newName = getFileNameFromRecord(rowUpdates);
-      const { isValid, errMessage } = validateName(newName);
+      const policy = validateNewFileName(newName);
+      const { isValid, errMessage } = policy.isValid ? validateName(newName) : policy;
       if (!isValid) {
         toaster.danger(errMessage);
         return;
