@@ -25,7 +25,8 @@ class ViewScopeTests(unittest.TestCase):
         force_authenticate(req, SimpleNamespace(id=1, username="reader@auth.local",
                                                  is_authenticated=True, is_active=True))
         policy = SimpleNamespace(can_read=read, can_write=write)
-        repo = SimpleNamespace(is_virtual=False, encrypted=False, version=1)
+        repo = SimpleNamespace(is_virtual=False, encrypted=False, version=1,
+                               name="方案设计库")
         # Mirror the real CE14 binding: dirents expose obj_id/obj_name, not `.id`.
         # A fixture with `.id` hides exactly this class of bug (it shipped once).
         file_entry = SimpleNamespace(mode=stat.S_IFREG | 0o644, obj_id=FILE_ID)
@@ -53,6 +54,9 @@ class ViewScopeTests(unittest.TestCase):
         self.assertEqual(claims["repo_id"], RID)
         self.assertEqual(claims["path"], FILE)
         self.assertEqual(claims["file_id"], FILE_ID)
+        # 库名只用于本机任务中心的显示，必须跟着票据走 —— 否则列表里只剩
+        # `/10220942/a.dta` 这种库内路径，同名文件根本分不出是哪个库的。
+        self.assertEqual(claims["repo_name"], "方案设计库")
         for mode in ("optimistic-edit", "exclusive-edit"):
             denied = self.request(mode, read=True, write=False)
             self.assertEqual(denied.status_code, 403)
@@ -74,6 +78,23 @@ class ViewScopeTests(unittest.TestCase):
         self.assertTrue(issue_ticket(mode="local-view", **base))
         with self.assertRaises(ValueError):
             issue_ticket(mode="unlimited", **base)
+
+    def test_library_name_claim_is_display_only_and_sanitized(self):
+        base = dict(username="reader@auth.local", uid="stable-uid",
+                    repo_id=RID, path=FILE, file_id=FILE_ID, now=1700000000,
+                    secret="unit-test-secret", mode="local-view")
+        # 没有库名（老版本 seafile_api 或 fixture）时给空串，不能因此签不出票。
+        empty = jwt.decode(issue_ticket(**base), "unit-test-secret",
+                           audience="cloudfile-edit-agent", algorithms=["HS256"])
+        self.assertEqual(empty["repo_name"], "")
+        # 控制字符会被去掉；名字本身（含中文/空格）原样保留。
+        named = jwt.decode(issue_ticket(repo_name="方案 设计库\x00\x07", **base),
+                           "unit-test-secret", audience="cloudfile-edit-agent",
+                           algorithms=["HS256"])
+        self.assertEqual(named["repo_name"], "方案 设计库")
+        # 只影响显示字段：授权相关的 claim 一个字都不能变。
+        for claim in ("repo_id", "path", "file_id", "mode", "sub", "uid"):
+            self.assertEqual(named[claim], empty[claim])
 
 
 class CheckoutCapabilityTests(unittest.TestCase):

@@ -72,7 +72,8 @@ def checkout_unavailable(repo_id):
             is_enabled('CF_ENABLE_CHECKOUT') and not checkout_available())
 
 
-def issue_ticket(*, username, uid, repo_id, path, mode, file_id, now, secret):
+def issue_ticket(*, username, uid, repo_id, path, mode, file_id, now, secret,
+                 repo_name=""):
     """Stateless, path-scoped Agent permit. Never accept a caller-supplied actor."""
     if not isinstance(username, str) or not username or len(username) > 255:
         raise ValueError("invalid current user")
@@ -91,13 +92,18 @@ def issue_ticket(*, username, uid, repo_id, path, mode, file_id, now, secret):
         raise ValueError("invalid Seafile object")
     if not secret:
         raise ValueError("JWT secret not available")
+    # 库名只用于本机任务中心显示（「库 方案设计库 · 10220942/a.dta」），
+    # 不参与任何授权判断：本地能不能读、能不能写仍然只看 ticket 的 scope
+    # 和文件服务端的校验。agent 侧也只把它当展示字段。
+    name = repo_name if isinstance(repo_name, str) else ""
+    name = "".join(ch for ch in name if ch.isprintable()).strip()[:255]
     return jwt.encode({
         "iss": "cloudfile-v2-edit",
         "aud": "cloudfile-edit-agent",
         "sub": username, "uid": uid, "jti": str(uuid4()),
         "iat": now, "nbf": now, "exp": now + MAX_TICKET_SECONDS,
         "repo_id": repo_id, "path": path, "file_id": file_id,
-        "mode": mode,
+        "mode": mode, "repo_name": name,
     }, secret, algorithm="HS256")
 
 
@@ -150,7 +156,11 @@ class RustLocalEditOpen(APIView):
             now = int(time.time())
             token = issue_ticket(username=user, uid=uid, repo_id=repo_id, path=path,
                                  mode=mode, file_id=file_id, now=now,
-                                 secret=JWT_PRIVATE_KEY)
+                                 secret=JWT_PRIVATE_KEY,
+                                 # 本机任务中心要在列表里区分「哪个库」：
+                                 # `path` 只有库内的相对路径，同名文件在不同库里
+                                 # 长得一模一样（现场 /10220942/a.dta）。
+                                 repo_name=getattr(repo, "name", ""))
             # Explicit origin, not forwarded claims from the caller body.
             instance = request.build_absolute_uri("/").rstrip("/")
             ticket_id = str(uuid4())
