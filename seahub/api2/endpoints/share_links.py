@@ -344,13 +344,6 @@ class ShareLinks(APIView):
         from cloudfile_ext.v2.share_links import require_external_sharing
         require_external_sharing()
 
-        # CloudFile review share-002: when external sharing is restricted,
-        # only system admins may create new share links.
-        from cloudfile_ext.features import is_enabled
-        if is_enabled('CF_ENABLE_SHARE_RESTRICT') and not request.user.is_staff:
-            error_msg = 'External sharing is disabled.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
-
         # argument check
         repo_id = request.data.get('repo_id', None)
         if not repo_id:

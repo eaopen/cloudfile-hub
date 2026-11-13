@@ -53,6 +53,7 @@ class ShareBoundariesTest(unittest.TestCase):
                 'UploadLinkShareManager.get_valid_upload_link_by_token',
                 'check_share_link_common', 'check_share_link_access_by_scope'],
             'seahub/api2/views.py': ['FileSharedLinkView.put'],
+            'seahub/api2/endpoints/share_link_auth.py': ['ShareLinkUserAuthView.post', 'ShareLinkEmailAuthView.post'],
             'seahub/api2/endpoints/internal_api.py': ['InternalCheckShareLinkAccess.post', 'CheckShareLinkThumbnailAccess.post'],
             'seahub/share/views.py': ['save_shared_link', 'ajax_get_link_email_audit_code'],
             'seahub/api2/endpoints/share_links.py': ['ShareLinks.post', 'ShareLink.put',
@@ -96,6 +97,38 @@ class ShareBoundariesTest(unittest.TestCase):
                 self.assertEqual(fn(None, SimpleNamespace(user=SimpleNamespace(username='other')), 'abc'), 404)
                 format_info.assert_not_called()
                 self.assertEqual(fn(None, SimpleNamespace(user=SimpleNamespace(username='owner')), 'abc')['has_password'], True)
+
+    def test_recipient_management_checks_owner_and_native_object_path(self):
+        import posixpath
+        permission = Mock(return_value='rw')
+        fn = native_function('seahub/api2/endpoints/share_link_auth.py', 'check_link_share_perms', {
+            'posixpath': posixpath, 'check_folder_permission': permission,
+            'parse_repo_perm': lambda perm: SimpleNamespace(can_generate_share_link=perm == 'rw'),
+        })
+        request = SimpleNamespace(user=SimpleNamespace(username='owner'), GET={'path': '/public'})
+        link = SimpleNamespace(repo_id='actual', path='/private/file.txt', s_type='f',
+                               is_owner=lambda username: username == 'owner')
+        self.assertTrue(fn(request, link))
+        permission.assert_called_once_with(request, 'actual', '/private')
+        permission.reset_mock()
+        request.user.username = 'other'
+        self.assertFalse(fn(request, link))
+        permission.assert_not_called()
+        request.user.username = 'owner'
+        permission.return_value = None
+        self.assertFalse(fn(request, link))
+
+    def test_recipient_detail_lookups_are_owner_scoped(self):
+        for klass in ('ShareLinkUserAuthView', 'ShareLinkEmailAuthView'):
+            lookup = Mock(side_effect=KeyError)
+            fn = native_function('seahub/api2/endpoints/share_link_auth.py', klass + '.get', {
+                'FileShare': SimpleNamespace(objects=SimpleNamespace(get=lookup), DoesNotExist=KeyError),
+                'status': SimpleNamespace(HTTP_400_BAD_REQUEST=400), 'IS_EMAIL_CONFIGURED': True,
+                'api_error': lambda status, message: status,
+            })
+            request = SimpleNamespace(user=SimpleNamespace(username='other'), GET={'path': '/public'})
+            self.assertEqual(fn(None, request, 'abc'), 400)
+            lookup.assert_called_once_with(token='abc', username='other')
 
     def test_detail_serializers_never_decrypt_passwords(self):
         import os
