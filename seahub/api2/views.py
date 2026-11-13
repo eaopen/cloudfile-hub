@@ -3770,9 +3770,10 @@ class FileSharedLinkView(APIView):
 
     def put(self, request, repo_id, format=None):
 
-        # V2 uses native CE share authorization, not the retired
-        # v0.9 CF_ENABLE_SHARE_RESTRICT feature flag.
+        # Legacy creation must honor the same external-sharing restriction as v2.1.
 
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
         repo = seaserv.get_repo(repo_id)
         if not repo:
             return api_error(status.HTTP_404_NOT_FOUND, "Library does not exist")
@@ -5392,7 +5393,7 @@ class RepoDownloadSharedLink(APIView):
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         try:
-            link = FileShare.objects.get(token=token)
+            link = FileShare.objects.get(token=token, repo_id=repo_id)
         except FileShare.DoesNotExist:
             error_msg = 'Link %s not found.' % token
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
@@ -5474,8 +5475,8 @@ class RepoUploadSharedLink(APIView):
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         try:
-            link = UploadLinkShare.objects.get(token=token)
-        except FileShare.DoesNotExist:
+            link = UploadLinkShare.objects.get(token=token, repo_id=repo_id)
+        except UploadLinkShare.DoesNotExist:
             error_msg = 'Link %s not found.' % token
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 

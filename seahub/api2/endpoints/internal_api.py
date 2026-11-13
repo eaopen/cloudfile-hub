@@ -75,6 +75,8 @@ class InternalCheckShareLinkAccess(APIView):
     
     def post(self, request):
         
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
         auth = request.META.get('HTTP_AUTHORIZATION', '').split()
         is_valid = is_valid_internal_jwt(auth)
         if not is_valid:
@@ -412,6 +414,8 @@ class CheckShareLinkThumbnailAccess(APIView):
     authentication_classes = (SessionCRSFCheckFreeAuthentication,)
     
     def post(self, request):
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
         auth = request.META.get('HTTP_AUTHORIZATION', '').split()
         link_token = request.data.get('token')
         is_valid = is_valid_internal_jwt(auth)
