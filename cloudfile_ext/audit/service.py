@@ -26,7 +26,8 @@ from cloudfile_ext.audit.events import (
 # path; Activity only ever emits create/edit/delete/rename/move/recover.
 VALID_OPS = frozenset((
     'create', 'edit', 'update', 'delete', 'rename', 'move', 'recover',
-    'tag_add', 'tag_remove', 'tag_replace', 'checkout', 'checkin', 'checkout_cancel'))
+    'tag_add', 'tag_remove', 'tag_replace', 'checkout', 'checkin', 'checkout_cancel',
+    'file_protect', 'file_unprotect'))
 VALID_OBJECTS = frozenset(('file', 'dir', 'tag'))
 
 MAX_PAGE_SIZE = 200

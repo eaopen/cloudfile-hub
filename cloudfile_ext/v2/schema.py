@@ -7,7 +7,8 @@ import re
 TABLES = frozenset({'cf_library_storage', 'cf_dir_acl', 'cf_sso_group_map'})
 EDIT_TABLES = frozenset({'cf_edit_guard'})
 AUDIT_TABLES = frozenset({'cf_audit_event'})
-ALL_TABLES = TABLES | EDIT_TABLES | AUDIT_TABLES
+PROTECTION_TABLES = frozenset({'cf_file_protection'})
+ALL_TABLES = TABLES | EDIT_TABLES | AUDIT_TABLES | PROTECTION_TABLES
 
 
 class SchemaError(RuntimeError):
@@ -57,16 +58,17 @@ def statements(ddl, *, allowed=TABLES):
 
 
 class FreshSchema:
-    def __init__(self, connection, ddl, *, edit_ddl, audit_ddl):
+    def __init__(self, connection, ddl, *, edit_ddl, audit_ddl, protection_ddl):
         if not connection.get_autocommit():
             raise ValueError('dedicated autocommit connection required')
-        # All five tables are the sole unreleased V2 schema. Checkout
+        # All six reviewed tables form the V2 schema. Checkout
         # activation is a runtime capability, not a schema version.
         self.connection = connection
         self.tables = ALL_TABLES
         self.ddl = statements(ddl)
         self.ddl.update(statements(edit_ddl, allowed=EDIT_TABLES))
         self.ddl.update(statements(audit_ddl, allowed=AUDIT_TABLES))
+        self.ddl.update(statements(protection_ddl, allowed=PROTECTION_TABLES))
 
     def _tables(self, cursor):
         cursor.execute('SELECT table_name FROM information_schema.tables WHERE table_schema=DATABASE()')
@@ -77,7 +79,15 @@ class FreshSchema:
         cursor.execute('SHOW CREATE TABLE ' + identifier(name))
         # Only the table name differs for the disposable expected definition.
         definition = cursor.fetchone()[1]
-        return definition[definition.index('('):]
+        definition = definition[definition.index('('):]
+        # SHOW CREATE includes the next generated value for populated tables.
+        # It is data state, not structural drift; retain the column attribute
+        # and every other table option (engine, charset, collation, etc.).
+        columns, separator, options = definition.rpartition(') ENGINE=')
+        if not separator:
+            raise SchemaError('unrecognized table definition')
+        options = re.sub(r' AUTO_INCREMENT=[0-9]+(?= |$)', '', options)
+        return columns + separator + options
 
     def _verify_one(self, cursor, name):
         expected = 'cfv2_expected'
@@ -101,6 +111,10 @@ class FreshSchema:
         with database_lock(self.connection, 'schema'):
             with self.connection.cursor() as cursor:
                 present = self._tables(cursor)
+                if present == (TABLES | EDIT_TABLES | AUDIT_TABLES):
+                    # An existing five-table volume is not a fresh install.
+                    # It needs an explicitly reviewed protection migration.
+                    raise SchemaError('existing V2 requires controlled protection migration')
                 if present - self.tables:
                     raise SchemaError('legacy configuration present; no conversion is provided')
                 # Check every existing table before creating any missing table.
