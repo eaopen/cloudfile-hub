@@ -52,7 +52,7 @@
 
 ## 当前数据库（未正式发布 V2）
 
-- 唯一扩展表为 `cf_library_storage`、`cf_dir_acl`、`cf_sso_group_map`、`cf_edit_guard`、`cf_audit_event`；新装一次创建全部五表，已有卷只校验。
+- 唯一扩展表为 `cf_library_storage`、`cf_dir_acl`、`cf_sso_group_map`、`cf_edit_guard`、`cf_audit_event`、`cf_file_protection`；新装一次创建全部六表，已有卷只校验。
 - 不迁移或追溯开发期旧数据。存储绑定从 Seafile 的 Repo/RepoStorageId 重新识别，ACL/共享和组织/角色从客户 Provider 重新同步，Guard/审计从空表开始；旧 `cf_tag`、Resource、Intent、Session、Outbox 不恢复。
 - 绝不清除 CE 原生 Repo、Branch、文件内容、版本或原生 Tag，也不因为缺表自动建立旧扩展 DDL、迁移服务或产品级升级框架。
 
@@ -63,9 +63,9 @@
 - **不得恢复** `cf_edit_session`、`cf_resource`、`cf_commit_intent`、旧设备/会话/回执表，也不得让旧 `extensions/local-edit/v1/*` / `file_actions.local-sessions` 重新参与运行。
 - 本地普通编辑无需 Checkout；独占编辑按 Guard 及实际启用能力返回。出现 `cf_edit_session doesn't exist` 是旧调用或旧部署证据，禁止以补表修复。
 
-## 仅允许当前五张扩展表
+## 仅允许当前六张扩展表
 
-- 当前 V2 数据模型：`cf_library_storage`、`cf_sso_group_map`、`cf_dir_acl`、`cf_edit_guard`、`cf_audit_event`。Tag 属于 CE 原生表，文件版本/动作使用 CE Commit/Activity。
+- 当前 V2 数据模型：`cf_library_storage`、`cf_sso_group_map`、`cf_dir_acl`、`cf_edit_guard`、`cf_audit_event`、`cf_file_protection`。Tag 属于 CE 原生表，文件版本/动作使用 CE Commit/Activity。
 - `cloudfile_extensions/schema/migrations` 的旧 001–042 迁移链已移除；不得从历史 Git 分支复制回来，也不得注册 `cloudfile_extensions.*` 旧 URLConf 或启动旧 PolicyHost/Worker。
 - 当前 URI/Agent2 编辑流程不使用 SQL Session、Resource、Intent，历史编辑服务可能还出现在 Git 树中以便追溯，但不属于当前运行或发布合同。
 
@@ -75,4 +75,4 @@
 - 唯一权限链：Seafile CE 原生库资格 + Hub `Authority.effective()` 对当前身份和实际路径的 ACL/共享目录结果 + C/Go 真实文件与最终 Commit 终判。无整库资格但有 `share_mode=true` 的用户只从共享目录根进入，不得开放库根、父级或兄弟目录。
 - **坚决禁止**恢复 `cf_managed_library`、`cf_managed_library_share`、`cf_library_share_revision`、`checkLegacyLibrary`、`cf_policy_check_legacy_library`、`managed_library_guard`、`allow_legacy_managed_reads`，也禁止恢复用于断言“库有任意 ACL 行就应全库拒绝”的测试。
 - 没有可信当前用户/路径的整库同步或无范围票据，允许因该**操作缺乏授权证明**而拒绝；这不是库分类。任何有路径证明的 Web/API/Agent/下载/上传必须按实际目标裁决，不能用无关目录的 ACL 拒绝整个库。策略异常不回退宽权限。
-- 当前文档与测试应以 V2 权限终判契约及五张扩展表为准；历史文档只用于追溯，不得作为实施依据。跨仓变更必须维护防复活的源码扫描和正反权限用例。
+- 当前文档与测试应以 V2 权限终判契约及六张扩展表为准；历史文档只用于追溯，不得作为实施依据。跨仓变更必须维护防复活的源码扫描和正反权限用例。

@@ -138,6 +138,11 @@ class RustLocalEditOpen(APIView):
             if not permitted:
                 return Response({"code": "VIEW_DENIED" if mode == "local-view"
                                  else "EDIT_DENIED"}, status=403)
+            if mode != 'local-view':
+                from .file_protection import read_batch
+                # ACL first: file-protection state must not reveal hidden paths.
+                if path in read_batch(repo_id, [path]):
+                    return Response({'code': 'FILE_PROTECTED'}, status=423)
             repo = seafile_api.get_repo(repo_id)
             if (repo is None or repo.is_virtual or repo.encrypted or
                     repo.version != 1):

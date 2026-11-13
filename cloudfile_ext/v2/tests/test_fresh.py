@@ -42,6 +42,7 @@ class FreshDatabaseTest(unittest.TestCase):
         cls.ddl = Path(os.environ['CF_V2_DDL']).read_text()
         cls.edit_ddl = Path(os.environ['CF_V2_DDL']).with_name('cloudfile-v2-edit.sql').read_text()
         cls.audit_ddl = Path(os.environ['CF_V2_DDL']).with_name('cloudfile-v2-audit.sql').read_text()
+        cls.protection_ddl = Path(os.environ['CF_V2_DDL']).with_name('cloudfile-v2-protection.sql').read_text()
         # Exported CE source is the test input, never the modified fork's SQL.
         source = Path(os.environ['CF_V2_SOURCE'])
         cls.native_ddl = {
@@ -71,7 +72,7 @@ class FreshDatabaseTest(unittest.TestCase):
                     cursor.execute('SET FOREIGN_KEY_CHECKS=1')
             self.connection = pymysql.connect(host='127.0.0.1', port=int(os.environ['CF_TEST_DB_PORT']), user='root',
                                               database=self.names['files'], charset='utf8mb4', autocommit=True)
-            self.schema = FreshSchema(self.connection, self.ddl, edit_ddl=self.edit_ddl, audit_ddl=self.audit_ddl)
+            self.schema = FreshSchema(self.connection, self.ddl, edit_ddl=self.edit_ddl, audit_ddl=self.audit_ddl, protection_ddl=self.protection_ddl)
             self.schema.install()
             def create_account(username):
                 with self.admin.cursor() as cursor:
@@ -139,7 +140,7 @@ class FreshDatabaseTest(unittest.TestCase):
             self.query('UPDATE ' + self.names['account'] + '.`Group` SET parent_group_id=1 WHERE group_id=%s', (group,))
             with self.assertRaises(IdentityConflict):lookup_group('role:r1')
 
-    def test_schema_is_independent_retryable_and_exactly_five_tables(self):
+    def test_schema_is_independent_retryable_and_exactly_six_tables(self):
         self.schema.install()
         self.schema.verify()
         self.assertEqual({row[0] for row in self.query('SHOW TABLES') if row[0].startswith('cf_')}, ALL_TABLES)
