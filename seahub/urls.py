@@ -9,6 +9,7 @@ from cloudfile_ext.v2.oidc import oidc_login
 from cloudfile_ext.v2.search.http import SearchQuery
 from cloudfile_ext.v2.operation_logs import OperationLogs
 from cloudfile_ext.v2.rust_edit import RustLocalEditOpen, RustCheckoutInfo
+from cloudfile_ext.v2.file_protection import FileProtectionStatus, FileProtect, FileUnprotect
 
 from seahub.api2.endpoints.file_comments import FileCommentsView, FileCommentView, FileCommentRepliesView, \
     FileCommentReplyView
@@ -248,6 +249,9 @@ urlpatterns = [
     path('api/v2.1/cloudfile/authorization/v1/directory-entries/', DirectoryEntries.as_view()),
     path('api/v2.1/cloudfile/repos/<str:repo_id>/upload-session/', UploadSession.as_view()),
     path('api/v2.1/cloudfile/tags/batch/', TagBatch.as_view()),
+    path('api/v2.1/cloudfile/protection/v1/status/', FileProtectionStatus.as_view()),
+    path('api/v2.1/cloudfile/protection/v1/protect/', FileProtect.as_view()),
+    path('api/v2.1/cloudfile/protection/v1/unprotect/', FileUnprotect.as_view()),
     path('api/v2.1/cloudfile/authorization/v1/directory-rules/', DirectoryRules.as_view()),
     path('api/v2.1/cloudfile/authorization/v1/library-acl-batch/', LibraryACLBatch.as_view()),
     path('api/v2.1/cloudfile/authorization/v1/library-grants/', LibraryGrants.as_view()),

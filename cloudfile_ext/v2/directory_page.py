@@ -91,5 +91,20 @@ def directory_page(request, repo_id):
         from .tag_http import page_tags
         for item, metadata in zip(response.data['dirent_list'], page_tags(repo_id, page['items'])):
             item.update(metadata)
+        # Display-only projection: one indexed read, never an editable SYS tag.
+        from .file_protection import read_batch
+        paths = [path for _, path, kind, _ in page['items'] if kind == 'file']
+        try:
+            protected = read_batch(repo_id, paths)
+            response.data['protection_status'] = 'OK'
+            for item, (_, path, kind, _) in zip(response.data['dirent_list'], page['items']):
+                if kind == 'file':
+                    item['protected'] = path in protected
+        except Exception:
+            logger.exception('CloudFile directory protection metadata unavailable')
+            response.data['protection_status'] = 'FAILED'
+            for item in response.data['dirent_list']:
+                if item['type'] == 'file':
+                    item['protected'] = None
     response['Cache-Control'] = 'no-store'
     return response
