@@ -76,3 +76,17 @@ class ProtectionContractTests(unittest.TestCase):
                 admin, {'repo_id': REPO, 'path': FILE, 'expected_file_id': FILE_ID}, True)
             self.assertEqual(response.status_code, 409)
             self.assertEqual(cursor.execute.call_count, 1)  # No INSERT/DELETE
+
+    def test_pending_virtual_write_blocks_old_origin_protection(self):
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [(REPO, '/design', HEAD)]
+        for candidate, allowed in [(FILE_ID, True), ('c' * 40, False), (None, False)]:
+            with self.subTest(candidate=candidate), patch.object(
+                    protection.seafile_api, 'get_file_id_by_commit_and_path', return_value=candidate) as read:
+                self.assertEqual(protection._virtual_views_current(
+                    cursor, '`native`.`Branch`', REPO, FILE, FILE_ID), allowed)
+                read.assert_called_once_with(REPO, HEAD, '/original.prt')
+        cursor.fetchall.return_value = [(REPO, '/design-other', HEAD)]
+        with patch.object(protection.seafile_api, 'get_file_id_by_commit_and_path') as read:
+            self.assertTrue(protection._virtual_views_current(cursor, '`native`.`Branch`', REPO, FILE, FILE_ID))
+            read.assert_not_called()
