@@ -79,7 +79,15 @@ class FreshSchema:
         cursor.execute('SHOW CREATE TABLE ' + identifier(name))
         # Only the table name differs for the disposable expected definition.
         definition = cursor.fetchone()[1]
-        return definition[definition.index('('):]
+        definition = definition[definition.index('('):]
+        # SHOW CREATE includes the next generated value for populated tables.
+        # It is data state, not structural drift; retain the column attribute
+        # and every other table option (engine, charset, collation, etc.).
+        columns, separator, options = definition.rpartition(') ENGINE=')
+        if not separator:
+            raise SchemaError('unrecognized table definition')
+        options = re.sub(r' AUTO_INCREMENT=[0-9]+(?= |$)', '', options)
+        return columns + separator + options
 
     def _verify_one(self, cursor, name):
         expected = 'cfv2_expected'
