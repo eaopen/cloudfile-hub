@@ -73,6 +73,8 @@ def check_share_link_access(request, token, is_upload_link=False):
 
 
 def check_share_link_access_by_scope(request, sharelink):
+    from cloudfile_ext.v2.share_links import require_external_sharing
+    require_external_sharing()
     from seahub.share.utils import SCOPE_ALL_USERS, SCOPE_SPECIFIC_EMAILS, SCOPE_SPECIFIC_USERS
     scope = sharelink.user_scope
     username = request.user.username
@@ -109,6 +111,8 @@ def check_share_link_access_by_scope(request, sharelink):
 def check_share_link_common(request, sharelink, is_upload_link=False):
     """Check if user can view a share link
     """
+    from cloudfile_ext.v2.share_links import require_external_sharing
+    require_external_sharing()
 
     msg = ''
     if not sharelink.is_encrypted():
@@ -141,6 +145,8 @@ class FileShareManager(models.Manager):
                         password=None, expire_date=None,
                         permission='view_download', org_id=None, description=None):
 
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
         if password is not None:
             password_enc = make_password(password)
         else:
@@ -173,6 +179,8 @@ class FileShareManager(models.Manager):
     def _get_valid_file_share_by_token(self, token):
         """Return share link that exists and not expire, otherwise none.
         """
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
         try:
             fs = self.get(token=token)
         except self.model.DoesNotExist:
@@ -522,6 +530,8 @@ class UploadLinkShareManager(models.Manager):
 
     def create_upload_link_share(self, username, repo_id, path,
                                  password=None, expire_date=None):
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
         path = normalize_dir_path(path)
         token = gen_token(max_length=config.SHARE_LINK_TOKEN_LENGTH)
         if password is not None:
@@ -537,6 +547,8 @@ class UploadLinkShareManager(models.Manager):
     def get_valid_upload_link_by_token(self, token):
         """Return upload link that exists and not expire, otherwise none.
         """
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
         try:
             fs = self.get(token=token)
         except self.model.DoesNotExist:

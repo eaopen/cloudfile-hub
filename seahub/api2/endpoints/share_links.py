@@ -115,7 +115,8 @@ def get_share_link_info(fileshare):
     data['expire_date'] = expire_date
     data['is_expired'] = fileshare.is_expired()
     data['permissions'] = fileshare.get_permissions()
-    data['password'] = fileshare.get_password()
+    data['password'] = None  # Never disclose recoverable native passwords.
+    data['has_password'] = fileshare.is_encrypted()
     data['user_scope'] = fileshare.user_scope
     data['description'] = fileshare.description
     data['can_edit'] = False
@@ -309,7 +310,8 @@ class ShareLinks(APIView):
             link_info['expire_date'] = datetime_to_isoformat_timestr(fs.expire_date) if fs.expire_date else ''
             link_info['is_expired'] = fs.is_expired()
             link_info['permissions'] = fs.get_permissions()
-            link_info['password'] = fs.get_password()
+            link_info['password'] = None
+            link_info['has_password'] = fs.is_encrypted()
             link_info['user_scope'] = fs.user_scope
             link_info['description'] = fs.description
 
@@ -339,13 +341,8 @@ class ShareLinks(APIView):
         Permission checking:
         1. default(NOT guest) user;
         """
-
-        # CloudFile review share-002: when external sharing is restricted,
-        # only system admins may create new share links.
-        from cloudfile_ext.features import is_enabled
-        if is_enabled('CF_ENABLE_SHARE_RESTRICT') and not request.user.is_staff:
-            error_msg = 'External sharing is disabled.'
-            return api_error(status.HTTP_403_FORBIDDEN, error_msg)
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
 
         # argument check
         repo_id = request.data.get('repo_id', None)
@@ -639,18 +636,15 @@ class ShareLink(APIView):
         1. default(NOT guest) user;
         """
 
-        # CloudFile review share-004: token APIs must not bypass the external
-        # share restriction either.
-        from cloudfile_ext.features import is_enabled
-        if is_enabled('CF_ENABLE_SHARE_RESTRICT') and not request.user.is_staff:
-            error_msg = 'token %s not found.' % token
-            return api_error(status.HTTP_404_NOT_FOUND, error_msg)
-
         try:
             fs = FileShare.objects.get(token=token)
         except FileShare.DoesNotExist:
             error_msg = 'token %s not found.' % token
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
+
+        # A locator token is not proof of ownership; management reads expose private metadata.
+        if not fs.is_owner(request.user.username):
+            return api_error(status.HTTP_404_NOT_FOUND, 'Share link not found.')
 
         link_info = get_share_link_info(fs)
         return Response(link_info)
@@ -661,6 +655,8 @@ class ShareLink(APIView):
         Permission checking:
         share link creater
         """
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
 
         # resource check
         try:
@@ -864,6 +860,8 @@ class ShareLinkOnlineOfficeLock(APIView):
         2, Share link should have can_edit permission.
         3, File must have been locked by OnlineOffice.
         """
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
 
         expire = request.data.get('expire', 0)
         try:
@@ -1164,6 +1162,8 @@ class ShareLinkUploadDone(APIView):
         3, If share link is encrypted, share link password must have been checked.
         4, Share link must be a folder share link and has can_upload permission.
         """
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
 
         # resource check
 
@@ -1288,6 +1288,8 @@ class ShareLinkSaveFileToRepo(APIView):
     def post(self, request, token):
 
         # argument check
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
         dst_repo_id = request.POST.get('dst_repo_id', '')
         if not dst_repo_id:
             error_msg = 'dst_repo_id invalid.'
@@ -1363,6 +1365,8 @@ class ShareLinkSaveItemsToRepo(APIView):
     def post(self, request, token):
 
         # argument check
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
         dst_repo_id = request.POST.get('dst_repo_id', '')
         if not dst_repo_id:
             error_msg = 'dst_repo_id invalid.'
@@ -1456,6 +1460,8 @@ class ShareLinkRepoTags(APIView):
     def get(self, request, token):
         """get all repo_tags by share link token.
         """
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
 
         try:
             share_link = FileShare.objects.get(token=token)
@@ -1505,6 +1511,8 @@ class ShareLinkRepoTagsTaggedFiles(APIView):
     def get(self, request, token, tag_id):
         """get tagged files by share link token and tag id.
         """
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
 
         try:
             share_link = FileShare.objects.get(token=token)

@@ -82,7 +82,8 @@ def get_upload_link_info(uls):
     data['username'] = uls.username
     data['expire_date'] = expire_date
     data['is_expired'] = uls.is_expired()
-    data['password'] = uls.get_password()
+    data['password'] = None
+    data['has_password'] = uls.is_encrypted()
     data['description'] = uls.description
 
     return data
@@ -153,6 +154,8 @@ class UploadLinks(APIView):
         1. default(NOT guest) user;
         2. user with 'rw' permission;
         """
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
 
         # argument check
         repo_id = request.data.get('repo_id', None)
@@ -358,6 +361,10 @@ class UploadLink(APIView):
             error_msg = 'token %s not found.' % token
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)
 
+        # Upload collection tokens must not reveal another creator's management metadata.
+        if uls.username != request.user.username:
+            return api_error(status.HTTP_404_NOT_FOUND, 'Upload link not found.')
+
         link_info = get_upload_link_info(uls)
         return Response(link_info)
 
@@ -367,6 +374,8 @@ class UploadLink(APIView):
         Permission checking:
         upload link creater
         """
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
 
         try:
             uls = UploadLinkShare.objects.get(token=token)
@@ -481,6 +490,8 @@ class UploadLinkUpload(APIView):
         Permission checking:
         1. anyone has the upload link token can perform this action;
         """
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
 
         try:
             uls = UploadLinkShare.objects.get(token=token)

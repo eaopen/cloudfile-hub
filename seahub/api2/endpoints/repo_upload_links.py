@@ -127,7 +127,7 @@ class RepoUploadLink(APIView):
 
         # resource check
         try:
-            upload_link = UploadLinkShare.objects.get(token=token)
+            upload_link = UploadLinkShare.objects.get(token=token, repo_id=repo_id)
         except UploadLinkShare.DoesNotExist:
             error_msg = 'Upload link %s not found.' % token
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)

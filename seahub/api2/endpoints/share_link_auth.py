@@ -1,4 +1,5 @@
 import logging
+import posixpath
 import json
 from rest_framework.authentication import SessionAuthentication
 from rest_framework.permissions import IsAuthenticated
@@ -18,7 +19,7 @@ from seahub.share.models import FileShare
 from seahub.share.utils import SCOPE_SPECIFIC_USERS, SCOPE_SPECIFIC_EMAILS
 from seahub.utils.repo import parse_repo_perm
 from seahub.utils import IS_EMAIL_CONFIGURED, string2list, is_valid_email
-from seaserv import seafile_api
+from seahub.views import check_folder_permission
 
 
 logger = logging.getLogger(__name__)
@@ -37,13 +38,15 @@ def get_user_auth_info(username, token):
     }
 
 
-def check_link_share_perms(request, repo_id, path):
-    username = request.user.username
-    repo_folder_permission = seafile_api.check_permission_by_path(repo_id, path, username)
-    if parse_repo_perm(repo_folder_permission).can_generate_share_link is False:
+def check_link_share_perms(request, file_share):
+    # Never trust the caller's path or a token alone to administer another object's grant.
+    if not file_share.is_owner(request.user.username):
         return False
-
-    return True
+    path = file_share.path.rstrip('/') or '/'
+    if file_share.s_type != 'd':
+        path = posixpath.dirname(path)
+    permission = check_folder_permission(request, file_share.repo_id, path)
+    return parse_repo_perm(permission).can_generate_share_link is not False
 
 
 
@@ -61,7 +64,7 @@ class ShareLinkUserAuthView(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         try:
-            file_share = FileShare.objects.get(token=token)
+            file_share = FileShare.objects.get(token=token, username=request.user.username)
         except FileShare.DoesNotExist:
             error_msg = 'token invalid.'
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
@@ -71,7 +74,7 @@ class ShareLinkUserAuthView(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         repo_id = file_share.repo_id
-        if not check_link_share_perms(request, repo_id, path):
+        if not check_link_share_perms(request, file_share):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -95,6 +98,9 @@ class ShareLinkUserAuthView(APIView):
 
     def post(self, request, token):
 
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
+
         try:
             path = request.GET.get('path', None)
             if not path:
@@ -102,7 +108,7 @@ class ShareLinkUserAuthView(APIView):
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
             try:
-                file_share = FileShare.objects.get(token=token)
+                file_share = FileShare.objects.get(token=token, username=request.user.username)
             except FileShare.DoesNotExist:
                 error_msg = 'token invalid.'
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
@@ -112,7 +118,7 @@ class ShareLinkUserAuthView(APIView):
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
             repo_id = file_share.repo_id
-            if not check_link_share_perms(request, repo_id, path):
+            if not check_link_share_perms(request, file_share):
                 error_msg = 'Permission denied.'
                 return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -170,7 +176,7 @@ class ShareLinkUserAuthView(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
         
         try:
-            file_share = FileShare.objects.get(token=token)
+            file_share = FileShare.objects.get(token=token, username=request.user.username)
         except FileShare.DoesNotExist:
             return Response({'success': True})
         
@@ -179,7 +185,7 @@ class ShareLinkUserAuthView(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         repo_id = file_share.repo_id
-        if not check_link_share_perms(request, repo_id, path):
+        if not check_link_share_perms(request, file_share):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -228,7 +234,7 @@ class ShareLinkEmailAuthView(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         try:
-            file_share = FileShare.objects.get(token=token)
+            file_share = FileShare.objects.get(token=token, username=request.user.username)
         except FileShare.DoesNotExist:
             error_msg = 'token invalid.'
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
@@ -238,7 +244,7 @@ class ShareLinkEmailAuthView(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
         repo_id = file_share.repo_id
-        if not check_link_share_perms(request, repo_id, path):
+        if not check_link_share_perms(request, file_share):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -262,6 +268,9 @@ class ShareLinkEmailAuthView(APIView):
 
     def post(self, request, token):
         
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
+
         if not IS_EMAIL_CONFIGURED:
             error_msg = 'feature is not enabled.'
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
@@ -273,7 +282,7 @@ class ShareLinkEmailAuthView(APIView):
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
             try:
-                file_share = FileShare.objects.get(token=token)
+                file_share = FileShare.objects.get(token=token, username=request.user.username)
             except FileShare.DoesNotExist:
                 error_msg = 'token invalid.'
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
@@ -283,7 +292,7 @@ class ShareLinkEmailAuthView(APIView):
                 return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
 
             repo_id = file_share.repo_id
-            if not check_link_share_perms(request, repo_id, path):
+            if not check_link_share_perms(request, file_share):
                 error_msg = 'Permission denied.'
                 return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
@@ -350,7 +359,7 @@ class ShareLinkEmailAuthView(APIView):
             return api_error(status.HTTP_400_BAD_REQUEST, error_msg)
         
         try:
-            file_share = FileShare.objects.get(token=token)
+            file_share = FileShare.objects.get(token=token, username=request.user.username)
         except FileShare.DoesNotExist:
             return Response({'success': True})
         
@@ -363,7 +372,7 @@ class ShareLinkEmailAuthView(APIView):
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 
         repo_id = file_share.repo_id
-        if not check_link_share_perms(request, repo_id, path):
+        if not check_link_share_perms(request, file_share):
             error_msg = 'Permission denied.'
             return api_error(status.HTTP_403_FORBIDDEN, error_msg)
 

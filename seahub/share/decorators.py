@@ -62,6 +62,9 @@ def share_link_audit(func):
 
     def _decorated(request, token, *args, **kwargs):
 
+        from cloudfile_ext.v2.share_links import require_external_sharing
+        require_external_sharing()
+
         assert token is not None    # Checked by URLconf
 
         is_for_upload = False

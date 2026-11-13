@@ -132,7 +132,7 @@ class RepoShareLink(APIView):
 
         # resource check
         try:
-            fileshare = FileShare.objects.get(token=token)
+            fileshare = FileShare.objects.get(token=token, repo_id=repo_id)
         except FileShare.DoesNotExist:
             error_msg = 'Share link %s not found.' % token
             return api_error(status.HTTP_404_NOT_FOUND, error_msg)

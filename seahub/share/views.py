@@ -120,6 +120,8 @@ def share_to_user(request, repo, to_user, permission):
 def save_shared_link(request):
     """Save public share link to one's library.
     """
+    from cloudfile_ext.v2.share_links import require_external_sharing
+    require_external_sharing()
     username = request.user.username
     token = request.GET.get('t', '')
     dst_repo_id = request.POST.get('dst_repo', '')
@@ -345,6 +347,8 @@ def ajax_private_share_dir(request):
         return HttpResponse(data, status=400, content_type=content_type)
 
 def ajax_get_link_email_audit_code(request):
+    from cloudfile_ext.v2.share_links import require_external_sharing
+    require_external_sharing()
     content_type = 'application/json; charset=utf-8'
 
     token = request.POST.get('token')
