@@ -143,6 +143,34 @@ def _regular_file(repo_id, path):
     return file_id, head
 
 
+def _virtual_views_current(cursor, branch_table, repo_id, path, file_id):
+    """Origin Branch is held: virtual publishers take it before their Branch.
+
+    An accepted virtual write may still be awaiting native merge. Do not freeze
+    the old origin version during that interval. Read immutable virtual commits,
+    not cached HEAD metadata, and never alter Checkout leases.
+    """
+    virtual_table = branch_table.rsplit('.', 1)[0] + '.`VirtualRepo`'
+    cursor.execute(
+        f"SELECT v.repo_id,v.path,b.commit_id FROM {virtual_table} v "
+        f"LEFT JOIN {branch_table} b ON b.repo_id=v.repo_id AND b.name='master' "
+        "WHERE v.origin_repo=%s ORDER BY v.repo_id LIMIT 1001 FOR UPDATE", [repo_id])
+    rows = cursor.fetchall()
+    if len(rows) > 1000:
+        raise ProtectionUnavailable("too many virtual views to verify")
+    for virtual_id, prefix, head in rows:
+        if not isinstance(prefix, str) or canonical_path(prefix) != prefix:
+            raise ProtectionUnavailable("invalid virtual path")
+        relative = path if prefix == '/' else path[len(prefix):] if path.startswith(prefix + '/') else None
+        if relative is None:
+            continue
+        if not HEX40.fullmatch(str(head)):
+            raise ProtectionUnavailable("virtual head unavailable")
+        if seafile_api.get_file_id_by_commit_and_path(virtual_id, head, relative) != file_id:
+            return False
+    return True
+
+
 def _state_change(user, body, protect):
     if not isinstance(body, dict) or set(body) != {'repo_id', 'path', 'expected_file_id'}:
         raise ValueError("explicit native file version required")
@@ -168,6 +196,8 @@ def _state_change(user, body, protect):
             row = cursor.fetchone()
             if row is None or row[0] != original_head:
                 return _reply({'code': 'FILE_VERSION_CHANGED'}, 409)
+            if protect and not _virtual_views_current(cursor, branch_table, repo_id, path, file_id):
+                return _reply({'code': 'VIRTUAL_REPO_SYNC_PENDING'}, 409)
             cursor.execute(
                 f'SELECT file_id,path FROM {table} WHERE repo_id=%s AND path_hash=%s FOR UPDATE',
                 [repo_id, digest])
