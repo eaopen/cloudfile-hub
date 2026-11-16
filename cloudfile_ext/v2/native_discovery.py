@@ -5,6 +5,7 @@ copies bytes, changes ownership, or allocates a new repository UUID.
 """
 from collections import Counter
 from uuid import UUID
+from .storage_reconcile import valid_key
 
 
 def native_key(repo_id):
@@ -29,14 +30,14 @@ def classify(repo_id, present, route, key, state, *, route_row_present=False):
     # an ordinary CE repository. Match the C/Go fail-closed route readers.
     if route_row_present and route is None:
         return "STORAGE_BINDING_INCOMPLETE"
-    if route is None and key is None:
+    if route in (None, 'cf-native') and key is None:
         return "NATIVE_REGISTERED"  # Native Seafile needs no CloudFile row.
     if route is None and key == marker and state in ("active", "retired"):
         return "NATIVE_REGISTERED"
     if route is not None and route.startswith("auto-local:"):
         # New V2 has only immutable RepoStorageId. Old V2 may have a historical
         # registry record for a custom outer directory.
-        if (key is None and route == "auto-local:" + repo_id) or (
+        if (key is None and valid_key(route[len("auto-local:"):])) or (
                 key is not None and route == "auto-local:" + key and
                 state in ("reserved", "active", "retired")):
             return "V2_ROUTED"
@@ -79,11 +80,10 @@ class NativeLibraryDiscovery:
             raise ValueError("repo_id must be a canonical UUID")
         with self.connection.cursor() as cursor:
             cursor.execute(
-                "SELECT t.repo_id,r.repo_id,s.storage_id,s.repo_id,c.repo_key,c.state,v.repo_id "
+                "SELECT t.repo_id,r.repo_id,s.storage_id,s.repo_id,NULL,NULL,v.repo_id "
                 "FROM (SELECT %s AS repo_id) t "
                 "LEFT JOIN Repo r ON r.repo_id=t.repo_id "
                 "LEFT JOIN RepoStorageId s ON s.repo_id=t.repo_id "
-                "LEFT JOIN cf_library_storage c ON c.repo_id=t.repo_id "
                 "LEFT JOIN VirtualRepo v ON v.repo_id=t.repo_id", (repo_id,))
             row = cursor.fetchone()
             if row[6] is not None:
@@ -97,9 +97,8 @@ class NativeLibraryDiscovery:
         while True:
             with self.connection.cursor() as cursor:
                 cursor.execute(
-                    "SELECT r.repo_id,r.repo_id,s.storage_id,s.repo_id,c.repo_key,c.state "
+                    "SELECT r.repo_id,r.repo_id,s.storage_id,s.repo_id,NULL,NULL "
                     "FROM Repo r LEFT JOIN RepoStorageId s ON s.repo_id=r.repo_id "
-                    "LEFT JOIN cf_library_storage c ON c.repo_id=r.repo_id "
                     "LEFT JOIN VirtualRepo v ON v.repo_id=r.repo_id "
                     "WHERE r.repo_id > %s AND v.repo_id IS NULL ORDER BY r.repo_id LIMIT %s",
                     (last, batch_size))
@@ -125,14 +124,11 @@ class NativeLibraryDiscovery:
 
         RepoTrash and GarbageRepos are normal native lifecycle locations.
         """
+        # Native allocations without a lifecycle owner remain visible for review.
         with self.connection.cursor() as cursor:
-            cursor.execute(
-                "SELECT COUNT(*) FROM cf_library_storage c "
-                "LEFT JOIN Repo r ON r.repo_id=c.repo_id "
-                "LEFT JOIN RepoTrash t ON t.repo_id=c.repo_id "
-                "LEFT JOIN GarbageRepos g ON g.repo_id=c.repo_id "
-                "WHERE r.repo_id IS NULL AND t.repo_id IS NULL "
-                "AND g.repo_id IS NULL AND c.state <> 'retired'")
+            cursor.execute("SELECT COUNT(*) FROM RepoStorageId s LEFT JOIN Repo r USING(repo_id) "
+                           "LEFT JOIN RepoTrash t USING(repo_id) LEFT JOIN GarbageRepos g USING(repo_id) "
+                           "WHERE r.repo_id IS NULL AND t.repo_id IS NULL AND g.repo_id IS NULL")
             return cursor.fetchone()[0]
 
     def summary(self, repo_id=None):
@@ -163,8 +159,8 @@ def storage_catalog_status(repo_id, repo_present, key, state, storage_id, readab
     if key is None:
         # Current UUID V2 and original Seafile both have no CloudFile
         # registry requirement. The actual route remains in RepoStorageId.
-        native = storage_id is None
-        auto = storage_id == "auto-local:" + repo_id
+        native = storage_id in (None, "cf-native")
+        auto = bool(storage_id and storage_id.startswith("auto-local:") and valid_key(storage_id[11:]))
         if native or auto:
             return "READY" if readable else "RESOURCE_UNREADABLE"
         return "BINDING_ERROR"
@@ -214,6 +210,8 @@ def inspect_from_hub(repo_ids):
     def table(name):
         return schema + '.' + identifier(name)
 
+    from .storage_reconcile import StorageConfig
+    config = StorageConfig.detect()
     result = {}
     for offset in range(0, len(repo_ids), 200):
         batch = repo_ids[offset:offset + 200]
@@ -222,10 +220,9 @@ def inspect_from_hub(repo_ids):
         if not batch:
             continue
         keys = ' UNION ALL '.join('SELECT %s AS repo_id' for _ in batch)
-        sql = ('SELECT i.repo_id,r.repo_id,c.repo_key,c.state,s.storage_id,s.repo_id,'
+        sql = ('SELECT i.repo_id,r.repo_id,NULL,NULL,s.storage_id,s.repo_id,'
                't.repo_id,g.repo_id,v.repo_id FROM (' + keys + ') i '
                'LEFT JOIN ' + table('Repo') + ' r ON r.repo_id=i.repo_id '
-               'LEFT JOIN ' + table('cf_library_storage') + ' c ON c.repo_id=i.repo_id '
                'LEFT JOIN ' + table('RepoStorageId') + ' s ON s.repo_id=i.repo_id '
                'LEFT JOIN ' + table('RepoTrash') + ' t ON t.repo_id=i.repo_id '
                'LEFT JOIN ' + table('GarbageRepos') + ' g ON g.repo_id=i.repo_id '
@@ -239,9 +236,11 @@ def inspect_from_hub(repo_ids):
                 present is not None, in_trash=trash is not None,
                 in_gc=garbage is not None, virtual=virtual is not None,
                 route_row_present=route_owner is not None)
+            if status == 'READY' and route_owner is None and config and config.root:
+                status = 'BINDING_ERROR'
             result[repo_id] = {
                 'status': status,
-                'source': 'native' if route is None and route_owner is None
+                'source': 'native' if (route is None and route_owner is None) or route == 'cf-native'
                 else ('v2' if route and route.startswith('auto-local:') else 'unknown')
             }
     return result

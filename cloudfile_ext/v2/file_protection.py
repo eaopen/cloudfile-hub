@@ -4,13 +4,9 @@ Independent from ACL and Checkout. A protected row identifies a canonical
 repository path and its immutable native file version. Native fileservers
 enforce it at Branch(master) publication; Hub handles management and display.
 """
-import configparser
-from functools import lru_cache
 import hashlib
-import os
 import re
 import stat
-from pathlib import Path
 from uuid import UUID
 
 from django.db import connection, transaction
@@ -23,6 +19,7 @@ from seahub.utils.db_api import SeafileDB
 
 from .acl_policy import canonical_path
 from .acl_runtime import Authority
+from .repo_feature import enabled
 
 MAX_BATCH = 200
 MAX_DISPLAY = 1000
@@ -46,34 +43,8 @@ def _path(value):
     return path
 
 
-@lru_cache(maxsize=1)
-def protected_repositories():
-    """Use the same native seafile.conf for Hub/C/Go, with coordinated restart."""
-    directory = os.environ.get('SEAFILE_CENTRAL_CONF_DIR') or os.environ.get('SEAFILE_DATA_DIR')
-    if not directory:
-        # Ordinary Seahub installations without the native scope remain OFF.
-        # The native C/Go commit fence remains authoritative if misconfigured.
-        return frozenset()
-    parser = configparser.ConfigParser(interpolation=None)
-    if not parser.read(str(Path(directory) / 'seafile.conf')):
-        raise ProtectionUnavailable("seafile.conf unavailable")
-    raw = parser.get('cloudfile', 'protection_repo_ids', fallback='')
-    if len(raw) > 8192:
-        raise ProtectionUnavailable("protection scope too large")
-    if not raw.strip():
-        return frozenset()
-    try:
-        values = [_uuid(value.strip()) for value in raw.split(',')]
-    except (ValueError, TypeError):
-        raise ProtectionUnavailable("invalid protection repository list") from None
-    if len(values) != len(set(values)):
-        raise ProtectionUnavailable("duplicate protected repository")
-    return frozenset(values)
-
-
 def selected(repo_id):
-    _uuid(repo_id)
-    return repo_id in protected_repositories()
+    return enabled(_uuid(repo_id), 'protection')
 
 
 def _tables():
@@ -196,6 +167,8 @@ def _state_change(user, body, protect):
             row = cursor.fetchone()
             if row is None or row[0] != original_head:
                 return _reply({'code': 'FILE_VERSION_CHANGED'}, 409)
+            if not enabled(repo_id, 'protection', locked=True):
+                return _reply({'code': 'PROTECTION_NOT_ENABLED'}, 409)
             if protect and not _virtual_views_current(cursor, branch_table, repo_id, path, file_id):
                 return _reply({'code': 'VIRTUAL_REPO_SYNC_PENDING'}, 409)
             cursor.execute(

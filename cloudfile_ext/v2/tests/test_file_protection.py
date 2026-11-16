@@ -17,23 +17,15 @@ HEAD = 'b' * 40
 
 
 class ProtectionContractTests(unittest.TestCase):
-    def tearDown(self):
-        protection.protected_repositories.cache_clear()
+    def setUp(self):
+        # All non-scope tests run with the capability row present.
+        self.feature = self.enterContext(patch.object(protection, 'enabled', return_value=True))
 
-    def test_native_repository_scope_is_strict_and_default_off(self):
-        with TemporaryDirectory() as directory:
-            config = Path(directory) / 'seafile.conf'
-            config.write_text('[cloudfile]\nprotection_repo_ids = \n')
-            with patch.dict(os.environ, {'SEAFILE_CENTRAL_CONF_DIR': directory}):
-                protection.protected_repositories.cache_clear()
-                self.assertEqual(protection.protected_repositories(), frozenset())
-                config.write_text('[cloudfile]\nprotection_repo_ids = ' + REPO + '\n')
-                protection.protected_repositories.cache_clear()
-                self.assertTrue(protection.selected(REPO))
-                config.write_text('[cloudfile]\nprotection_repo_ids = bad-id\n')
-                protection.protected_repositories.cache_clear()
-                with self.assertRaises(protection.ProtectionUnavailable):
-                    protection.protected_repositories()
+    def test_scope_reads_each_change(self):
+        self.feature.side_effect = (False, True, False)
+        self.assertEqual([protection.selected(REPO) for _ in range(3)], [False, True, False])
+        with self.assertRaises(ValueError):
+            protection.selected('bad-id')
 
     def test_status_does_not_reach_table_for_off_repo(self):
         with patch.object(protection, 'selected', return_value=False), \

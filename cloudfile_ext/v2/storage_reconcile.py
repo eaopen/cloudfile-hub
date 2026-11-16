@@ -136,7 +136,6 @@ class StorageReconciler:
         self.schema = schema
         self.prefix = identifier(schema) + '.' if schema else ''
         self.atomic = atomic or self._atomic
-        self.registry_present = True
 
     def table(self, name):
         return self.prefix + identifier(name)
@@ -161,62 +160,14 @@ class StorageReconciler:
             required = {'Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId'}
             cursor.execute("SELECT table_name FROM information_schema.tables "
                            "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name IN "
-                           "('Repo','RepoTrash','GarbageRepos','VirtualRepo','RepoStorageId')", (self.schema,))
+                           "('Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId')", (self.schema,))
             if {row[0] for row in cursor.fetchall()} != required:
                 raise RuntimeError('NATIVE_SEAFILE_DATABASE_NOT_CONNECTED')
-            cursor.execute("SELECT engine,table_collation FROM information_schema.tables "
-                           "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name='cf_library_storage'",
-                           (self.schema,))
-            table = cursor.fetchone()
-            if table is None:
-                self.registry_present = False
-                if not apply:
-                    return 'SCHEMA_MISSING'
-                raise RuntimeError('V2_FIVE_TABLE_SCHEMA_REQUIRED')
-            cursor.execute("SELECT column_name,column_type,is_nullable,column_default,character_set_name,"
-                           "collation_name,extra FROM information_schema.columns "
-                           "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name='cf_library_storage' "
-                           "ORDER BY ordinal_position", (self.schema,))
-            columns = list(cursor.fetchall())
-            expected_columns = [(name, kind, 'NO', None, 'ascii', 'ascii_bin', '') for name, kind in
-                                (('repo_key', 'varchar(80)'), ('repo_id', 'char(36)'), ('state', 'varchar(8)'))]
-            cursor.execute("SELECT index_name,non_unique,seq_in_index,column_name,sub_part,index_type "
-                           "FROM information_schema.statistics WHERE table_schema=COALESCE(%s,DATABASE()) "
-                           "AND table_name='cf_library_storage' ORDER BY index_name,seq_in_index", (self.schema,))
-            indexes = sorted(cursor.fetchall(), key=lambda row: (row[0], row[2]))
-            expected_indexes = [('PRIMARY', 0, 1, 'repo_key', None, 'BTREE'),
-                                ('library_storage_repo', 0, 1, 'repo_id', None, 'BTREE')]
-            # MariaDB hides CHECK_CONSTRAINTS from SELECT-only users even
-            # when SHOW CREATE TABLE exposes their table's complete contract.
-            cursor.execute('SHOW CREATE TABLE ' + self.table('cf_library_storage'))
-            definition = cursor.fetchone()[1]
-            checks = re.findall(r'CONSTRAINT\s+`?([A-Za-z0-9_]+)`?\s+CHECK\s+([^\n]+)',
-                                definition, flags=re.IGNORECASE)
-            def clause(value):
-                # MySQL may add _ascii literal introducers and parentheses;
-                # these spell the same reviewed expression on MariaDB.
-                value = re.sub(r"_[a-zA-Z0-9]+(?=')", '', value)
-                return re.sub(r'[\s`()]+', '', value).lower()
-            valid_check = (len(checks) == 1 and checks[0][0] == 'library_storage_state' and
-                           clause(checks[0][1]) == clause("state IN ('reserved','active','retired')"))
-            if (table != ('InnoDB', 'utf8mb4_bin') or columns != expected_columns or
-                    indexes != expected_indexes or not valid_check or 'NOT ENFORCED' in definition.upper() or
-                    'FOREIGN KEY' in definition.upper()):
-                raise RuntimeError('STORAGE_SCHEMA_DRIFT')
-        self.registry_present = True
         return 'SCHEMA_READY'
 
     def sources(self):
-        sources = ['SELECT repo_id FROM ' + self.table(name)
-                   for name in ('Repo', 'RepoTrash', 'GarbageRepos')]
-        if self.registry_present:
-            # A failed native create may leave the early, durable UUID
-            # allocation marker without ever creating Repo/Owner. Include it
-            # in *explicit* inventory so it cannot appear successfully active.
-            # Routine V2 startup does not call this full scan.
-            sources.append("SELECT repo_id FROM " + self.table('cf_library_storage') +
-                           " WHERE state='active'")
-        return ' UNION '.join(sources)
+        return ' UNION '.join('SELECT repo_id FROM ' + self.table(name)
+                              for name in ('Repo', 'RepoTrash', 'GarbageRepos', 'RepoStorageId'))
 
     def scan(self, batch_size=500):
         if not 1 <= batch_size <= 2000:
@@ -232,7 +183,7 @@ class StorageReconciler:
             yield from self.inspect_batch(ids)
             after = ids[-1]
 
-    def inspect_batch(self, repo_ids):
+    def inspect_batch(self, repo_ids, *, lock=False):
         """Read already-registered bindings in bounded pages, without stale caches.
 
         A full inventory used to repeat every join and route-conflict scan twice
@@ -240,169 +191,59 @@ class StorageReconciler:
         bindings take this read-only path; missing or abnormal bindings still use
         inspect/apply_one and its locked mutation checks.
         """
-        from .native_discovery import native_key
-        if not self.registry_present:
-            for repo_id in repo_ids:
-                yield self.inspect(repo_id)
-            return
-        tables = {name: self.table(name) for name in
-                  ('Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId', 'cf_library_storage')}
         sources = ' UNION ALL '.join('SELECT %s AS repo_id' for _ in repo_ids)
-        # SQL performs duplicate-route comparison with the native column's
-        # collation, including routes outside this page and retired repositories.
-        sql = ('SELECT i.repo_id,r.repo_id,t.repo_id,g.repo_id,v.repo_id,'
-               's.repo_id,s.storage_id,c.repo_key,c.state,d.storage_id '
-               'FROM (' + sources + ') i '
-               'LEFT JOIN {Repo} r ON r.repo_id=i.repo_id '
-               'LEFT JOIN {RepoTrash} t ON t.repo_id=i.repo_id '
-               'LEFT JOIN {GarbageRepos} g ON g.repo_id=i.repo_id '
-               'LEFT JOIN {VirtualRepo} v ON v.repo_id=i.repo_id '
-               'LEFT JOIN {RepoStorageId} s ON s.repo_id=i.repo_id '
-               'LEFT JOIN {cf_library_storage} c ON c.repo_id=i.repo_id '
-               'LEFT JOIN (SELECT storage_id FROM {RepoStorageId} '
-               'GROUP BY storage_id HAVING COUNT(*)>1) d ON d.storage_id=s.storage_id').format(**tables)
+        tables = {name: self.table(name) for name in ('Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId')}
+        sql = ('SELECT i.repo_id,r.repo_id,t.repo_id,g.repo_id,v.repo_id,s.repo_id,s.storage_id,'
+               'd.storage_id '
+               'FROM (' + sources + ') i LEFT JOIN {Repo} r ON r.repo_id=i.repo_id '
+               'LEFT JOIN {RepoTrash} t ON t.repo_id=i.repo_id LEFT JOIN {GarbageRepos} g ON g.repo_id=i.repo_id '
+                'LEFT JOIN {VirtualRepo} v ON v.repo_id=i.repo_id LEFT JOIN {RepoStorageId} s ON s.repo_id=i.repo_id '
+               'LEFT JOIN (SELECT storage_id FROM {RepoStorageId} GROUP BY storage_id HAVING COUNT(*)>1) d '
+               'ON d.storage_id=s.storage_id').format(**tables)
         with self.connection.cursor() as cursor:
-            cursor.execute(sql, tuple(repo_ids))
-            rows = {row[0]: row[1:] for row in cursor.fetchall()}
-        for repo_id in repo_ids:
-            present, trash, garbage, virtual, route_owner, route, key, state, duplicate = rows[repo_id]
-            # The normal UUID local route is complete without the historical
-            # cf_library_storage row; it must not be re-created by inventory.
-            if (not virtual and (present or trash or garbage) and route_owner and
-                    route == 'auto-local:' + repo_id and key is None and duplicate is None and
-                    self.config.auto_error(repo_id, repo_id) is None):
-                yield dict(repo_id=repo_id, storage_id=route, status='UUID_LOCAL',
-                           category='AUTO_LOCAL', repo_key=repo_id)
-                continue
-            marker = native_key(repo_id)
-            target = 'active' if present or trash else 'retired'
-            category = None
-            if marker and not virtual and (present or trash or garbage):
-                if route_owner is None and key == marker:
-                    category = 'NATIVE'
-                elif (route and route.startswith('auto-local:') and duplicate is None
-                      and key == route[len('auto-local:'):]
-                      and self.config.auto_error(key, repo_id) is None):
-                    category = 'AUTO_LOCAL'
-            if category and (state == target or (state == 'reserved' and target == 'active')):
-                # Matching the unique registered key proves no other registry
-                # owner exists; physical-path and native-route checks remain live.
-                yield dict(repo_id=repo_id, storage_id=route, status='REGISTERED',
-                           category=category, repo_key=key, state=state, expected_state=target)
+            cursor.execute(sql + (' FOR UPDATE' if lock else ''), tuple(repo_ids))
+            rows = cursor.fetchall()
+        for rid, live, trash, garbage, virtual, owner, route, duplicate in rows:
+            item = dict(repo_id=rid, storage_id=route)
+            if virtual:
+                yield dict(item, status='VIRTUAL_REPO')
+            elif not (live or trash or garbage):
+                yield dict(item, status='BLOCKED', reason='NATIVE_RESOURCE_MISSING')
+            elif (owner is None and not self.config.root) or route == 'cf-native':
+                yield dict(item, status='REGISTERED', category='NATIVE')
+            elif route and route.startswith('auto-local:'):
+                key = route[11:]
+                error = 'KEY_OCCUPIED' if duplicate else self.config.auto_error(key, rid)
+                if error:
+                    yield dict(item, status='BLOCKED', reason=error)
+                else:
+                    yield dict(item, status='UUID_LOCAL' if key == rid else 'REGISTERED', category='AUTO_LOCAL', repo_key=key)
+            elif route and self.config.native_class(route):
+                yield dict(item, status='NATIVE_CLASS_PINNED')
             else:
-                yield self.inspect(repo_id)
+                yield dict(item, status='BLOCKED', reason='INVALID_STORAGE_ROUTE')
 
     def inspect(self, repo_id, *, lock=False):
-        from .native_discovery import native_key
-        tables = {name: self.table(name) for name in
-                  ('Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId', 'cf_library_storage')}
-        if not self.registry_present:
-            tables['cf_library_storage'] = '(SELECT NULL AS repo_id,NULL AS repo_key,NULL AS state WHERE 1=0)'
-        sql = ('SELECT r.repo_id,t.repo_id,g.repo_id,v.repo_id,s.repo_id,s.storage_id,c.repo_key,c.state '
-               'FROM (SELECT %s AS repo_id) i '
-               'LEFT JOIN {Repo} r ON r.repo_id=i.repo_id '
-               'LEFT JOIN {RepoTrash} t ON t.repo_id=i.repo_id '
-               'LEFT JOIN {GarbageRepos} g ON g.repo_id=i.repo_id '
-               'LEFT JOIN {VirtualRepo} v ON v.repo_id=i.repo_id '
-               'LEFT JOIN {RepoStorageId} s ON s.repo_id=i.repo_id '
-               'LEFT JOIN {cf_library_storage} c ON c.repo_id=i.repo_id').format(**tables)
-        with self.connection.cursor() as cursor:
-            cursor.execute(sql + (' FOR UPDATE' if lock else ''), (repo_id,))
-            present, trash, garbage, virtual, route_owner, route, key, state = cursor.fetchone()
-        item = dict(repo_id=repo_id, storage_id=route, status='BLOCKED')
-        def blocked(reason):
-            return dict(item, reason=reason)
-        if virtual:
-            return dict(item, status='VIRTUAL_REPO')
-        if not (present or trash or garbage):
-            return blocked('NATIVE_RESOURCE_MISSING')
-        if route_owner is not None and route is None:
-            return blocked('INVALID_STORAGE_ROUTE')
-        marker = native_key(repo_id)
-        if marker is None:
-            return blocked('INVALID_NATIVE_REPO_ID')
-        target_state = 'active' if present or trash else 'retired'
-        if route is None:
-            category, wanted = 'NATIVE', marker
-        elif route.startswith('auto-local:'):
-            category, wanted = 'AUTO_LOCAL', route[len('auto-local:'):]
-            error = self.config.auto_error(wanted, repo_id)
-            if error:
-                return blocked(error)
-        elif self.config.native_class(route):
-            category, wanted = 'NATIVE_CLASS_PINNED', marker
-        else:
-            return blocked('UNSUPPORTED_STORAGE_CLASS')
-        item.update(category=category, repo_key=wanted, state=target_state)
-        # UUID-local is the V2 default, not a legacy key reservation. Do not
-        # maintain a second lifecycle marker or touch this table at runtime.
-        if (category == 'AUTO_LOCAL' and wanted == repo_id and key is None):
-            return dict(item, status='UUID_LOCAL')
-        with self.connection.cursor() as cursor:
-            if self.registry_present:
-                cursor.execute('SELECT repo_id FROM ' + self.table('cf_library_storage') +
-                               ' WHERE repo_key=%s AND repo_id<>%s', (wanted, repo_id))
-                if cursor.fetchone():
-                    return blocked('KEY_OCCUPIED')
-            if category == 'AUTO_LOCAL':
-                cursor.execute('SELECT repo_id FROM ' + self.table('RepoStorageId') +
-                               ' WHERE storage_id=%s AND repo_id<>%s', (route, repo_id))
-                if cursor.fetchone():
-                    return blocked('KEY_OCCUPIED')
-        if key is not None:
-            if key != wanted or category == 'NATIVE_CLASS_PINNED':
-                return blocked('STORAGE_BINDING_CONFLICT')
-            item.update(state=state, expected_state=target_state)
-            if state != target_state and not (state == 'reserved' and target_state == 'active'):
-                return dict(item, status='STATE_DRIFT', reason='LIFECYCLE_STATE_MISMATCH')
-            return dict(item, status='REGISTERED')
-        return dict(item, status=category)
+        return next(self.inspect_batch([repo_id], lock=lock))
 
     def apply_one(self, repo_id, normalize=()):
-        try:
-            with self.atomic():
-                item = self.inspect(repo_id, lock=True)
-                category = item['status']
-                normalize_route = (category == 'NATIVE_CLASS_PINNED' and item['storage_id'] in normalize)
-                if category not in ('NATIVE', 'AUTO_LOCAL') and not normalize_route:
-                    return item
-                if normalize_route:
-                    with self.connection.cursor() as cursor:
-                        cursor.execute('DELETE FROM ' + self.table('RepoStorageId') +
-                                       ' WHERE repo_id=%s AND BINARY storage_id = BINARY %s',
-                                       (repo_id, item['storage_id']))
-                        if cursor.rowcount != 1:
-                            raise RuntimeError('NATIVE_ROUTE_CHANGED')
-                route = None if normalize_route else item['storage_id']
-                route_check = 's.repo_id IS NULL' if route is None else 'BINARY s.storage_id = BINARY %s'
-                sql = ('INSERT INTO ' + self.table('cf_library_storage') + '(repo_key,repo_id,state) '
-                       'SELECT %s,i.repo_id,CASE WHEN r.repo_id IS NOT NULL OR t.repo_id IS NOT NULL '
-                       "THEN 'active' ELSE 'retired' END FROM (SELECT %s AS repo_id) i "
-                       'LEFT JOIN ' + self.table('Repo') + ' r ON r.repo_id=i.repo_id '
-                       'LEFT JOIN ' + self.table('RepoTrash') + ' t ON t.repo_id=i.repo_id '
-                       'LEFT JOIN ' + self.table('GarbageRepos') + ' g ON g.repo_id=i.repo_id '
-                       'LEFT JOIN ' + self.table('VirtualRepo') + ' v ON v.repo_id=i.repo_id '
-                       'LEFT JOIN ' + self.table('RepoStorageId') + ' s ON s.repo_id=i.repo_id '
-                       'WHERE (r.repo_id IS NOT NULL OR t.repo_id IS NOT NULL OR g.repo_id IS NOT NULL) '
-                       'AND v.repo_id IS NULL AND ' + route_check + ' FOR UPDATE')
-                with self.connection.cursor() as cursor:
-                    cursor.execute(sql, (item['repo_key'], repo_id) + (() if route is None else (route,)))
-                    if cursor.rowcount != 1:
-                        raise RuntimeError('NATIVE_ROUTE_CHANGED')
-                after = self.inspect(repo_id)
-                if after['status'] != 'REGISTERED':
-                    raise RuntimeError('STORAGE_FACTS_CHANGED')
-                return dict(after, action='REGISTERED', normalized=normalize_route)
-        except Exception as error:
-            if getattr(error, 'args', (None,))[0] == 1062:
-                # A competing writer wins only if its complete binding agrees.
-                after = self.inspect(repo_id)
-                if after['status'] == 'REGISTERED':
-                    return after
-                return dict(after, status='BLOCKED', reason='UNIQUE_KEY_CONFLICT')
-            if isinstance(error, RuntimeError) and str(error) in ('NATIVE_ROUTE_CHANGED', 'STORAGE_FACTS_CHANGED'):
-                return dict(repo_id=repo_id, status='BLOCKED', reason=str(error))
-            raise
+        if not normalize:
+            return self.inspect(repo_id)
+        # Only an explicitly named class proven to use the native directory
+        # can be normalized. A managed deployment needs a positive native route.
+        with self.atomic():
+            item = self.inspect(repo_id, lock=True)
+            if item['status'] != 'NATIVE_CLASS_PINNED' or item['storage_id'] not in normalize:
+                return item
+            table = self.table('RepoStorageId')
+            sql = ("UPDATE " + table + " SET storage_id='cf-native'" if self.config.root
+                   else "DELETE FROM " + table)
+            with self.connection.cursor() as cursor:
+                cursor.execute(sql + ' WHERE repo_id=%s AND BINARY storage_id=BINARY %s',
+                               (repo_id, item['storage_id']))
+                if cursor.rowcount != 1:
+                    raise RuntimeError('NATIVE_ROUTE_CHANGED')
+            return dict(self.inspect(repo_id), normalized=True)
 
     def orphans(self):
         if not self.config.root or not real_directory(self.config.root):
@@ -422,7 +263,7 @@ class StorageReconciler:
         for item in iterator:
             # A registered binding requires no write or second locked scan.
             # Every prospective mutation still revalidates inside apply_one.
-            if apply and item['status'] not in ('REGISTERED', 'UUID_LOCAL'):
+            if apply and normalize and item['status'] == 'NATIVE_CLASS_PINNED':
                 item = self.apply_one(item['repo_id'], normalize)
             items.append(item)
         orphans = self.orphans()
