@@ -99,28 +99,24 @@ class ViewScopeTests(unittest.TestCase):
 
 class CheckoutCapabilityTests(unittest.TestCase):
     def test_checkout_is_off_without_explicit_repo_selection(self):
-        with patch('cloudfile_ext.v2.rust_edit.settings',
-                   SimpleNamespace(CF_CHECKOUT_REPOS=())), \
+        with patch('cloudfile_ext.v2.repo_feature.enabled', return_value=False), \
              patch('cloudfile_ext.v2.rust_edit.checkout_available') as available:
             self.assertFalse(checkout_for_repo(RID))
             available.assert_not_called()
 
     def test_checkout_only_for_selected_repo(self):
-        with patch('cloudfile_ext.v2.rust_edit.settings',
-                   SimpleNamespace(CF_CHECKOUT_REPOS=(RID,))), \
+        with patch('cloudfile_ext.v2.repo_feature.enabled', side_effect=lambda rid, feature: rid == RID), \
              patch('cloudfile_ext.v2.rust_edit.checkout_available', return_value=True):
             self.assertTrue(checkout_for_repo(RID))
             self.assertFalse(checkout_for_repo('22222222-2222-4222-8222-222222222222'))
 
     def test_selected_repo_is_still_off_when_global_capability_is_disabled(self):
-        with patch('cloudfile_ext.v2.rust_edit.settings',
-                   SimpleNamespace(CF_CHECKOUT_REPOS=(RID,))), \
+        with patch('cloudfile_ext.v2.repo_feature.enabled', side_effect=lambda rid, feature: rid == RID), \
              patch('cloudfile_ext.v2.rust_edit.checkout_available', return_value=False):
             self.assertFalse(checkout_for_repo(RID))
 
     def test_malformed_selection_type_fails_safe_to_off(self):
-        with patch('cloudfile_ext.v2.rust_edit.settings',
-                   SimpleNamespace(CF_CHECKOUT_REPOS=RID)), \
+        with patch('cloudfile_ext.v2.repo_feature.enabled', return_value=False), \
              patch('cloudfile_ext.v2.rust_edit.checkout_available') as available:
             self.assertFalse(checkout_for_repo(RID))
             available.assert_not_called()
@@ -132,8 +128,7 @@ class CheckoutCapabilityTests(unittest.TestCase):
                                                  is_authenticated=True, is_active=True))
         # Exercise the real helper: an empty allowlist must short-circuit before
         # checkout_available()/schema discovery, without any Guard SQL.
-        with patch('cloudfile_ext.v2.rust_edit.settings',
-                   SimpleNamespace(CF_CHECKOUT_REPOS=())), \
+        with patch('cloudfile_ext.v2.repo_feature.enabled', return_value=False), \
              patch('cloudfile_ext.v2.rust_edit.connection') as database:
             response = RustCheckoutInfo.as_view()(req)
             self.assertEqual(response.status_code, 200)
@@ -142,8 +137,7 @@ class CheckoutCapabilityTests(unittest.TestCase):
 
 
     def test_optional_without_guard_refuses_new_edit_tickets(self):
-        with patch('cloudfile_ext.v2.rust_edit.settings',
-                   SimpleNamespace(CF_CHECKOUT_REPOS=(RID,))), \
+        with patch('cloudfile_ext.v2.repo_feature.enabled', side_effect=lambda rid, feature: rid == RID), \
              patch('cloudfile_ext.features.is_enabled', return_value=True), \
              patch('cloudfile_ext.v2.rust_edit.checkout_available', return_value=False):
             for mode in ('optimistic-edit', 'exclusive-edit'):
@@ -163,8 +157,7 @@ class CheckoutCapabilityTests(unittest.TestCase):
         force_authenticate(request, SimpleNamespace(username='user@auth.local',
                                                       is_authenticated=True,
                                                       is_active=True))
-        with patch('cloudfile_ext.v2.rust_edit.settings',
-                   SimpleNamespace(CF_CHECKOUT_REPOS=(RID,))), \
+        with patch('cloudfile_ext.v2.repo_feature.enabled', side_effect=lambda rid, feature: rid == RID), \
              patch('cloudfile_ext.features.is_enabled', return_value=True), \
              patch('cloudfile_ext.v2.rust_edit.checkout_available', return_value=False), \
              patch('cloudfile_ext.v2.rust_edit.connection') as database:

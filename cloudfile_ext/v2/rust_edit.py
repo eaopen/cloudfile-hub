@@ -55,10 +55,8 @@ def checkout_available():
 
 
 def checkout_selected(repo_id):
-    """Only explicit Repo UUIDs are OPTIONAL; OFF requires no Guard discovery."""
-    selected = getattr(settings, 'CF_CHECKOUT_REPOS', ())
-    return (isinstance(selected, (tuple, list, set, frozenset)) and
-            repo_id in selected)
+    from .repo_feature import enabled
+    return enabled(repo_id, 'checkout')
 
 
 def checkout_for_repo(repo_id):

@@ -4,7 +4,7 @@ import hashlib
 import re
 
 
-TABLES = frozenset({'cf_library_storage', 'cf_dir_acl', 'cf_sso_group_map'})
+TABLES = frozenset({'cf_repo_feature', 'cf_dir_acl', 'cf_sso_group_map'})
 EDIT_TABLES = frozenset({'cf_edit_guard'})
 AUDIT_TABLES = frozenset({'cf_audit_event'})
 PROTECTION_TABLES = frozenset({'cf_file_protection'})
