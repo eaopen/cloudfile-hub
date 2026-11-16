@@ -34,18 +34,14 @@ from .acl_runtime import Authority
 # 两个日间加中间睡眠。服务端 cfEditClaimsFor 必须用同一个值，两处必须同批发布。
 MAX_TICKET_SECONDS = 86400
 
-# Existing Checkout configuration and schema are qualified together. Changing
-# the capability or migrating Guard requires restarting Hub/native processes.
+# The Guard schema is static after deployment. Repository capability is
+# dynamic in cf_repo_feature: never cache its state or gate it on the old
+# CF_ENABLE_CHECKOUT startup flag.
 from functools import lru_cache
 
 
 @lru_cache(maxsize=1)
 def checkout_available():
-    from cloudfile_ext.features import is_enabled
-    # A baseline table is not feature activation. Keep ordinary transfer and
-    # optimistic editing independent of Guard discovery when Checkout is off.
-    if not is_enabled('CF_ENABLE_CHECKOUT'):
-        return False
     from seahub.utils.db_api import SeafileDB
     schema = SeafileDB().db_name
     from .checkout_schema import path_checkout_available
@@ -65,9 +61,7 @@ def checkout_for_repo(repo_id):
 
 def checkout_unavailable(repo_id):
     """A selected OPTIONAL repo with a missing Guard is NOT an OFF repo."""
-    from cloudfile_ext.features import is_enabled
-    return (checkout_selected(repo_id) and
-            is_enabled('CF_ENABLE_CHECKOUT') and not checkout_available())
+    return checkout_selected(repo_id) and not checkout_available()
 
 
 def issue_ticket(*, username, uid, repo_id, path, mode, file_id, now, secret,

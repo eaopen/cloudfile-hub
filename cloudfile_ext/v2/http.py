@@ -165,6 +165,18 @@ class RepoFeatures(APIView):
                 if cursor.fetchone() is not None:
                     return api_error(409, 'Protected files must be unprotected before '
                                           'disabling protection for this library.')
+            # Checkout is a time-bound reservation, not a detachable switch.
+            # A live Guard cannot be abandoned by turning off its repository
+            # policy: otherwise the holder's lease would be bypassed by normal
+            # writes before expiry. Use the same Branch lock order as native
+            # checkout/renew/release and refuse the whole multi-feature patch.
+            if changes.get('checkout') is False:
+                cursor.execute('SELECT 1 FROM ' + db +
+                               'cf_edit_guard WHERE repo_id=%s AND guard_id IS NOT NULL '
+                               'AND lease_expires_at>UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE', (rid,))
+                if cursor.fetchone() is not None:
+                    return api_error(409, 'Active checkouts must be released or '
+                                          'expired before disabling checkout.')
             for key, enabled in sorted(changes.items()):
                 if enabled and key not in current:
                     cursor.execute('INSERT INTO ' + table + '(repo_id,feature) VALUES (%s,%s)', (rid, key))

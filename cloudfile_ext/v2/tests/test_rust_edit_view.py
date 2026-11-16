@@ -1,5 +1,6 @@
 """Scope tests: view tickets require read, and cannot be upgraded to write."""
 import stat
+import time
 import unittest
 from types import SimpleNamespace
 from unittest.mock import patch
@@ -73,7 +74,7 @@ class ViewScopeTests(unittest.TestCase):
 
     def test_view_claim_is_issued_only_for_explicit_local_view(self):
         base = dict(username="reader@auth.local", uid="stable-uid",
-                    repo_id=RID, path=FILE, file_id=FILE_ID, now=1700000000,
+                    repo_id=RID, path=FILE, file_id=FILE_ID, now=int(time.time()),
                     secret="unit-test-secret")
         self.assertTrue(issue_ticket(mode="local-view", **base))
         with self.assertRaises(ValueError):
@@ -81,7 +82,7 @@ class ViewScopeTests(unittest.TestCase):
 
     def test_library_name_claim_is_display_only_and_sanitized(self):
         base = dict(username="reader@auth.local", uid="stable-uid",
-                    repo_id=RID, path=FILE, file_id=FILE_ID, now=1700000000,
+                    repo_id=RID, path=FILE, file_id=FILE_ID, now=int(time.time()),
                     secret="unit-test-secret", mode="local-view")
         # 没有库名（老版本 seafile_api 或 fixture）时给空串，不能因此签不出票。
         empty = jwt.decode(issue_ticket(**base), "unit-test-secret",
@@ -144,7 +145,7 @@ class CheckoutCapabilityTests(unittest.TestCase):
                 request = APIRequestFactory().post(
                     '/api/v2.1/cloudfile/edit/v1/open/',
                     {'repo_id': RID, 'path': FILE, 'mode': mode}, format='json')
-                force_authenticate(request, SimpleNamespace(username='user@auth.local',
+                force_authenticate(request, SimpleNamespace(id=1, username='user@auth.local',
                                                               is_authenticated=True,
                                                               is_active=True))
                 response = RustLocalEditOpen.as_view()(request)
@@ -154,7 +155,7 @@ class CheckoutCapabilityTests(unittest.TestCase):
     def test_optional_without_guard_lock_info_returns_503_without_guard_sql(self):
         request = APIRequestFactory().get('/api/v2.1/cloudfile/edit/v1/lock-info/',
                                           {'repo_id': RID, 'path': FILE})
-        force_authenticate(request, SimpleNamespace(username='user@auth.local',
+        force_authenticate(request, SimpleNamespace(id=1, username='user@auth.local',
                                                       is_authenticated=True,
                                                       is_active=True))
         with patch('cloudfile_ext.v2.repo_feature.enabled', side_effect=lambda rid, feature: rid == RID), \
@@ -166,13 +167,16 @@ class CheckoutCapabilityTests(unittest.TestCase):
             self.assertEqual(response.data['code'], 'GUARD_UNAVAILABLE')
             database.cursor.assert_not_called()
 
-    def test_disabled_checkout_never_discovers_schema(self):
+    def test_old_global_checkout_false_cannot_override_dynamic_capability(self):
         checkout_available.cache_clear()
         try:
             with patch('cloudfile_ext.features.is_enabled', return_value=False), \
-                 patch('cloudfile_ext.v2.checkout_schema.path_checkout_available') as qualify:
-                self.assertFalse(checkout_available())
-                qualify.assert_not_called()
+                 patch('seahub.utils.db_api.SeafileDB') as database, \
+                 patch('cloudfile_ext.v2.checkout_schema.path_checkout_available',
+                       return_value=True) as qualify:
+                database.return_value.db_name = 'fixture_files'
+                self.assertTrue(checkout_available())
+                qualify.assert_called_once()
         finally:
             checkout_available.cache_clear()
 
