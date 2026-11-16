@@ -153,6 +153,18 @@ class RepoFeatures(APIView):
             cursor.execute('SELECT feature FROM ' + table +
                            ' WHERE repo_id=%s FOR UPDATE', (rid,))
             current = {row[0] for row in cursor.fetchall()}
+            # 修改原因（2026-11-16）：关闭库级 protection 会让原生屏障立即消失，
+            # 已定版原件随即可被覆盖、删除、改名；残留的 cf_file_protection 行还会让
+            # 状态查询继续报 protected=true，重新开启后保护的是关闭期间被改写的内容，
+            # 且该路径的 protect 会一直 409。因此有残留定版记录时必须拒绝关闭。
+            # 校验放在任何写操作之前：同一请求若还带 checkout 变更，也不能出现
+            # checkout 已落库、protection 被拒的部分应用。
+            if changes.get('protection') is False and 'protection' in current:
+                cursor.execute('SELECT 1 FROM ' + db +
+                               'cf_file_protection WHERE repo_id=%s LIMIT 1', (rid,))
+                if cursor.fetchone() is not None:
+                    return api_error(409, 'Protected files must be unprotected before '
+                                          'disabling protection for this library.')
             for key, enabled in sorted(changes.items()):
                 if enabled and key not in current:
                     cursor.execute('INSERT INTO ' + table + '(repo_id,feature) VALUES (%s,%s)', (rid, key))
