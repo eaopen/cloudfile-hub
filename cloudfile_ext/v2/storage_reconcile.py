@@ -160,14 +160,14 @@ class StorageReconciler:
             required = {'Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId'}
             cursor.execute("SELECT table_name FROM information_schema.tables "
                            "WHERE table_schema=COALESCE(%s,DATABASE()) AND table_name IN "
-                           "('Repo','RepoTrash','GarbageRepos','VirtualRepo','RepoStorageId')", (self.schema,))
+                           "('Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId')", (self.schema,))
             if {row[0] for row in cursor.fetchall()} != required:
                 raise RuntimeError('NATIVE_SEAFILE_DATABASE_NOT_CONNECTED')
         return 'SCHEMA_READY'
 
     def sources(self):
         return ' UNION '.join('SELECT repo_id FROM ' + self.table(name)
-                              for name in ('Repo','RepoTrash','GarbageRepos','RepoStorageId'))
+                              for name in ('Repo', 'RepoTrash', 'GarbageRepos', 'RepoStorageId'))
 
     def scan(self, batch_size=500):
         if not 1 <= batch_size <= 2000:
@@ -183,7 +183,7 @@ class StorageReconciler:
             yield from self.inspect_batch(ids)
             after = ids[-1]
 
-    def inspect_batch(self, repo_ids):
+    def inspect_batch(self, repo_ids, *, lock=False):
         """Read already-registered bindings in bounded pages, without stale caches.
 
         A full inventory used to repeat every join and route-conflict scan twice
@@ -192,44 +192,58 @@ class StorageReconciler:
         inspect/apply_one and its locked mutation checks.
         """
         sources = ' UNION ALL '.join('SELECT %s AS repo_id' for _ in repo_ids)
-        tables = {name: self.table(name) for name in ('Repo','RepoTrash','GarbageRepos','VirtualRepo','RepoStorageId')}
+        tables = {name: self.table(name) for name in ('Repo', 'RepoTrash', 'GarbageRepos', 'VirtualRepo', 'RepoStorageId')}
         sql = ('SELECT i.repo_id,r.repo_id,t.repo_id,g.repo_id,v.repo_id,s.repo_id,s.storage_id,'
-               'EXISTS(SELECT 1 FROM {RepoStorageId} d WHERE d.storage_id=s.storage_id AND d.repo_id<>i.repo_id) '
+               'd.storage_id '
                'FROM (' + sources + ') i LEFT JOIN {Repo} r ON r.repo_id=i.repo_id '
                'LEFT JOIN {RepoTrash} t ON t.repo_id=i.repo_id LEFT JOIN {GarbageRepos} g ON g.repo_id=i.repo_id '
-               'LEFT JOIN {VirtualRepo} v ON v.repo_id=i.repo_id LEFT JOIN {RepoStorageId} s ON s.repo_id=i.repo_id').format(**tables)
+                'LEFT JOIN {VirtualRepo} v ON v.repo_id=i.repo_id LEFT JOIN {RepoStorageId} s ON s.repo_id=i.repo_id '
+               'LEFT JOIN (SELECT storage_id FROM {RepoStorageId} GROUP BY storage_id HAVING COUNT(*)>1) d '
+               'ON d.storage_id=s.storage_id').format(**tables)
         with self.connection.cursor() as cursor:
-            cursor.execute(sql,tuple(repo_ids))
+            cursor.execute(sql + (' FOR UPDATE' if lock else ''), tuple(repo_ids))
             rows = cursor.fetchall()
         for rid, live, trash, garbage, virtual, owner, route, duplicate in rows:
             item = dict(repo_id=rid, storage_id=route)
             if virtual:
-                yield dict(item,status='VIRTUAL_REPO')
+                yield dict(item, status='VIRTUAL_REPO')
             elif not (live or trash or garbage):
-                yield dict(item,status='BLOCKED',reason='NATIVE_RESOURCE_MISSING')
+                yield dict(item, status='BLOCKED', reason='NATIVE_RESOURCE_MISSING')
             elif (owner is None and not self.config.root) or route == 'cf-native':
-                yield dict(item,status='REGISTERED',category='NATIVE')
+                yield dict(item, status='REGISTERED', category='NATIVE')
             elif route and route.startswith('auto-local:'):
                 key = route[11:]
-                error = 'KEY_OCCUPIED' if duplicate else self.config.auto_error(key,rid)
+                error = 'KEY_OCCUPIED' if duplicate else self.config.auto_error(key, rid)
                 if error:
-                    yield dict(item,status='BLOCKED',reason=error)
+                    yield dict(item, status='BLOCKED', reason=error)
                 else:
-                    yield dict(item,status='UUID_LOCAL' if key==rid else 'REGISTERED',category='AUTO_LOCAL',repo_key=key)
+                    yield dict(item, status='UUID_LOCAL' if key == rid else 'REGISTERED', category='AUTO_LOCAL', repo_key=key)
             elif route and self.config.native_class(route):
-                yield dict(item,status='NATIVE_CLASS_PINNED')
+                yield dict(item, status='NATIVE_CLASS_PINNED')
             else:
-                yield dict(item,status='BLOCKED',reason='INVALID_STORAGE_ROUTE')
+                yield dict(item, status='BLOCKED', reason='INVALID_STORAGE_ROUTE')
 
     def inspect(self, repo_id, *, lock=False):
-        return next(self.inspect_batch([repo_id]))
+        return next(self.inspect_batch([repo_id], lock=lock))
 
     def apply_one(self, repo_id, normalize=()):
-        # Storage discovery observes native routes. Rewriting a physical binding
-        # requires offline migration, never an inventory request.
-        if normalize:
-            raise ValueError('storage route changes require offline migration')
-        return self.inspect(repo_id)
+        if not normalize:
+            return self.inspect(repo_id)
+        # Only an explicitly named class proven to use the native directory
+        # can be normalized. A managed deployment needs a positive native route.
+        with self.atomic():
+            item = self.inspect(repo_id, lock=True)
+            if item['status'] != 'NATIVE_CLASS_PINNED' or item['storage_id'] not in normalize:
+                return item
+            table = self.table('RepoStorageId')
+            sql = ("UPDATE " + table + " SET storage_id='cf-native'" if self.config.root
+                   else "DELETE FROM " + table)
+            with self.connection.cursor() as cursor:
+                cursor.execute(sql + ' WHERE repo_id=%s AND BINARY storage_id=BINARY %s',
+                               (repo_id, item['storage_id']))
+                if cursor.rowcount != 1:
+                    raise RuntimeError('NATIVE_ROUTE_CHANGED')
+            return dict(self.inspect(repo_id), normalized=True)
 
     def orphans(self):
         if not self.config.root or not real_directory(self.config.root):
@@ -249,7 +263,7 @@ class StorageReconciler:
         for item in iterator:
             # A registered binding requires no write or second locked scan.
             # Every prospective mutation still revalidates inside apply_one.
-            if apply and item['status'] not in ('REGISTERED', 'UUID_LOCAL'):
+            if apply and normalize and item['status'] == 'NATIVE_CLASS_PINNED':
                 item = self.apply_one(item['repo_id'], normalize)
             items.append(item)
         orphans = self.orphans()

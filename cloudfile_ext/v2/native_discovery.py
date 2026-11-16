@@ -210,6 +210,8 @@ def inspect_from_hub(repo_ids):
     def table(name):
         return schema + '.' + identifier(name)
 
+    from .storage_reconcile import StorageConfig
+    config = StorageConfig.detect()
     result = {}
     for offset in range(0, len(repo_ids), 200):
         batch = repo_ids[offset:offset + 200]
@@ -234,9 +236,11 @@ def inspect_from_hub(repo_ids):
                 present is not None, in_trash=trash is not None,
                 in_gc=garbage is not None, virtual=virtual is not None,
                 route_row_present=route_owner is not None)
+            if status == 'READY' and route_owner is None and config and config.root:
+                status = 'BINDING_ERROR'
             result[repo_id] = {
                 'status': status,
-                'source': 'native' if route is None and route_owner is None
+                'source': 'native' if (route is None and route_owner is None) or route == 'cf-native'
                 else ('v2' if route and route.startswith('auto-local:') else 'unknown')
             }
     return result
