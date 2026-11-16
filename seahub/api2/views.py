@@ -4452,6 +4452,9 @@ class DefaultRepoView(APIView):
         if repo_id and (get_repo(repo_id) is not None):
             return self.default_repo_info(repo_id)
 
+        # Enterprise deployments can suppress implicit libraries while retaining existing ones.
+        if not getattr(dj_settings, "ENABLE_PERSONAL_DEFAULT_LIBRARY", True):
+            return api_error(status.HTTP_403_FORBIDDEN, "Personal default library creation is disabled.")
         repo_id = create_default_library(request)
 
         return self.default_repo_info(repo_id)
