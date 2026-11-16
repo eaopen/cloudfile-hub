@@ -7,6 +7,7 @@ from rest_framework.permissions import IsAdminUser
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework import status
+from django.conf import settings as dj_settings
 from django.utils.translation import gettext as _
 
 from seaserv import seafile_api
@@ -133,6 +134,9 @@ class AdminDefaultLibrary(APIView):
             if default_repo_id and seafile_api.get_repo(default_repo_id) is not None:
                 default_repo_info['repo_id'] = default_repo_id
             else:
+                # Enterprise deployments can suppress implicit libraries while retaining existing ones.
+                if not getattr(dj_settings, "ENABLE_PERSONAL_DEFAULT_LIBRARY", True):
+                    return api_error(status.HTTP_403_FORBIDDEN, "Personal default library creation is disabled.")
                 new_default_repo_id = self.create_default_repo(user_email)
                 default_repo_info['repo_id'] = new_default_repo_id
         except Exception as e:
