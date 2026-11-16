@@ -201,7 +201,7 @@ def reconcile_from_hub(repo_id=None, *, batch_size=500):
     return report
 
 
-def inspect_from_hub(repo_ids):
+def inspect_from_hub(repo_ids, *, with_features=False):
     """One exact native lookup per bounded batch, including missing Repo IDs."""
     from django.db import connection
     from seahub.utils.db_api import SeafileDB
@@ -212,6 +212,8 @@ def inspect_from_hub(repo_ids):
 
     from .storage_reconcile import StorageConfig
     config = StorageConfig.detect()
+    if with_features and repo_ids and config is None:
+        raise RuntimeError('SEAFILE_STORAGE_CONFIGURATION_UNAVAILABLE')
     result = {}
     for offset in range(0, len(repo_ids), 200):
         batch = repo_ids[offset:offset + 200]
@@ -230,6 +232,14 @@ def inspect_from_hub(repo_ids):
         with connection.cursor() as cursor:
             cursor.execute(sql, batch)
             rows = cursor.fetchall()
+            features = {}
+            if with_features:
+                # Bound the capability lookup to the same requested inventory page.
+                marks = ','.join(['%s'] * len(batch))
+                cursor.execute('SELECT repo_id,feature FROM ' + table('cf_repo_feature') +
+                               ' WHERE repo_id IN (' + marks + ') ORDER BY repo_id,feature', batch)
+                for rid, feature in cursor.fetchall():
+                    features.setdefault(rid, []).append(feature)
         for repo_id, present, key, state, route, route_owner, trash, garbage, virtual in rows:
             status = storage_catalog_status(
                 repo_id, present is not None, key, state, route,
@@ -243,4 +253,6 @@ def inspect_from_hub(repo_ids):
                 'source': 'native' if (route is None and route_owner is None) or route == 'cf-native'
                 else ('v2' if route and route.startswith('auto-local:') else 'unknown')
             }
+            if with_features and status == 'READY':
+                result[repo_id]['features'] = features.get(repo_id, [])
     return result

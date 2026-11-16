@@ -98,15 +98,12 @@ class CatalogSync(APIView):
 
 
 class StorageReconcile(APIView):
-    """Explicit admin-only mutation: idempotently register original Repo rows.
-
-    Discovery itself stays in the native AdminLibraries GET endpoint.
-    """
+    """Check only the bindings submitted by the administrator."""
     authentication_classes = (TokenAuthentication, SessionAuthentication)
     permission_classes = (IsAdminUser,)
 
     def post(self, request):
-        from .native_discovery import reconcile_from_hub, inspect_from_hub
+        from .native_discovery import inspect_from_hub
         if not request.user.admin_permissions.can_manage_library():
             return api_error(status.HTTP_403_FORBIDDEN, 'Permission denied.')
         ids = request.data.get('repo_ids', [])
@@ -115,12 +112,51 @@ class StorageReconcile(APIView):
         if len(ids) != len(set(ids)):
             return api_error(status.HTTP_400_BAD_REQUEST, 'Duplicate repo_ids.')
         try:
-            counts = reconcile_from_hub()
-            states = inspect_from_hub(ids) if ids else {}
+            states = inspect_from_hub(ids, with_features=True)
         except ValueError:
             return api_error(status.HTTP_400_BAD_REQUEST, 'Invalid Repo UUID.')
         except Exception:
-            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Native library registration unavailable.')
-        response = Response({'registered': counts['registered'], 'statuses': states})
+            return api_error(status.HTTP_503_SERVICE_UNAVAILABLE, 'Native library inventory unavailable.')
+        response = Response({'registered': 0, 'statuses': states})
         response['Cache-Control'] = 'no-store'
         return response
+
+
+class RepoFeatures(APIView):
+    """Patch only explicitly managed capabilities and read back the committed intent."""
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAdminUser,)
+
+    def post(self, request, repo_id):
+        from django.db import connection, transaction
+        from seahub.utils.db_api import SeafileDB
+        from .schema import identifier
+        if not request.user.admin_permissions.can_manage_library():
+            return api_error(403, 'Permission denied.')
+        changes = request.data
+        if not isinstance(changes, dict) or not changes or any(
+                key not in ('checkout', 'protection') or type(value) is not bool
+                for key, value in changes.items()):
+            return api_error(400, 'Expected boolean repository capability changes.')
+        rid = str(repo_id)
+        db = identifier(SeafileDB().db_name) + '.'
+        table = db + 'cf_repo_feature'
+        with transaction.atomic(), connection.cursor() as cursor:
+            # Serialize with native publishing on the same master branch. A stale
+            # binding must never create configuration for a missing or virtual repo.
+            cursor.execute('SELECT b.commit_id FROM ' + db + 'Branch b JOIN ' + db +
+                           'Repo r ON r.repo_id=b.repo_id WHERE b.repo_id=%s AND b.name=%s '
+                           'AND NOT EXISTS (SELECT 1 FROM ' + db +
+                           'VirtualRepo v WHERE v.repo_id=b.repo_id) FOR UPDATE', (rid, 'master'))
+            if cursor.fetchone() is None:
+                return api_error(404, 'Native repository unavailable.')
+            cursor.execute('SELECT feature FROM ' + table +
+                           ' WHERE repo_id=%s FOR UPDATE', (rid,))
+            current = {row[0] for row in cursor.fetchall()}
+            for key, enabled in sorted(changes.items()):
+                if enabled and key not in current:
+                    cursor.execute('INSERT INTO ' + table + '(repo_id,feature) VALUES (%s,%s)', (rid, key))
+                elif not enabled and key in current:
+                    cursor.execute('DELETE FROM ' + table + ' WHERE repo_id=%s AND feature=%s', (rid, key))
+            cursor.execute('SELECT feature FROM ' + table + ' WHERE repo_id=%s ORDER BY feature', (rid,))
+            return Response({'repo_id': rid, 'features': [row[0] for row in cursor.fetchall()]})
