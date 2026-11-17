@@ -127,17 +127,52 @@ class RepoFeatures(APIView):
     authentication_classes = (TokenAuthentication, SessionAuthentication)
     permission_classes = (IsAdminUser,)
 
+    def get(self, request, repo_id):
+        from django.db import connection, DatabaseError
+        from seahub.utils.db_api import SeafileDB
+        from .schema import identifier
+        from .writer_runtime import FEATURES, writer_runtime
+        if not request.user.admin_permissions.can_manage_library():
+            return api_error(403, 'Permission denied.')
+        rid = str(repo_id)
+        try:
+            db = identifier(SeafileDB().db_name) + '.'
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT f.feature FROM ' + db + 'Repo r JOIN ' + db +
+                               'Branch b ON b.repo_id=r.repo_id AND b.name=%s LEFT JOIN ' +
+                               db + 'cf_repo_feature f ON f.repo_id=r.repo_id WHERE r.repo_id=%s '
+                               'AND NOT EXISTS (SELECT 1 FROM ' + db +
+                               'VirtualRepo v WHERE v.repo_id=r.repo_id) ORDER BY f.feature',
+                               ('master', rid))
+                rows = cursor.fetchall()
+        except DatabaseError:
+            return api_error(503, 'Native repository configuration unavailable.')
+        if not rows:
+            return api_error(404, 'Native repository unavailable.')
+        features = [key for (key,) in rows if key is not None]
+        if any(key not in FEATURES for key in features):
+            return api_error(503, 'Unsupported repository capability.')
+        runtime = writer_runtime()
+        response = Response({'repo_id': rid, 'features': features, 'capabilities': {
+            key: {'configured': key in features, 'runtime': runtime[key]} for key in FEATURES}})
+        response['Cache-Control'] = 'no-store'
+        return response
+
     def post(self, request, repo_id):
         from django.db import connection, transaction
         from seahub.utils.db_api import SeafileDB
         from .schema import identifier
+        from .writer_runtime import FEATURES, writer_runtime
         if not request.user.admin_permissions.can_manage_library():
             return api_error(403, 'Permission denied.')
         changes = request.data
         if not isinstance(changes, dict) or not changes or any(
-                key not in ('checkout', 'protection') or type(value) is not bool
+                key not in FEATURES or type(value) is not bool
                 for key, value in changes.items()):
             return api_error(400, 'Expected boolean repository capability changes.')
+        # Never hold the publication lock during network I/O. Apply the probe
+        # only to actual OFF -> ON transitions under the lock.
+        runtime = writer_runtime() if any(changes.values()) else {}
         rid = str(repo_id)
         db = identifier(SeafileDB().db_name) + '.'
         table = db + 'cf_repo_feature'
@@ -153,6 +188,8 @@ class RepoFeatures(APIView):
             cursor.execute('SELECT feature FROM ' + table +
                            ' WHERE repo_id=%s FOR UPDATE', (rid,))
             current = {row[0] for row in cursor.fetchall()}
+            if current.difference(FEATURES):
+                return api_error(503, 'Unsupported repository capability.')
             # 修改原因（2026-11-16）：关闭库级 protection 会让原生屏障立即消失，
             # 已定版原件随即可被覆盖、删除、改名；残留的 cf_file_protection 行还会让
             # 状态查询继续报 protected=true，重新开启后保护的是关闭期间被改写的内容，
@@ -177,10 +214,23 @@ class RepoFeatures(APIView):
                 if cursor.fetchone() is not None:
                     return api_error(409, 'Active checkouts must be released or '
                                           'expired before disabling checkout.')
+            for key, enabled in changes.items():
+                if enabled and key not in current and runtime[key] != 'ready':
+                    return api_error(503, f'{key} writer readiness is {runtime[key]}.')
             for key, enabled in sorted(changes.items()):
                 if enabled and key not in current:
                     cursor.execute('INSERT INTO ' + table + '(repo_id,feature) VALUES (%s,%s)', (rid, key))
                 elif not enabled and key in current:
                     cursor.execute('DELETE FROM ' + table + ' WHERE repo_id=%s AND feature=%s', (rid, key))
+                else:
+                    continue
+                cursor.execute('INSERT INTO ' + db + 'cf_audit_event '
+                               '(repo_id,object_type,object_id,operation,operator,source,'
+                               '`before`,`after`,result,occurred_at) '
+                               'VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,UTC_TIMESTAMP(6))',
+                               (rid, 'repo_feature', key, 'repo_feature_enable' if enabled else
+                                'repo_feature_disable', request.user.username, 'admin',
+                                'false' if enabled else 'true', 'true' if enabled else 'false',
+                                'success'))
             cursor.execute('SELECT feature FROM ' + table + ' WHERE repo_id=%s ORDER BY feature', (rid,))
             return Response({'repo_id': rid, 'features': [row[0] for row in cursor.fetchall()]})

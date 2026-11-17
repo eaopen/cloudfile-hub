@@ -27,8 +27,8 @@ from cloudfile_ext.audit.events import (
 VALID_OPS = frozenset((
     'create', 'edit', 'update', 'delete', 'rename', 'move', 'recover',
     'tag_add', 'tag_remove', 'tag_replace', 'checkout', 'checkin', 'checkout_cancel',
-    'file_protect', 'file_unprotect'))
-VALID_OBJECTS = frozenset(('file', 'dir', 'tag'))
+    'file_protect', 'file_unprotect', 'repo_feature_enable', 'repo_feature_disable'))
+VALID_OBJECTS = frozenset(('file', 'dir', 'tag', 'repo_feature'))
 
 MAX_PAGE_SIZE = 200
 DEFAULT_PAGE_SIZE = 50

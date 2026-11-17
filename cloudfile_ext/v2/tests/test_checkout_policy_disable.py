@@ -42,3 +42,19 @@ class CheckoutDisableTests(TestCase):
         response, queries = self.request({"checkout": False}, active=False)
         self.assertEqual(response.status_code, 200)
         self.assertTrue(any("lease_expires_at>UTC_TIMESTAMP(6)" in sql for sql in queries))
+
+    def test_unknown_readiness_refuses_mixed_patch_before_disable(self):
+        with patch("cloudfile_ext.v2.writer_runtime.writer_runtime",
+                   return_value={"checkout": "ready", "protection": "unknown"}):
+            response, queries = self.request({"checkout": False, "protection": True}, active=False)
+        self.assertEqual(response.status_code, 503)
+        self.assertFalse(any(sql.startswith(("INSERT", "DELETE", "UPDATE")) for sql in queries))
+
+    def test_only_actual_transitions_are_audited(self):
+        response, queries = self.request({"checkout": False}, active=False)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(sum("INSERT INTO" in sql and "cf_audit_event" in sql for sql in queries), 1)
+        with patch("cloudfile_ext.v2.writer_runtime.writer_runtime", return_value={"checkout": "unknown"}):
+            response, queries = self.request({"checkout": True}, active=False)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(any("cf_audit_event" in sql for sql in queries))

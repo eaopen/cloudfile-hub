@@ -21,3 +21,21 @@ class RepoCapabilityContractTests(TestCase):
         for invalid in ({'protection': 'false'}, {'other': True}, {}, []):
             req.data = invalid
             self.assertEqual(RepoFeatures().post(req, 'ignored').status_code, 400)
+
+    def test_read_configuration_independently_of_runtime(self):
+        from unittest.mock import MagicMock
+        conn = MagicMock()
+        cursor = conn.cursor.return_value.__enter__.return_value
+        with patch('django.db.connection', conn), patch('seahub.utils.db_api.SeafileDB') as db, \
+             patch('cloudfile_ext.v2.writer_runtime.writer_runtime',
+                   return_value=dict(checkout='ready', protection='unknown')):
+            db.return_value.db_name = 'seafile_db'
+            req = Mock()
+            for rows, expected in (([], 404), ([(None,)], 200), ([('protection',)], 200)):
+                cursor.fetchall.return_value = rows
+                response = RepoFeatures().get(req, 'repo-id')
+                self.assertEqual(response.status_code, expected)
+                if expected == 200:
+                    self.assertEqual(response.data['capabilities']['protection'],
+                                     dict(configured=rows == [('protection',)], runtime='unknown'))
+                    self.assertEqual(response['Cache-Control'], 'no-store')
