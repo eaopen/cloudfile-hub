@@ -1,14 +1,13 @@
-from unittest import TestCase
 from unittest.mock import patch
 
 import requests
-from django.test import override_settings
+from django.test import SimpleTestCase, override_settings
 
 from cloudfile_ext.v2.writer_runtime import writer_runtime
 
 
 @override_settings(JWT_PRIVATE_KEY='isolated-writer-unit-test-signing-key')
-class WriterRuntimeTests(TestCase):
+class WriterRuntimeTests(SimpleTestCase):
     def probe(self, root, data, *, cluster=False):
         with patch('cloudfile_ext.v2.writer_runtime.get_inner_fileserver_root', return_value=root), \
              patch('cloudfile_ext.v2.writer_runtime.CLUSTER_MODE', cluster), \
