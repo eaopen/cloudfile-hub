@@ -23,6 +23,7 @@ from .repo_feature import enabled
 
 MAX_BATCH = 200
 MAX_DISPLAY = 1000
+MAX_SUBTREE = 50
 HEX40 = re.compile(r'[0-9a-f]{40}\Z')
 
 
@@ -90,6 +91,26 @@ def _reply(data, status=200):
     out = Response(data, status=status)
     out['Cache-Control'] = 'no-store'
     return out
+
+
+def read_subtree(repo_id, path, limit=MAX_SUBTREE):
+    """Protected files at or below one directory, ordered by path.
+
+    Why: the native fence rejects any commit whose diff reaches a protected
+    path, so renaming or deleting an ancestor directory fails with a generic
+    520 from the fileserver. Callers need the concrete blocker to explain it.
+    """
+    if not selected(repo_id):
+        return []
+    protection_table, _, _ = _tables()
+    prefix = '/' if path == '/' else path + '/'
+    with connection.cursor() as cursor:
+        cursor.execute(
+            f'SELECT path FROM {protection_table} '
+            f'WHERE repo_id=%s AND (path=%s OR LEFT(path,%s)=%s) '
+            f'ORDER BY path LIMIT {int(limit)}',
+            [repo_id, path, len(prefix), prefix])
+        return [row[0] for row in cursor.fetchall()]
 
 
 def _admin(user):
@@ -246,6 +267,32 @@ class FileProtectionStatus(APIView):
             protected = read_batch(repo_id, normalized)
             return _reply({'protection_supported': selected(repo_id), 'items': [
                 {'path': path, 'protected': path in protected} for path in normalized]})
+        except Exception as err:
+            return _failure(err)
+
+
+class FileProtectionSubtree(APIView):
+    """Read-only view of the protected files a directory mutation would touch.
+
+    Native publication refuses the whole commit, so a rename/delete of an
+    ancestor fails with a generic fileserver error. This endpoint lets the
+    caller name the actual blocker instead of guessing.
+    """
+
+    authentication_classes = (TokenAuthentication, SessionAuthentication)
+    permission_classes = (IsAuthenticated,)
+
+    def get(self, request):
+        try:
+            if set(request.query_params) != {'repo_id', 'path'}:
+                raise ValueError()
+            repo_id = _uuid(request.query_params['repo_id'])
+            path = canonical_path(request.query_params['path'])
+            if not Authority(request.user.username).effective(repo_id, path, 'dir').can_read:
+                raise PermissionError()
+            items = read_subtree(repo_id, path)
+            return _reply({'protection_supported': selected(repo_id),
+                           'protected': bool(items), 'items': items})
         except Exception as err:
             return _failure(err)
 

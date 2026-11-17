@@ -80,5 +80,60 @@ class ProtectionContractTests(unittest.TestCase):
                 read.assert_called_once_with(REPO, HEAD, '/original.prt')
         cursor.fetchall.return_value = [(REPO, '/design-other', HEAD)]
         with patch.object(protection.seafile_api, 'get_file_id_by_commit_and_path') as read:
-            self.assertTrue(protection._virtual_views_current(cursor, '`native`.`Branch`', REPO, FILE, FILE_ID))
+            self.assertTrue(protection._virtual_views_current(
+                cursor, '`native`.`Branch`', REPO, FILE, FILE_ID))
             read.assert_not_called()
+
+    # Why: the native fence rejects the whole commit, so renaming or deleting an
+    # ancestor of a protected file only surfaces a generic fileserver error.
+    # These tests pin the lookup that lets the caller name the actual blocker.
+
+    def test_read_subtree_is_scoped_to_the_directory_prefix(self):
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [(FILE,), ('/design/sub/part.prt',)]
+        cursor.__enter__.return_value = cursor
+        with patch.object(protection, 'selected', return_value=True), \
+             patch.object(protection, '_tables', return_value=('prot', 'audit', 'branch')), \
+             patch.object(protection.connection, 'cursor', return_value=cursor):
+            self.assertEqual(protection.read_subtree(REPO, '/design'),
+                             [FILE, '/design/sub/part.prt'])
+        sql, params = cursor.execute.call_args.args
+        self.assertIn('LEFT(path', sql)
+        self.assertEqual(params, [REPO, '/design', len('/design/'), '/design/'])
+
+    def test_read_subtree_covers_root_scope_without_sql_for_off_repo(self):
+        cursor = MagicMock()
+        cursor.fetchall.return_value = [(FILE,)]
+        cursor.__enter__.return_value = cursor
+        with patch.object(protection, 'selected', return_value=True), \
+             patch.object(protection, '_tables', return_value=('prot', 'audit', 'branch')), \
+             patch.object(protection.connection, 'cursor', return_value=cursor):
+            self.assertEqual(protection.read_subtree(REPO, '/'), [FILE])
+        self.assertEqual(cursor.execute.call_args.args[1][3], '/')
+        with patch.object(protection, 'selected', return_value=False), \
+             patch.object(protection.connection, 'cursor',
+                          side_effect=AssertionError('unexpected SQL')):
+            self.assertEqual(protection.read_subtree(REPO, '/design'), [])
+
+    def test_subtree_view_returns_the_blocking_paths(self):
+        request = SimpleNamespace(username='reader@example.com',
+                                  query_params={'repo_id': REPO, 'path': '/design'})
+        with patch.object(protection, 'selected', return_value=True), \
+             patch.object(protection, 'read_subtree', return_value=[FILE]), \
+             patch.object(protection, 'Authority') as authority:
+            authority.return_value.effective.return_value.can_read = True
+            response = protection.FileProtectionSubtree().get(request)
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.data, {'protection_supported': True,
+                                         'protected': True, 'items': [FILE]})
+        authority.return_value.effective.assert_called_once_with(REPO, '/design', 'dir')
+
+    def test_subtree_view_hides_paths_from_readers_without_access(self):
+        request = SimpleNamespace(username='reader@example.com',
+                                  query_params={'repo_id': REPO, 'path': '/design'})
+        with patch.object(protection, 'read_subtree') as read, \
+             patch.object(protection, 'Authority') as authority:
+            authority.return_value.effective.return_value.can_read = False
+            response = protection.FileProtectionSubtree().get(request)
+        self.assertEqual(response.status_code, 403)
+        read.assert_not_called()
