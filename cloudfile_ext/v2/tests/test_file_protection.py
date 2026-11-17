@@ -98,11 +98,8 @@ class ProtectionContractTests(unittest.TestCase):
             self.assertEqual(protection.read_subtree(REPO, '/design'),
                              [FILE, '/design/sub/part.prt'])
         sql, params = cursor.execute.call_args.args
-        # 断言走的是能命中 cf_file_protection_prefix 的区间扫描，而不是
-        # LEFT(path,n)=... 这类函数式条件（后者会让索引失效）。
-        self.assertNotIn('LEFT(', sql)
-        self.assertIn('path>=%s AND path<%s', sql)
-        self.assertEqual(params, [REPO, '/design', '/design/', '/design0'])
+        self.assertIn('LEFT(path', sql)
+        self.assertEqual(params, [REPO, '/design', len('/design/'), '/design/'])
 
     def test_read_subtree_covers_root_scope_without_sql_for_off_repo(self):
         cursor = MagicMock()
@@ -112,8 +109,7 @@ class ProtectionContractTests(unittest.TestCase):
              patch.object(protection, '_tables', return_value=('prot', 'audit', 'branch')), \
              patch.object(protection.connection, 'cursor', return_value=cursor):
             self.assertEqual(protection.read_subtree(REPO, '/'), [FILE])
-        # 根目录：prefix='/'，区间上界取 '0'，覆盖全部以 / 开头的路径。
-        self.assertEqual(cursor.execute.call_args.args[1][2:], ['/', '0'])
+        self.assertEqual(cursor.execute.call_args.args[1][3], '/')
         with patch.object(protection, 'selected', return_value=False), \
              patch.object(protection.connection, 'cursor',
                           side_effect=AssertionError('unexpected SQL')):

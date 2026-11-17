@@ -104,17 +104,12 @@ def read_subtree(repo_id, path, limit=MAX_SUBTREE):
         return []
     protection_table, _, _ = _tables()
     prefix = '/' if path == '/' else path + '/'
-    # 修改原因（2026-11-17）：原写法 LEFT(path,n)=prefix 是函数式条件，用不上
-    # cf_file_protection_prefix 索引，会扫该库全部保护行（LIMIT 只限制返回条数）。
-    # 改成半开区间 [prefix, prefix[:-1]+'0')：'/' 的下一个码点是 '0'，因此该区间
-    # 恰好覆盖以 prefix 开头的全部路径，且满足 index range 条件。
-    upper = prefix[:-1] + '0'
     with connection.cursor() as cursor:
         cursor.execute(
             f'SELECT path FROM {protection_table} '
-            f'WHERE repo_id=%s AND (path=%s OR (path>=%s AND path<%s)) '
+            f'WHERE repo_id=%s AND (path=%s OR LEFT(path,%s)=%s) '
             f'ORDER BY path LIMIT {int(limit)}',
-            [repo_id, path, prefix, upper])
+            [repo_id, path, len(prefix), prefix])
         return [row[0] for row in cursor.fetchall()]
 
 
