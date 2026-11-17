@@ -1075,10 +1075,19 @@ class ReposBatchMoveItemView(APIView):
                                       json.dumps([dst_obj_name]),
                                       False, username, 0, 1)
             except Exception as e:
-                logger.error(e)
-                error_dict = {
-                    'error_msg': 'Internal Server Error'
-                }
+                # 修改原因（2026-11-17）：与批量删除同一条原生屏障，移动含定版文件的
+                # 条目同样被 423 FILE_PROTECTED 拒绝。原先只回「Internal Server Error」，
+                # 逐项失败结果里看不出原因；命中定版时给出可读文案，其余保持原行为。
+                detail = str(e)
+                if any(key in detail for key in ('FILE_PROTECTED', 'fenced', 'is protected')):
+                    error_dict = {
+                        'error_msg': '目标含已定版文件，不能移动；请平台管理员先解除定版'
+                    }
+                else:
+                    logger.exception('batch move failed: %s', detail)
+                    error_dict = {
+                        'error_msg': 'Internal Server Error'
+                    }
                 common_dict.update(error_dict)
                 result['failed'].append(common_dict)
                 continue
@@ -1676,9 +1685,17 @@ class ReposBatchDeleteItemView(APIView):
                                  json.dumps(dirents),
                                  username)
         except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
+            # 修改原因（2026-11-17）：原生屏障对含定版文件的删除返回 423
+            # FILE_PROTECTED，这里原先一律吞成 500「Internal Server Error」，
+            # EAP 只能把它包成 503 转述，用户看不出是被定版拦住。
+            # 识别后返回 409 + 可读原因；其余异常保持原有 500 行为不变。
+            detail = str(e)
+            if any(key in detail for key in ('FILE_PROTECTED', 'fenced', 'is protected')):
+                return api_error(status.HTTP_409_CONFLICT,
+                                 '目标含已定版文件，不能删除；请平台管理员先解除定版')
+            logger.exception('batch delete failed: %s', detail)
+            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                             'Internal Server Error')
 
         result = {}
         result['success'] = True
