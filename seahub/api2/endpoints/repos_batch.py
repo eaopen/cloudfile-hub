@@ -1598,9 +1598,17 @@ class ReposSyncBatchMoveItemView(APIView):
                                   replace=False, username=username,
                                   need_progress=0, synchronous=1)
         except Exception as e:
-            logger.error(e)
-            error_msg = 'Internal Server Error'
-            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, error_msg)
+            # 修改原因（2026-11-17）：EAP 的 items/move 实际走 sync-batch-move-item
+            # （162 日志 seahub.api2.endpoints.repos_batch:1592 确认），原先同样把
+            # 423 FILE_PROTECTED 吞成 500「Internal Server Error」。
+            # 命中定版时返回 409 + 可读原因，其余异常保持 500。
+            detail = str(e)
+            if any(key in detail for key in ('FILE_PROTECTED', 'fenced', 'is protected')):
+                return api_error(status.HTTP_409_CONFLICT,
+                                 '目标含已定版文件，不能移动；请平台管理员先解除定版')
+            logger.exception('sync batch move failed: %s', detail)
+            return api_error(status.HTTP_500_INTERNAL_SERVER_ERROR,
+                             'Internal Server Error')
 
         result = {}
         result['success'] = True
