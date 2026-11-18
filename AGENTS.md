@@ -52,8 +52,8 @@
 
 ## 当前数据库（未正式发布 V2）
 
-- 唯一扩展表为 `cf_library_storage`、`cf_dir_acl`、`cf_sso_group_map`、`cf_edit_guard`、`cf_audit_event`、`cf_file_protection`；新装一次创建全部六表，已有卷只校验。
-- 不迁移或追溯开发期旧数据。存储绑定从 Seafile 的 Repo/RepoStorageId 重新识别，ACL/共享和组织/角色从客户 Provider 重新同步，Guard/审计从空表开始；旧 `cf_tag`、Resource、Intent、Session、Outbox 不恢复。
+- 唯一扩展表为 `cf_repo_feature`、`cf_dir_acl`、`cf_sso_group_map`、`cf_edit_guard`、`cf_audit_event`、`cf_file_protection`；新装一次创建全部六表；已有卷仅缺特性表且其余结构完全匹配且没有保护记录或活动租约时可由 Docker 启动 gate 锁内补建空表。旧 `cf_library_storage` 需离线迁移并归档为 `retired_library_storage_v2`，原生 `RepoStorageId` 是存储路由真相。
+- 旧存储注册表须按离线迁移核验，保留已有保护、Guard 和特性记录；旧 `cf_tag`、Resource、Intent、Session、Outbox 不恢复。
 - 绝不清除 CE 原生 Repo、Branch、文件内容、版本或原生 Tag，也不因为缺表自动建立旧扩展 DDL、迁移服务或产品级升级框架。
 
 ## 本地查看/编辑（V2 运行合同）
@@ -65,7 +65,7 @@
 
 ## 仅允许当前六张扩展表
 
-- 当前 V2 数据模型：`cf_library_storage`、`cf_sso_group_map`、`cf_dir_acl`、`cf_edit_guard`、`cf_audit_event`、`cf_file_protection`。Tag 属于 CE 原生表，文件版本/动作使用 CE Commit/Activity。
+- 当前 V2 数据模型：`cf_repo_feature`、`cf_sso_group_map`、`cf_dir_acl`、`cf_edit_guard`、`cf_audit_event`、`cf_file_protection`。Tag 属于 CE 原生表，文件版本/动作使用 CE Commit/Activity。
 - `cloudfile_extensions/schema/migrations` 的旧 001–042 迁移链已移除；不得从历史 Git 分支复制回来，也不得注册 `cloudfile_extensions.*` 旧 URLConf 或启动旧 PolicyHost/Worker。
 - 当前 URI/Agent2 编辑流程不使用 SQL Session、Resource、Intent，历史编辑服务可能还出现在 Git 树中以便追溯，但不属于当前运行或发布合同。
 
