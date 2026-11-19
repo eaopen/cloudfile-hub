@@ -5,6 +5,8 @@ import time
 
 import jwt
 from django.conf import settings
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import ensure_csrf_cookie
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from rest_framework.response import Response
 from rest_framework.views import APIView
@@ -98,6 +100,8 @@ class EffectivePermission(AuthenticatedACL):
 
 
 class SharedDirectories(AuthenticatedACL):
+    # A standalone browser returning from SSO has not rendered a Hub template.
+    @method_decorator(ensure_csrf_cookie)
     def get(self, request):
         try:
             if request.query_params:
