@@ -7,18 +7,18 @@ export class HubError extends Error {
 }
 
 async function json(path, options = {}) {
-  const response = await fetch(path, { credentials: 'same-origin', redirect: 'error', ...options })
+  const response = await fetch(path, { credentials: 'same-origin', redirect: 'error', cache: 'no-store', ...options })
   if (!response.ok) throw new HubError(response.status)
   return response.json()
 }
 
-export async function libraries(signal) {
+export async function libraries(signal, prefix = '') {
   // Hub also returns 403 for an anonymous session on the native library list.
-  const repos = await json('/api2/repos/', { signal }).catch(error => {
+  const repos = await json(prefix + '/api2/repos/', { signal }).catch(error => {
     if (error.status === 403) throw new HubError(401)
     throw error
   })
-  const shares = await json('/api/v2.1/cloudfile/authorization/v1/shared-directories/', { signal })
+  const shares = await json(prefix + '/api/v2.1/cloudfile/authorization/v1/shared-directories/', { signal })
   const entries = new Map()
   function add(id, root, name) {
     const key = id + ':' + root
@@ -29,35 +29,36 @@ export async function libraries(signal) {
   return [...entries.values()]
 }
 
-export function directory({ id, path }, start, version, signal) {
+export function directory({ id, path, instance }, start, version, signal) {
   const params = new URLSearchParams({ p: path, start, limit: 100 })
   if (version) params.set('if_dir_id', version)
-  return json('/api/v2.1/repos/' + id + '/dir/?' + params, { signal })
+  return json(instance.prefix + '/api/v2.1/repos/' + id + '/dir/?' + params, { signal })
 }
 
-function fileUrl(ticket) {
+export function fileUrl(ticket, instance) {
   if (typeof ticket !== 'string' || !ticket.trim()) throw new Error('缺少文件服务地址')
-  const url = new URL(ticket, location.origin)
-  const allowed = new URL(import.meta.env.VITE_FILE_ORIGIN || location.origin)
-  if (!['https:', 'http:'].includes(url.protocol) || url.origin !== allowed.origin || url.username || url.password) {
+  const url = new URL(ticket, globalThis.location?.origin)
+  const allowed = new URL(instance.fileBase)
+  if (!['https:', 'http:'].includes(url.protocol) || url.origin !== allowed.origin || !url.pathname.startsWith(allowed.pathname) || url.username || url.password) {
     throw new Error('文件服务地址与配置不一致')
   }
   return url.href
 }
 
-export async function downloadLink(id, path, signal) {
+export async function downloadLink({ id, instance }, path, signal) {
   const params = new URLSearchParams({ p: path })
-  return fileUrl(await json('/api2/repos/' + id + '/file/?' + params, { signal }))
+  return fileUrl(await json(instance.prefix + '/api2/repos/' + id + '/file/?' + params, { signal }), instance)
 }
 
-export async function uploadFile({ id, path }, file, signal, progress) {
-  const csrf = document.cookie.split('; ').find(cookie => cookie.startsWith('sfcsrftoken='))?.slice('sfcsrftoken='.length)
-  const session = await json('/api/v2.1/cloudfile/repos/' + id + '/upload-session/', {
+export async function uploadFile({ id, path, instance }, file, signal, progress) {
+  const key = instance.csrfCookie + '='
+  const csrf = document.cookie.split('; ').find(cookie => cookie.startsWith(key))?.slice(key.length)
+  const session = await json(instance.prefix + '/api/v2.1/cloudfile/repos/' + id + '/upload-session/', {
     signal, method: 'POST', headers: { 'Content-Type': 'application/json', 'X-CSRFToken': csrf || '' },
     body: JSON.stringify({ parent_dir: path }),
   })
   if (session.parent_dir !== path) throw new Error('上传目标已变化')
-  const url = fileUrl(session.upload_url)
+  const url = fileUrl(session.upload_url, instance)
   const data = new FormData()
   data.append('parent_dir', path)
   data.append('file', file)

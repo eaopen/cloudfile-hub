@@ -6,9 +6,11 @@ function canonical(path) {
   ))
 }
 
-export function readLocation(url) {
-  if (url.pathname === '/inst/1' || url.pathname === '/inst/1/') return null
-  const match = /^\/inst\/1\/([^/]+)\/?$/.exec(url.pathname)
+export function readLocation(url, instanceId = 1) {
+  const base = '/inst/' + instanceId
+  if (url.pathname === base || url.pathname === base + '/') return null
+  if (!url.pathname.startsWith(base + '/')) throw new Error('实例地址不匹配')
+  const match = /^([^/]+)\/?$/.exec(url.pathname.slice(base.length + 1))
   if (!match || !uuid.test(match[1])) throw new Error('资料库地址无效')
   const root = url.searchParams.get('root') ?? '/'
   const path = url.searchParams.get('path') ?? root
@@ -18,11 +20,11 @@ export function readLocation(url) {
   return { id: match[1], root, path }
 }
 
-export function driveLink(id, root = '/', path = root) {
+export function driveLink(id, root = '/', path = root, instanceId = 1) {
   const query = new URLSearchParams()
   if (root !== '/') query.set('root', root)
   if (path !== root) query.set('path', path)
-  return '/inst/1/' + id + (query.size ? '?' + query : '')
+  return '/inst/' + instanceId + '/' + id + (query.size ? '?' + query : '')
 }
 
 export function childPath(path, name) {
