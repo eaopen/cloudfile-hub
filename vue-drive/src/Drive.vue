@@ -56,11 +56,10 @@ async function openLocation() {
   page.value = null
   offsets.value = [0]
   target.value = null
+  entries.value = []
+  signedIn.value = false
   try {
     target.value = readLocation(new URL(location.href))
-    // Refresh discovery with the current session, including directory-only grants.
-    entries.value = []
-    signedIn.value = false
     const discovered = await libraries(signal)
     if (signal.aborted) return
     entries.value = discovered
@@ -70,7 +69,6 @@ async function openLocation() {
       if (!signal.aborted) page.value = first
     }
   } catch (failure) {
-    if (!signal.aborted && !signedIn.value && [401, 403].includes(failure.status)) sessionRequired.value = true
     failed(failure, signal)
   } finally {
     if (!signal.aborted) loading.value = false

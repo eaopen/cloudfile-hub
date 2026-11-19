@@ -13,14 +13,20 @@ async function json(path, options = {}) {
 }
 
 export async function libraries(signal) {
-  const [repos, shares] = await Promise.all([
-    json('/api2/repos/', { signal }),
-    json('/api/v2.1/cloudfile/authorization/v1/shared-directories/', { signal }),
-  ])
-  return [
-    ...repos.map(repo => ({ id: repo.id, name: repo.name, root: '/' })),
-    ...shares.data.map(entry => ({ id: entry.repo_id, name: entry.path, root: entry.path })),
-  ]
+  // Hub also returns 403 for an anonymous session on the native library list.
+  const repos = await json('/api2/repos/', { signal }).catch(error => {
+    if (error.status === 403) throw new HubError(401)
+    throw error
+  })
+  const shares = await json('/api/v2.1/cloudfile/authorization/v1/shared-directories/', { signal })
+  const entries = new Map()
+  function add(id, root, name) {
+    const key = id + ':' + root
+    if (!entries.has(key)) entries.set(key, { id, name, root })
+  }
+  for (const repo of repos) add(repo.id, '/', repo.name)
+  for (const share of shares.data) add(share.repo_id, share.path, share.path)
+  return [...entries.values()]
 }
 
 export function directory({ id, path }, start, version, signal) {
