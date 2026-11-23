@@ -1405,19 +1405,8 @@ def view_shared_file(request, fileshare):
         return _download_file_from_share_link(request, fileshare)
 
     # get raw file
-    # 修改原因（2026-11-23）：CloudFile 的 C 层拒绝签发"无路径票据"
-    # （web-accesstoken-mgr.c: "Path-qualified authorization required"），
-    # 原生 get_fileserver_access_token 只带 obj_id，在有目录 ACL 的库上必然 500。
-    # 这里改用路径绑定票据：以链接创建者身份、绑定 fileshare.path 签发。
-    # 已知限制：该票据的 op 固定为 download，预览会退化为下载；
-    # 补齐 scoped view 票据前，先验证链路是否走通。
-    try:
-        grant = seafserv_threaded_rpc.seafile_web_get_scoped_download_token(
-            repo_id, fileshare.path, fileshare.username, 0)
-        access_token = json.loads(grant)['token'] if grant else None
-    except Exception:
-        logger.exception('issue scoped download token failed for share link %s', token)
-        access_token = None
+    access_token = seafile_api.get_fileserver_access_token(repo_id, obj_id, 'view',
+                                                           '', use_onetime=False)
 
     if not access_token:
         return render_error(request, _('Unable to view file'))
