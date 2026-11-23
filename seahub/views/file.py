@@ -1405,7 +1405,9 @@ def view_shared_file(request, fileshare):
         return _download_file_from_share_link(request, fileshare)
 
     # get raw file
-    access_token = seafile_api.get_fileserver_access_token(repo_id, obj_id, 'view',
+    # 修改原因（2026-11-23）：外链面向系统外用户，C 层不执行目录 ACL、一律只读。
+    # 用外链专用 op 签发，C 层据此放行无路径票据；票据内部仍按原生 view 存储。
+    access_token = seafile_api.get_fileserver_access_token(repo_id, obj_id, 'share-link-view',
                                                            '', use_onetime=False)
 
     if not access_token:
@@ -1720,8 +1722,9 @@ def view_file_via_shared_dir(request, fileshare):
         return _download_file_from_share_link(request, fileshare, use_tmp_token=True)
 
     # get raw file
+    # 修改原因（2026-11-23）：与文件外链一致，目录内文件预览也使用外链专用 op。
     access_token = seafile_api.get_fileserver_access_token(repo.id,
-            obj_id, 'view', '', use_onetime=False)
+            obj_id, 'share-link-view', '', use_onetime=False)
     if not access_token:
         return render_error(request, _('Unable to view file'))
 

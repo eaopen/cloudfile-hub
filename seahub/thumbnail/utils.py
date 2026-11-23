@@ -216,8 +216,11 @@ def get_rotated_image(image):
 
     return image
 
-def generate_thumbnail(request, repo_id, size, path):
+def generate_thumbnail(request, repo_id, size, path, op='view'):
     """ generate and save thumbnail if not exist
+
+    op: 票据操作类型。外链场景传 'share-link-view'，让 C 层按外链放行无路径票据；
+        普通场景保持 'view' 不变。
 
     before generate thumbnail, you should check:
     1. if repo exist: should exist;
@@ -269,7 +272,7 @@ def generate_thumbnail(request, repo_id, size, path):
     if filetype == EPUB:
         if file_size > EPUB_ARCHIVE_SIZE_LIMIT:
             return (False, 400)
-        return create_epub_thumbnail(repo, file_id, path, size, thumbnail_file)
+        return create_epub_thumbnail(repo, file_id, path, size, thumbnail_file, op=op)
 
 
     # image thumbnails
@@ -278,7 +281,7 @@ def generate_thumbnail(request, repo_id, size, path):
 
     if fileext.lower() in ('psd', 'psb'):
         return create_psd_thumbnails(repo, file_id, path, size,
-                                           thumbnail_file, file_size)
+                                           thumbnail_file, file_size, op=op)
     
     if filetype == SVG:
         return create_svg_thumbnails(repo, file_id, path, size, thumbnail_file, file_size)
@@ -287,7 +290,7 @@ def generate_thumbnail(request, repo_id, size, path):
         return (False, 400)
 
     token = seafile_api.get_fileserver_access_token(repo_id,
-            file_id, 'view', '', use_onetime=True)
+            file_id, op, '', use_onetime=True)
 
     if not token:
         return (False, 500)
@@ -302,9 +305,9 @@ def generate_thumbnail(request, repo_id, size, path):
         return (False, 400)
 
 
-def create_epub_thumbnail(repo, file_id, path, size, thumbnail_file):
+def create_epub_thumbnail(repo, file_id, path, size, thumbnail_file, op='view'):
     token = seafile_api.get_fileserver_access_token(
-        repo.id, file_id, 'view', '', use_onetime=True)
+        repo.id, file_id, op, '', use_onetime=True)
     if not token:
         return (False, 500)
 
@@ -320,7 +323,7 @@ def create_epub_thumbnail(repo, file_id, path, size, thumbnail_file):
         logger.warning('Failed to create EPUB cover thumbnail for %s: %s', path, e)
         return (False, 400)
 
-def create_psd_thumbnails(repo, file_id, path, size, thumbnail_file, file_size):
+def create_psd_thumbnails(repo, file_id, path, size, thumbnail_file, file_size, op='view'):
     try:
         from psd_tools import PSDImage
     except ImportError:
@@ -329,7 +332,7 @@ def create_psd_thumbnails(repo, file_id, path, size, thumbnail_file, file_size):
         return (False, 500)
 
     token = seafile_api.get_fileserver_access_token(
-        repo.id, file_id, 'view', '', use_onetime=False)
+        repo.id, file_id, op, '', use_onetime=False)
     if not token:
         return (False, 500)
 

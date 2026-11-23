@@ -208,7 +208,10 @@ def share_link_thumbnail_get(request, token, size, path):
     thumbnail_file = os.path.join(THUMBNAIL_ROOT, str(size), thumbnail_key)
     
     # generate_thumbnail will handle mtime comparison internally
-    success, status_code = generate_thumbnail(request, repo_id, size, image_path)
+    # 修改原因（2026-11-23）：该视图走外链 token 校验（check_share_link_common），
+    # 签票时使用外链专用 op，让 C 层按"系统外只读"放行无路径票据。
+    success, status_code = generate_thumbnail(request, repo_id, size, image_path,
+                                              op='share-link-view')
 
     if success:
         try:
