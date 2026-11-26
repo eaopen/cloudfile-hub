@@ -97,6 +97,9 @@ class SearchAuthority:
                 continue
             path, kind = ref['path'], ref['kind']
             current = tags[path]
+            if any(tag in current for tag in ref.get('literal_tags', ())):
+                result.append(None)
+                continue
             matched = [t for t in ref.get('matched_tags', []) if t in current]
             if not ref.get('text_match', True) and not matched:
                 result.append(None)

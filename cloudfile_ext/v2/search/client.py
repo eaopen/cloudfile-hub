@@ -110,7 +110,7 @@ class ExistingMeiliIndex:
             self._cap = cap
         return self._cap
 
-    def page(self, repo_id, root, query, offset, limit, acl_filter=None):
+    def page(self, repo_id, root, query, offset, limit, acl_filter=None, fuzzy=False):
         if (not isinstance(repo_id, str) or not isinstance(query, str) or not query or
                 type(offset) is not int or offset < 0 or type(limit) is not int or
                 not 1 <= limit <= 101):
@@ -130,7 +130,7 @@ class ExistingMeiliIndex:
                        attributesToRetrieve=['repo_id', 'path', 'name', 'object_type', 'tags'],
                        attributesToHighlight=['name', 'tags'])
         literal = query.strip().lower() if is_number_query(query.strip()) else None
-        if literal:
+        if literal and not fuzzy:
             # The postings narrow candidates before pagination. Check order and
             # field boundaries on each hit; different fields can share grams.
             grams = number_grams(literal, [])
@@ -154,9 +154,16 @@ class ExistingMeiliIndex:
                     raise SearchUnavailable('invalid indexed tags')
                 if literal:
                     name = reference['path'].rsplit('/', 1)[-1]
-                    items.append(dict(**reference, text_match=literal in name.lower(),
-                                      matched_tags=[tag for tag in tags if literal in tag.lower()]))
-                    continue
+                    literal_tags = [tag for tag in tags if literal in tag.lower()]
+                    if not fuzzy:
+                        items.append(dict(**reference, text_match=literal in name.lower(), matched_tags=literal_tags))
+                        continue
+                    if literal in name.lower():
+                        # Keep the candidate position so the signed offset remains valid.
+                        items.append(dict(**reference, text_match=False, matched_tags=[]))
+                        continue
+                    if literal_tags:
+                        reference['literal_tags'] = literal_tags
                 formatted = hit.get('_formatted') or {}
                 if not isinstance(formatted, dict):
                     raise SearchUnavailable('invalid highlighted tags')
