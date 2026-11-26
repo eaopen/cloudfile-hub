@@ -13,7 +13,8 @@ from seahub.utils.timeutils import timestamp_to_isoformat_timestr
 
 from .client import ExistingMeiliIndex, SearchUnavailable, SearchWindowExceeded, normalize_path
 from . import acl_filter
-from .paging import page
+from .numbers import is_number_query
+from .paging import ranked_page
 from .runtime import AccessDenied, SearchAuthority
 
 logger = logging.getLogger(__name__)
@@ -49,6 +50,8 @@ class SearchQuery(APIView):
             authority = SearchAuthority(request.user.username, rid, root)
             binding = dict(user=request.user.username, repo=rid, q=query, root=root,
                            limit=limit, version=authority.version)
+            number_query = is_number_query(query.strip())
+            stage = 'literal' if number_query else 'text'
             offset = 0
             cursor = args.get('cursor')
             if cursor:
@@ -58,33 +61,36 @@ class SearchQuery(APIView):
                 if saved['scope'] != binding or type(saved['offset']) is not int or saved['offset'] < 0:
                     raise ValueError()
                 offset = saved['offset']
+                stage = saved.get('stage', stage)
+                if stage not in (('literal', 'fuzzy') if number_query else ('text',)):
+                    raise ValueError()
             client = configured_client()
 
-            def candidates(start, count):
+            def candidates(stage, start, count):
                 if authority.filter is acl_filter.NOTHING:
                     return []
-                return client.page(rid, root, query, start, count, acl_filter=authority.filter)
-            result = page(limit=limit, offset=offset, fetch_candidates=candidates,
-                          resolve_authorized=authority.resolve)
+                return client.page(rid, root, query, start, count, acl_filter=authority.filter, fuzzy=stage == 'fuzzy')
+            items, stage, next_offset = ranked_page(
+                limit=limit, offset=offset, stage=stage, number_query=number_query,
+                fetch_candidates=candidates, resolve_authorized=authority.resolve)
             data = []
-            for item in result['items']:
+            for item in items:
                 ref = {k: item[k] for k in ('repo_id', 'path', 'kind')}
                 data.append(dict(path=item['path'], type='folder' if item['kind'] == 'dir' else 'file',
                                  size=item['size'], mtime=timestamp_to_isoformat_timestr(item['mtime']),
                                  tags=item['tags'], matched_tags=item['matched_tags'],
                                  authorization=dict(**ref, visible=True, read=True)))
-            next_offset = result['next_offset']
             payload = dict(data=data, provider='meilisearch', fallback=False, scope='subtree', path=root,
                            authorization=dict(version=1, repo_id=rid, policy_revision=authority.version,
                                               head=authority.snapshot['head']),
-                           next_cursor=signing.dumps(dict(scope=binding, offset=next_offset),
+                           next_cursor=signing.dumps(dict(scope=binding, stage=stage, offset=next_offset),
                                                     salt='cloudfile-v2-search', compress=True) if next_offset is not None else None)
             response = Response(payload)
             response.accepted_renderer = request.accepted_renderer
             response.accepted_media_type = request.accepted_media_type
             response.renderer_context = self.get_renderer_context()
             response.render()
-            authority.assert_current(result['items'])
+            authority.assert_current(items)
         except (ValueError, TypeError, KeyError, UnicodeError, signing.BadSignature):
             response = Response(dict(error_code='INVALID_SEARCH', error_msg='Invalid search parameters or expired cursor'), status=400)
         except AccessDenied:

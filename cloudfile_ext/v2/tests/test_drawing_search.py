@@ -60,3 +60,32 @@ class DrawingSearchTests(unittest.TestCase):
         fresh = root + '/泵组AB42Z91.dwg'
         indexer.publish([indexer.upsert(repo, fresh, entry, {})])
         self.assertEqual(client.page(repo.id, root, '42z9', 0, 10)[0]['path'], fresh)
+
+        from cloudfile_ext.v2.search.paging import ranked_page
+
+        def ranked_names(query, limit):
+            stage, offset, names = 'literal', 0, []
+            for _ in range(16):
+                items, stage, offset = ranked_page(
+                    limit=limit, offset=offset, stage=stage, number_query=True,
+                    fetch_candidates=lambda tier, start, count: client.page(
+                        repo.id, root, query, start, count, fuzzy=tier == 'fuzzy'),
+                    resolve_authorized=lambda refs: [
+                        r if r['text_match'] or r['matched_tags'] else None for r in refs])
+                names.extend(item['path'].rsplit('/', 1)[-1] for item in items)
+                if offset is None:
+                    return names
+            self.fail('cursor did not terminate')
+
+        for limit in (1, 2, 50):
+            names = ranked_names('TP3K70', limit)
+            self.assertEqual(names[0], dongming)
+            self.assertCountEqual(names, [dongming, singapore, pdf])
+            self.assertEqual(ranked_names('3K70', limit)[0], dongming)
+        projects = ['PROJ04275 PTA', 'PROJ02629 turbine', 'PROJ04265 turbine']
+        indexer.publish([indexer.upsert(repo, root + '/' + name, entry, {}) for name in projects])
+        for limit in (1, 50):
+            names = ranked_names('PROJ04265', limit)
+            self.assertEqual(names[0], projects[2])
+            self.assertIn(projects[0], names[1:])
+            self.assertEqual(len(names), len(set(names)))
