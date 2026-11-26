@@ -6,12 +6,14 @@ on:
     paths:
       - 'cloudfile_ext/v2/search/**'
       - 'cloudfile_ext/v2/tests/test_search*.py'
+      - 'cloudfile_ext/v2/tests/test_drawing_search.py'
       - '.github/workflows/v2-meilisearch.yml'
   pull_request:
     branches: [dev]
     paths:
       - 'cloudfile_ext/v2/search/**'
       - 'cloudfile_ext/v2/tests/test_search*.py'
+      - 'cloudfile_ext/v2/tests/test_drawing_search.py'
       - '.github/workflows/v2-meilisearch.yml'
   workflow_dispatch:
 
@@ -21,6 +23,11 @@ permissions:
 jobs:
   test-search-core:
     runs-on: ubuntu-latest
+    services:
+      meilisearch:
+        image: getmeili/meilisearch:v1.53.2
+        ports:
+          - 7700:7700
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -28,10 +35,14 @@ jobs:
           python-version: "3.12"
       - name: Verify isolated search core
         run: python -m unittest cloudfile_ext.v2.tests.test_search cloudfile_ext.v2.tests.test_search_client -v
+      - name: Verify drawing-number backfill and search
+        env:
+          CF_TEST_MEILI_URL: http://127.0.0.1:7700
+        run: python -m unittest cloudfile_ext.v2.tests.test_drawing_search -v
       - name: Reject new extension SQL tables
         run: |
           python - <<'PY'
           from cloudfile_ext.v2.schema import TABLES
-          assert TABLES == frozenset({'cf_library_storage', 'cf_dir_acl', 'cf_sso_group_map'})
+          assert TABLES == frozenset({'cf_repo_feature', 'cf_dir_acl', 'cf_sso_group_map'})
           print('V2 reviewed extension tables unchanged')
           PY
