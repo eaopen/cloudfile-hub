@@ -39,7 +39,7 @@ INDEX_NAME = 'cloudfile_files'
 #: 1.10 has no STARTS WITH filter, so the "search within this folder"
 #: narrowing uses `dirs IN [<search_path>]`, which matches exactly the
 #: documents under that directory.
-FILTERABLE_ATTRIBUTES = ['repo_id', 'path', 'object_type', 'extension', 'mtime', 'size', 'creator', 'tags', 'dirs']
+FILTERABLE_ATTRIBUTES = ['repo_id', 'path', 'object_type', 'extension', 'mtime', 'size', 'creator', 'tags', 'dirs', 'number_grams']
 SORTABLE_ATTRIBUTES = ['mtime', 'size', 'name']
 SEARCHABLE_ATTRIBUTES = ['name', 'path', 'content', 'tags']
 

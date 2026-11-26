@@ -8,8 +8,14 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlsplit
 from urllib.request import HTTPRedirectHandler, ProxyHandler, Request, build_opener
 
+from .numbers import is_number_query, number_grams
+
 
 class SearchUnavailable(RuntimeError):
+    pass
+
+
+class ResponseTooLarge(SearchUnavailable):
     pass
 
 
@@ -90,7 +96,7 @@ class ExistingMeiliIndex:
                     raise SearchUnavailable('index response invalid')
                 raw = response.read(1048577)
                 if len(raw) > 1048576:
-                    raise SearchUnavailable('index response too large')
+                    raise ResponseTooLarge('index response too large')
                 return json.loads(raw.decode('utf-8'))
         except (HTTPError, URLError, OSError, UnicodeError, ValueError, TypeError) as exc:
             raise SearchUnavailable('Meilisearch unavailable') from exc
@@ -123,6 +129,13 @@ class ExistingMeiliIndex:
                        matchingStrategy='all', attributesToSearchOn=['name', 'tags'],
                        attributesToRetrieve=['repo_id', 'path', 'name', 'object_type', 'tags'],
                        attributesToHighlight=['name', 'tags'])
+        literal = query.strip().lower() if is_number_query(query.strip()) else None
+        if literal:
+            # The postings narrow candidates before pagination. Check order and
+            # field boundaries on each hit; different fields can share grams.
+            grams = number_grams(literal, [])
+            filters.extend('number_grams = ' + json.dumps(gram) for gram in grams[:32])
+            payload.update(q='', filter=' AND '.join(filters))
         try:
             data = self.call('POST', self.index_path + '/search', payload)
             hits = data.get('hits') if isinstance(data, dict) else None
@@ -139,6 +152,11 @@ class ExistingMeiliIndex:
                 tags = hit.get('tags') or []
                 if not isinstance(tags, list) or any(not isinstance(t, str) or len(t) > 255 for t in tags):
                     raise SearchUnavailable('invalid indexed tags')
+                if literal:
+                    name = reference['path'].rsplit('/', 1)[-1]
+                    items.append(dict(**reference, text_match=literal in name.lower(),
+                                      matched_tags=[tag for tag in tags if literal in tag.lower()]))
+                    continue
                 formatted = hit.get('_formatted') or {}
                 if not isinstance(formatted, dict):
                     raise SearchUnavailable('invalid highlighted tags')

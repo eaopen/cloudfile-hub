@@ -16,8 +16,9 @@ import posixpath
 import stat
 import time
 
-from .client import SearchUnavailable, normalize_path
+from .client import ResponseTooLarge, SearchUnavailable, normalize_path
 from .documents import ancestor_paths
+from .numbers import number_grams
 
 logger = logging.getLogger(__name__)
 
@@ -72,10 +73,11 @@ class Indexer:
     def upsert(self, repo, path, entry, tags):
         directory = stat.S_ISDIR(entry.mode)
         name = posixpath.basename(path)
+        labels = tags.get(path, [None, []])[1]
         return dict(id=doc_id(repo.id, path), repo_id=repo.id, path=path, name=name,
                     object_type='dir' if directory else 'file', size=0 if directory else entry.size,
                     mtime=entry.mtime, extension=name.rsplit('.', 1)[-1].lower() if not directory and '.' in name else '',
-                    tags=tags.get(path, [None, []])[1], dirs=ancestor_paths(path), content='')
+                    tags=labels, number_grams=number_grams(name, labels), dirs=ancestor_paths(path), content='')
 
     def publish(self, documents):
         if documents:
@@ -331,6 +333,30 @@ def tick(client, native, checkpoint, bootstrap_before=0, pages_per_repo=10):
 
 
 
+def backfill_number_search(client):
+    """Upgrade existing derived documents while holding the index writer lock."""
+    settings = client.index_path + '/settings/filterable-attributes'
+    fields = client.call('GET', settings)
+    if 'number_grams' not in fields:
+        confirm(client, client.call('PUT', settings, [*fields, 'number_grams']))
+    batch_size = 100
+    while True:
+        try:
+            page = client.call('POST', client.index_path + '/documents/fetch', {
+                'filter': 'number_grams NOT EXISTS', 'fields': ['id', 'name', 'tags'], 'limit': batch_size})
+        except ResponseTooLarge:
+            if batch_size == 1:
+                raise
+            batch_size = max(1, batch_size // 2)
+            continue
+        rows = page['results']
+        if not rows:
+            return
+        updates = [dict(id=row['id'], number_grams=number_grams(row['name'], row.get('tags') or []))
+                   for row in rows]
+        confirm(client, client.call('PUT', client.index_path + '/documents', updates))
+
+
 def main():
     import django
     django.setup()
@@ -338,6 +364,8 @@ def main():
     from .http import configured_client
     parser = argparse.ArgumentParser()
     parser.add_argument('--checkpoint', required=True)
+    parser.add_argument('--backfill-number-search', action='store_true',
+                        help='upgrade the derived number index and exit')
     parser.add_argument('--once', action='store_true')
     parser.add_argument('--bootstrap-before', type=int, default=int(os.environ.get('CF_SEARCH_BOOTSTRAP_BEFORE', '0')))
     args = parser.parse_args()
@@ -347,6 +375,9 @@ def main():
     interval = max(15, int(getattr(settings, 'CF_SEARCH_INDEX_INTERVAL', 60)))
     with open(args.checkpoint + '.lock', 'w') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        if args.backfill_number_search:
+            backfill_number_search(configured_client())
+            return
         while True:
             started = time.monotonic()
             try:
