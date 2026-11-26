@@ -24,6 +24,8 @@ import urllib.request
 
 from django.db import connection
 
+from cloudfile_ext.v2.search.numbers import number_grams
+
 logger = logging.getLogger(__name__)
 
 #: How many Activity rows one tick will walk at most. Keeps a single tick
@@ -267,6 +269,7 @@ def _build_document(repo_id, path, op_user, timestamp, max_bytes, object_type='f
         'last_modifier': op_user,
         'creator': creator,
         'tags': tags,
+        'number_grams': number_grams(name, tags),
         'dirs': _ancestor_dirs(path),
         'content': '' if directory else _fetch_content(repo, file_id, path, max_bytes),
     }
@@ -321,6 +324,7 @@ def build_backfill_document(repo_id, path, entry, object_type, tags, creator):
         'last_modifier': '',
         'creator': creator,
         'tags': tags,
+        'number_grams': number_grams(name, tags),
         'dirs': _ancestor_dirs(path),
         'content': '',
     }
